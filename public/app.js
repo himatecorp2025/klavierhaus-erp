@@ -396,7 +396,7 @@ function previousMonths(count=24){
  const arr=[];
  const d=new Date();
  d.setDate(1);
- for(let i=0;i<count;i++){
+ for(let i=1;i<=count;i++){
    const x=new Date(d);
    x.setMonth(d.getMonth()-i);
    arr.push(`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}`);
@@ -406,64 +406,56 @@ function previousMonths(count=24){
 async function loadMonthlyIncomeStatement(month){
  return await api(`/api/income-statement/monthly?month=${encodeURIComponent(month)}`);
 }
-async function renderIncomeStatement(month=currentMonthKey()){
- const d=await loadMonthlyIncomeStatement(month);
+function renderIncomeSheetHTML(d, includeTrial=true){
  const acct=c=>d.trialBalance.filter(a=>a.category===c);
  const rows=arr=>arr.map(a=>`<div class="cf-row"><span>${a.name_en}<br><small>${a.name_hu}</small></span><b>${money(a.balance)}</b></div>`).join("")||"<p class='muted'>No data / Nincs adat</p>";
- const months=previousMonths(36);
+ const trial=includeTrial?`<div class="panel income-trial-table"><h3>Monthly trial balance / Havi főkönyvi kivonat</h3><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`:"";
+ return `<div class="grid kpis">
+   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
+   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
+   <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
+   <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
+ </div>
+ <div class="cashflow-sheet">
+   <div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div>
+   <div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div>
+   <div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div>
+   <div class="cf-box"><h3>Liabilities / Források</h3>${rows(acct("LIABILITY"))}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div>
+ </div>${trial}`;
+}
+async function renderIncomeStatement(){
+ const currentMonth=currentMonthKey();
+ const d=await loadMonthlyIncomeStatement(currentMonth);
+ const past=await Promise.all(previousMonths(12).map(m=>loadMonthlyIncomeStatement(m).catch(()=>null)));
+ const pastRows=past.filter(Boolean);
 
- $("#income_statement").innerHTML=`<div class="panel">
+ $("#income_statement").innerHTML=`<div class="panel no-print">
    <div class="toolbar">
      <div>
-       <h3>Monthly Income Statement / Havi eredménykimutatás</h3>
-       <p class="muted">Period start / Időszak kezdete: <b>${d.monthStart}</b> · Generated / Letöltés időbélyege: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
+       <h3>Current monthly export / Aktuális havi export</h3>
+       <p class="muted">Current month / Aktuális hónap: <b>${d.month}</b> · Period start / Időszak kezdete: <b>${d.monthStart}</b> · Generated / Lekérés ideje: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
      </div>
-     <div class="no-print">
-       <select id="incomeMonthSelect" onchange="renderIncomeStatement(this.value)">
-         ${months.map(m=>`<option value="${m}" ${m===d.month?"selected":""}>${m}</option>`).join("")}
-       </select>
-       <button onclick="exportIncomeStatementPDF('${d.month}')">Export PDF</button>
-     </div>
+     <button onclick="exportIncomeStatementPDF('${d.month}')">Export current month PDF / Aktuális hónap PDF</button>
    </div>
+ </div>
 
-   <div id="incomeStatementPrintable">
-     <div class="pdf-title">
-       <h2>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h2>
-       <p>Month / Hónap: ${d.month}</p>
-       <p>Period start / Időszak kezdete: ${d.monthStart}</p>
-       <p>Generated / Letöltés időbélyege: ${new Date(d.generatedAt).toLocaleString()}</p>
-     </div>
+ <div id="incomeStatementCurrent" data-month="${d.month}">
+   ${renderIncomeSheetHTML(d,false)}
+ </div>
 
-     <div class="grid kpis">
-       <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
-       <div class="kpi"><span>Closed jobs this month / Havi lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
-       <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
-       <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
-     </div>
-
-     <div class="cashflow-sheet">
-       <div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div>
-       <div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div>
-       <div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div>
-       <div class="cf-box"><h3>Liabilities & Equity / Források és saját tőke</h3>${rows([...acct("LIABILITY"),...acct("EQUITY")])}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div>
-     </div>
-
-     <div class="panel">
-       <h3>Monthly trial balance / Havi főkönyvi kivonat</h3>
-       <div class="table-wrap"><table>
-         <thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead>
-         <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody>
-       </table></div>
-     </div>
-   </div>
+ <div class="panel no-print">
+   <div class="toolbar"><h3>Previous monthly income statements / Korábbi havi eredménykimutatások</h3></div>
+   <div class="table-wrap"><table>
+     <thead><tr><th>Month / Hónap</th><th>Period start / Időszak kezdete</th><th>Revenue / Bevétel</th><th>Expenses / Kiadások</th><th>Profit / Eredmény</th><th>Export</th></tr></thead>
+     <tbody>${pastRows.map(x=>`<tr><td>${x.month}</td><td>${x.monthStart}</td><td>${money(x.totals.revenue)}</td><td>${money(x.totals.expenses)}</td><td>${money(x.totals.profit)}</td><td><button class="small" onclick="exportIncomeStatementPDF('${x.month}')">PDF</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No previous monthly data / Nincs korábbi havi adat.</td></tr>`}</tbody>
+   </table></div>
  </div>`;
 }
 async function exportIncomeStatementPDF(month=currentMonthKey()){
  const d=await loadMonthlyIncomeStatement(month);
- const generated=new Date(d.generatedAt).toLocaleString();
+ const generated=new Date().toLocaleString();
  const filename=`income_statement_${month}_${new Date().toISOString().replace(/[:.]/g,"-")}.pdf`;
- const source=document.getElementById("incomeStatementPrintable");
- const html=source ? source.innerHTML : "";
+ const html=renderIncomeSheetHTML(d,true);
  const win=window.open("", "_blank");
  win.document.write(`<!doctype html><html><head><title>${filename}</title><style>
    body{font-family:Arial,sans-serif;color:#111;padding:24px}
@@ -478,7 +470,6 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
    table{width:100%;border-collapse:collapse;font-size:12px}
    th,td{border:1px solid #aaa;padding:6px;text-align:left}
    th{background:#eee}
-   @media print{button{display:none}}
  </style></head><body>
    <div class="pdf-meta">
      <h1>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h1>
@@ -491,6 +482,7 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
  </body></html>`);
  win.document.close();
 }
+
 async function renderAccounts(){
  let d=await api("/api/income-statement");
  $("#accounts").innerHTML=`<div class="panel"><div class="toolbar"><h3>General Ledger / Főkönyv</h3>${user.role==="ADMIN"?`<button onclick="openLedgerEntry()">+ Add ledger entry / Új főkönyvi tétel</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`
