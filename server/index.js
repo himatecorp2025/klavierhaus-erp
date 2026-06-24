@@ -421,6 +421,24 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   res.json(piano);
 });
 
+
+app.get("/api/contacts/:id/pianos", auth, (req,res)=>{res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));});
+app.put("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const ids = Array.isArray(req.body.piano_ids) ? req.body.piano_ids : [];
+  db.prepare("UPDATE pianos SET owner_contact_id=NULL WHERE owner_contact_id=?").run(req.params.id);
+  const upd=db.prepare("UPDATE pianos SET owner_contact_id=? WHERE id=?"); ids.forEach(id=>upd.run(req.params.id,id));
+  res.json({ok:true,piano_ids:ids});
+});
+app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
+  if(!client) return res.status(404).json({error:"Client not found"});
+  const id=req.body.id || rid("P"), brand=req.body.brand || "", model=req.body.model || "", display=req.body.display_name || `${brand} ${model}`.trim() || "Unknown piano";
+  const ownershipType=req.body.ownership_type || "Customer owned", estimated=Number(req.body.estimated_value||0);
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active","");
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+  if(String(ownershipType).toLowerCase().includes("company") && typeof createPianoAssetEntry==="function") createPianoAssetEntry(piano,req.user.id);
+  res.json(piano);
+});
 app.get("/api/closed-jobs", auth, (req,res)=>{
   const rows=db.prepare(`
     SELECT
