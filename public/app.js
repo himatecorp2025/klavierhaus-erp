@@ -153,6 +153,8 @@ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${row?.assigned_to===n
  startInput.addEventListener("change", ()=>{validateDateField(startInput); setEndFromHours();});
  endInput.addEventListener("change", ()=>{validateDateField(endInput); setHoursFromTimes();});
 
+ toggleInstructionsField();
+
  $("#form").onsubmit=async ev=>{
    ev.preventDefault();
    let b=Object.fromEntries(new FormData(ev.target));
@@ -241,7 +243,7 @@ function openReassign(j){
  <select name="assigned_to" required>
  ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${j.assigned_to===n?"selected":""}>${n}</option>`).join("")}
  </select></div>
- <div class="field full"><label>Reassignment note / Átadási megjegyzés</label><textarea name="reassignment_note" placeholder="Miért adjuk át a munkát? / Why is this job being reassigned?"></textarea></div>
+ <div class="field full"><label>Reassignment note / Átadási megjegyzés</label><textarea name="reassignment_note" placeholder="Átadás vagy visszavétel oka / Reason for reassignment or take-back"></textarea></div>
  </div>
  <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Reassign only / Csak átadás</button></div>`;
  $("#form").onsubmit=async e=>{
