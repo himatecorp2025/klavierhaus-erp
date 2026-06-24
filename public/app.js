@@ -232,7 +232,27 @@ function openJobDetails(j){
  <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button><button type="button" onclick='openReassign(${esc(j)})'>Reassign / Átadás</button>${j.status==="Completed"?"":`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`}</div>`;
  $("#form").onsubmit=e=>e.preventDefault()
 }
-function openReassign(j){$("#modalTitle").textContent="Reassign job / Munka átadása";$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${req("New assigned to / Új felelős")}</label><select name="assigned_to"><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div><div class="field full"><label>Reassignment note / Átadási megjegyzés</label><textarea name="reassignment_note"></textarea></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save / Mentés</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api(`/api/jobs/${j.id}`,{method:"PUT",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
+function openReassign(j){
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Reassign job / Munka átadása";
+ $("#form").innerHTML=`<div class="form-grid">
+ <div class="field"><label>${req("Current responsible / Jelenlegi felelős")}</label><input value="${j.assigned_to||""}" disabled></div>
+ <div class="field"><label>${req("New responsible / Új felelős")}</label>
+ <select name="assigned_to" required>
+ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${j.assigned_to===n?"selected":""}>${n}</option>`).join("")}
+ </select></div>
+ <div class="field full"><label>Reassignment note / Átadási megjegyzés</label><textarea name="reassignment_note" placeholder="Miért adjuk át a munkát? / Why is this job being reassigned?"></textarea></div>
+ </div>
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Reassign only / Csak átadás</button></div>`;
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   try{
+     await api(`/api/jobs/${j.id}/reassign`,{method:"PUT",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+     closeModal();
+     await renderScheduler();
+   }catch(err){alert(err.message)}
+ }
+}
 function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezárása";$("#form").innerHTML=`<p class="muted">Billed amount / Számlázandó összeg kötelező. Ha 0, nem kell fájl. Ha nagyobb mint 0, fizetési mód és számla/csekk fájl kötelező.</p><div class="form-grid">
 <div class="field"><label>${req("Close type / Lezárás típusa")}</label><select name="close_type" id="closeType" onchange="toggleNextJob()"><option>Full</option><option>Partial</option></select></div>
 <div class="field"><label>${req("Billed amount / Számlázandó összeg")}</label><input name="billed_amount" type="number" value="${j.planned_amount||0}" required></div>
