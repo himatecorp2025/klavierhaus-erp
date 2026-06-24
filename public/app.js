@@ -31,6 +31,7 @@ function localDT(d){let x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneO
 function hhmm(s){let d=new Date(s);return d.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})}
 function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
+function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
 async function render(v){if(v==="scheduler")return renderScheduler();if(v==="income_statement")return renderIncomeStatement();if(v==="finance")return renderFinance();if(v==="accounts")return renderAccounts();if(v==="users")return renderUsers();return renderTable(v)}
 
@@ -169,7 +170,7 @@ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${row?.assigned_to===n
    ["planned_amount","planned_hours"].forEach(k=>b[k]=Number(b[k]||0));
    b.travel_minutes=0;
    b.priority=row?.priority||"Medium";
-   if(row?.id){ b.id=row.id; b.job_id=row.id; }
+   if(row?.id){ b.id=row.id; b.job_id=row.id; } if(row?.job_key){ b.job_key=row.job_key; }
    b.client_id=row?.client_id||null;
    b.piano_id=row?.piano_id||null;
 
@@ -183,7 +184,7 @@ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${row?.assigned_to===n
    if(matchedPiano) b.piano_id=matchedPiano.id;
 
    try{
-     const saved=row ? await api(`/api/jobs/${encodeURIComponent(row.id)}`,{method:"PUT",body:JSON.stringify(b)}) : await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
+     const saved=row ? await api(`/api/jobs/${encodeURIComponent(jobRef(row))}`,{method:"PUT",body:JSON.stringify(b)}) : await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
      console.log("Saved job / Mentett munka:", saved);
      currentWeekStart=startOfWeek(new Date(saved.start_time || b.start_time));
      closeModal();
@@ -221,7 +222,7 @@ function openJobDetails(j){
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
  $("#form").innerHTML=`<div class="work-card">
  <h4>${badge(j.priority)} ${j.title}</h4>
- <p><b>Work category / Munkakategória:</b> ${j.job_type==="Part-work" ? "Part-work / Részmunka" : "Standalone / Önálló munka"}</p>
+ <p class="muted"><b>Job key / Munkaazonosító:</b> ${j.job_key||j.id||""}</p><p><b>Work category / Munkakategória:</b> ${j.job_type==="Part-work" ? "Part-work / Részmunka" : "Standalone / Önálló munka"}</p>
  <p><b>Assigned / Felelős:</b> ${j.assigned_to}</p>
  <p><b>Client / Ügyfél:</b> ${j.client_name||j.client_id||""}</p>
  <p><b>Phone / Telefon:</b> ${phone}</p>
@@ -251,8 +252,8 @@ function openReassign(j){
    e.preventDefault();
    try{
      const body=Object.fromEntries(new FormData(e.target));
-     body.id=j.id; body.job_id=j.id; body.title=j.title; body.start_time=j.start_time;
-     await api(`/api/jobs/${encodeURIComponent(j.id)}/reassign`,{method:"PUT",body:JSON.stringify(body)});
+     body.id=j.id; body.job_id=j.id; body.job_key=j.job_key; body.client_id=j.client_id; body.client_name=j.client_name; body.piano_name=j.piano_name; body.title=j.title;
+     await api(`/api/jobs/${encodeURIComponent(jobRef(j))}/reassign`,{method:"PUT",body:JSON.stringify(body)});
      closeModal();
      await renderScheduler();
    }catch(err){alert(err.message)}
@@ -267,8 +268,8 @@ function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezár�
 <div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select name="next_assigned_to"><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div><div class="field"><label>Next priority</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input name="next_start_time" type="datetime-local"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input name="next_end_time" type="datetime-local"></div><div class="field"><label>Next planned amount</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save closeout / Lezárás mentése</button></div>`;
 $("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(!payment){alert("Fizetési mód kötelező. / Payment method is required.");return}if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}
 if(file && file.name && !isAllowedInvoiceFile(file.name)){alert("Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel. / Only PDF, JPG, JPEG or PNG files are allowed.");return}
-fd.append("id",j.id); fd.append("job_id",j.id); fd.append("title",j.title||""); fd.append("start_time",j.start_time||"");
-try{await api(`/api/jobs/${encodeURIComponent(j.id)}/close`,{method:"POST",body:fd});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
+fd.append("id",j.id); fd.append("job_id",j.id); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
+try{await api(`/api/jobs/${encodeURIComponent(jobRef(j))}/close`,{method:"POST",body:fd});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
 function isAllowedInvoiceFile(name){return /\.(pdf|jpg|jpeg|png)$/i.test(name||"")}
 function toggleNextJob(){document.getElementById("nextJobFields").classList.toggle("hidden",document.getElementById("closeType").value!=="Partial")}
 function headerLabel(key,c){
