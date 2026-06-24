@@ -70,6 +70,19 @@ function ensureLedgerExpansion(){
 }
 ensureLedgerExpansion();
 
+function ensureCorrectionExpansion(){
+  try{
+    const jeCols=db.prepare("PRAGMA table_info(journal_entries)").all().map(c=>c.name);
+    if(!jeCols.includes("correction_for_entry_id")) db.prepare("ALTER TABLE journal_entries ADD COLUMN correction_for_entry_id TEXT").run();
+    if(!jeCols.includes("correction_type")) db.prepare("ALTER TABLE journal_entries ADD COLUMN correction_type TEXT").run();
+    if(!jeCols.includes("correction_reason")) db.prepare("ALTER TABLE journal_entries ADD COLUMN correction_reason TEXT").run();
+    if(!jeCols.includes("modified_by")) db.prepare("ALTER TABLE journal_entries ADD COLUMN modified_by TEXT").run();
+    if(!jeCols.includes("modified_at")) db.prepare("ALTER TABLE journal_entries ADD COLUMN modified_at TEXT").run();
+  }catch(e){ console.warn("correction expansion migration skipped:", e.message); }
+}
+ensureCorrectionExpansion();
+
+
 function ensureCommonAccounts(){
   const rows=[
     ["1030","Petty Cash","Házipénztár","ASSET","DEBIT"],
@@ -587,14 +600,67 @@ app.put("/api/finance/journal-entries/:id", auth, permit("ADMIN"), (req,res)=>{
   if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
 
   const tx=db.transaction(()=>{
-    db.prepare(`UPDATE journal_entries SET entry_date=?, description=?, payment_method=?, entry_type=?, acquisition_date=?, acquisition_value=?, check_number=?, check_status=?, client_name=? WHERE id=?`)
-      .run(nextDate,description||entry.description,payment_method||"",entry_type||entry.entry_type||"Normal",acquisition_date||"",Number(acquisition_value||0),check_number||"",check_status||"",client_name||"",entry.id);
+    db.prepare(`UPDATE journal_entries SET entry_date=?, description=?, payment_method=?, entry_type=?, acquisition_date=?, acquisition_value=?, check_number=?, check_status=?, client_name=?, modified_by=?, modified_at=? WHERE id=?`)
+      .run(nextDate,description||entry.description,payment_method||"",entry_type||entry.entry_type||"Normal",acquisition_date||"",Number(acquisition_value||0),check_number||"",check_status||"",client_name||"",req.user.name||req.user.id,new Date().toISOString(),entry.id);
     db.prepare("DELETE FROM journal_lines WHERE entry_id=?").run(entry.id);
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),entry.id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
   });
   tx();
   res.json({ok:true,id:entry.id,editable_until:currentMonthEnd()});
+});
+
+
+app.post("/api/finance/journal-entries/:id/correction", auth, permit("ADMIN"), (req,res)=>{
+  const original=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  if(!original) return res.status(404).json({error:"Original journal entry not found"});
+
+  const correction_type=String(req.body.correction_type||"").trim();
+  const correction_reason=String(req.body.correction_reason||"").trim();
+  if(!["Reversal","Adjustment"].includes(correction_type)) return res.status(400).json({error:"Correction type must be Reversal or Adjustment"});
+  if(!correction_reason) return res.status(400).json({error:"Correction reason is required"});
+
+  const entry_date=req.body.entry_date || today();
+  if(String(entry_date).slice(0,7)!==today().slice(0,7)){
+    return res.status(403).json({error:`Correction must be posted in the current open month. Current month can be modified until ${currentMonthEnd()} / Korrekció csak az aktuális nyitott hónapban könyvelhető. Módosítható eddig: ${currentMonthEnd()}`});
+  }
+
+  const originalLines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id").all(original.id);
+  let lines=[];
+  if(correction_type==="Reversal"){
+    lines=originalLines.map(l=>({
+      account_code:l.account_code,
+      debit:Number(l.credit||0),
+      credit:Number(l.debit||0),
+      memo:`Reversal of ${original.id} / Stornó: ${correction_reason}`
+    }));
+  }else{
+    lines=Array.isArray(req.body.lines) ? req.body.lines : [];
+  }
+
+  if(!Array.isArray(lines)||lines.length<2) return res.status(400).json({error:"At least two correction lines are required"});
+  const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0);
+  const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
+  if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
+
+  const id=rid("JE");
+  const tx=db.transaction(()=>{
+    db.prepare(`INSERT INTO journal_entries(
+      id,entry_date,description,payment_method,status,created_by,entry_type,
+      correction_for_entry_id,correction_type,correction_reason,modified_by,modified_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(
+        id,entry_date,
+        `${correction_type} correction / ${correction_type==="Reversal"?"Stornó":"Helyesbítés"} for ${original.id}: ${correction_reason}`,
+        req.body.payment_method||"Adjustment","POSTED",req.user.id,
+        "Correction / Korrekció",original.id,correction_type,correction_reason,
+        req.user.name||req.user.id,new Date().toISOString()
+      );
+    const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
+    lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||correction_reason));
+  });
+  tx();
+  res.json({ok:true,id,correction_for_entry_id:original.id,correction_type});
 });
 
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
