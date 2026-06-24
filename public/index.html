@@ -2,46 +2,68 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Klavierhaus Work Management</title>
-  <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<div id="login" class="login-screen">
-  <form class="login-card" id="loginForm">
-    <div class="brand-mark">KH</div>
-    <h1>Klavierhaus Work Management</h1>
-    <p>Calendar-first job management / Naptárközpontú munkakezelés</p>
-    <input name="email" placeholder="Email" value="karoly@klavierhaus.local"/>
-    <input name="password" placeholder="Password / Jelszó" type="password" value="karoly123"/>
-    <button>Login / Belépés</button>
-  </form>
-</div>
-<div id="app" class="app-shell hidden">
-  <aside class="sidebar">
-    <div class="brand"><div class="brand-mark">KH</div><div><h1>Klavierhaus</h1><p id="userInfo"></p></div></div>
-    <nav id="nav"></nav>
-    <button class="ghost-btn" id="logoutBtn">Logout / Kilépés</button>
-  </aside>
-  <main class="main">
-    <header class="topbar"><h2 id="pageTitle">Scheduler / Naptár</h2><p id="pageSub">New York time based operations</p></header>
-    <section id="scheduler" class="view active"></section>
-    <section id="contacts" class="view"></section>
-    <section id="pianos" class="view"></section>
-    <section id="knowledge_base" class="view"></section>
-    <section id="finance" class="view"></section>
-    <section id="income_statement" class="view"></section>
-    <section id="accounts" class="view"></section>
-    <section id="users" class="view"></section>
-  </main>
-</div>
-<div id="modal" class="modal hidden">
-  <div class="modal-card">
-    <div class="modal-head"><h3 id="modalTitle"></h3><button onclick="closeModal()" class="icon-btn">×</button></div>
-    <form id="form"></form>
+  <section id="login" class="login-page">
+    <div class="login-card">
+      <div class="brand-badge">KH</div>
+      <h1>Klavierhaus Work Management</h1>
+      <p>Calendar-first job management / Naptárközpontú munkakezelés</p>
+      <form id="loginForm">
+        <label>Email</label>
+        <input name="email" type="email" required autocomplete="username">
+        <label>Password / Jelszó</label>
+        <input name="password" type="password" required autocomplete="current-password">
+        <button type="submit">Login / Belépés</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-badge">KH</div>
+        <div>
+          <h2>Klavierhaus</h2>
+          <small id="userInfo"></small>
+        </div>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <button id="logoutBtn" class="logout-btn">Logout / Kilépés</button>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <h1 id="pageTitle">Scheduler / Naptár</h1>
+        <p>New York time based operations</p>
+      </header>
+
+      <section id="scheduler" class="view active"></section>
+      <section id="contacts" class="view"></section>
+      <section id="pianos" class="view"></section>
+      <section id="closed_jobs" class="view"></section>
+      <section id="knowledge_base" class="view"></section>
+      <section id="finance" class="view"></section>
+      <section id="income_statement" class="view"></section>
+      <section id="accounts" class="view"></section>
+      <section id="users" class="view"></section>
+    </main>
+  </section>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalTitle"></h3>
+        <button type="button" class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <form id="form"></form>
+    </div>
   </div>
-</div>
-<script src="app.js"></script>
+
+  <script src="/app.js"></script>
 </body>
 </html>
