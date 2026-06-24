@@ -6,8 +6,10 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','STAFF','VIEWER')),
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
+  status TEXT DEFAULT 'Active',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -46,116 +48,72 @@ CREATE TABLE IF NOT EXISTS pianos (
   FOREIGN KEY(owner_contact_id) REFERENCES contacts(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
-  piano_id TEXT,
+  parent_job_id TEXT,
+  title TEXT NOT NULL,
   client_id TEXT,
-  name TEXT NOT NULL,
-  type TEXT,
-  manager TEXT,
-  priority TEXT DEFAULT 'Medium',
-  status TEXT DEFAULT 'Not started',
-  start_date TEXT,
-  due_date TEXT,
-  planned_revenue REAL DEFAULT 0,
-  actual_revenue REAL DEFAULT 0,
-  planned_cost REAL DEFAULT 0,
-  actual_cost REAL DEFAULT 0,
-  location_type TEXT DEFAULT 'Workshop',
-  service_address TEXT,
-  customer_phone TEXT,
-  customer_email TEXT,
-  notes TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
-  FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS project_phases (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  phase_name TEXT NOT NULL,
-  phase_type TEXT,
-  sequence_no INTEGER DEFAULT 1,
-  assigned_to TEXT,
+  client_name TEXT,
+  piano_id TEXT,
+  piano_name TEXT,
+  assigned_to TEXT NOT NULL,
+  created_by TEXT,
   priority TEXT DEFAULT 'Medium',
   status TEXT DEFAULT 'Open',
-  planned_start TEXT,
-  planned_end TEXT,
-  appointment_start TEXT,
-  appointment_end TEXT,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
   timezone TEXT DEFAULT 'America/New_York',
-  service_address TEXT,
   planned_amount REAL DEFAULT 0,
+  planned_hours REAL DEFAULT 0,
+  travel_minutes INTEGER DEFAULT 0,
+  service_address TEXT,
+  instructions TEXT,
+  close_type TEXT,
   billed_amount REAL DEFAULT 0,
   payment_method TEXT,
   invoice_status TEXT DEFAULT 'Not invoiced',
   invoice_number TEXT,
-  required_document_status TEXT DEFAULT 'Not required',
-  completion_notes TEXT,
+  close_notes TEXT,
   completed_at TEXT,
-  notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+  FOREIGN KEY(parent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS task_templates (
+CREATE TABLE IF NOT EXISTS job_logs (
   id TEXT PRIMARY KEY,
-  project_type TEXT NOT NULL,
-  task_type TEXT NOT NULL,
-  default_priority TEXT DEFAULT 'Medium',
-  default_planned_hours REAL DEFAULT 0,
-  sequence_no INTEGER DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  phase_id TEXT,
-  task_type TEXT NOT NULL,
-  assigned_to TEXT,
-  priority TEXT DEFAULT 'Medium',
-  status TEXT DEFAULT 'Open',
-  due_date TEXT,
-  appointment_start TEXT,
-  appointment_end TEXT,
-  timezone TEXT DEFAULT 'America/New_York',
-  location_type TEXT DEFAULT 'Workshop',
-  service_address TEXT,
-  travel_minutes INTEGER DEFAULT 0,
-  planned_hours REAL DEFAULT 0,
-  actual_hours REAL DEFAULT 0,
-  completion_revenue REAL DEFAULT 0,
+  job_id TEXT NOT NULL,
+  log_type TEXT NOT NULL,
+  description TEXT NOT NULL,
+  billed_amount REAL DEFAULT 0,
   payment_method TEXT,
-  invoice_status TEXT DEFAULT 'Not invoiced',
   invoice_number TEXT,
-  completion_notes TEXT,
-  required_document_status TEXT DEFAULT 'Not required',
-  completed_at TEXT,
-  notes TEXT,
+  document_path TEXT,
+  next_job_id TEXT,
+  created_by TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY(next_job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE IF NOT EXISTS knowledge_base (
   id TEXT PRIMARY KEY,
-  related_type TEXT,
-  related_id TEXT,
+  job_id TEXT,
   title TEXT NOT NULL,
-  doc_type TEXT,
-  doc_date TEXT,
-  url TEXT,
+  category TEXT DEFAULT 'Closed Job',
+  content_type TEXT DEFAULT 'Job Record',
+  body TEXT,
   stored_path TEXT,
   owner TEXT,
   amount REAL DEFAULT 0,
   payment_method TEXT,
   invoice_number TEXT,
-  notes TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  priority TEXT DEFAULT 'Medium',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
@@ -171,19 +129,15 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   entry_date TEXT NOT NULL,
   description TEXT,
   client_id TEXT,
-  project_id TEXT,
   piano_id TEXT,
-  task_id TEXT,
-  phase_id TEXT,
+  job_id TEXT,
   payment_method TEXT,
   status TEXT DEFAULT 'POSTED',
   created_by TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
-  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
-  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS journal_lines (
@@ -195,61 +149,6 @@ CREATE TABLE IF NOT EXISTS journal_lines (
   memo TEXT,
   FOREIGN KEY(entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
   FOREIGN KEY(account_code) REFERENCES accounts(code)
-);
-
-CREATE TABLE IF NOT EXISTS scheduler_events (
-  id TEXT PRIMARY KEY,
-  task_id TEXT,
-  phase_id TEXT,
-  project_id TEXT,
-  title TEXT NOT NULL,
-  assigned_to TEXT,
-  event_start TEXT NOT NULL,
-  event_end TEXT NOT NULL,
-  timezone TEXT DEFAULT 'America/New_York',
-  service_address TEXT,
-  priority TEXT DEFAULT 'Medium',
-  status TEXT DEFAULT 'Scheduled',
-  event_type TEXT DEFAULT 'Task',
-  planned_amount REAL DEFAULT 0,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE CASCADE,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS notifications (
-  id TEXT PRIMARY KEY,
-  user_name TEXT,
-  task_id TEXT,
-  phase_id TEXT,
-  title TEXT NOT NULL,
-  message TEXT,
-  severity TEXT DEFAULT 'Info',
-  is_read INTEGER DEFAULT 0,
-  due_at TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS knowledge_base (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  category TEXT,
-  brand TEXT,
-  content_type TEXT,
-  body TEXT,
-  url TEXT,
-  stored_path TEXT,
-  owner TEXT,
-  priority TEXT DEFAULT 'Medium',
-  project_id TEXT,
-  phase_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
-  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
 );
 
 CREATE VIEW IF NOT EXISTS v_trial_balance AS
