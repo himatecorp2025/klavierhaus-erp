@@ -38,12 +38,30 @@ async function renderScheduler(){
  const jobs=await api("/api/jobs");
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const hours=Array.from({length:15},(_,i)=>i+7);
- const weekEnd=addDays(currentWeekStart,7);
- const shown=jobs.filter(j=>{let d=new Date(j.start_time);return d>=currentWeekStart&&d<weekEnd});
- let html=`<div class="panel"><div class="toolbar"><div><h3>Weekly Scheduler / Heti naptár</h3><p class="muted">${fmtDate(currentWeekStart)} – ${fmtDate(addDays(currentWeekStart,6))} · America/New_York</p></div><div><button class="small" onclick="moveWeek(-1)">← Previous / Előző</button><button class="small" onclick="goThisWeek()">This week / Aktuális hét</button><button class="small" onclick="moveWeek(1)">Next / Következő →</button><button onclick="openJob()">+ Add Job / Új munka</button></div></div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">Time</div>`;
+ const weekDates=week.map(d=>fmtDate(d));
+
+ let html=`<div class="panel"><div class="toolbar"><div><h3>Weekly Scheduler / Heti naptár</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p></div><div><button class="small" onclick="moveWeek(-1)">← Previous / Előző</button><button class="small" onclick="goThisWeek()">This week / Aktuális hét</button><button class="small" onclick="moveWeek(1)">Next / Következő →</button><button onclick="openJob()">+ Add Job / Új munka</button></div></div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">Time</div>`;
  html+=week.map(d=>`<div class="cal-head"><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b><br><span>${fmtDate(d)}</span></div>`).join("");
- for(const h of hours){html+=`<div class="cal-time">${String(h).padStart(2,"0")}:00</div>`;for(const day of week){const pf=`${fmtDate(day)}T${String(h).padStart(2,"0")}:00`;html+=`<div class="cal-cell" onclick="openJob('${pf}')">`;html+=shown.filter(j=>sameDay(j.start_time,day)&&new Date(j.start_time).getHours()===h).map(j=>`<div class="cal-event ${j.priority}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><strong>${hhmm(j.start_time)}–${hhmm(j.end_time)}</strong><br>${j.assigned_to} · ${j.title}<br><small>${j.job_type||""} · ${money(j.planned_amount)} · ${j.status}</small></div>`).join("");html+=`</div>`}}
- html+=`</div></div></div>`;$("#scheduler").innerHTML=html;
+
+ for(const h of hours){
+   html+=`<div class="cal-time">${String(h).padStart(2,"0")}:00</div>`;
+   for(const day of week){
+     const dayStr=fmtDate(day);
+     const pf=`${dayStr}T${String(h).padStart(2,"0")}:00`;
+     html+=`<div class="cal-cell" onclick="openJob('${pf}')">`;
+     html+=jobs
+       .filter(j=>{
+          const datePart=String(j.start_time||"").slice(0,10);
+          const hourPart=Number(String(j.start_time||"").slice(11,13));
+          return datePart===dayStr && hourPart===h;
+       })
+       .map(j=>`<div class="cal-event ${j.priority||"Medium"}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><br>${j.assigned_to} · ${j.title}<br><small>${j.job_type||""} · ${money(j.planned_amount)} · ${j.status}</small></div>`)
+       .join("");
+     html+=`</div>`;
+   }
+ }
+ html+=`</div></div></div>`;
+ $("#scheduler").innerHTML=html;
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
 
@@ -117,7 +135,9 @@ async function openJob(prefill=""){
    if(matchedPiano) b.piano_id=matchedPiano.id;
 
    try{
-     await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
+     const saved=await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
+     console.log("Saved job / Mentett munka:", saved);
+     currentWeekStart=startOfWeek(new Date(saved.start_time || b.start_time));
      closeModal();
      await renderScheduler();
    }catch(err){alert(err.message)}
