@@ -501,7 +501,9 @@ async function renderAccounts(){
      <thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Normal side / Normál oldal</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead>
      <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${ledgerCategoryHu(a.category)}</td><td>${ledgerSideHu(a.normal_side)}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody>
    </table></div>
- </div>`;
+ </div>
+ <div id="journalEntriesPanel"></div>`;
+ renderJournalEntriesPanel();
 }
 function ledgerCategoryHu(c){
  const m={ASSET:"ASSET / Eszköz",LIABILITY:"LIABILITY / Kötelezettség / Forrás",EQUITY:"EQUITY / Saját tőke",REVENUE:"REVENUE / Bevétel",EXPENSE:"EXPENSE / Kiadás"};
@@ -601,7 +603,7 @@ function toggleRevenueAccountForCheck(){
  const type=document.getElementById("checkWorkflowType")?.value;
  const box=document.getElementById("checkRevenueBox");
  if(box) box.classList.toggle("hidden", type!=="received");
-; renderJournalEntriesPanel();
+
 }
 async function renderJournalEntriesPanel(){
  const box=document.getElementById("journalEntriesPanel");
