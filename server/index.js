@@ -123,7 +123,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const required=["title","assigned_to","start_time","end_time"];
   for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
   const id=req.body.id || rid("J");
-  const cols=["id","parent_job_id","title","job_type","client_id","client_name","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"]
+  const cols=["id","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"]
     .filter(c=>c==="id" || c==="created_by" || req.body[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="created_by"?req.user.name:req.body[c])));
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
@@ -138,7 +138,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     return res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
   }
   if(!canEditJob(req.user, job)) return res.status(403).json({error:"You cannot edit this job"});
-  const allowed=["title","job_type","client_id","client_name","piano_id","piano_name","assigned_to","priority","status","start_time","end_time","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"];
+  const allowed=["title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","priority","status","start_time","end_time","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE jobs SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id));
@@ -163,9 +163,9 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
     const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
     for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
     nextJobId=rid("J");
-    db.prepare(`INSERT INTO jobs(id,parent_job_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nextJobId,job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
+    db.prepare(`INSERT INTO jobs(id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nextJobId,job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
   }
   db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(closeType==="Full"?"Completed":"Partially completed",closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
