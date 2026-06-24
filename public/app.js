@@ -485,15 +485,11 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
 
 async function renderAccounts(){
  let d=await api("/api/income-statement");
- let entries=[];
- try{ entries=await api("/api/finance/journal-entries"); }catch(e){ entries=[]; }
- const editableUntil=currentMonthLastDay();
  $("#accounts").innerHTML=`<div class="panel">
    <div class="toolbar">
      <div>
        <h3>General Ledger / Főkönyv</h3>
        <p class="muted">A Főkönyv az Eredménykimutatás adatforrása. / General Ledger is the source of the Income Statement.</p>
-       <p class="muted">Current open month can be edited until / Az aktuális nyitott hónap módosítható eddig: <b>${editableUntil}</b></p>
      </div>
      ${user.role==="ADMIN"?`<div>
        <button onclick="openAccountForm()">+ Add account / Új főkönyvi kategória</button>
@@ -505,31 +501,7 @@ async function renderAccounts(){
      <thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Normal side / Normál oldal</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead>
      <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${ledgerCategoryHu(a.category)}</td><td>${ledgerSideHu(a.normal_side)}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody>
    </table></div>
- </div>
-
- <div class="panel">
-   <div class="toolbar"><h3>Journal entries / Főkönyvi tételek</h3><p class="muted">Click a current-month entry to edit / Kattints az aktuális havi tételre a módosításhoz.</p></div>
-   <div class="table-wrap"><table>
-     <thead><tr><th>Date / Dátum</th><th>Description / Leírás</th><th>Type / Típus</th><th>Payment / Fizetés</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Editable / Módosítható</th></tr></thead>
-     <tbody>${entries.map(e=>{
-       const debit=e.lines.reduce((s,l)=>s+Number(l.debit||0),0);
-       const credit=e.lines.reduce((s,l)=>s+Number(l.credit||0),0);
-       return `<tr class="${e.editable?"clickable-row":""}" ${e.editable&&user.role==="ADMIN"?`onclick="openJournalEntry('${e.id}')"`:""}>
-         <td>${e.entry_date||""}</td>
-         <td>${e.description||""}</td>
-         <td>${e.entry_type||""}</td>
-         <td>${e.payment_method||""}</td>
-         <td>${money(debit)}</td>
-         <td>${money(credit)}</td>
-         <td>${e.editable?`Yes / Igen, until ${e.editable_until}`:"No / Nem, closed month / lezárt hónap"}</td>
-       </tr>`;
-     }).join("") || `<tr><td colspan="7" class="muted">No journal entries / Nincs főkönyvi tétel.</td></tr>`}</tbody>
-   </table></div>
  </div>`;
-}
-function currentMonthLastDay(){
- const d=new Date();
- return new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().slice(0,10);
 }
 function ledgerCategoryHu(c){
  const m={ASSET:"ASSET / Eszköz",LIABILITY:"LIABILITY / Kötelezettség / Forrás",EQUITY:"EQUITY / Saját tőke",REVENUE:"REVENUE / Bevétel",EXPENSE:"EXPENSE / Kiadás"};
@@ -538,70 +510,6 @@ function ledgerCategoryHu(c){
 function ledgerSideHu(s){
  const m={DEBIT:"DEBIT / Tartozik",CREDIT:"CREDIT / Követel"};
  return m[s]||s;
-}
-async function openJournalEntry(id){
- const entry=await api(`/api/finance/journal-entries/${id}`);
- if(!entry.editable){
-   alert(`Lezárt hónap nem módosítható. / Closed month cannot be modified.`);
-   return;
- }
- const accounts=await api("/api/accounts");
- const opts=accounts.map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
- const line1=entry.lines[0]||{};
- const line2=entry.lines[1]||{};
- const amount=Math.max(Number(line1.debit||line1.credit||0),Number(line2.debit||line2.credit||0));
- const debitLine=entry.lines.find(l=>Number(l.debit)>0)||line1;
- const creditLine=entry.lines.find(l=>Number(l.credit)>0)||line2;
- $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent="Edit journal entry / Főkönyvi tétel módosítása";
- $("#form").innerHTML=`<p class="muted">Warning / Figyelmeztetés: only current-month entries can be modified. This entry can be modified until / Csak az aktuális havi tételek módosíthatók. Ez a tétel eddig módosítható: <b>${entry.editable_until}</b>.</p>
- <div class="form-grid">
-   <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${entry.entry_date||fmtDate(new Date())}" required></div>
-   <div class="field"><label>${req("Entry type / Tétel típusa")}</label><select name="entry_type">${["Opening balance / Nyitó tétel","Normal / Normál tétel","Adjustment / Korrekció","Acquisition / Bekerülési tétel","Check workflow"].map(x=>`<option ${entry.entry_type===x?"selected":""}>${x}</option>`).join("")}</select></div>
-   <div class="field full"><label>${req("Description / Leírás")}</label><input name="description" value="${entry.description||""}" required></div>
-   <div class="field"><label>${req("Debit account / Tartozik számla")}</label><select name="debit_account">${opts}</select></div>
-   <div class="field"><label>${req("Credit account / Követel számla")}</label><select name="credit_account">${opts}</select></div>
-   <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" step="0.01" value="${amount}" required></div>
-   <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method">${["Adjustment","Cash","Check","Bank Transfer","Credit Card","Invoice","Asset Entry"].map(x=>`<option ${entry.payment_method===x?"selected":""}>${x}</option>`).join("")}</select></div>
-   <div class="field"><label>Acquisition date / Bekerülési dátum</label><input name="acquisition_date" type="date" value="${entry.acquisition_date||""}"></div>
-   <div class="field"><label>Acquisition value / Bekerülési érték</label><input name="acquisition_value" type="number" step="0.01" value="${entry.acquisition_value||0}"></div>
-   <div class="field"><label>Check number / Csekk száma</label><input name="check_number" value="${entry.check_number||""}"></div>
-   <div class="field"><label>Check status / Csekk státusz</label><input name="check_status" value="${entry.check_status||""}"></div>
-   <div class="field"><label>Client name / Ügyfél neve</label><input name="client_name" value="${entry.client_name||""}"></div>
-   <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo">${debitLine.memo||creditLine.memo||""}</textarea></div>
- </div>
- <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save changes / Módosítás mentése</button></div>`;
- document.querySelector('[name="debit_account"]').value=debitLine.account_code||"";
- document.querySelector('[name="credit_account"]').value=creditLine.account_code||"";
- $("#form").onsubmit=async ev=>{
-   ev.preventDefault();
-   const f=Object.fromEntries(new FormData(ev.target));
-   const amt=Number(f.amount||0);
-   if(amt<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
-   const monthNow=new Date().toISOString().slice(0,7);
-   if(String(f.entry_date).slice(0,7)!==monthNow){
-     alert(`A tétel dátuma csak az aktuális hónapban maradhat. Módosítható eddig: ${entry.editable_until}`);
-     return;
-   }
-   try{
-     await api(`/api/finance/journal-entries/${id}`,{method:"PUT",body:JSON.stringify({
-       entry_date:f.entry_date,
-       description:f.description,
-       payment_method:f.payment_method,
-       entry_type:f.entry_type,
-       acquisition_date:f.acquisition_date,
-       acquisition_value:Number(f.acquisition_value||0),
-       check_number:f.check_number,
-       check_status:f.check_status,
-       client_name:f.client_name,
-       lines:[
-         {account_code:f.debit_account,debit:amt,credit:0,memo:f.memo},
-         {account_code:f.credit_account,debit:0,credit:amt,memo:f.memo}
-       ]
-     })});
-     closeModal();renderAccounts();
-   }catch(err){alert(err.message)}
- };
 }
 async function openAccountForm(){
  $("#modal").classList.remove("hidden");
@@ -693,7 +601,150 @@ function toggleRevenueAccountForCheck(){
  const type=document.getElementById("checkWorkflowType")?.value;
  const box=document.getElementById("checkRevenueBox");
  if(box) box.classList.toggle("hidden", type!=="received");
+; renderJournalEntriesPanel();
 }
+async function renderJournalEntriesPanel(){
+ const box=document.getElementById("journalEntriesPanel");
+ if(!box)return;
+ let entries=[];
+ try{entries=await api("/api/finance/journal-entries")}catch(e){entries=[]}
+ const editableUntil=currentMonthLastDay();
+ box.innerHTML=`<div class="panel">
+   <div class="toolbar">
+     <div>
+       <h3>Journal entries / Főkönyvi tételek</h3>
+       <p class="muted">Current open month can be edited until / Az aktuális nyitott hónap módosítható eddig: <b>${editableUntil}</b>. Closed months are corrected by new correction entries. / Lezárt hónapot korrekciós tétellel javítunk.</p>
+     </div>
+   </div>
+   <div class="table-wrap"><table>
+     <thead><tr><th>Date / Dátum</th><th>Description / Leírás</th><th>Type / Típus</th><th>Payment / Fizetés</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Modified / Módosítás</th><th>Action / Művelet</th></tr></thead>
+     <tbody>${entries.map(e=>{
+       const debit=e.lines.reduce((s,l)=>s+Number(l.debit||0),0);
+       const credit=e.lines.reduce((s,l)=>s+Number(l.credit||0),0);
+       return `<tr>
+         <td>${e.entry_date||""}</td>
+         <td>${e.description||""}</td>
+         <td>${e.entry_type||""}</td>
+         <td>${e.payment_method||""}</td>
+         <td>${money(debit)}</td>
+         <td>${money(credit)}</td>
+         <td>${e.modified_at?`${e.modified_at}<br>${e.modified_by||""}`:"-"}</td>
+         <td>${user.role==="ADMIN"?(e.editable?`<button class="small" onclick="openJournalEntry('${e.id}')">Edit / Módosítás</button>`:`<button class="small" onclick="openCorrectionEntry('${e.id}')">Correction / Korrekció</button>`):""}</td>
+       </tr>`;
+     }).join("") || `<tr><td colspan="8" class="muted">No journal entries / Nincs főkönyvi tétel.</td></tr>`}</tbody>
+   </table></div>
+ </div>`;
+}
+function currentMonthLastDay(){
+ const d=new Date();
+ return new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().slice(0,10);
+}
+async function openJournalEntry(id){
+ const entry=await api(`/api/finance/journal-entries/${id}`);
+ if(!entry.editable){
+   alert("Lezárt hónap nem módosítható. Használj korrekciós tételt. / Closed month cannot be modified. Use correction entry.");
+   return;
+ }
+ const accounts=await api("/api/accounts");
+ const opts=accounts.map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
+ const debitLine=entry.lines.find(l=>Number(l.debit)>0)||entry.lines[0]||{};
+ const creditLine=entry.lines.find(l=>Number(l.credit)>0)||entry.lines[1]||{};
+ const amount=Math.max(Number(debitLine.debit||0),Number(creditLine.credit||0));
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Edit journal entry / Főkönyvi tétel módosítása";
+ $("#form").innerHTML=`<p class="muted">Warning / Figyelmeztetés: this current-month entry can be modified until / Ez az aktuális havi tétel eddig módosítható: <b>${entry.editable_until}</b>.</p>
+ <div class="form-grid">
+   <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${entry.entry_date||fmtDate(new Date())}" required></div>
+   <div class="field"><label>${req("Entry type / Tétel típusa")}</label><select name="entry_type">${["Opening balance / Nyitó tétel","Normal / Normál tétel","Adjustment / Korrekció","Acquisition / Bekerülési tétel","Check workflow","Correction / Korrekció"].map(x=>`<option ${entry.entry_type===x?"selected":""}>${x}</option>`).join("")}</select></div>
+   <div class="field full"><label>${req("Description / Leírás")}</label><input name="description" value="${entry.description||""}" required></div>
+   <div class="field"><label>${req("Debit account / Tartozik számla")}</label><select name="debit_account">${opts}</select></div>
+   <div class="field"><label>${req("Credit account / Követel számla")}</label><select name="credit_account">${opts}</select></div>
+   <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" step="0.01" value="${amount}" required></div>
+   <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method">${["Adjustment","Cash","Check","Bank Transfer","Credit Card","Invoice","Asset Entry"].map(x=>`<option ${entry.payment_method===x?"selected":""}>${x}</option>`).join("")}</select></div>
+   <div class="field"><label>Acquisition date / Bekerülési dátum</label><input name="acquisition_date" type="date" value="${entry.acquisition_date||""}"></div>
+   <div class="field"><label>Acquisition value / Bekerülési érték</label><input name="acquisition_value" type="number" step="0.01" value="${entry.acquisition_value||0}"></div>
+   <div class="field"><label>Check number / Csekk száma</label><input name="check_number" value="${entry.check_number||""}"></div>
+   <div class="field"><label>Check status / Csekk státusz</label><input name="check_status" value="${entry.check_status||""}"></div>
+   <div class="field"><label>Client name / Ügyfél neve</label><input name="client_name" value="${entry.client_name||""}"></div>
+   <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo">${debitLine.memo||creditLine.memo||""}</textarea></div>
+ </div>
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save changes / Módosítás mentése</button></div>`;
+ document.querySelector('[name="debit_account"]').value=debitLine.account_code||"";
+ document.querySelector('[name="credit_account"]').value=creditLine.account_code||"";
+ $("#form").onsubmit=async ev=>{
+   ev.preventDefault();
+   const f=Object.fromEntries(new FormData(ev.target));
+   const amt=Number(f.amount||0);
+   if(amt<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
+   if(String(f.entry_date).slice(0,7)!==new Date().toISOString().slice(0,7)){
+     alert(`A tétel dátuma csak az aktuális hónapban maradhat. Módosítható eddig: ${entry.editable_until}`);
+     return;
+   }
+   try{
+     await api(`/api/finance/journal-entries/${id}`,{method:"PUT",body:JSON.stringify({
+       entry_date:f.entry_date,description:f.description,payment_method:f.payment_method,entry_type:f.entry_type,
+       acquisition_date:f.acquisition_date,acquisition_value:Number(f.acquisition_value||0),
+       check_number:f.check_number,check_status:f.check_status,client_name:f.client_name,
+       lines:[
+         {account_code:f.debit_account,debit:amt,credit:0,memo:f.memo},
+         {account_code:f.credit_account,debit:0,credit:amt,memo:f.memo}
+       ]
+     })});
+     closeModal();renderAccounts();
+   }catch(err){alert(err.message)}
+ };
+}
+async function openCorrectionEntry(id){
+ const original=await api(`/api/finance/journal-entries/${id}`);
+ const accounts=await api("/api/accounts");
+ const opts=accounts.map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
+ const debitLine=original.lines.find(l=>Number(l.debit)>0)||original.lines[0]||{};
+ const creditLine=original.lines.find(l=>Number(l.credit)>0)||original.lines[1]||{};
+ const amount=Math.max(Number(debitLine.debit||0),Number(creditLine.credit||0));
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Create correction / Korrekció létrehozása";
+ $("#form").innerHTML=`<p class="muted">Closed month cannot be modified directly. This creates a new correction entry in the current open month. / Lezárt hónapot nem módosítunk közvetlenül. Ez új korrekciós tételt hoz létre az aktuális nyitott hónapban.</p>
+ <div class="form-grid">
+   <div class="field"><label>Original entry / Eredeti tétel</label><input value="${original.id} · ${original.entry_date}" disabled></div>
+   <div class="field"><label>${req("Correction date / Korrekció dátuma")}</label><input name="entry_date" type="date" value="${fmtDate(new Date())}" required></div>
+   <div class="field"><label>${req("Correction type / Korrekció típusa")}</label><select name="correction_type" id="correctionType" onchange="toggleCorrectionLines()"><option value="Reversal">Reversal / Stornó</option><option value="Adjustment">Adjustment / Helyesbítő tétel</option></select></div>
+   <div class="field full"><label>${req("Reason / Indoklás")}</label><input name="correction_reason" required></div>
+   <div id="adjustmentLines" class="field full hidden"><div class="form-grid">
+     <div class="field"><label>Debit account / Tartozik számla</label><select name="debit_account">${opts}</select></div>
+     <div class="field"><label>Credit account / Követel számla</label><select name="credit_account">${opts}</select></div>
+     <div class="field"><label>Amount / Összeg</label><input name="amount" type="number" step="0.01" value="${amount}"></div>
+     <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo"></textarea></div>
+   </div></div>
+ </div>
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create correction / Korrekció mentése</button></div>`;
+ if(document.querySelector('[name="debit_account"]')) document.querySelector('[name="debit_account"]').value=debitLine.account_code||"";
+ if(document.querySelector('[name="credit_account"]')) document.querySelector('[name="credit_account"]').value=creditLine.account_code||"";
+ toggleCorrectionLines();
+ $("#form").onsubmit=async ev=>{
+   ev.preventDefault();
+   const f=Object.fromEntries(new FormData(ev.target));
+   if(String(f.entry_date).slice(0,7)!==new Date().toISOString().slice(0,7)){
+     alert("Korrekció csak az aktuális nyitott hónapban könyvelhető. / Correction must be posted in current open month.");
+     return;
+   }
+   const body={entry_date:f.entry_date,correction_type:f.correction_type,correction_reason:f.correction_reason,payment_method:"Adjustment"};
+   if(f.correction_type==="Adjustment"){
+     const amt=Number(f.amount||0);
+     if(amt<=0){alert("Az összegnek nagyobbnak kell lennie nullánál.");return}
+     body.lines=[
+       {account_code:f.debit_account,debit:amt,credit:0,memo:f.memo||f.correction_reason},
+       {account_code:f.credit_account,debit:0,credit:amt,memo:f.memo||f.correction_reason}
+     ];
+   }
+   try{await api(`/api/finance/journal-entries/${id}/correction`,{method:"POST",body:JSON.stringify(body)});closeModal();renderAccounts()}catch(err){alert(err.message)}
+ };
+}
+function toggleCorrectionLines(){
+ const type=document.getElementById("correctionType")?.value;
+ const box=document.getElementById("adjustmentLines");
+ if(box) box.classList.toggle("hidden", type!=="Adjustment");
+}
+
 
 async function renderClosedJobs(){
  const target=forceShowView("closed_jobs");
@@ -752,3 +803,5 @@ function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").text
 if(token)boot();
 
 (function forceCompletedGreenStyle(){const s=document.createElement("style");s.textContent=".cal-event.Completed,.badge.Completed{background:var(--green)!important;color:#07101d!important;}";document.head.appendChild(s);})();
+
+(function ledgerEditStyle(){const s=document.createElement("style");s.textContent=".clickable-row{cursor:pointer}.clickable-row:hover{outline:2px solid var(--blue)}";document.head.appendChild(s);})();
