@@ -21,7 +21,23 @@ const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormD
 $("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));boot()}else alert("Login failed")};
 $("#logoutBtn").onclick=()=>{localStorage.clear();location.reload()};
 
-function boot(){if(!token)return;$("#login").classList.add("hidden");$("#app").classList.remove("hidden");$("#userInfo").textContent=`${user.name} · ${user.role}`;let nav=navs[user.role]||navs.WORKER;$("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${n[1]}</button>`).join("");$("#nav").onclick=e=>{let b=e.target.closest("button");if(!b)return;document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("#"+b.dataset.v).classList.add("active");$("#pageTitle").textContent=b.textContent;render(b.dataset.v)};render("scheduler")}
+function boot(){
+ if(!token)return;
+ $("#login").classList.add("hidden");
+ $("#app").classList.remove("hidden");
+ $("#userInfo").textContent=`${user.name} · ${user.role}`;
+ let nav=navs[user.role]||navs.WORKER;
+ $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${n[1]}</button>`).join("");
+ $("#nav").onclick=e=>{
+   let b=e.target.closest("button");
+   if(!b)return;
+   document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));
+   b.classList.add("active");
+   $("#pageTitle").textContent=b.textContent;
+   render(b.dataset.v);
+ };
+ render("scheduler");
+}
 function money(n){return "$"+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0})}
 function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge ${c}">${v||""}</span>`}
 function fmtDate(d){return d.toISOString().slice(0,10)}
@@ -34,25 +50,39 @@ function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
 
-function forceShowView(id){
-  document.querySelectorAll(".view").forEach(v=>{
-    v.classList.add("hidden");
-    v.style.display="none";
-  });
-  let el=document.getElementById(id);
-  if(!el){
-    el=document.createElement("section");
-    el.id=id;
-    el.className="view";
-    const main=document.querySelector(".main") || document.querySelector("main") || document.body;
-    main.appendChild(el);
-  }
-  el.classList.remove("hidden");
-  el.style.display="block";
-  return el;
+function ensureView(id){
+ let el=document.getElementById(id);
+ if(!el){
+   el=document.createElement("section");
+   el.id=id;
+   el.className="view";
+   const main=document.querySelector(".main") || document.querySelector("main") || document.body;
+   main.appendChild(el);
+ }
+ return el;
 }
-function ensureView(id){let el=$("#"+id);if(!el){el=document.createElement("section");el.id=id;el.className="view";document.querySelector(".main").appendChild(el)}return el}
-async function render(v){if(v==="closed_jobs"){forceShowView("closed_jobs");return renderClosedJobs();}ensureView(v);if(v==="scheduler")return renderScheduler();if(v==="income_statement")return renderIncomeStatement();if(v==="finance")return renderFinance();if(v==="accounts")return renderAccounts();if(v==="users")return renderUsers();return renderTable(v)}
+function forceShowView(id){
+ document.querySelectorAll(".view").forEach(v=>{
+   v.classList.remove("active");
+   v.classList.add("hidden");
+   v.style.display="none";
+ });
+ const el=ensureView(id);
+ el.classList.add("active");
+ el.classList.remove("hidden");
+ el.style.display="block";
+ return el;
+}
+async function render(v){
+ forceShowView(v);
+ if(v==="scheduler")return renderScheduler();
+ if(v==="closed_jobs")return renderClosedJobs();
+ if(v==="income_statement")return renderIncomeStatement();
+ if(v==="finance")return renderFinance();
+ if(v==="accounts")return renderAccounts();
+ if(v==="users")return renderUsers();
+ return renderTable(v);
+}
 
 async function renderScheduler(){
  const jobs=await api("/api/jobs");
