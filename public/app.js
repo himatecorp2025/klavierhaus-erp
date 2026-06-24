@@ -47,21 +47,88 @@ async function renderScheduler(){
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
 
-function openJob(prefill=""){const start=prefill||localDT(new Date());let e=new Date(start);e.setHours(e.getHours()+3);let end=localDT(e);$("#modal").classList.remove("hidden");$("#modalTitle").textContent="New Job / Új munka";$("#form").innerHTML=`<div class="form-grid">
-<div class="field full"><label>${req("Job title / Munka neve")}</label><input name="title" required></div>
-<div class="field"><label>Job type / Munka típusa</label><select name="job_type"><option>Standalone / Önálló munka</option><option>Part-work / Részmunka</option></select></div>
-<div class="field"><label>${req("Assigned to / Felelős")}</label><select name="assigned_to" required><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div>
-<div class="field"><label>Client ID / Ügyfél ID</label><input name="client_id" placeholder="C-001"></div><div class="field"><label>Client name / Ügyfél neve</label><input name="client_name"></div>
-<div class="field"><label>Piano ID / Zongora ID</label><input name="piano_id" placeholder="P-001"></div><div class="field"><label>Piano name / Zongora neve</label><input name="piano_name"></div>
-<div class="field"><label>${req("Start / Kezdés")}</label><input name="start_time" type="datetime-local" value="${start}" required></div><div class="field"><label>${req("End / Befejezés")}</label><input name="end_time" type="datetime-local" value="${end}" required></div>
-<div class="field"><label>Priority / Prioritás</label><select name="priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+async function openJob(prefill=""){
+ const start=prefill||localDT(new Date());
+ let e=new Date(start);e.setHours(e.getHours()+3);
+ let end=localDT(e);
+
+ let contacts=[]; let pianos=[];
+ try{ contacts=await api("/api/contacts"); }catch(e){}
+ try{ pianos=await api("/api/pianos"); }catch(e){}
+
+ const clientOptions=contacts.map(c=>`<option value="${(c.name||"").replaceAll('"',"&quot;")}">${c.phone||""} ${c.address||""}</option>`).join("");
+ const pianoOptions=pianos.map(p=>`<option value="${(`${p.brand||""} ${p.model||""}`).trim().replaceAll('"',"&quot;")}">${p.serial_no||""} ${p.location||""}</option>`).join("");
+
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="New Job / Új munka";
+ $("#form").innerHTML=`<div class="form-grid">
+<div class="field full"><label>${req("Job title / Munka neve")}</label><input name="title" required placeholder="Piano tuning / Zongorahangolás"></div>
+
+<div class="field"><label>${req("Standalone or part-work / Önálló munka vagy részmunka")}</label>
+<select name="job_type" id="jobType" onchange="toggleInstructionsField()">
+<option value="Standalone">Standalone / Önálló munka</option>
+<option value="Part-work">Part-work / Részmunka</option>
+</select></div>
+
+<div class="field"><label>${req("Assigned to / Felelős")}</label>
+<select name="assigned_to" required>
+<option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option>
+</select></div>
+
+<div class="field"><label>${req("Client name / Ügyfél neve")}</label>
+<input name="client_name" list="clientList" required placeholder="Start typing client name / Kezdd el írni az ügyfél nevét">
+<datalist id="clientList">${clientOptions}</datalist></div>
+
+<div class="field"><label>${req("Piano name / Zongora neve")}</label>
+<input name="piano_name" list="pianoList" required placeholder="Steinway D, Yamaha U1...">
+<datalist id="pianoList">${pianoOptions}</datalist></div>
+
+<div class="field"><label>${req("Start / Kezdés")}</label><input name="start_time" type="datetime-local" value="${start}" required></div>
+<div class="field"><label>${req("End / Befejezés")}</label><input name="end_time" type="datetime-local" value="${end}" required></div>
+
 <div class="field"><label>Estimated amount / Előzetes összeg</label><input name="planned_amount" type="number" value="0"></div>
-<div class="field full"><label>Pricing basis / Hogyan lett az összeg megállapítva?</label><input name="pricing_basis" placeholder="Phone quote / Telefonos ajánlat, Email quote / E-mail ajánlat, On-site estimate / Helyszíni becslés"></div>
-<div class="field"><label>Planned hours / Tervezett óra</label><input name="planned_hours" type="number" value="3"></div><div class="field"><label>Travel minutes / Utazási idő percben</label><input name="travel_minutes" type="number" value="0"></div>
-<div class="field full"><label>Service address / Cím</label><input name="service_address"></div>
-<div class="field full"><label>Instructions / Elvégzendő feladatok</label><textarea name="instructions"></textarea></div>
-</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Create job / Munka létrehozása</button></div>`;
-$("#form").onsubmit=async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));["planned_amount","planned_hours","travel_minutes"].forEach(k=>b[k]=Number(b[k]||0));try{await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});closeModal();await renderScheduler()}catch(err){alert(err.message)}}}
+<div class="field"><label>Pricing basis / Díjmegállapítás módja</label>
+<input name="pricing_basis" placeholder="Phone quote / Telefonos ajánlat, Email quote / E-mail ajánlat, Fixed agreement / Fix megállapodás"></div>
+
+<div class="field"><label>Planned hours / Tervezett óra</label><input name="planned_hours" type="number" value="3"></div>
+<div class="field"><label>${req("Service address / Cím")}</label><input name="service_address" required></div>
+
+<div class="field full hidden" id="instructionsField"><label>Remaining tasks / Hátralévő feladatok</label>
+<textarea name="instructions" placeholder="Csak részmunka esetén: milyen feladat marad még hátra?"></textarea></div>
+</div>
+<div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Create job / Munka létrehozása</button></div>`;
+
+ $("#form").onsubmit=async ev=>{
+   ev.preventDefault();
+   let b=Object.fromEntries(new FormData(ev.target));
+   ["planned_amount","planned_hours"].forEach(k=>b[k]=Number(b[k]||0));
+   b.travel_minutes=0;
+   b.priority="Medium";
+   b.client_id=null;
+   b.piano_id=null;
+
+   const matchedClient=contacts.find(c=>(c.name||"").trim().toLowerCase()===(b.client_name||"").trim().toLowerCase());
+   if(matchedClient){
+     b.client_id=matchedClient.id;
+     if(!b.service_address && matchedClient.address) b.service_address=matchedClient.address;
+   }
+
+   const matchedPiano=pianos.find(p=>(`${p.brand||""} ${p.model||""}`).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());
+   if(matchedPiano) b.piano_id=matchedPiano.id;
+
+   try{
+     await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
+     closeModal();
+     await renderScheduler();
+   }catch(err){alert(err.message)}
+ };
+}
+
+function toggleInstructionsField(){
+ const t=document.getElementById("jobType")?.value;
+ const el=document.getElementById("instructionsField");
+ if(el) el.classList.toggle("hidden", t!=="Part-work");
+}
 function openJobDetails(j){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Job details / Munka részletei";$("#form").innerHTML=`<div class="work-card"><h4>${badge(j.priority)} ${j.title}</h4><p><b>Assigned / Felelős:</b> ${j.assigned_to}</p><p><b>Client / Ügyfél:</b> ${j.client_name||j.client_id||""}</p><p><b>Piano / Zongora:</b> ${j.piano_name||j.piano_id||""}</p><p><b>Time / Idő:</b> ${j.start_time} → ${j.end_time}</p><p><b>Address / Cím:</b> ${j.service_address||""}</p><p><b>Estimated / Előzetes:</b> ${money(j.planned_amount)} · ${j.pricing_basis||""}</p><p><b>Status / Státusz:</b> ${badge(j.status)}</p><p>${j.instructions||""}</p></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openReassign(${esc(j)})'>Reassign / Átadás</button>${j.status==="Completed"?"":`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`}</div>`;$("#form").onsubmit=e=>e.preventDefault()}
 function openReassign(j){$("#modalTitle").textContent="Reassign job / Munka átadása";$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${req("New assigned to / Új felelős")}</label><select name="assigned_to"><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div><div class="field full"><label>Reassignment note / Átadási megjegyzés</label><textarea name="reassignment_note"></textarea></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save / Mentés</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api(`/api/jobs/${j.id}`,{method:"PUT",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
 function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezárása";$("#form").innerHTML=`<p class="muted">Billed amount / Számlázandó összeg kötelező. Ha 0, nem kell fájl. Ha nagyobb mint 0, fizetési mód és számla/csekk fájl kötelező.</p><div class="form-grid">
