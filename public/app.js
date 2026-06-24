@@ -33,8 +33,26 @@ function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
+
+function forceShowView(id){
+  document.querySelectorAll(".view").forEach(v=>{
+    v.classList.add("hidden");
+    v.style.display="none";
+  });
+  let el=document.getElementById(id);
+  if(!el){
+    el=document.createElement("section");
+    el.id=id;
+    el.className="view";
+    const main=document.querySelector(".main") || document.querySelector("main") || document.body;
+    main.appendChild(el);
+  }
+  el.classList.remove("hidden");
+  el.style.display="block";
+  return el;
+}
 function ensureView(id){let el=$("#"+id);if(!el){el=document.createElement("section");el.id=id;el.className="view";document.querySelector(".main").appendChild(el)}return el}
-async function render(v){ensureView(v);if(v==="scheduler")return renderScheduler();if(v==="income_statement")return renderIncomeStatement();if(v==="closed_jobs")return renderClosedJobs();if(v==="finance")return renderFinance();if(v==="accounts")return renderAccounts();if(v==="users")return renderUsers();return renderTable(v)}
+async function render(v){if(v==="closed_jobs"){forceShowView("closed_jobs");return renderClosedJobs();}ensureView(v);if(v==="scheduler")return renderScheduler();if(v==="income_statement")return renderIncomeStatement();if(v==="finance")return renderFinance();if(v==="accounts")return renderAccounts();if(v==="users")return renderUsers();return renderTable(v)}
 
 async function renderScheduler(){
  const jobs=await api("/api/jobs");
@@ -379,6 +397,7 @@ async function openLedgerEntry(){
  };
 }
 async function renderClosedJobs(){
+ const target=forceShowView("closed_jobs");
  let rows=[];
  try{ rows=await api("/api/closed-jobs"); }catch(e){ rows=[]; }
  const tableRows = rows.length ? rows.map(r=>`<tr>
@@ -396,7 +415,7 @@ async function renderClosedJobs(){
    <td>${r.close_description||""}</td>
  </tr>`).join("") : `<tr><td colspan="12" class="muted">Még nincs lezárt munka.</td></tr>`;
 
- $("#closed_jobs").innerHTML=`<div class="panel">
+ target.innerHTML=`<div class="panel">
    <div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div>
    <div class="table-wrap"><table>
      <thead><tr>
