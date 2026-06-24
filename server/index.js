@@ -18,6 +18,29 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 
+function ensureRuntimeMigrations(){
+  try {
+    const jobCols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
+    if(!jobCols.includes("job_key")) db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
+    if(!jobCols.includes("client_phone")) db.prepare("ALTER TABLE jobs ADD COLUMN client_phone TEXT").run();
+
+    const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
+    if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
+    if(!pianoCols.includes("display_name")) db.prepare("ALTER TABLE pianos ADD COLUMN display_name TEXT").run();
+
+    const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
+    const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
+    missing.forEach(r => upd.run(`JK-${r.id}`, r.id));
+
+    db.prepare("UPDATE pianos SET ownership_type=COALESCE(ownership_type, ownership, 'Customer owned')").run();
+    db.prepare("UPDATE pianos SET display_name=trim(COALESCE(brand,'') || ' ' || COALESCE(model,'')) WHERE display_name IS NULL OR display_name=''").run();
+  } catch(e) {
+    console.warn("runtime migration skipped:", e.message);
+  }
+}
+ensureRuntimeMigrations();
+
+
 function ensureJobKeyColumn(){
   try {
     const cols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
@@ -31,7 +54,7 @@ function ensureJobKeyColumn(){
     console.warn("job_key migration skipped:", e.message);
   }
 }
-ensureJobKeyColumn();
+ensureRuntimeMigrations();
 
 const upload = multer({
   dest: UPLOAD_DIR,
@@ -93,14 +116,11 @@ function getJobByAnyId(rawId, body={}){
     const found=db.prepare("SELECT * FROM jobs WHERE id=?").get(id);
     if(found) return found;
   }
-
   for(const key of candidates){
     const found=db.prepare("SELECT * FROM jobs WHERE job_key=?").get(key);
     if(found) return found;
   }
 
-  // Fallback is client-based, never time-only.
-  // Tartalék keresés ügyfél alapján, nem munkaidő alapján.
   const clientId = String(body.client_id || "").trim();
   const clientName = String(body.client_name || "").trim();
   const pianoName = String(body.piano_name || "").trim();
@@ -165,7 +185,7 @@ function createResourceRoutes(key, table, prefix, write, roles){
   });
 }
 createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes"],["ADMIN","MANAGER","WORKER"]);
-createResourceRoutes("pianos","pianos","P",["brand","model","serial_no","year","ownership","owner_contact_id","location","estimated_value","status","notes"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("pianos","pianos","P",["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes"],["ADMIN","MANAGER","WORKER"]);
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/client-profile/:id", auth, (req,res)=>{
@@ -177,7 +197,7 @@ app.get("/api/client-profile/:id", auth, (req,res)=>{
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
-  ensureJobKeyColumn();
+  ensureRuntimeMigrations();
   res.json(db.prepare("SELECT * FROM jobs ORDER BY start_time").all());
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -194,47 +214,33 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
 
-  const assignedChanging = req.body.assigned_to !== undefined && req.body.assigned_to !== job.assigned_to;
-
-  // Editing rules:
-  // - Admin edits everything.
-  // - Current responsible can edit their job.
-  // - Manager can edit jobs they created.
-  // - Responsible change is allowed inside this edit endpoint; separate reassignment button is removed from UI.
-  // Szerkesztési szabály:
-  // - Admin mindent szerkeszt.
-  // - Jelenlegi felelős szerkesztheti a saját munkáját.
-  // - Manager szerkesztheti az általa létrehozott munkát.
-  // - Felelősváltás mostantól a szerkesztés része.
-  if(!canEditJob(req.user, job) && !(assignedChanging && (req.user.role==="ADMIN" || req.user.role==="MANAGER" || req.body.assigned_to===req.user.name || job.assigned_to===req.user.name))) {
-    return res.status(403).json({error:"You cannot edit this job"});
-  }
-
+  // Operational scheduling rule:
+  // everyone may change the responsible person and operational details.
+  // Operatív szabály: mindenki átadhatja / visszaveheti / továbbadhatja a munkát.
   const allowed=[
     "title","job_type","client_id","client_name","client_phone",
     "piano_id","piano_name","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
     "planned_hours","travel_minutes","service_address","instructions"
   ];
-  const cols=allowed.filter(c=>req.body[c]!==undefined);
 
   if(req.body.job_type==="Part-work" && (!req.body.instructions || !String(req.body.instructions).trim())){
     return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
   }
 
+  const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length){
     const setParts=cols.map(c=>`${c}=?`);
     const vals=cols.map(c=>req.body[c]);
 
-    if(assignedChanging){
+    if(req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to){
       setParts.push("last_reassigned_by=?");
       setParts.push("reassignment_note=?");
-      vals.push(req.user.name, req.body.reassignment_note || "Changed during edit / Szerkesztés közbeni felelősváltás");
+      vals.push(req.user.name, req.body.reassignment_note || "Changed in edit / Szerkesztésben módosítva");
     }
 
     setParts.push("updated_at=CURRENT_TIMESTAMP");
     vals.push(job.id);
-
     db.prepare(`UPDATE jobs SET ${setParts.join(",")} WHERE id=?`).run(...vals);
   }
 
@@ -265,7 +271,12 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
 
-  if(!canCloseJob(req.user, job)) return res.status(403).json({error:"Only assigned person or admin can close this job"});
+  if(!(req.user.role==="ADMIN" || job.assigned_to===req.user.name)){
+    return res.status(403).json({
+      error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. Take it back to yourself in Edit Job first. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős. Előbb vedd vissza magadra a Munka szerkesztése ablakban.`
+    });
+  }
+
   const closeType=req.body.close_type;
   if(!["Partial","Full"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial or Full"});
 
@@ -335,6 +346,57 @@ function createRevenueEntry(job,amount,payment,userId){
   });
   tx();
 }
+
+
+app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
+  res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));
+});
+
+app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
+  if(!client) return res.status(404).json({error:"Client not found"});
+  const id=req.body.id || rid("P");
+  const brand=req.body.brand || "";
+  const model=req.body.model || "";
+  const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",Number(req.body.year||0)||null,"Customer owned","Customer owned",display,client.id,req.body.location||client.address||"",Number(req.body.estimated_value||0),"Active",req.body.notes||"");
+  res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(id));
+});
+
+app.get("/api/closed-jobs", auth, (req,res)=>{
+  const rows=db.prepare(`
+    SELECT
+      jl.id AS log_id,
+      jl.job_id,
+      j.job_key,
+      j.title,
+      j.job_type,
+      j.client_name,
+      j.client_phone,
+      j.piano_name,
+      j.assigned_to AS responsible_at_close,
+      jl.created_by AS closed_by,
+      jl.created_at AS closed_at,
+      jl.log_type AS close_type,
+      jl.description AS close_description,
+      jl.billed_amount,
+      jl.payment_method,
+      jl.invoice_number,
+      jl.document_path,
+      jl.next_job_id,
+      nj.job_key AS next_job_key,
+      nj.title AS next_job_title
+    FROM job_logs jl
+    LEFT JOIN jobs j ON j.id=jl.job_id
+    LEFT JOIN jobs nj ON nj.id=jl.next_job_id
+    WHERE jl.log_type IN ('Full','Partial')
+    ORDER BY jl.created_at DESC
+  `).all();
+  res.json(rows);
+});
+
 
 app.get("/api/accounts", auth, permit("ADMIN","MANAGER"), (req,res)=>res.json(db.prepare("SELECT * FROM accounts ORDER BY code").all()));
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
