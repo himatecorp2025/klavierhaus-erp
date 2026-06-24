@@ -129,12 +129,10 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
-  if(!job) return res.status(404).json({error:"Job not found"});
+  const jobId = req.params.id || req.body.id;
+  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
+  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
 
-  // Edit permission: admin can edit everything; current responsible can edit their job;
-  // manager can edit jobs they created.
-  // If a user is only taking the job back to themselves, use /reassign instead.
   if(!canEditJob(req.user, job)) return res.status(403).json({error:"You cannot edit this job"});
 
   const allowed=[
@@ -156,25 +154,22 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     }
 
     setParts.push("updated_at=CURRENT_TIMESTAMP");
-    vals.push(req.params.id);
+    vals.push(job.id);
 
     db.prepare(`UPDATE jobs SET ${setParts.join(",")} WHERE id=?`).run(...vals);
   }
 
-  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id));
+  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
 });
 
 app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
-  if(!job) return res.status(404).json({error:"Job not found"});
+  const jobId = req.params.id || req.body.id;
+  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
+  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
 
   const assignedTo=req.body.assigned_to;
   if(!assignedTo) return res.status(400).json({error:"assigned_to is required"});
 
-  // Normal reassignment: admin/manager/current responsible can reassign.
-  // Take-back rule: anybody may reassign a job back to themselves.
-  // Átadás: admin/manager/jelenlegi felelős átadhatja.
-  // Visszavétel: bárki visszaveheti saját magára.
   const isTakingBackToSelf = assignedTo === req.user.name;
   if(!canReassignJob(req.user, job) && !isTakingBackToSelf) {
     return res.status(403).json({error:"You cannot reassign this job"});
@@ -187,8 +182,9 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
-  if(!job) return res.status(404).json({error:"Job not found"});
+  const jobId = req.params.id || req.body.id;
+  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
+  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
   if(!canCloseJob(req.user, job)) return res.status(403).json({error:"Only assigned person or admin can close this job"});
   const closeType=req.body.close_type;
   if(!["Partial","Full"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial or Full"});
@@ -196,8 +192,12 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
   const desc=(req.body.close_description||"").trim();
   if(!desc) return res.status(400).json({error:"Close description is required"});
+
   const payment=req.body.payment_method || "";
-  if(billed > 0 && !payment) return res.status(400).json({error:"Payment method is required when billed amount is greater than zero"});
+  // Payment method is always required, even when billed amount is 0.
+  // A fizetési mód mindig kötelező, akkor is, ha az összeg 0.
+  if(!payment) return res.status(400).json({error:"Payment method is required / Fizetési mód kötelező"});
+
   if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
   let nextJobId=null;
