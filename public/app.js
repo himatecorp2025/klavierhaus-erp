@@ -4,15 +4,15 @@ let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
 
 const navs={
- ADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Knowledge Base / Tudásbázis"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["accounts","General Ledger / Főkönyv"],["users","Users / Felhasználók"]],
- MANAGER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Knowledge Base / Tudásbázis"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["accounts","General Ledger / Főkönyv"],["users","Users / Felhasználók"]],
- WORKER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Knowledge Base / Tudásbázis"]]
+ ADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["accounts","General Ledger / Főkönyv"],["users","Users / Felhasználók"]],
+ MANAGER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["accounts","General Ledger / Főkönyv"],["users","Users / Felhasználók"]],
+ WORKER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["knowledge_base","Invoices / Számlák"]]
 };
 
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["priority","Priority / Prioritás","select",["Critical","Urgent","High","Medium","Low"]],["status","Status / Státusz"],["owner","Owner / Felelős"],["relationship_holder","Relationship holder / Kapcsolatgazda"],["loss_risk","Loss risk / Elvesztési kockázat","select",["High","Medium","Low","Unknown"]],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["id","name","phone","address","last_contact","next_step"]},
 pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["brand","Brand / Márka"],["model","Model / Típus"],["serial_no","Serial No. / Gyári szám"],["year","Year / Év","number"],["ownership","Ownership / Tulajdon"],["owner_contact_id","Owner Contact ID / Ügyfél ID"],["location","Location / Helyszín"],["estimated_value","Estimated value / Becsült érték","number"],["status","Status / Státusz"],["notes","Notes / Megjegyzés","textarea"]],cols:["id","brand","model","serial_no","owner_contact_id","location","estimated_value","status"]},
-knowledge_base:{api:"knowledge_base",title:"Knowledge Base / Tudásbázis",fields:[["title","Title / Cím"],["category","Category / Kategória"],["content_type","Content type / Tartalomtípus"],["body","Body / Tartalom","textarea"],["stored_path","Attachment path / Melléklet útvonal"],["owner","Owner / Felelős"],["amount","Amount / Összeg","number"],["payment_method","Payment method / Fizetési mód"],["invoice_number","Invoice number / Számlaszám"],["priority","Priority / Prioritás","select",["Critical","Urgent","High","Medium","Low"]]],cols:["id","title","category","owner","amount","payment_method","invoice_number","stored_path","created_at"]}
+knowledge_base:{api:"knowledge_base",title:"Invoices / Számlák",fields:[["title","Title / Cím"],["category","Category / Kategória"],["content_type","Content type / Tartalomtípus"],["body","Body / Tartalom","textarea"],["stored_path","Attachment path / Melléklet útvonal"],["owner","Owner / Felelős"],["amount","Amount / Összeg","number"],["payment_method","Payment method / Fizetési mód"],["invoice_number","Invoice number / Számlaszám"],["priority","Priority / Prioritás","select",["Critical","Urgent","High","Medium","Low"]]],cols:["id","title","category","owner","amount","payment_method","invoice_number","stored_path","created_at"]}
 };
 
 const $=s=>document.querySelector(s);
@@ -101,14 +101,14 @@ async function openJob(prefill=""){
 <input name="piano_name" list="pianoList" required placeholder="Steinway D, Yamaha U1...">
 <datalist id="pianoList">${pianoOptions}</datalist></div>
 
-<div class="field"><label>${req("Start / Kezdés")}</label><input name="start_time" type="datetime-local" value="${start}" required></div>
-<div class="field"><label>${req("End / Befejezés")}</label><input name="end_time" type="datetime-local" value="${end}" required></div>
+<div class="field"><label>${req("Start / Kezdés")}</label><input id="jobStart" name="start_time" type="datetime-local" value="${start}" required></div>
+<div class="field"><label>${req("End / Befejezés")}</label><input id="jobEnd" name="end_time" type="datetime-local" value="${end}" required></div>
 
 <div class="field"><label>Estimated amount / Előzetes összeg</label><input name="planned_amount" type="number" value="0"></div>
 <div class="field"><label>Pricing basis / Díjmegállapítás módja</label>
 <input name="pricing_basis" placeholder="Phone quote / Telefonos ajánlat, Email quote / E-mail ajánlat, Fixed agreement / Fix megállapodás"></div>
 
-<div class="field"><label>Planned hours / Tervezett óra</label><input name="planned_hours" type="number" value="3"></div>
+<div class="field"><label>Planned hours / Tervezett óra</label><input id="plannedHours" name="planned_hours" type="number" value="3" step="0.25"></div>
 <div class="field"><label>${req("Service address / Cím")}</label><input name="service_address" required></div>
 
 <div class="field full hidden" id="instructionsField"><label>Remaining tasks / Hátralévő feladatok</label>
@@ -116,9 +116,38 @@ async function openJob(prefill=""){
 </div>
 <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Create job / Munka létrehozása</button></div>`;
 
+ const startInput=document.getElementById("jobStart");
+ const endInput=document.getElementById("jobEnd");
+ const hoursInput=document.getElementById("plannedHours");
+
+ function setEndFromHours(){
+   const s=startInput.value;
+   const h=Number(hoursInput.value||0);
+   if(!s || !h) return;
+   let d=new Date(s);
+   d.setMinutes(d.getMinutes()+Math.round(h*60));
+   endInput.value=localDT(d);
+ }
+ function setHoursFromTimes(){
+   if(!startInput.value || !endInput.value) return;
+   const diff=(new Date(endInput.value)-new Date(startInput.value))/(1000*60*60);
+   if(diff>0) hoursInput.value=(Math.round(diff*100)/100).toString();
+ }
+ hoursInput.addEventListener("change", setEndFromHours);
+ startInput.addEventListener("change", ()=>{validateDateField(startInput); setEndFromHours();});
+ endInput.addEventListener("change", ()=>{validateDateField(endInput); setHoursFromTimes();});
+
  $("#form").onsubmit=async ev=>{
    ev.preventDefault();
    let b=Object.fromEntries(new FormData(ev.target));
+
+   if(!validateDateField(startInput) || !validateDateField(endInput)) return;
+   if(new Date(b.end_time)<=new Date(b.start_time)){alert("A befejezés nem lehet korábbi, mint a kezdés. / End must be after start.");return}
+   if(isPastDate(b.start_time)){
+     const ok=confirm("Visszamenőleges dátumot adtál meg. Biztosan ezt akarod? / You entered a past date. Are you sure?");
+     if(!ok) return;
+   }
+
    ["planned_amount","planned_hours"].forEach(k=>b[k]=Number(b[k]||0));
    b.travel_minutes=0;
    b.priority="Medium";
@@ -130,7 +159,6 @@ async function openJob(prefill=""){
      b.client_id=matchedClient.id;
      if(!b.service_address && matchedClient.address) b.service_address=matchedClient.address;
    }
-
    const matchedPiano=pianos.find(p=>(`${p.brand||""} ${p.model||""}`).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());
    if(matchedPiano) b.piano_id=matchedPiano.id;
 
@@ -142,6 +170,19 @@ async function openJob(prefill=""){
      await renderScheduler();
    }catch(err){alert(err.message)}
  };
+}
+
+function validateDateField(input){
+ const val=input.value||"";
+ const year=val.slice(0,4);
+ if(!val){alert("Kérlek, add meg pontosan a dátumot. / Please enter the exact date."); return false}
+ if(!/^\d{4}$/.test(year)){alert("Az évszám pontosan 4 számjegyből álljon. / Year must be exactly 4 digits."); return false}
+ return true;
+}
+function isPastDate(value){
+ const d=new Date(value);
+ const now=new Date();
+ return d.getTime() < now.getTime();
 }
 
 function toggleInstructionsField(){
@@ -158,9 +199,28 @@ function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezár�
 <div class="field"><label>Invoice number / Számla vagy csekk szám</label><input name="invoice_number"></div><div class="field"><label>Invoice/check file / Számla vagy csekk fájl</label><input name="file" type="file"></div>
 <div class="field full"><label>${req("Close description / Elvégzett munka leírása")}</label><textarea name="close_description" required></textarea></div>
 <div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select name="next_assigned_to"><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div><div class="field"><label>Next priority</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input name="next_start_time" type="datetime-local"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input name="next_end_time" type="datetime-local"></div><div class="field"><label>Next planned amount</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save closeout / Lezárás mentése</button></div>`;
-$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}try{await api(`/api/jobs/${j.id}/close`,{method:"POST",body:fd});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
+$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}
+if(file && file.name && !isAllowedInvoiceFile(file.name)){alert("Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel. / Only PDF, JPG, JPEG or PNG files are allowed.");return}
+try{await api(`/api/jobs/${j.id}/close`,{method:"POST",body:fd});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
+function isAllowedInvoiceFile(name){return /\.(pdf|jpg|jpeg|png)$/i.test(name||"")}
 function toggleNextJob(){document.getElementById("nextJobFields").classList.toggle("hidden",document.getElementById("closeType").value!=="Partial")}
-async function renderTable(key){let s=schemas[key],data=await api("/api/"+s.api);$("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${s.title}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ Add / Új</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${c}</th>`).join("")}<th>Actions</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${c.includes("amount")||c.includes("value")?money(r[c]):r[c]??""}</td>`).join("")}<td>${key==="contacts"?`<button class="small" onclick="clientProfile('${r.id}')">Profile</button>`:""}<button class="small" onclick='openForm("${key}",${esc(r)})'>Edit</button></td></tr>`).join("")}</tbody></table></div></div>`}
+function headerLabel(key,c){
+ const map={
+   contacts:{id:"Client ID / Ügyfél ID",name:"Client name / Ügyfél neve",phone:"Phone / Telefon",address:"Address / Cím",last_contact:"Last visit / Utolsó látogatás",next_step:"Next step / Következő lépés"},
+   pianos:{id:"Piano ID / Zongora ID",brand:"Brand / Márka",model:"Model / Típus",serial_no:"Serial No. / Gyári szám",owner_contact_id:"Owner client ID / Tulajdonos ügyfél ID",location:"Location / Helyszín",estimated_value:"Estimated value / Becsült érték",status:"Status / Státusz"},
+   knowledge_base:{id:"ID",title:"Title / Cím",category:"Category / Kategória",owner:"Owner / Felelős",amount:"Amount / Összeg",payment_method:"Payment method / Fizetési mód",invoice_number:"Invoice/check number / Számla vagy csekk szám",stored_path:"Attachment / Melléklet",created_at:"Created / Létrehozva"}
+ };
+ return map[key]?.[c] || c;
+}
+async function renderTable(key){
+ let s=schemas[key],data=await api("/api/"+s.api);
+ $("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${s.title}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ Add / Új</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel(key,c)}</th>`).join("")}<th>Actions / Műveletek</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue(key,c,r)}</td>`).join("")}<td>${key==="contacts"?`<button class="small" onclick="clientProfile('${r.id}')">Profile / Adatlap</button>`:""}<button class="small" onclick='openForm("${key}",${esc(r)})'>Edit / Szerkesztés</button></td></tr>`).join("")}</tbody></table></div></div>`
+}
+function cellValue(key,c,r){
+ if((c.includes("amount")||c.includes("value"))) return money(r[c]);
+ if(c==="stored_path" && r[c]) return `<a href="${r[c]}" target="_blank">Download / Letöltés</a>`;
+ return r[c]??"";
+}
 async function clientProfile(id){let p=await api(`/api/client-profile/${id}`);$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Client profile / Ügyfélprofil";$("#form").innerHTML=`<div class="work-card"><h4>${p.client.name} · ${p.client.id}</h4><p><b>Phone / Telefon:</b> ${p.client.phone||""}</p><p><b>Address / Cím:</b> ${p.client.address||""}</p><p><b>Last visit / Utolsó látogatás:</b> ${p.lastVisit||""}</p><p><b>Last job / Legutóbbi munka:</b> ${p.lastJob||""}</p><h3>Pianos / Zongorák</h3>${p.pianos.map(x=>`<p>${x.brand||""} ${x.model||""} · ${x.serial_no||""}</p>`).join("")||"<p>No pianos</p>"}<h3>Jobs / Munkák</h3>${p.jobs.map(x=>`<p>${x.start_time} · ${x.title} · ${x.assigned_to} · ${x.status}</p>`).join("")||"<p>No jobs</p>"}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close</button></div>`;$("#form").onsubmit=e=>e.preventDefault()}
 function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?"Edit ":"Add ")+s.title;$("#form").innerHTML=`<div class="form-grid">${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});try{if(row)await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});closeModal();render(key)}catch(err){alert(err.message)}}}
 function field(f,val=""){let[name,label,type,opts]=f;if(type==="textarea")return `<div class="field full"><label>${label}</label><textarea name="${name}">${val||""}</textarea></div>`;if(type==="select")return `<div class="field"><label>${label}</label><select name="${name}">${opts.map(o=>`<option ${o==val?"selected":""}>${o}</option>`).join("")}</select></div>`;return `<div class="field"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${val??""}"></div>`}
@@ -168,7 +228,43 @@ function closeModal(){$("#modal").classList.add("hidden")}
 function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
 async function renderFinance(){let e=await api("/api/finance/entries");$("#finance").innerHTML=`<div class="panel"><h3>Finance / Pénzügy</h3><p class="muted">Managers: read-only / Menedzserek: csak megtekintés. Admin: pénzügyi módosítás.</p><div class="table-wrap"><table><thead><tr><th>Date</th><th>Job</th><th>Client</th><th>Piano</th><th>Amount</th><th>Payment method</th><th>Invoice status</th><th>Invoice/check no.</th><th>Lines</th></tr></thead><tbody>${e.map(x=>`<tr><td>${x.entry_date}</td><td>${x.job_title||x.job_id||""}</td><td>${x.client_name||""}</td><td>${x.piano_name||""}</td><td>${money(x.billed_amount||x.lines.reduce((s,l)=>s+Number(l.credit||0),0))}</td><td>${x.payment_method||""}</td><td>${x.invoice_status||""}</td><td>${x.invoice_number||""}</td><td>${x.lines.map(l=>`${l.account_code}: D ${money(l.debit)} / C ${money(l.credit)}`).join("<br>")}</td></tr>`).join("")}</tbody></table></div></div>`}
 async function renderIncomeStatement(){let d=await api("/api/income-statement");let acct=c=>d.trialBalance.filter(a=>a.category===c);let rows=arr=>arr.map(a=>`<div class="cf-row"><span>${a.name_en}<br><small>${a.name_hu}</small></span><b>${money(a.balance)}</b></div>`).join("")||"<p class='muted'>No data</p>";$("#income_statement").innerHTML=`<div class="grid kpis"><div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div><div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.completedJobs}</strong></div><div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div><div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div></div><div class="cashflow-sheet"><div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div><div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div><div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div><div class="cf-box"><h3>Liabilities / Források</h3>${rows(acct("LIABILITY"))}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div></div>`}
-async function renderAccounts(){let d=await api("/api/income-statement");$("#accounts").innerHTML=`<div class="panel"><h3>General Ledger / Főkönyv</h3><div class="table-wrap"><table><thead><tr><th>Code</th><th>Account</th><th>Category</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`}
+async function renderAccounts(){
+ let d=await api("/api/income-statement");
+ $("#accounts").innerHTML=`<div class="panel"><div class="toolbar"><h3>General Ledger / Főkönyv</h3>${user.role==="ADMIN"?`<button onclick="openLedgerEntry()">+ Add ledger entry / Új főkönyvi tétel</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`
+}
+async function openLedgerEntry(){
+ const accounts=await api("/api/accounts");
+ const opts=accounts.map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Add ledger entry / Új főkönyvi tétel";
+ $("#form").innerHTML=`<p class="muted">Admin-only manual ledger entry. Debit and credit must balance. / Csak admin kézi főkönyvi tétel. A Tartozik és Követel oldalnak egyeznie kell.</p>
+ <div class="form-grid">
+ <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${fmtDate(new Date())}" required></div>
+ <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method"><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Adjustment</option></select></div>
+ <div class="field full"><label>${req("Description / Leírás")}</label><input name="description" required></div>
+ <div class="field"><label>${req("Debit account / Tartozik számla")}</label><select name="debit_account">${opts}</select></div>
+ <div class="field"><label>${req("Credit account / Követel számla")}</label><select name="credit_account">${opts}</select></div>
+ <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" required></div>
+ <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo"></textarea></div>
+ </div>
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save balanced entry / Kiegyenlített tétel mentése</button></div>`;
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   const f=Object.fromEntries(new FormData(e.target));
+   const amount=Number(f.amount||0);
+   if(amount<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
+   try{
+     await api("/api/finance/entries",{method:"POST",body:JSON.stringify({
+       entry_date:f.entry_date,description:f.description,payment_method:f.payment_method,
+       lines:[
+         {account_code:f.debit_account,debit:amount,credit:0,memo:f.memo},
+         {account_code:f.credit_account,debit:0,credit:amount,memo:f.memo}
+       ]
+     })});
+     closeModal();renderAccounts();
+   }catch(err){alert(err.message)}
+ };
+}
 async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
 function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
 if(token)boot();
