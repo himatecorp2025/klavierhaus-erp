@@ -495,6 +495,49 @@ app.post("/api/finance/entries", auth, permit("ADMIN"), (req,res)=>{
   res.json({ok:true,id});
 });
 
+
+app.get("/api/income-statement/monthly", auth, (req,res)=>{
+  const month = req.query.month || today().slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({error:"Month must be YYYY-MM"});
+  const monthStart = `${month}-01`;
+  const nextMonth = new Date(`${monthStart}T00:00:00`);
+  nextMonth.setMonth(nextMonth.getMonth()+1);
+  const monthEnd = nextMonth.toISOString().slice(0,10);
+
+  const tb=db.prepare(`
+    SELECT a.code,a.name_en,a.name_hu,a.category,a.normal_side,
+      COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date < ? THEN jl.debit ELSE 0 END),0) debit_total,
+      COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date < ? THEN jl.credit ELSE 0 END),0) credit_total
+    FROM accounts a
+    LEFT JOIN journal_lines jl ON jl.account_code=a.code
+    LEFT JOIN journal_entries je ON je.id=jl.entry_id AND je.status='POSTED'
+    GROUP BY a.code
+    ORDER BY a.code
+  `).all(monthStart,monthEnd,monthStart,monthEnd).map(a=>{
+    const balance=a.normal_side==="DEBIT" ? Number(a.debit_total)-Number(a.credit_total) : Number(a.credit_total)-Number(a.debit_total);
+    return {...a,balance};
+  });
+
+  const revenue=tb.filter(a=>a.category==="REVENUE").reduce((s,a)=>s+a.balance,0);
+  const expenses=tb.filter(a=>a.category==="EXPENSE").reduce((s,a)=>s+a.balance,0);
+  const assets=tb.filter(a=>a.category==="ASSET").reduce((s,a)=>s+a.balance,0);
+  const liabilities=tb.filter(a=>a.category==="LIABILITY").reduce((s,a)=>s+a.balance,0);
+  const equity=tb.filter(a=>a.category==="EQUITY").reduce((s,a)=>s+a.balance,0);
+
+  const closedJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?").get(monthStart,monthEnd).c;
+  const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
+
+  res.json({
+    month,
+    monthStart,
+    monthEndExclusive:monthEnd,
+    generatedAt:new Date().toISOString(),
+    counts:{openJobs,closedJobs},
+    totals:{revenue,expenses,profit:revenue-expenses,assets,liabilities,equity,netWorth:assets-liabilities},
+    trialBalance:tb
+  });
+});
+
 app.get("/api/income-statement", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const trial=db.prepare("SELECT * FROM v_trial_balance ORDER BY code").all();
   const sum=cat=>trial.filter(a=>a.category===cat).reduce((s,a)=>s+Number(a.balance||0),0);
