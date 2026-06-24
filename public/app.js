@@ -167,6 +167,10 @@ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${row?.assigned_to===n
      if(!ok) return;
    }
 
+   if(b.job_type==="Part-work" && !(b.instructions||"").trim()){
+     alert("Részmunka esetén a hátralévő feladatok megadása kötelező. / Remaining tasks are required for part-work.");
+     return;
+   }
    ["planned_amount","planned_hours"].forEach(k=>b[k]=Number(b[k]||0));
    b.travel_minutes=0;
    b.priority=row?.priority||"Medium";
@@ -233,7 +237,7 @@ function openJobDetails(j){
  <p><b>Status / Státusz:</b> ${badge(j.status)}</p>
  ${j.job_type==="Part-work"?`<p><b>Remaining tasks / Hátralévő feladatok:</b><br>${j.instructions||""}</p>`:""}
  </div>
- <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button><button type="button" onclick='openReassign(${esc(j)})'>Reassign / Átadás</button>${j.status==="Completed"?"":`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`}</div>`;
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>${j.status==="Completed"?"":`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`}</div>`;
  $("#form").onsubmit=e=>e.preventDefault()
 }
 function openReassign(j){
