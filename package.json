@@ -1,7 +1,7 @@
 {
-  "name": "klavierhaus-calendar-first-work-management",
-  "version": "5.0.0",
-  "description": "Klavierhaus calendar-first work management system",
+  "name": "klavierhaus-calendar-finance-system",
+  "version": "6.0.0",
+  "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
