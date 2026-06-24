@@ -41,6 +41,22 @@ function ensureRuntimeMigrations(){
 }
 ensureRuntimeMigrations();
 
+
+function monthEndDate(dateStr){
+  const d = dateStr ? new Date(`${String(dateStr).slice(0,7)}-01T00:00:00`) : new Date();
+  d.setMonth(d.getMonth()+1);
+  d.setDate(0);
+  return d.toISOString().slice(0,10);
+}
+function currentMonthEnd(){
+  return monthEndDate(today());
+}
+function canEditJournalEntry(entry){
+  if(!entry || !entry.entry_date) return false;
+  const currentMonth = today().slice(0,7);
+  return String(entry.entry_date).slice(0,7) === currentMonth;
+}
+
 function ensureLedgerExpansion(){
   try{
     const jeCols=db.prepare("PRAGMA table_info(journal_entries)").all().map(c=>c.name);
@@ -525,6 +541,62 @@ app.post("/api/accounts", auth, permit("ADMIN"), (req,res)=>{
 });
 
 app.get("/api/accounts", auth, permit("ADMIN","MANAGER"), (req,res)=>res.json(db.prepare("SELECT * FROM accounts ORDER BY code").all()));
+
+app.get("/api/finance/journal-entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  const rows=db.prepare(`
+    SELECT je.*, 
+           GROUP_CONCAT(jl.account_code || ':' || jl.debit || ':' || jl.credit || ':' || COALESCE(jl.memo,''), '||') AS line_blob
+    FROM journal_entries je
+    LEFT JOIN journal_lines jl ON jl.entry_id=je.id
+    GROUP BY je.id
+    ORDER BY je.entry_date DESC, je.created_at DESC
+  `).all().map(r=>{
+    const lines=String(r.line_blob||"").split("||").filter(Boolean).map(x=>{
+      const p=x.split(":");
+      return {account_code:p[0],debit:Number(p[1]||0),credit:Number(p[2]||0),memo:p.slice(3).join(":")};
+    });
+    delete r.line_blob;
+    return {...r,lines,editable:canEditJournalEntry(r),editable_until:currentMonthEnd()};
+  });
+  res.json(rows);
+});
+
+app.get("/api/finance/journal-entries/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  if(!entry) return res.status(404).json({error:"Journal entry not found"});
+  const lines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id").all(req.params.id);
+  res.json({...entry,lines,editable:canEditJournalEntry(entry),editable_until:currentMonthEnd()});
+});
+
+app.put("/api/finance/journal-entries/:id", auth, permit("ADMIN"), (req,res)=>{
+  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  if(!entry) return res.status(404).json({error:"Journal entry not found"});
+  if(!canEditJournalEntry(entry)){
+    return res.status(403).json({error:`Closed month cannot be modified. Current month entries can be edited until ${currentMonthEnd()} / Lezárt hónap nem módosítható. Az aktuális hónap tételei eddig módosíthatók: ${currentMonthEnd()}`});
+  }
+
+  const {entry_date,description,payment_method,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,lines}=req.body;
+  const nextDate=entry_date || entry.entry_date;
+  if(String(nextDate).slice(0,7)!==today().slice(0,7)){
+    return res.status(403).json({error:`Entry date must remain in the current open month. Editable until ${currentMonthEnd()} / A tétel dátuma csak az aktuális nyitott hónapban maradhat. Módosítható eddig: ${currentMonthEnd()}`});
+  }
+
+  if(!Array.isArray(lines)||lines.length<2) return res.status(400).json({error:"At least two ledger lines are required"});
+  const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0);
+  const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
+  if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
+
+  const tx=db.transaction(()=>{
+    db.prepare(`UPDATE journal_entries SET entry_date=?, description=?, payment_method=?, entry_type=?, acquisition_date=?, acquisition_value=?, check_number=?, check_status=?, client_name=? WHERE id=?`)
+      .run(nextDate,description||entry.description,payment_method||"",entry_type||entry.entry_type||"Normal",acquisition_date||"",Number(acquisition_value||0),check_number||"",check_status||"",client_name||"",entry.id);
+    db.prepare("DELETE FROM journal_lines WHERE entry_id=?").run(entry.id);
+    const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
+    lines.forEach(l=>ins.run(rid("JL"),entry.id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
+  });
+  tx();
+  res.json({ok:true,id:entry.id,editable_until:currentMonthEnd()});
+});
+
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const rows=db.prepare(`SELECT je.*, j.title AS job_title, j.client_name, j.piano_name, j.invoice_status, j.invoice_number, j.billed_amount
                          FROM journal_entries je LEFT JOIN jobs j ON j.id=je.job_id
@@ -600,16 +672,37 @@ app.get("/api/income-statement/monthly", auth, (req,res)=>{
   nextMonth.setMonth(nextMonth.getMonth()+1);
   const monthEnd = nextMonth.toISOString().slice(0,10);
 
+  /*
+    Correct accounting logic / Helyes könyvelési logika:
+    - REVENUE and EXPENSE are period accounts: only current month movement.
+      Bevétel és kiadás: csak az adott hónap mozgása.
+    - ASSET, LIABILITY and EQUITY are balance-sheet accounts: cumulative balance up to month end.
+      Eszköz, kötelezettség és saját tőke: hónap végéig halmozott állomány.
+  */
   const tb=db.prepare(`
     SELECT a.code,a.name_en,a.name_hu,a.category,a.normal_side,
-      COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date < ? THEN jl.debit ELSE 0 END),0) debit_total,
-      COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date < ? THEN jl.credit ELSE 0 END),0) credit_total
+      COALESCE(SUM(CASE
+        WHEN a.category IN ('REVENUE','EXPENSE')
+          AND je.entry_date >= ? AND je.entry_date < ?
+        THEN jl.debit
+        WHEN a.category IN ('ASSET','LIABILITY','EQUITY')
+          AND je.entry_date < ?
+        THEN jl.debit
+        ELSE 0 END),0) debit_total,
+      COALESCE(SUM(CASE
+        WHEN a.category IN ('REVENUE','EXPENSE')
+          AND je.entry_date >= ? AND je.entry_date < ?
+        THEN jl.credit
+        WHEN a.category IN ('ASSET','LIABILITY','EQUITY')
+          AND je.entry_date < ?
+        THEN jl.credit
+        ELSE 0 END),0) credit_total
     FROM accounts a
     LEFT JOIN journal_lines jl ON jl.account_code=a.code
     LEFT JOIN journal_entries je ON je.id=jl.entry_id AND je.status='POSTED'
     GROUP BY a.code
     ORDER BY a.code
-  `).all(monthStart,monthEnd,monthStart,monthEnd).map(a=>{
+  `).all(monthStart,monthEnd,monthEnd,monthStart,monthEnd,monthEnd).map(a=>{
     const balance=a.normal_side==="DEBIT" ? Number(a.debit_total)-Number(a.credit_total) : Number(a.credit_total)-Number(a.debit_total);
     return {...a,balance};
   });
@@ -628,11 +721,16 @@ app.get("/api/income-statement/monthly", auth, (req,res)=>{
     monthStart,
     monthEndExclusive:monthEnd,
     generatedAt:new Date().toISOString(),
+    accountingLogic:{
+      revenueExpense:"period",
+      assetsLiabilitiesEquity:"cumulative_to_month_end"
+    },
     counts:{openJobs,closedJobs},
     totals:{revenue,expenses,profit:revenue-expenses,assets,liabilities,equity,netWorth:assets-liabilities},
     trialBalance:tb
   });
 });
+
 
 app.get("/api/income-statement", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const trial=db.prepare("SELECT * FROM v_trial_balance ORDER BY code").all();
