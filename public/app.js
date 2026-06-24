@@ -379,11 +379,55 @@ async function openLedgerEntry(){
  };
 }
 async function renderClosedJobs(){
- const rows=await api("/api/closed-jobs");
- const tableRows = rows.length ? rows.map(r=>`<tr><td>${r.job_key||r.job_id||""}</td><td>${r.title||""}</td><td>${r.client_name||""}</td><td>${r.piano_name||""}</td><td>${r.close_type||r.job_type||""}</td><td>${r.responsible_at_close||""}</td><td>${r.closed_by||""}</td><td>${r.closed_at||""}</td><td>${money(r.billed_amount)}</td><td>${r.payment_method||""}</td><td>${r.document_path?`<a href="${r.document_path}" target="_blank">Download / Letöltés</a>`:""}</td><td>${r.close_description||""}</td></tr>`).join("") : `<tr><td colspan="12" class="muted">Még nincs lezárt munka. / No closed jobs yet.</td></tr>`;
- $("#closed_jobs").innerHTML=`<div class="panel"><div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div><div class="table-wrap"><table><thead><tr><th>Job key / Munkaazonosító</th><th>Job / Munka neve</th><th>Client / Ügyfél</th><th>Piano / Zongora</th><th>Type / Típus</th><th>Responsible at close / Felelős lezáráskor</th><th>Closed by / Lezárta</th><th>Closed at / Lezárás ideje</th><th>Amount / Összeg</th><th>Payment / Fizetési mód</th><th>Invoice/check / Számla vagy csekk</th><th>Description / Leírás</th></tr></thead><tbody>${tableRows}</tbody></table></div></div>`;
+ let rows=[];
+ try{ rows=await api("/api/closed-jobs"); }catch(e){ rows=[]; }
+ const tableRows = rows.length ? rows.map(r=>`<tr>
+   <td>${r.job_key||r.job_id||""}</td>
+   <td>${r.title||""}</td>
+   <td>${r.client_name||""}</td>
+   <td>${r.piano_name||""}</td>
+   <td>${r.close_type||r.job_type||""}</td>
+   <td>${r.responsible_at_close||""}</td>
+   <td>${r.closed_by||""}</td>
+   <td>${r.closed_at||""}</td>
+   <td>${money(r.billed_amount)}</td>
+   <td>${r.payment_method||""}</td>
+   <td>${r.document_path?`<a href="${r.document_path}" target="_blank">Download / Letöltés</a>`:""}</td>
+   <td>${r.close_description||""}</td>
+ </tr>`).join("") : `<tr><td colspan="12" class="muted">Még nincs lezárt munka.</td></tr>`;
+
+ $("#closed_jobs").innerHTML=`<div class="panel">
+   <div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div>
+   <div class="table-wrap"><table>
+     <thead><tr>
+       <th>Munkaazonosító</th>
+       <th>Munka neve</th>
+       <th>Ügyfél</th>
+       <th>Zongora</th>
+       <th>Típus</th>
+       <th>Felelős lezáráskor</th>
+       <th>Lezárta</th>
+       <th>Lezárás ideje</th>
+       <th>Összeg</th>
+       <th>Fizetési mód</th>
+       <th>Számla/csekk</th>
+       <th>Leírás</th>
+     </tr></thead>
+     <tbody>${tableRows}</tbody>
+   </table></div>
+ </div>`;
 }
-function exportClosedJobs(){api("/api/closed-jobs").then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="closed_jobs.csv";a.click()})}
+function exportClosedJobs(){
+ api("/api/closed-jobs").then(data=>{
+   if(!data.length){alert("No data / Nincs adat");return}
+   let h=Object.keys(data[0]);
+   let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");
+   let a=document.createElement("a");
+   a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+   a.download="closed_jobs.csv";
+   a.click();
+ });
+}
 
 async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
 function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
