@@ -82,6 +82,70 @@ function ensureCorrectionExpansion(){
 }
 ensureCorrectionExpansion();
 
+function ensureLedgerIntegrityExpansion(){
+  try{
+    const jeCols=db.prepare("PRAGMA table_info(journal_entries)").all().map(c=>c.name);
+    if(!jeCols.includes("entry_uuid")) db.prepare("ALTER TABLE journal_entries ADD COLUMN entry_uuid TEXT").run();
+    if(!jeCols.includes("deleted_at")) db.prepare("ALTER TABLE journal_entries ADD COLUMN deleted_at TEXT").run();
+    if(!jeCols.includes("deleted_by")) db.prepare("ALTER TABLE journal_entries ADD COLUMN deleted_by TEXT").run();
+    if(!jeCols.includes("is_deleted")) db.prepare("ALTER TABLE journal_entries ADD COLUMN is_deleted INTEGER DEFAULT 0").run();
+    if(!jeCols.includes("storno_status")) db.prepare("ALTER TABLE journal_entries ADD COLUMN storno_status INTEGER DEFAULT 0").run();
+    if(!jeCols.includes("storno_for_entry_id")) db.prepare("ALTER TABLE journal_entries ADD COLUMN storno_for_entry_id TEXT").run();
+    if(!jeCols.includes("duplicate_key")) db.prepare("ALTER TABLE journal_entries ADD COLUMN duplicate_key TEXT").run();
+
+    const missingUuid=db.prepare("SELECT id FROM journal_entries WHERE entry_uuid IS NULL OR entry_uuid=''").all();
+    const updUuid=db.prepare("UPDATE journal_entries SET entry_uuid=? WHERE id=?");
+    missingUuid.forEach(r=>updUuid.run(rid("GLUUID"),r.id));
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS audit_log(
+      id TEXT PRIMARY KEY,
+      event_time TEXT NOT NULL,
+      user_id TEXT,
+      user_name TEXT,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      entity_id TEXT,
+      entity_uuid TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      ip_address TEXT
+    )`).run();
+  }catch(e){ console.warn("ledger integrity migration skipped:", e.message); }
+}
+function auditLog(req, action, entity, entityId, entityUuid, oldValue, newValue){
+  try{
+    db.prepare(`INSERT INTO audit_log(id,event_time,user_id,user_name,action,entity,entity_id,entity_uuid,old_value,new_value,ip_address)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      rid("AUD"), new Date().toISOString(), req.user?.id||"", req.user?.name||"", action, entity,
+      entityId||"", entityUuid||"", JSON.stringify(oldValue||null), JSON.stringify(newValue||null),
+      req.ip||req.headers["x-forwarded-for"]||""
+    );
+  }catch(e){ console.warn("audit log failed:", e.message); }
+}
+function makeDuplicateKey(payload){
+  const date=String(payload.entry_date||"").slice(0,10);
+  const desc=String(payload.description||"").trim().toLowerCase();
+  const payment=String(payload.payment_method||"").trim().toLowerCase();
+  const check=String(payload.check_number||"").trim().toLowerCase();
+  const client=String(payload.client_name||"").trim().toLowerCase();
+  let amount=0;
+  if(Array.isArray(payload.lines)) amount=payload.lines.reduce((s,l)=>s+Number(l.debit||0),0);
+  amount=Math.round(amount*100)/100;
+  return [date,desc,payment,check,client,amount].join("|");
+}
+function ensureLedgerNotDuplicate(payload){
+  const duplicateKey=makeDuplicateKey(payload);
+  const recent=db.prepare(`
+    SELECT id,entry_uuid,created_at FROM journal_entries
+    WHERE duplicate_key=? AND COALESCE(is_deleted,0)=0
+      AND datetime(created_at) >= datetime('now','-5 seconds')
+    ORDER BY created_at DESC LIMIT 1
+  `).get(duplicateKey);
+  return {duplicateKey,recent};
+}
+ensureLedgerIntegrityExpansion();
+
+
 
 function ensureCommonAccounts(){
   const rows=[
@@ -561,6 +625,7 @@ app.get("/api/finance/journal-entries", auth, permit("ADMIN","MANAGER"), (req,re
            GROUP_CONCAT(jl.account_code || ':' || jl.debit || ':' || jl.credit || ':' || COALESCE(jl.memo,''), '||') AS line_blob
     FROM journal_entries je
     LEFT JOIN journal_lines jl ON jl.entry_id=je.id
+    WHERE COALESCE(je.is_deleted,0)=0
     GROUP BY je.id
     ORDER BY je.entry_date DESC, je.created_at DESC
   `).all().map(r=>{
@@ -575,18 +640,21 @@ app.get("/api/finance/journal-entries", auth, permit("ADMIN","MANAGER"), (req,re
 });
 
 app.get("/api/finance/journal-entries/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=? AND COALESCE(is_deleted,0)=0").get(req.params.id);
   if(!entry) return res.status(404).json({error:"Journal entry not found"});
   const lines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id").all(req.params.id);
   res.json({...entry,lines,editable:canEditJournalEntry(entry),editable_until:currentMonthEnd()});
 });
 
 app.put("/api/finance/journal-entries/:id", auth, permit("ADMIN"), (req,res)=>{
-  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=? AND COALESCE(is_deleted,0)=0").get(req.params.id);
   if(!entry) return res.status(404).json({error:"Journal entry not found"});
   if(!canEditJournalEntry(entry)){
     return res.status(403).json({error:`Closed month cannot be modified. Current month entries can be edited until ${currentMonthEnd()} / Lezárt hónap nem módosítható. Az aktuális hónap tételei eddig módosíthatók: ${currentMonthEnd()}`});
   }
+
+  const oldLines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id").all(entry.id);
+  const oldValue={...entry,lines:oldLines};
 
   const {entry_date,description,payment_method,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,lines}=req.body;
   const nextDate=entry_date || entry.entry_date;
@@ -598,21 +666,37 @@ app.put("/api/finance/journal-entries/:id", auth, permit("ADMIN"), (req,res)=>{
   const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0);
   const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
   if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
+  const duplicateKey=makeDuplicateKey({entry_date:nextDate,description:description||entry.description,payment_method,lines,check_number,client_name});
 
   const tx=db.transaction(()=>{
-    db.prepare(`UPDATE journal_entries SET entry_date=?, description=?, payment_method=?, entry_type=?, acquisition_date=?, acquisition_value=?, check_number=?, check_status=?, client_name=?, modified_by=?, modified_at=? WHERE id=?`)
-      .run(nextDate,description||entry.description,payment_method||"",entry_type||entry.entry_type||"Normal",acquisition_date||"",Number(acquisition_value||0),check_number||"",check_status||"",client_name||"",req.user.name||req.user.id,new Date().toISOString(),entry.id);
+    db.prepare(`UPDATE journal_entries SET entry_date=?, description=?, payment_method=?, entry_type=?, acquisition_date=?, acquisition_value=?, check_number=?, check_status=?, client_name=?, modified_by=?, modified_at=?, duplicate_key=? WHERE id=?`)
+      .run(nextDate,description||entry.description,payment_method||"",entry_type||entry.entry_type||"Normal",acquisition_date||"",Number(acquisition_value||0),check_number||"",check_status||"",client_name||"",req.user.name||req.user.id,new Date().toISOString(),duplicateKey,entry.id);
     db.prepare("DELETE FROM journal_lines WHERE entry_id=?").run(entry.id);
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),entry.id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
   });
   tx();
-  res.json({ok:true,id:entry.id,editable_until:currentMonthEnd()});
+  auditLog(req,"UPDATE","journal_entries",entry.id,entry.entry_uuid,oldValue,{entry_date:nextDate,description,payment_method,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,lines});
+  res.json({ok:true,id:entry.id,entry_uuid:entry.entry_uuid,editable_until:currentMonthEnd()});
 });
 
 
+
+app.delete("/api/finance/journal-entries/:id", auth, permit("ADMIN"), (req,res)=>{
+  const entry=db.prepare("SELECT * FROM journal_entries WHERE id=? AND COALESCE(is_deleted,0)=0").get(req.params.id);
+  if(!entry) return res.status(404).json({error:"Journal entry not found"});
+  if(!canEditJournalEntry(entry)){
+    return res.status(403).json({error:`Closed month cannot be deleted. Use correction or reversal. / Lezárt hónap tétele nem törölhető. Használj korrekciót vagy stornót.`});
+  }
+  const lines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id").all(entry.id);
+  db.prepare("UPDATE journal_entries SET is_deleted=1, deleted_at=?, deleted_by=?, modified_by=?, modified_at=? WHERE id=?")
+    .run(new Date().toISOString(),req.user.name||req.user.id,req.user.name||req.user.id,new Date().toISOString(),entry.id);
+  auditLog(req,"DELETE","journal_entries",entry.id,entry.entry_uuid,{...entry,lines},{is_deleted:1});
+  res.json({ok:true,id:entry.id});
+});
+
 app.post("/api/finance/journal-entries/:id/correction", auth, permit("ADMIN"), (req,res)=>{
-  const original=db.prepare("SELECT * FROM journal_entries WHERE id=?").get(req.params.id);
+  const original=db.prepare("SELECT * FROM journal_entries WHERE id=? AND COALESCE(is_deleted,0)=0").get(req.params.id);
   if(!original) return res.status(404).json({error:"Original journal entry not found"});
 
   const correction_type=String(req.body.correction_type||"").trim();
@@ -643,24 +727,34 @@ app.post("/api/finance/journal-entries/:id/correction", auth, permit("ADMIN"), (
   const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
   if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
 
+  const description=`${correction_type} correction / ${correction_type==="Reversal"?"Stornó":"Helyesbítés"} for ${original.id}: ${correction_reason}`;
+  const dup=ensureLedgerNotDuplicate({entry_date,description,payment_method:req.body.payment_method||"Adjustment",lines,check_number:"",client_name:""});
+  if(dup.recent) return res.status(409).json({error:"Possible duplicate correction entry / Lehetséges duplikált korrekciós tétel", existing:dup.recent});
+
   const id=rid("JE");
+  const uuid=rid("GLUUID");
   const tx=db.transaction(()=>{
     db.prepare(`INSERT INTO journal_entries(
-      id,entry_date,description,payment_method,status,created_by,entry_type,
-      correction_for_entry_id,correction_type,correction_reason,modified_by,modified_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,
+      correction_for_entry_id,correction_type,correction_reason,modified_by,modified_at,storno_for_entry_id,duplicate_key
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
-        id,entry_date,
-        `${correction_type} correction / ${correction_type==="Reversal"?"Stornó":"Helyesbítés"} for ${original.id}: ${correction_reason}`,
+        id,uuid,entry_date,description,
         req.body.payment_method||"Adjustment","POSTED",req.user.id,
         "Correction / Korrekció",original.id,correction_type,correction_reason,
-        req.user.name||req.user.id,new Date().toISOString()
+        req.user.name||req.user.id,new Date().toISOString(),
+        correction_type==="Reversal"?original.id:"",dup.duplicateKey
       );
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||correction_reason));
+    if(correction_type==="Reversal"){
+      db.prepare("UPDATE journal_entries SET storno_status=1, modified_by=?, modified_at=? WHERE id=?")
+        .run(req.user.name||req.user.id,new Date().toISOString(),original.id);
+    }
   });
   tx();
-  res.json({ok:true,id,correction_for_entry_id:original.id,correction_type});
+  auditLog(req,correction_type==="Reversal"?"STORNO":"CORRECTION","journal_entries",id,uuid,{original,lines:originalLines},{entry_date,description,lines,correction_type,correction_reason});
+  res.json({ok:true,id,entry_uuid:uuid,correction_for_entry_id:original.id,correction_type});
 });
 
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
@@ -698,35 +792,50 @@ app.post("/api/finance/check-workflow", auth, permit("ADMIN"), (req,res)=>{
     return res.status(400).json({error:"Invalid check workflow type"});
   }
 
+  const lines=[
+    {account_code:debit_account,debit:amount,credit:0,memo},
+    {account_code:credit_account,debit:0,credit:amount,memo}
+  ];
+  const dup=ensureLedgerNotDuplicate({entry_date,description,payment_method:"Check",lines,check_number,client_name});
+  if(dup.recent) return res.status(409).json({error:"Possible duplicate check ledger entry / Lehetséges duplikált csekk főkönyvi tétel", existing:dup.recent});
+
   const id=rid("JE");
+  const uuid=rid("GLUUID");
   const tx=db.transaction(()=>{
-    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,payment_method,status,created_by,entry_type,check_number,check_status,client_name)
-                VALUES(?,?,?,?,?,?,?,?,?,?)`)
-      .run(id,entry_date,description,"Check","POSTED",req.user.id,"Check workflow",check_number,check_status,client_name);
+    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,check_number,check_status,client_name,duplicate_key)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,uuid,entry_date,description,"Check","POSTED",req.user.id,"Check workflow",check_number,check_status,client_name,dup.duplicateKey);
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     ins.run(rid("JL"),id,debit_account,amount,0,memo);
     ins.run(rid("JL"),id,credit_account,0,amount,memo);
   });
   tx();
-  res.json({ok:true,id,type,check_status});
+  auditLog(req,"CREATE","journal_entries",id,uuid,null,{type,amount,entry_date,check_number,client_name,check_status});
+  res.json({ok:true,id,entry_uuid:uuid,type,check_status});
 });
 
 app.post("/api/finance/entries", auth, permit("ADMIN"), (req,res)=>{
-  const {entry_date,description,payment_method,lines,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name}=req.body;
+  const {entry_date,description,payment_method,lines,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,entry_uuid}=req.body;
   if(!entry_date||!description||!Array.isArray(lines)||lines.length<2) return res.status(400).json({error:"Balanced entry with at least two lines is required"});
   const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0);
   const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
   if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
+
+  const dup=ensureLedgerNotDuplicate({entry_date,description,payment_method,lines,check_number,client_name});
+  if(dup.recent) return res.status(409).json({error:"Possible duplicate ledger entry / Lehetséges duplikált főkönyvi tétel", existing:dup.recent});
+
   const id=rid("JE");
+  const uuid=entry_uuid || rid("GLUUID");
   const tx=db.transaction(()=>{
-    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,payment_method,status,created_by,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id,entry_date,description,payment_method||"", "POSTED", req.user.id, entry_type||"Normal", acquisition_date||"", Number(acquisition_value||0), check_number||"", check_status||"", client_name||"");
+    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,duplicate_key)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,uuid,entry_date,description,payment_method||"", "POSTED", req.user.id, entry_type||"Normal", acquisition_date||"", Number(acquisition_value||0), check_number||"", check_status||"", client_name||"", dup.duplicateKey);
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
   });
   tx();
-  res.json({ok:true,id});
+  auditLog(req,"CREATE","journal_entries",id,uuid,null,{entry_date,description,payment_method,lines,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name});
+  res.json({ok:true,id,entry_uuid:uuid});
 });
 
 
