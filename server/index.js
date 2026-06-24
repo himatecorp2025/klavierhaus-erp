@@ -190,11 +190,25 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
-  const jobId = req.params.id || req.body.id || req.body.job_id;
+  const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
-  if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
+  if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
 
-  if(!canEditJob(req.user, job)) return res.status(403).json({error:"You cannot edit this job"});
+  const assignedChanging = req.body.assigned_to !== undefined && req.body.assigned_to !== job.assigned_to;
+
+  // Editing rules:
+  // - Admin edits everything.
+  // - Current responsible can edit their job.
+  // - Manager can edit jobs they created.
+  // - Responsible change is allowed inside this edit endpoint; separate reassignment button is removed from UI.
+  // Szerkesztési szabály:
+  // - Admin mindent szerkeszt.
+  // - Jelenlegi felelős szerkesztheti a saját munkáját.
+  // - Manager szerkesztheti az általa létrehozott munkát.
+  // - Felelősváltás mostantól a szerkesztés része.
+  if(!canEditJob(req.user, job) && !(assignedChanging && (req.user.role==="ADMIN" || req.user.role==="MANAGER" || req.body.assigned_to===req.user.name || job.assigned_to===req.user.name))) {
+    return res.status(403).json({error:"You cannot edit this job"});
+  }
 
   const allowed=[
     "title","job_type","client_id","client_name","client_phone",
@@ -204,11 +218,15 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   ];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
 
+  if(req.body.job_type==="Part-work" && (!req.body.instructions || !String(req.body.instructions).trim())){
+    return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
+  }
+
   if(cols.length){
     const setParts=cols.map(c=>`${c}=?`);
     const vals=cols.map(c=>req.body[c]);
 
-    if(req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to){
+    if(assignedChanging){
       setParts.push("last_reassigned_by=?");
       setParts.push("reassignment_note=?");
       vals.push(req.user.name, req.body.reassignment_note || "Changed during edit / Szerkesztés közbeni felelősváltás");
@@ -243,39 +261,57 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  const jobId = req.params.id || req.body.id || req.body.job_id;
+  const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
-  if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
+  if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
+
   if(!canCloseJob(req.user, job)) return res.status(403).json({error:"Only assigned person or admin can close this job"});
   const closeType=req.body.close_type;
   if(!["Partial","Full"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial or Full"});
+
   const billed=Number(req.body.billed_amount);
   if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
+
   const desc=(req.body.close_description||"").trim();
   if(!desc) return res.status(400).json({error:"Close description is required"});
 
   const payment=req.body.payment_method || "";
-  // Payment method is always required, even when billed amount is 0.
-  // A fizetési mód mindig kötelező, akkor is, ha az összeg 0.
   if(!payment) return res.status(400).json({error:"Payment method is required / Fizetési mód kötelező"});
 
   if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
+
   let nextJobId=null;
   if(closeType==="Partial"){
     const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
     for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
+
     nextJobId=rid("J");
-    db.prepare(`INSERT INTO jobs(id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
+    db.prepare(`INSERT INTO jobs(
+      id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
+      assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+      planned_hours,travel_minutes,service_address,instructions
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(
+        nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",
+        job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
+        req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",
+        req.body.next_start_time,req.body.next_end_time,"America/New_York",
+        Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",
+        Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),
+        req.body.next_service_address||job.service_address,req.body.next_instructions||""
+      );
   }
+
   db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(closeType==="Full"?"Completed":"Partially completed",closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+
   db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
     .run(rid("LOG"),job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+
   db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":"Részlezárás"}: ${job.title}`,closeType==="Full"?"Closed Job":"Partial Close","Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
+
   if(billed > 0) createRevenueEntry(job,billed,payment,req.user.id);
   res.json({ok:true,next_job_id:nextJobId,storedPath});
 });
