@@ -41,6 +41,45 @@ function ensureRuntimeMigrations(){
 }
 ensureRuntimeMigrations();
 
+function ensureLedgerExpansion(){
+  try{
+    const jeCols=db.prepare("PRAGMA table_info(journal_entries)").all().map(c=>c.name);
+    if(!jeCols.includes("entry_type")) db.prepare("ALTER TABLE journal_entries ADD COLUMN entry_type TEXT DEFAULT 'Normal'").run();
+    if(!jeCols.includes("acquisition_date")) db.prepare("ALTER TABLE journal_entries ADD COLUMN acquisition_date TEXT").run();
+    if(!jeCols.includes("acquisition_value")) db.prepare("ALTER TABLE journal_entries ADD COLUMN acquisition_value REAL DEFAULT 0").run();
+    if(!jeCols.includes("check_number")) db.prepare("ALTER TABLE journal_entries ADD COLUMN check_number TEXT").run();
+    if(!jeCols.includes("check_status")) db.prepare("ALTER TABLE journal_entries ADD COLUMN check_status TEXT").run();
+    if(!jeCols.includes("client_name")) db.prepare("ALTER TABLE journal_entries ADD COLUMN client_name TEXT").run();
+  }catch(e){ console.warn("ledger expansion migration skipped:", e.message); }
+}
+ensureLedgerExpansion();
+
+function ensureCommonAccounts(){
+  const rows=[
+    ["1030","Petty Cash","Házipénztár","ASSET","DEBIT"],
+    ["1100","Security Deposits","Kauciók","ASSET","DEBIT"],
+    ["1310","Parts Inventory","Alkatrész készlet","ASSET","DEBIT"],
+    ["1320","Tools and Equipment","Szerszámok és berendezések","ASSET","DEBIT"],
+    ["1510","Company Pianos","Céges zongorák","ASSET","DEBIT"],
+    ["2200","Credit Card Payable","Hitelkártya tartozás","LIABILITY","CREDIT"],
+    ["2300","Sales Tax Payable","Értékesítési adó tartozás","LIABILITY","CREDIT"],
+    ["2400","Payroll Taxes Payable","Bérjárulék tartozás","LIABILITY","CREDIT"],
+    ["4400","Service Revenue","Szolgáltatási bevétel","REVENUE","CREDIT"],
+    ["4500","Parts Revenue","Alkatrész bevétel","REVENUE","CREDIT"],
+    ["5100","Materials Expense","Anyagköltség","EXPENSE","DEBIT"],
+    ["6500","Marketing Expense","Marketingköltség","EXPENSE","DEBIT"],
+    ["6600","Insurance Expense","Biztosítási költség","EXPENSE","DEBIT"],
+    ["6700","Utilities Expense","Rezsi / közüzemi költség","EXPENSE","DEBIT"],
+    ["6800","Professional Fees","Szakértői díjak","EXPENSE","DEBIT"],
+    ["6900","Bank Fees","Bankköltség","EXPENSE","DEBIT"]
+  ];
+  const st=db.prepare("INSERT OR IGNORE INTO accounts(code,name_en,name_hu,category,normal_side) VALUES(?,?,?,?,?)");
+  rows.forEach(r=>st.run(...r));
+}
+ensureCommonAccounts();
+
+
+
 
 function ensureJobKeyColumn(){
   try {
@@ -471,6 +510,20 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
   res.json(rows);
 });
 
+
+app.post("/api/accounts", auth, permit("ADMIN"), (req,res)=>{
+  const code=String(req.body.code||"").trim();
+  const name_en=String(req.body.name_en||"").trim();
+  const name_hu=String(req.body.name_hu||"").trim();
+  const category=String(req.body.category||"").trim();
+  const normal_side=String(req.body.normal_side||"").trim();
+  if(!code||!name_en||!name_hu||!category||!normal_side) return res.status(400).json({error:"All account fields are required"});
+  if(!["ASSET","LIABILITY","EQUITY","REVENUE","EXPENSE"].includes(category)) return res.status(400).json({error:"Invalid category"});
+  if(!["DEBIT","CREDIT"].includes(normal_side)) return res.status(400).json({error:"Invalid normal side"});
+  db.prepare("INSERT INTO accounts(code,name_en,name_hu,category,normal_side) VALUES(?,?,?,?,?)").run(code,name_en,name_hu,category,normal_side);
+  res.json(db.prepare("SELECT * FROM accounts WHERE code=?").get(code));
+});
+
 app.get("/api/accounts", auth, permit("ADMIN","MANAGER"), (req,res)=>res.json(db.prepare("SELECT * FROM accounts ORDER BY code").all()));
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const rows=db.prepare(`SELECT je.*, j.title AS job_title, j.client_name, j.piano_name, j.invoice_status, j.invoice_number, j.billed_amount
@@ -479,16 +532,59 @@ app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const lines=db.prepare("SELECT * FROM journal_lines WHERE entry_id=? ORDER BY id");
   res.json(rows.map(e=>({...e,lines:lines.all(e.id)})));
 });
-app.post("/api/finance/entries", auth, permit("ADMIN"), (req,res)=>{
-  const {entry_date,description,client_id,piano_id,job_id,payment_method,status,lines}=req.body;
-  if(!Array.isArray(lines)||lines.length<2) return res.status(400).json({error:"At least two journal lines required"});
-  const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0), credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
-  if(Math.abs(debit-credit)>0.005) return res.status(400).json({error:"Debit and credit must balance",debit,credit});
+
+app.post("/api/finance/check-workflow", auth, permit("ADMIN"), (req,res)=>{
+  const type=String(req.body.type||"").trim();
+  const amount=Number(req.body.amount||0);
+  const entry_date=req.body.entry_date || today();
+  const check_number=req.body.check_number || "";
+  const client_name=req.body.client_name || "";
+  const memo=req.body.memo || "";
+  const revenue_account=req.body.revenue_account || "4200";
+  if(amount<=0) return res.status(400).json({error:"Amount must be greater than zero"});
+
+  let debit_account="", credit_account="", description="", check_status="";
+  if(type==="received"){
+    debit_account="1020"; credit_account=revenue_account;
+    description=`Check received / Csekk beérkezett${check_number?": "+check_number:""}${client_name?" · "+client_name:""}`;
+    check_status="Received";
+  }else if(type==="deposit_bank"){
+    debit_account="1010"; credit_account="1020";
+    description=`Check deposited to bank / Csekk bankba befizetve${check_number?": "+check_number:""}`;
+    check_status="Deposited to bank";
+  }else if(type==="cash"){
+    debit_account="1000"; credit_account="1020";
+    description=`Check cashed / Csekk készpénzre váltva${check_number?": "+check_number:""}`;
+    check_status="Cashed";
+  }else{
+    return res.status(400).json({error:"Invalid check workflow type"});
+  }
+
   const id=rid("JE");
   const tx=db.transaction(()=>{
-    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,client_id,piano_id,job_id,payment_method,status,created_by) VALUES(?,?,?,?,?,?,?,?,?)`)
-      .run(id,entry_date,description,client_id||null,piano_id||null,job_id||null,payment_method,status||"POSTED",req.user.id);
-    const ins=db.prepare(`INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)`);
+    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,payment_method,status,created_by,entry_type,check_number,check_status,client_name)
+                VALUES(?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,entry_date,description,"Check","POSTED",req.user.id,"Check workflow",check_number,check_status,client_name);
+    const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
+    ins.run(rid("JL"),id,debit_account,amount,0,memo);
+    ins.run(rid("JL"),id,credit_account,0,amount,memo);
+  });
+  tx();
+  res.json({ok:true,id,type,check_status});
+});
+
+app.post("/api/finance/entries", auth, permit("ADMIN"), (req,res)=>{
+  const {entry_date,description,payment_method,lines,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name}=req.body;
+  if(!entry_date||!description||!Array.isArray(lines)||lines.length<2) return res.status(400).json({error:"Balanced entry with at least two lines is required"});
+  const debit=lines.reduce((s,l)=>s+Number(l.debit||0),0);
+  const credit=lines.reduce((s,l)=>s+Number(l.credit||0),0);
+  if(Math.round(debit*100)!==Math.round(credit*100)) return res.status(400).json({error:"Debit and credit must balance"});
+  const id=rid("JE");
+  const tx=db.transaction(()=>{
+    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,payment_method,status,created_by,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,entry_date,description,payment_method||"", "POSTED", req.user.id, entry_type||"Normal", acquisition_date||"", Number(acquisition_value||0), check_number||"", check_status||"", client_name||"");
+    const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
   });
   tx();
