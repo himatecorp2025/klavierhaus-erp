@@ -131,17 +131,39 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
 app.put("/api/jobs/:id", auth, (req,res)=>{
   const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
   if(!job) return res.status(404).json({error:"Job not found"});
-  const assignedChanging=req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to;
-  if(assignedChanging && canReassignJob(req.user,job)){
-    db.prepare("UPDATE jobs SET assigned_to=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(req.body.assigned_to, req.user.name, req.body.reassignment_note||"", job.id);
-    return res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
-  }
   if(!canEditJob(req.user, job)) return res.status(403).json({error:"You cannot edit this job"});
+
   const allowed=["title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","priority","status","start_time","end_time","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
-  if(cols.length) db.prepare(`UPDATE jobs SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
+
+  if(cols.length){
+    const extraCols=[];
+    if(req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to){
+      extraCols.push("last_reassigned_by=?");
+      extraCols.push("reassignment_note=?");
+    }
+    const sql=`UPDATE jobs SET ${cols.map(c=>`${c}=?`).concat(extraCols).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`;
+    const vals=cols.map(c=>req.body[c]);
+    if(req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to){
+      vals.push(req.user.name, req.body.reassignment_note || "Changed during edit / Szerkesztés közbeni felelősváltás");
+    }
+    vals.push(req.params.id);
+    db.prepare(sql).run(...vals);
+  }
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id));
+});
+
+app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
+  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
+  if(!job) return res.status(404).json({error:"Job not found"});
+  if(!canReassignJob(req.user, job)) return res.status(403).json({error:"You cannot reassign this job"});
+
+  const assignedTo=req.body.assigned_to;
+  if(!assignedTo) return res.status(400).json({error:"assigned_to is required"});
+  db.prepare("UPDATE jobs SET assigned_to=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    .run(assignedTo, req.user.name, req.body.reassignment_note||"", job.id);
+
+  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
