@@ -1,0 +1,20 @@
+{
+  "name": "klavierhaus-cloud-erp-crm-scheduler-kb",
+  "version": "3.0.0",
+  "description": "Klavierhaus Cloud ERP + CRM + Scheduler + Knowledge Base",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "init-db": "node server/init-db.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
