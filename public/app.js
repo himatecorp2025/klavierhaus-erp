@@ -485,22 +485,71 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
 
 async function renderAccounts(){
  let d=await api("/api/income-statement");
- $("#accounts").innerHTML=`<div class="panel"><div class="toolbar"><h3>General Ledger / Főkönyv</h3>${user.role==="ADMIN"?`<button onclick="openLedgerEntry()">+ Add ledger entry / Új főkönyvi tétel</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`
+ $("#accounts").innerHTML=`<div class="panel">
+   <div class="toolbar">
+     <div>
+       <h3>General Ledger / Főkönyv</h3>
+       <p class="muted">A Főkönyv az Eredménykimutatás adatforrása. / General Ledger is the source of the Income Statement.</p>
+     </div>
+     ${user.role==="ADMIN"?`<div>
+       <button onclick="openAccountForm()">+ Add account / Új főkönyvi kategória</button>
+       <button onclick="openLedgerEntry()">+ Add ledger entry / Új főkönyvi tétel</button>
+       <button onclick="openCheckWorkflow()">+ Check workflow / Csekk folyamat</button>
+     </div>`:""}
+   </div>
+   <div class="table-wrap"><table>
+     <thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Normal side / Normál oldal</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead>
+     <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${ledgerCategoryHu(a.category)}</td><td>${ledgerSideHu(a.normal_side)}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody>
+   </table></div>
+ </div>`;
+}
+function ledgerCategoryHu(c){
+ const m={ASSET:"ASSET / Eszköz",LIABILITY:"LIABILITY / Kötelezettség / Forrás",EQUITY:"EQUITY / Saját tőke",REVENUE:"REVENUE / Bevétel",EXPENSE:"EXPENSE / Kiadás"};
+ return m[c]||c;
+}
+function ledgerSideHu(s){
+ const m={DEBIT:"DEBIT / Tartozik",CREDIT:"CREDIT / Követel"};
+ return m[s]||s;
+}
+async function openAccountForm(){
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Add account / Új főkönyvi kategória";
+ $("#form").innerHTML=`<div class="form-grid">
+   <div class="field"><label>${req("Account code / Főkönyvi szám")}</label><input name="code" required placeholder="6500"></div>
+   <div class="field"><label>${req("English name / Angol név")}</label><input name="name_en" required placeholder="Materials Expense"></div>
+   <div class="field"><label>${req("Hungarian name / Magyar név")}</label><input name="name_hu" required placeholder="Anyagköltség"></div>
+   <div class="field"><label>${req("Category / Kategória")}</label><select name="category" id="newAccountCategory" onchange="suggestNormalSide()"><option value="ASSET">ASSET / Eszköz</option><option value="LIABILITY">LIABILITY / Kötelezettség / Forrás</option><option value="EQUITY">EQUITY / Saját tőke</option><option value="REVENUE">REVENUE / Bevétel</option><option value="EXPENSE">EXPENSE / Kiadás</option></select></div>
+   <div class="field"><label>${req("Normal side / Normál oldal")}</label><select name="normal_side" id="newAccountSide"><option value="DEBIT">DEBIT / Tartozik</option><option value="CREDIT">CREDIT / Követel</option></select></div>
+ </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save account / Kategória mentése</button></div>`;
+ suggestNormalSide();
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   try{await api("/api/accounts",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderAccounts()}catch(err){alert(err.message)}
+ };
+}
+function suggestNormalSide(){
+ const c=document.getElementById("newAccountCategory")?.value;
+ const side=document.getElementById("newAccountSide");
+ if(!side)return;
+ side.value=(c==="ASSET"||c==="EXPENSE")?"DEBIT":"CREDIT";
 }
 async function openLedgerEntry(){
  const accounts=await api("/api/accounts");
  const opts=accounts.map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent="Add ledger entry / Új főkönyvi tétel";
- $("#form").innerHTML=`<p class="muted">Admin-only manual ledger entry. Debit and credit must balance. / Csak admin kézi főkönyvi tétel. A Tartozik és Követel oldalnak egyeznie kell.</p>
+ $("#form").innerHTML=`<p class="muted">Admin-only balanced ledger entry. / Csak admin: kiegyensúlyozott főkönyvi tétel.</p>
  <div class="form-grid">
- <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${fmtDate(new Date())}" required></div>
- <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method"><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Adjustment</option></select></div>
- <div class="field full"><label>${req("Description / Leírás")}</label><input name="description" required></div>
- <div class="field"><label>${req("Debit account / Tartozik számla")}</label><select name="debit_account">${opts}</select></div>
- <div class="field"><label>${req("Credit account / Követel számla")}</label><select name="credit_account">${opts}</select></div>
- <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" required></div>
- <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo"></textarea></div>
+   <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${fmtDate(new Date())}" required></div>
+   <div class="field"><label>${req("Entry type / Tétel típusa")}</label><select name="entry_type"><option>Opening balance / Nyitó tétel</option><option>Normal / Normál tétel</option><option>Adjustment / Korrekció</option><option>Acquisition / Bekerülési tétel</option></select></div>
+   <div class="field full"><label>${req("Description / Leírás")}</label><input name="description" required></div>
+   <div class="field"><label>${req("Debit account / Tartozik számla")}</label><select name="debit_account">${opts}</select></div>
+   <div class="field"><label>${req("Credit account / Követel számla")}</label><select name="credit_account">${opts}</select></div>
+   <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" step="0.01" required></div>
+   <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method"><option>Adjustment</option><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Asset Entry</option></select></div>
+   <div class="field"><label>Acquisition date / Bekerülési dátum</label><input name="acquisition_date" type="date"></div>
+   <div class="field"><label>Acquisition value / Bekerülési érték</label><input name="acquisition_value" type="number" step="0.01" value="0"></div>
+   <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo"></textarea></div>
  </div>
  <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save balanced entry / Kiegyenlített tétel mentése</button></div>`;
  $("#form").onsubmit=async e=>{
@@ -510,7 +559,12 @@ async function openLedgerEntry(){
    if(amount<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
    try{
      await api("/api/finance/entries",{method:"POST",body:JSON.stringify({
-       entry_date:f.entry_date,description:f.description,payment_method:f.payment_method,
+       entry_date:f.entry_date,
+       description:f.description,
+       payment_method:f.payment_method,
+       entry_type:f.entry_type,
+       acquisition_date:f.acquisition_date,
+       acquisition_value:Number(f.acquisition_value||0),
        lines:[
          {account_code:f.debit_account,debit:amount,credit:0,memo:f.memo},
          {account_code:f.credit_account,debit:0,credit:amount,memo:f.memo}
@@ -520,6 +574,35 @@ async function openLedgerEntry(){
    }catch(err){alert(err.message)}
  };
 }
+async function openCheckWorkflow(){
+ const accounts=await api("/api/accounts");
+ const revenue=accounts.filter(a=>a.category==="REVENUE").map(a=>`<option value="${a.code}">${a.code} · ${a.name_en} / ${a.name_hu}</option>`).join("");
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent="Check workflow / Amerikai csekk folyamat";
+ $("#form").innerHTML=`<p class="muted">Csekk beérkezés, bankba befizetés vagy készpénzre váltás könyvelése. / Record check received, deposited, or cashed.</p>
+ <div class="form-grid">
+   <div class="field"><label>${req("Workflow type / Folyamat típusa")}</label><select name="type" id="checkWorkflowType" onchange="toggleRevenueAccountForCheck()"><option value="received">Check received / Csekk beérkezett</option><option value="deposit_bank">Check deposited to bank / Csekk bankba befizetve</option><option value="cash">Check cashed / Csekk készpénzre váltva</option></select></div>
+   <div class="field"><label>${req("Date / Dátum")}</label><input name="entry_date" type="date" value="${fmtDate(new Date())}" required></div>
+   <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" step="0.01" required></div>
+   <div class="field"><label>Check number / Csekk száma</label><input name="check_number"></div>
+   <div class="field"><label>Client name / Ügyfél neve</label><input name="client_name"></div>
+   <div class="field" id="checkRevenueBox"><label>Revenue account / Bevételi jogcím</label><select name="revenue_account">${revenue}</select></div>
+   <div class="field full"><label>Memo / Megjegyzés</label><textarea name="memo"></textarea></div>
+ </div>
+ <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save check entry / Csekk tétel mentése</button></div>`;
+ toggleRevenueAccountForCheck();
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   const f=Object.fromEntries(new FormData(e.target));
+   try{await api("/api/finance/check-workflow",{method:"POST",body:JSON.stringify(f)});closeModal();renderAccounts()}catch(err){alert(err.message)}
+ };
+}
+function toggleRevenueAccountForCheck(){
+ const type=document.getElementById("checkWorkflowType")?.value;
+ const box=document.getElementById("checkRevenueBox");
+ if(box) box.classList.toggle("hidden", type!=="received");
+}
+
 async function renderClosedJobs(){
  const target=forceShowView("closed_jobs");
  let rows=[];
