@@ -17,6 +17,22 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
+
+function ensureJobKeyColumn(){
+  try {
+    const cols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
+    if(!cols.includes("job_key")){
+      db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
+    }
+    const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
+    const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
+    missing.forEach(r => upd.run(`JK-${r.id}`, r.id));
+  } catch(e) {
+    console.warn("job_key migration skipped:", e.message);
+  }
+}
+ensureJobKeyColumn();
+
 const upload = multer({
   dest: UPLOAD_DIR,
   fileFilter: (req,file,cb)=>{
@@ -62,22 +78,44 @@ function canReassignJob(user, job){
 }
 
 
+function stableJobKey(){ return `JK-${Date.now()}-${Math.floor(Math.random()*999999)}`; }
+
 function getJobByAnyId(rawId, body={}){
   const candidates = [];
-  [rawId, body.id, body.job_id].forEach(v=>{
+  [rawId, body.id, body.job_id, body.job_key].forEach(v=>{
     if(v!==undefined && v!==null){
       const s=String(v).trim();
       if(s && !candidates.includes(s)) candidates.push(s);
     }
   });
+
   for(const id of candidates){
     const found=db.prepare("SELECT * FROM jobs WHERE id=?").get(id);
     if(found) return found;
   }
-  // Last-resort fallback: if the visible calendar card was built from stale object but exact time/title match exists.
-  // Utolsó menedék: ha a kártya ID-ja elcsúszott, de az idő/cím alapján egyértelműen megtalálható.
-  if(body.title && body.start_time){
-    const found=db.prepare("SELECT * FROM jobs WHERE title=? AND start_time=? ORDER BY updated_at DESC LIMIT 1").get(body.title, body.start_time);
+
+  for(const key of candidates){
+    const found=db.prepare("SELECT * FROM jobs WHERE job_key=?").get(key);
+    if(found) return found;
+  }
+
+  // Fallback is client-based, never time-only.
+  // Tartalék keresés ügyfél alapján, nem munkaidő alapján.
+  const clientId = String(body.client_id || "").trim();
+  const clientName = String(body.client_name || "").trim();
+  const pianoName = String(body.piano_name || "").trim();
+  const title = String(body.title || "").trim();
+
+  if(clientId && title){
+    const found=db.prepare("SELECT * FROM jobs WHERE client_id=? AND title=? ORDER BY updated_at DESC LIMIT 1").get(clientId,title);
+    if(found) return found;
+  }
+  if(clientName && title){
+    const found=db.prepare("SELECT * FROM jobs WHERE lower(client_name)=lower(?) AND title=? ORDER BY updated_at DESC LIMIT 1").get(clientName,title);
+    if(found) return found;
+  }
+  if(clientName && pianoName){
+    const found=db.prepare("SELECT * FROM jobs WHERE lower(client_name)=lower(?) AND lower(piano_name)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(clientName,pianoName);
     if(found) return found;
   }
   return null;
@@ -139,15 +177,16 @@ app.get("/api/client-profile/:id", auth, (req,res)=>{
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
+  ensureJobKeyColumn();
   res.json(db.prepare("SELECT * FROM jobs ORDER BY start_time").all());
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const required=["title","assigned_to","start_time","end_time"];
   for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
   const id=req.body.id || rid("J");
-  const cols=["id","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"]
+  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"]
     .filter(c=>c==="id" || c==="created_by" || req.body[c]!==undefined);
-  db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="created_by"?req.user.name:req.body[c])));
+  db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(req.body.job_key||stableJobKey()):(c==="created_by"?req.user.name:req.body[c]))));
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
@@ -227,9 +266,9 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
     const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
     for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
     nextJobId=rid("J");
-    db.prepare(`INSERT INTO jobs(id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(nextJobId,job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
+    db.prepare(`INSERT INTO jobs(id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
   }
   db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(closeType==="Full"?"Completed":"Partially completed",closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
