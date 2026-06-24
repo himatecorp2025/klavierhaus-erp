@@ -27,6 +27,7 @@ function ensureRuntimeMigrations(){
     const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
     if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
     if(!pianoCols.includes("display_name")) db.prepare("ALTER TABLE pianos ADD COLUMN display_name TEXT").run();
+    if(!pianoCols.includes("asset_recorded")) db.prepare("ALTER TABLE pianos ADD COLUMN asset_recorded INTEGER DEFAULT 0").run();
 
     const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
     const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
@@ -185,7 +186,38 @@ function createResourceRoutes(key, table, prefix, write, roles){
   });
 }
 createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes"],["ADMIN","MANAGER","WORKER"]);
-createResourceRoutes("pianos","pianos","P",["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes"],["ADMIN","MANAGER","WORKER"]);
+
+app.get("/api/pianos", auth, (req,res)=>{
+  ensureRuntimeMigrations();
+  res.json(db.prepare("SELECT * FROM pianos ORDER BY display_name, brand, model").all());
+});
+
+app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const id=req.body.id || rid("P");
+  const brand=req.body.brand || "";
+  const model=req.body.model || "";
+  const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
+  const ownershipType=req.body.ownership_type || req.body.ownership || "Customer owned";
+  const estimated=Number(req.body.estimated_value||0);
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,req.body.owner_contact_id||null,req.body.location||"",estimated,"Active",req.body.notes||"");
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+  if(String(ownershipType).toLowerCase().includes("company")) createPianoAssetEntry(piano,req.user.id);
+  res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(id));
+});
+
+app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const allowed=["brand","model","serial_no","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes"];
+  const cols=allowed.filter(c=>req.body[c]!==undefined);
+  if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
+  if(piano && String(piano.ownership_type||piano.ownership||"").toLowerCase().includes("company")) createPianoAssetEntry(piano,req.user.id);
+  res.json(piano);
+});
+
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/client-profile/:id", auth, (req,res)=>{
@@ -327,6 +359,25 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   res.json({ok:true,next_job_id:nextJobId,storedPath});
 });
 
+
+function createPianoAssetEntry(piano,userId){
+  const value = Number(piano.estimated_value || 0);
+  if(value <= 0) return;
+  if(String(piano.ownership_type || piano.ownership || "").toLowerCase().includes("customer")) return;
+  if(Number(piano.asset_recorded || 0) === 1) return;
+
+  const je = rid("JE");
+  const tx = db.transaction(()=>{
+    db.prepare(`INSERT INTO journal_entries(id,entry_date,description,piano_id,payment_method,status,created_by) VALUES(?,?,?,?,?,?,?)`)
+      .run(je,today(),`Piano asset / Céges zongora eszköz: ${piano.display_name || `${piano.brand||""} ${piano.model||""}`.trim()}`,piano.id,"Asset Entry","POSTED",userId);
+    const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
+    ins.run(rid("JL"),je,"1500",value,0,"Fixed asset piano / Befektetett eszköz zongora");
+    ins.run(rid("JL"),je,"3000",0,value,"Owner equity / Saját tőke");
+  });
+  tx();
+  db.prepare("UPDATE pianos SET asset_recorded=1 WHERE id=?").run(piano.id);
+}
+
 function createRevenueEntry(job,amount,payment,userId){
   let debitAccount="1010";
   if(payment==="Cash") debitAccount="1000";
@@ -353,16 +404,21 @@ app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
 });
 
 app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  ensureRuntimeMigrations();
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
   const id=req.body.id || rid("P");
   const brand=req.body.brand || "";
   const model=req.body.model || "";
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",Number(req.body.year||0)||null,"Customer owned","Customer owned",display,client.id,req.body.location||client.address||"",Number(req.body.estimated_value||0),"Active",req.body.notes||"");
-  res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(id));
+  const ownershipType=req.body.ownership_type || "Customer owned";
+  const estimated=Number(req.body.estimated_value||0);
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+  if(String(ownershipType).toLowerCase().includes("company")) createPianoAssetEntry(piano,req.user.id);
+  res.json(piano);
 });
 
 app.get("/api/closed-jobs", auth, (req,res)=>{
@@ -396,7 +452,6 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
   `).all();
   res.json(rows);
 });
-
 
 app.get("/api/accounts", auth, permit("ADMIN","MANAGER"), (req,res)=>res.json(db.prepare("SELECT * FROM accounts ORDER BY code").all()));
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
