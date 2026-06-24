@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   job_type TEXT DEFAULT 'Standalone',
   client_id TEXT,
   client_name TEXT,
+  client_phone TEXT,
   piano_id TEXT,
   piano_name TEXT,
   assigned_to TEXT NOT NULL,
