@@ -1,7 +1,6 @@
-	
-name	"klavierhaus-cloud-erp-crm-scheduler-kb"
-version	"4.0.0"
-description	"Klavierhaus ERP CRM Scheduler with project phases"
+name	"klavierhaus-calendar-first-work-management"
+version	"5.0.0"
+description	"Klavierhaus calendar-first work management system"
 main	"server/index.js"
 scripts	
 start	"node server/index.js"
