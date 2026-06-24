@@ -4,22 +4,20 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Klavierhaus Cloud ERP</title>
+  <title>Klavierhaus Work Management</title>
   <link rel="stylesheet" href="styles.css"/>
 </head>
 <body>
 <div id="login" class="login-screen">
   <form class="login-card" id="loginForm">
     <div class="brand-mark">KH</div>
-    <h1>Klavierhaus Cloud ERP</h1>
-    <p>CRM · Scheduler · Project Phases · Finance · Knowledge Base</p>
+    <h1>Klavierhaus Work Management</h1>
+    <p>Calendar-first job management / Naptárközpontú munkakezelés</p>
     <input name="email" placeholder="Email" value="karoly@klavierhaus.local"/>
     <input name="password" placeholder="Password / Jelszó" type="password" value="karoly123"/>
     <button>Login / Belépés</button>
-    <small>Demo admin: karoly@klavierhaus.local / karoly123</small>
   </form>
 </div>
-
 <div id="app" class="app-shell hidden">
   <aside class="sidebar">
     <div class="brand"><div class="brand-mark">KH</div><div><h1>Klavierhaus</h1><p id="userInfo"></p></div></div>
@@ -27,25 +25,17 @@
     <button class="ghost-btn" id="logoutBtn">Logout / Kilépés</button>
   </aside>
   <main class="main">
-    <header class="topbar">
-      <div><h2 id="pageTitle">Dashboard / Vezérlőpult</h2><p id="pageSub">New York time based operations / New York-i idő szerinti működés</p></div>
-    </header>
-    <section id="dashboard" class="view active"></section>
-    <section id="scheduler" class="view"></section>
+    <header class="topbar"><h2 id="pageTitle">Scheduler / Naptár</h2><p id="pageSub">New York time based operations</p></header>
+    <section id="scheduler" class="view active"></section>
     <section id="contacts" class="view"></section>
     <section id="pianos" class="view"></section>
-    <section id="projects" class="view"></section>
-    <section id="phases" class="view"></section>
-    <section id="tasks" class="view"></section>
-    <section id="documents" class="view"></section>
-    <section id="completed_projects" class="view"></section>
     <section id="knowledge_base" class="view"></section>
+    <section id="dashboard" class="view"></section>
     <section id="finance" class="view"></section>
     <section id="accounts" class="view"></section>
     <section id="users" class="view"></section>
   </main>
 </div>
-
 <div id="modal" class="modal hidden">
   <div class="modal-card">
     <div class="modal-head"><h3 id="modalTitle"></h3><button onclick="closeModal()" class="icon-btn">×</button></div>
