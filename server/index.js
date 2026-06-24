@@ -17,7 +17,14 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
-const upload = multer({ dest: UPLOAD_DIR });
+const upload = multer({
+  dest: UPLOAD_DIR,
+  fileFilter: (req,file,cb)=>{
+    const ok = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname || "");
+    if(!ok) return cb(new Error("Only PDF, JPG, JPEG or PNG files are allowed / Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel"));
+    cb(null,true);
+  }
+});
 
 app.use(cors());
 app.use(express.json({limit:"10mb"}));
@@ -226,4 +233,8 @@ app.get("/api/income-statement", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   });
 });
 
-app.listen(PORT,()=>console.log(`Klavierhaus v6 running on http://localhost:${PORT}`));
+app.use((err,req,res,next)=>{
+  if(err) return res.status(400).json({error:err.message || "Upload error"});
+  next();
+});
+app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
