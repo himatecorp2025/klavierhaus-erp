@@ -11,11 +11,22 @@ const db = new Database(dbPath);
 db.pragma("foreign_keys = ON");
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
+function tryAlter(sql){ try { db.prepare(sql).run(); } catch(e) {} }
+tryAlter("ALTER TABLE tasks ADD COLUMN phase_id TEXT");
+tryAlter("ALTER TABLE journal_entries ADD COLUMN phase_id TEXT");
+tryAlter("ALTER TABLE scheduler_events ADD COLUMN phase_id TEXT");
+tryAlter("ALTER TABLE scheduler_events ADD COLUMN event_type TEXT DEFAULT 'Task'");
+tryAlter("ALTER TABLE scheduler_events ADD COLUMN planned_amount REAL DEFAULT 0");
+tryAlter("ALTER TABLE documents ADD COLUMN amount REAL DEFAULT 0");
+tryAlter("ALTER TABLE documents ADD COLUMN payment_method TEXT");
+tryAlter("ALTER TABLE documents ADD COLUMN invoice_number TEXT");
+tryAlter("ALTER TABLE knowledge_base ADD COLUMN project_id TEXT");
+tryAlter("ALTER TABLE knowledge_base ADD COLUMN phase_id TEXT");
+
 function id(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function user(name,email,password,role){
   const hash = bcrypt.hashSync(password, 10);
-  db.prepare(`INSERT OR IGNORE INTO users(id,name,email,password_hash,role) VALUES(?,?,?,?,?)`)
-    .run(id("U"), name, email, hash, role);
+  db.prepare(`INSERT OR IGNORE INTO users(id,name,email,password_hash,role) VALUES(?,?,?,?,?)`).run(id("U"), name, email, hash, role);
 }
 user("Károly","karoly@klavierhaus.local","karoly123","ADMIN");
 user("Alex","alex@klavierhaus.local","alex123","ADMIN");
@@ -79,9 +90,5 @@ if(db.prepare("SELECT COUNT(*) c FROM contacts").get().c === 0){
     .run("P-001","Steinway & Sons","D","TBD",1890,"Customer owned","C-001","Workshop",120000,"In restoration","Demo piano.");
   db.prepare(`INSERT INTO projects(id,piano_id,client_id,name,type,manager,priority,status,start_date,due_date,planned_revenue,planned_cost,location_type,service_address,customer_phone,customer_email,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run("PR-001","P-001","C-001","Steinway D full restoration","Full restoration","Misi","High","In progress","2026-06-15","2026-07-20",45000,22000,"Workshop","790 11th Avenue, New York, NY 10019","","","Auto workflow demo.");
-  db.prepare(`INSERT INTO tasks(id,project_id,task_type,assigned_to,priority,status,due_date,appointment_start,appointment_end,location_type,service_address,travel_minutes,planned_hours,actual_hours,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run("T-001","PR-001","In-home tuning / Helyszíni hangolás","Said","High","Open","2026-07-20","2026-07-20T11:00","2026-07-20T14:00","Client site","Manhattan, NY",35,3,0,"Demo on-site task.");
-  db.prepare(`INSERT INTO scheduler_events(id,task_id,project_id,title,assigned_to,event_start,event_end,service_address,priority,status) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run("EV-001","T-001","PR-001","In-home tuning / Helyszíni hangolás","Said","2026-07-20T11:00","2026-07-20T14:00","Manhattan, NY","High","Scheduled");
 }
-console.log("Klavierhaus v3 database initialized:", dbPath);
+console.log("Klavierhaus v4 database initialized:", dbPath);
