@@ -61,6 +61,28 @@ function canReassignJob(user, job){
   return false;
 }
 
+
+function getJobByAnyId(rawId, body={}){
+  const candidates = [];
+  [rawId, body.id, body.job_id].forEach(v=>{
+    if(v!==undefined && v!==null){
+      const s=String(v).trim();
+      if(s && !candidates.includes(s)) candidates.push(s);
+    }
+  });
+  for(const id of candidates){
+    const found=db.prepare("SELECT * FROM jobs WHERE id=?").get(id);
+    if(found) return found;
+  }
+  // Last-resort fallback: if the visible calendar card was built from stale object but exact time/title match exists.
+  // Utolsó menedék: ha a kártya ID-ja elcsúszott, de az idő/cím alapján egyértelműen megtalálható.
+  if(body.title && body.start_time){
+    const found=db.prepare("SELECT * FROM jobs WHERE title=? AND start_time=? ORDER BY updated_at DESC LIMIT 1").get(body.title, body.start_time);
+    if(found) return found;
+  }
+  return null;
+}
+
 app.post("/api/login",(req,res)=>{
   const {email,password}=req.body;
   const u=db.prepare("SELECT * FROM users WHERE email=? AND status='Active'").get(email);
@@ -129,9 +151,9 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
-  const jobId = req.params.id || req.body.id;
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
-  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
+  const jobId = req.params.id || req.body.id || req.body.job_id;
+  const job=getJobByAnyId(jobId, req.body);
+  if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
 
   if(!canEditJob(req.user, job)) return res.status(403).json({error:"You cannot edit this job"});
 
@@ -163,9 +185,9 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
 });
 
 app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
-  const jobId = req.params.id || req.body.id;
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
-  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
+  const jobId = req.params.id || req.body.id || req.body.job_id;
+  const job=getJobByAnyId(jobId, req.body);
+  if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
 
   const assignedTo=req.body.assigned_to;
   if(!assignedTo) return res.status(400).json({error:"assigned_to is required"});
@@ -182,9 +204,9 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  const jobId = req.params.id || req.body.id;
-  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
-  if(!job) return res.status(404).json({error:`Job not found: ${jobId}`});
+  const jobId = req.params.id || req.body.id || req.body.job_id;
+  const job=getJobByAnyId(jobId, req.body);
+  if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
   if(!canCloseJob(req.user, job)) return res.status(403).json({error:"Only assigned person or admin can close this job"});
   const closeType=req.body.close_type;
   if(!["Partial","Full"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial or Full"});
