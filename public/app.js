@@ -388,7 +388,109 @@ async function addInlinePianoToClient(clientId){
 function closeModal(){$("#modal").classList.add("hidden")}
 function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
 async function renderFinance(){let e=await api("/api/finance/entries");$("#finance").innerHTML=`<div class="panel"><h3>Finance / Pénzügy</h3><p class="muted">Managers: read-only / Menedzserek: csak megtekintés. Admin: pénzügyi módosítás.</p><div class="table-wrap"><table><thead><tr><th>Date</th><th>Job</th><th>Client</th><th>Piano</th><th>Amount</th><th>Payment method</th><th>Invoice status</th><th>Invoice/check no.</th><th>Lines</th></tr></thead><tbody>${e.map(x=>`<tr><td>${x.entry_date}</td><td>${x.job_title||x.job_id||""}</td><td>${x.client_name||""}</td><td>${x.piano_name||""}</td><td>${money(x.billed_amount||x.lines.reduce((s,l)=>s+Number(l.credit||0),0))}</td><td>${x.payment_method||""}</td><td>${x.invoice_status||""}</td><td>${x.invoice_number||""}</td><td>${x.lines.map(l=>`${l.account_code}: D ${money(l.debit)} / C ${money(l.credit)}`).join("<br>")}</td></tr>`).join("")}</tbody></table></div></div>`}
-async function renderIncomeStatement(){let d=await api("/api/income-statement");let acct=c=>d.trialBalance.filter(a=>a.category===c);let rows=arr=>arr.map(a=>`<div class="cf-row"><span>${a.name_en}<br><small>${a.name_hu}</small></span><b>${money(a.balance)}</b></div>`).join("")||"<p class='muted'>No data</p>";$("#income_statement").innerHTML=`<div class="grid kpis"><div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div><div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.completedJobs}</strong></div><div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div><div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div></div><div class="cashflow-sheet"><div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div><div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div><div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div><div class="cf-box"><h3>Liabilities / Források</h3>${rows(acct("LIABILITY"))}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div></div>`}
+function currentMonthKey(){
+ const d=new Date();
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function previousMonths(count=24){
+ const arr=[];
+ const d=new Date();
+ d.setDate(1);
+ for(let i=0;i<count;i++){
+   const x=new Date(d);
+   x.setMonth(d.getMonth()-i);
+   arr.push(`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}`);
+ }
+ return arr;
+}
+async function loadMonthlyIncomeStatement(month){
+ return await api(`/api/income-statement/monthly?month=${encodeURIComponent(month)}`);
+}
+async function renderIncomeStatement(month=currentMonthKey()){
+ const d=await loadMonthlyIncomeStatement(month);
+ const acct=c=>d.trialBalance.filter(a=>a.category===c);
+ const rows=arr=>arr.map(a=>`<div class="cf-row"><span>${a.name_en}<br><small>${a.name_hu}</small></span><b>${money(a.balance)}</b></div>`).join("")||"<p class='muted'>No data / Nincs adat</p>";
+ const months=previousMonths(36);
+
+ $("#income_statement").innerHTML=`<div class="panel">
+   <div class="toolbar">
+     <div>
+       <h3>Monthly Income Statement / Havi eredménykimutatás</h3>
+       <p class="muted">Period start / Időszak kezdete: <b>${d.monthStart}</b> · Generated / Letöltés időbélyege: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
+     </div>
+     <div class="no-print">
+       <select id="incomeMonthSelect" onchange="renderIncomeStatement(this.value)">
+         ${months.map(m=>`<option value="${m}" ${m===d.month?"selected":""}>${m}</option>`).join("")}
+       </select>
+       <button onclick="exportIncomeStatementPDF('${d.month}')">Export PDF</button>
+     </div>
+   </div>
+
+   <div id="incomeStatementPrintable">
+     <div class="pdf-title">
+       <h2>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h2>
+       <p>Month / Hónap: ${d.month}</p>
+       <p>Period start / Időszak kezdete: ${d.monthStart}</p>
+       <p>Generated / Letöltés időbélyege: ${new Date(d.generatedAt).toLocaleString()}</p>
+     </div>
+
+     <div class="grid kpis">
+       <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
+       <div class="kpi"><span>Closed jobs this month / Havi lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
+       <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
+       <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
+     </div>
+
+     <div class="cashflow-sheet">
+       <div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div>
+       <div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div>
+       <div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div>
+       <div class="cf-box"><h3>Liabilities & Equity / Források és saját tőke</h3>${rows([...acct("LIABILITY"),...acct("EQUITY")])}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div>
+     </div>
+
+     <div class="panel">
+       <h3>Monthly trial balance / Havi főkönyvi kivonat</h3>
+       <div class="table-wrap"><table>
+         <thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead>
+         <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody>
+       </table></div>
+     </div>
+   </div>
+ </div>`;
+}
+async function exportIncomeStatementPDF(month=currentMonthKey()){
+ const d=await loadMonthlyIncomeStatement(month);
+ const generated=new Date(d.generatedAt).toLocaleString();
+ const filename=`income_statement_${month}_${new Date().toISOString().replace(/[:.]/g,"-")}.pdf`;
+ const source=document.getElementById("incomeStatementPrintable");
+ const html=source ? source.innerHTML : "";
+ const win=window.open("", "_blank");
+ win.document.write(`<!doctype html><html><head><title>${filename}</title><style>
+   body{font-family:Arial,sans-serif;color:#111;padding:24px}
+   h1,h2,h3{margin-bottom:6px}
+   .pdf-meta{border-bottom:2px solid #111;margin-bottom:18px;padding-bottom:10px}
+   .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+   .kpi,.cf-box,.panel{border:1px solid #999;border-radius:8px;padding:12px;margin-bottom:12px}
+   .kpi span{display:block;color:#555}.kpi strong{font-size:24px}
+   .cashflow-sheet{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+   .cf-row,.cf-total{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:6px 0}
+   .cf-total{font-weight:bold;border-top:2px solid #111;border-bottom:0;margin-top:8px}
+   table{width:100%;border-collapse:collapse;font-size:12px}
+   th,td{border:1px solid #aaa;padding:6px;text-align:left}
+   th{background:#eee}
+   @media print{button{display:none}}
+ </style></head><body>
+   <div class="pdf-meta">
+     <h1>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h1>
+     <p><b>Month / Hónap:</b> ${d.month}</p>
+     <p><b>Period start / Időszak kezdete:</b> ${d.monthStart}</p>
+     <p><b>Generated / Letöltés időbélyege:</b> ${generated}</p>
+   </div>
+   ${html}
+   <script>window.onload=function(){document.title=${JSON.stringify(filename)};window.print();}</script>
+ </body></html>`);
+ win.document.close();
+}
 async function renderAccounts(){
  let d=await api("/api/income-statement");
  $("#accounts").innerHTML=`<div class="panel"><div class="toolbar"><h3>General Ledger / Főkönyv</h3>${user.role==="ADMIN"?`<button onclick="openLedgerEntry()">+ Add ledger entry / Új főkönyvi tétel</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br>${a.name_hu}</td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`
