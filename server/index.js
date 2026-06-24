@@ -85,13 +85,39 @@ ensureCorrectionExpansion();
 function ensureLedgerIntegrityExpansion(){
   try{
     const jeCols=db.prepare("PRAGMA table_info(journal_entries)").all().map(c=>c.name);
-    if(!jeCols.includes("entry_uuid")) db.prepare("ALTER TABLE journal_entries ADD COLUMN entry_uuid TEXT").run();
-    if(!jeCols.includes("deleted_at")) db.prepare("ALTER TABLE journal_entries ADD COLUMN deleted_at TEXT").run();
-    if(!jeCols.includes("deleted_by")) db.prepare("ALTER TABLE journal_entries ADD COLUMN deleted_by TEXT").run();
-    if(!jeCols.includes("is_deleted")) db.prepare("ALTER TABLE journal_entries ADD COLUMN is_deleted INTEGER DEFAULT 0").run();
-    if(!jeCols.includes("storno_status")) db.prepare("ALTER TABLE journal_entries ADD COLUMN storno_status INTEGER DEFAULT 0").run();
-    if(!jeCols.includes("storno_for_entry_id")) db.prepare("ALTER TABLE journal_entries ADD COLUMN storno_for_entry_id TEXT").run();
-    if(!jeCols.includes("duplicate_key")) db.prepare("ALTER TABLE journal_entries ADD COLUMN duplicate_key TEXT").run();
+
+    const addCol=(name, sql)=>{
+      if(!jeCols.includes(name)){
+        db.prepare(`ALTER TABLE journal_entries ADD COLUMN ${sql}`).run();
+        jeCols.push(name);
+      }
+    };
+
+    // Columns used by older finance/ledger features.
+    addCol("created_at", "created_at TEXT");
+    addCol("entry_type", "entry_type TEXT DEFAULT 'Normal'");
+    addCol("acquisition_date", "acquisition_date TEXT");
+    addCol("acquisition_value", "acquisition_value REAL DEFAULT 0");
+    addCol("check_number", "check_number TEXT");
+    addCol("check_status", "check_status TEXT");
+    addCol("client_name", "client_name TEXT");
+    addCol("modified_by", "modified_by TEXT");
+    addCol("modified_at", "modified_at TEXT");
+    addCol("correction_for_entry_id", "correction_for_entry_id TEXT");
+    addCol("correction_type", "correction_type TEXT");
+    addCol("correction_reason", "correction_reason TEXT");
+
+    // v6.24 integrity columns.
+    addCol("entry_uuid", "entry_uuid TEXT");
+    addCol("deleted_at", "deleted_at TEXT");
+    addCol("deleted_by", "deleted_by TEXT");
+    addCol("is_deleted", "is_deleted INTEGER DEFAULT 0");
+    addCol("storno_status", "storno_status INTEGER DEFAULT 0");
+    addCol("storno_for_entry_id", "storno_for_entry_id TEXT");
+    addCol("duplicate_key", "duplicate_key TEXT");
+
+    const now=new Date().toISOString();
+    db.prepare("UPDATE journal_entries SET created_at=? WHERE created_at IS NULL OR created_at=''").run(now);
 
     const missingUuid=db.prepare("SELECT id FROM journal_entries WHERE entry_uuid IS NULL OR entry_uuid=''").all();
     const updUuid=db.prepare("UPDATE journal_entries SET entry_uuid=? WHERE id=?");
@@ -112,6 +138,7 @@ function ensureLedgerIntegrityExpansion(){
     )`).run();
   }catch(e){ console.warn("ledger integrity migration skipped:", e.message); }
 }
+
 function auditLog(req, action, entity, entityId, entityUuid, oldValue, newValue){
   try{
     db.prepare(`INSERT INTO audit_log(id,event_time,user_id,user_name,action,entity,entity_id,entity_uuid,old_value,new_value,ip_address)
@@ -138,8 +165,8 @@ function ensureLedgerNotDuplicate(payload){
   const recent=db.prepare(`
     SELECT id,entry_uuid,created_at FROM journal_entries
     WHERE duplicate_key=? AND COALESCE(is_deleted,0)=0
-      AND datetime(created_at) >= datetime('now','-5 seconds')
-    ORDER BY created_at DESC LIMIT 1
+      AND datetime(COALESCE(created_at, modified_at, '1970-01-01T00:00:00.000Z')) >= datetime('now','-5 seconds')
+    ORDER BY datetime(COALESCE(created_at, modified_at, '1970-01-01T00:00:00.000Z')) DESC LIMIT 1
   `).get(duplicateKey);
   return {duplicateKey,recent};
 }
@@ -736,14 +763,14 @@ app.post("/api/finance/journal-entries/:id/correction", auth, permit("ADMIN"), (
   const tx=db.transaction(()=>{
     db.prepare(`INSERT INTO journal_entries(
       id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,
-      correction_for_entry_id,correction_type,correction_reason,modified_by,modified_at,storno_for_entry_id,duplicate_key
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      correction_for_entry_id,correction_type,correction_reason,modified_by,modified_at,storno_for_entry_id,duplicate_key,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         id,uuid,entry_date,description,
         req.body.payment_method||"Adjustment","POSTED",req.user.id,
         "Correction / Korrekció",original.id,correction_type,correction_reason,
         req.user.name||req.user.id,new Date().toISOString(),
-        correction_type==="Reversal"?original.id:"",dup.duplicateKey
+        correction_type==="Reversal"?original.id:"",dup.duplicateKey,new Date().toISOString()
       );
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||correction_reason));
@@ -802,9 +829,9 @@ app.post("/api/finance/check-workflow", auth, permit("ADMIN"), (req,res)=>{
   const id=rid("JE");
   const uuid=rid("GLUUID");
   const tx=db.transaction(()=>{
-    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,check_number,check_status,client_name,duplicate_key)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id,uuid,entry_date,description,"Check","POSTED",req.user.id,"Check workflow",check_number,check_status,client_name,dup.duplicateKey);
+    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,check_number,check_status,client_name,duplicate_key,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,uuid,entry_date,description,"Check","POSTED",req.user.id,"Check workflow",check_number,check_status,client_name,dup.duplicateKey,new Date().toISOString());
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     ins.run(rid("JL"),id,debit_account,amount,0,memo);
     ins.run(rid("JL"),id,credit_account,0,amount,memo);
@@ -827,9 +854,9 @@ app.post("/api/finance/entries", auth, permit("ADMIN"), (req,res)=>{
   const id=rid("JE");
   const uuid=entry_uuid || rid("GLUUID");
   const tx=db.transaction(()=>{
-    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,duplicate_key)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id,uuid,entry_date,description,payment_method||"", "POSTED", req.user.id, entry_type||"Normal", acquisition_date||"", Number(acquisition_value||0), check_number||"", check_status||"", client_name||"", dup.duplicateKey);
+    db.prepare(`INSERT INTO journal_entries(id,entry_uuid,entry_date,description,payment_method,status,created_by,entry_type,acquisition_date,acquisition_value,check_number,check_status,client_name,duplicate_key,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,uuid,entry_date,description,payment_method||"", "POSTED", req.user.id, entry_type||"Normal", acquisition_date||"", Number(acquisition_value||0), check_number||"", check_status||"", client_name||"", dup.duplicateKey, new Date().toISOString());
     const ins=db.prepare("INSERT INTO journal_lines(id,entry_id,account_code,debit,credit,memo) VALUES(?,?,?,?,?,?)");
     lines.forEach(l=>ins.run(rid("JL"),id,l.account_code,Number(l.debit||0),Number(l.credit||0),l.memo||""));
   });
