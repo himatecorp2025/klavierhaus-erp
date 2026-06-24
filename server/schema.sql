@@ -72,6 +72,35 @@ CREATE TABLE IF NOT EXISTS projects (
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS project_phases (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  phase_name TEXT NOT NULL,
+  phase_type TEXT,
+  sequence_no INTEGER DEFAULT 1,
+  assigned_to TEXT,
+  priority TEXT DEFAULT 'Medium',
+  status TEXT DEFAULT 'Open',
+  planned_start TEXT,
+  planned_end TEXT,
+  appointment_start TEXT,
+  appointment_end TEXT,
+  timezone TEXT DEFAULT 'America/New_York',
+  service_address TEXT,
+  planned_amount REAL DEFAULT 0,
+  billed_amount REAL DEFAULT 0,
+  payment_method TEXT,
+  invoice_status TEXT DEFAULT 'Not invoiced',
+  invoice_number TEXT,
+  required_document_status TEXT DEFAULT 'Not required',
+  completion_notes TEXT,
+  completed_at TEXT,
+  notes TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS task_templates (
   id TEXT PRIMARY KEY,
   project_type TEXT NOT NULL,
@@ -84,6 +113,7 @@ CREATE TABLE IF NOT EXISTS task_templates (
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
+  phase_id TEXT,
   task_type TEXT NOT NULL,
   assigned_to TEXT,
   priority TEXT DEFAULT 'Medium',
@@ -107,7 +137,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -120,6 +151,9 @@ CREATE TABLE IF NOT EXISTS documents (
   url TEXT,
   stored_path TEXT,
   owner TEXT,
+  amount REAL DEFAULT 0,
+  payment_method TEXT,
+  invoice_number TEXT,
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -140,6 +174,7 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   project_id TEXT,
   piano_id TEXT,
   task_id TEXT,
+  phase_id TEXT,
   payment_method TEXT,
   status TEXT DEFAULT 'POSTED',
   created_by TEXT,
@@ -147,7 +182,8 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
-  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL
+  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS journal_lines (
@@ -164,6 +200,7 @@ CREATE TABLE IF NOT EXISTS journal_lines (
 CREATE TABLE IF NOT EXISTS scheduler_events (
   id TEXT PRIMARY KEY,
   task_id TEXT,
+  phase_id TEXT,
   project_id TEXT,
   title TEXT NOT NULL,
   assigned_to TEXT,
@@ -173,8 +210,11 @@ CREATE TABLE IF NOT EXISTS scheduler_events (
   service_address TEXT,
   priority TEXT DEFAULT 'Medium',
   status TEXT DEFAULT 'Scheduled',
+  event_type TEXT DEFAULT 'Task',
+  planned_amount REAL DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE CASCADE,
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
@@ -182,13 +222,15 @@ CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   user_name TEXT,
   task_id TEXT,
+  phase_id TEXT,
   title TEXT NOT NULL,
   message TEXT,
   severity TEXT DEFAULT 'Info',
   is_read INTEGER DEFAULT 0,
   due_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_base (
@@ -202,8 +244,12 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
   stored_path TEXT,
   owner TEXT,
   priority TEXT DEFAULT 'Medium',
+  project_id TEXT,
+  phase_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
+  FOREIGN KEY(phase_id) REFERENCES project_phases(id) ON DELETE SET NULL
 );
 
 CREATE VIEW IF NOT EXISTS v_trial_balance AS
