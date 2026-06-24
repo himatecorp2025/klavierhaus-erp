@@ -47,6 +47,20 @@ function localDT(d){let x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneO
 function hhmm(s){let d=new Date(s);return d.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})}
 function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
+
+function makeClientUuid() {
+  if (window.crypto && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return (
+    "LEDGER-" +
+    Date.now() +
+    "-" +
+    Math.random().toString(36).substring(2, 10).toUpperCase()
+  );
+}
+
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
 
