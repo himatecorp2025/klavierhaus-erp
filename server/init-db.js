@@ -62,7 +62,7 @@ if(db.prepare("SELECT COUNT(*) c FROM pianos").get().c === 0){
     .run("P-001","Steinway & Sons","D","TBD",1890,"Customer owned","C-001","Client site",120000,"In restoration","Demo piano.");
 }
 if(db.prepare("SELECT COUNT(*) c FROM jobs").get().c === 0){
-  db.prepare(`INSERT INTO jobs(id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run("J-001","Demo Steinway tuning","Standalone","C-001","John Smith","P-001","Steinway D","Said","Károly","High","Open","2026-07-20T11:00","2026-07-20T14:00",500,"Phone quote / Telefonos ajánlat",3,35,"Manhattan, NY","Demo calendar job.");
+  db.prepare(`INSERT INTO jobs(id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run("J-001","Demo Steinway tuning","Standalone","C-001","John Smith","+1 555 000 1111","P-001","Steinway D","Said","Károly","High","Open","2026-07-20T11:00","2026-07-20T14:00",500,"Phone quote / Telefonos ajánlat",3,35,"Manhattan, NY","Demo calendar job.");
 }
 console.log("Klavierhaus v6 database initialized:", dbPath);
