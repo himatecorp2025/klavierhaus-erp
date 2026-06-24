@@ -829,5 +829,6 @@ async function withSubmitLock(evt, fn){
  if(btn && btn.disabled) return;
  if(btn){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent="Mentés folyamatban...";}
  try{return await fn();}
+ catch(err){alert(err.message||"Mentési hiba / Save error");}
  finally{if(btn){btn.disabled=false;btn.textContent=btn.dataset.oldText||"Save";}}
 }
