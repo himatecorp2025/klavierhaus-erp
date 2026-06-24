@@ -556,11 +556,12 @@ async function openLedgerEntry(){
  <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save balanced entry / Kiegyenlített tétel mentése</button></div>`;
  $("#form").onsubmit=async e=>{
    e.preventDefault();
-   const f=Object.fromEntries(new FormData(e.target));
-   const amount=Number(f.amount||0);
-   if(amount<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
-   try{
+   await withSubmitLock(e, async ()=>{
+     const f=Object.fromEntries(new FormData(e.target));
+     const amount=Number(f.amount||0);
+     if(amount<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
      await api("/api/finance/entries",{method:"POST",body:JSON.stringify({
+       entry_uuid:makeClientUuid(),
        entry_date:f.entry_date,
        description:f.description,
        payment_method:f.payment_method,
@@ -573,7 +574,7 @@ async function openLedgerEntry(){
        ]
      })});
      closeModal();renderAccounts();
-   }catch(err){alert(err.message)}
+   });
  };
 }
 async function openCheckWorkflow(){
@@ -595,8 +596,11 @@ async function openCheckWorkflow(){
  toggleRevenueAccountForCheck();
  $("#form").onsubmit=async e=>{
    e.preventDefault();
-   const f=Object.fromEntries(new FormData(e.target));
-   try{await api("/api/finance/check-workflow",{method:"POST",body:JSON.stringify(f)});closeModal();renderAccounts()}catch(err){alert(err.message)}
+   await withSubmitLock(e, async ()=>{
+     const f=Object.fromEntries(new FormData(e.target));
+     await api("/api/finance/check-workflow",{method:"POST",body:JSON.stringify(f)});
+     closeModal();renderAccounts();
+   });
  };
 }
 function toggleRevenueAccountForCheck(){
@@ -619,21 +623,21 @@ async function renderJournalEntriesPanel(){
      </div>
    </div>
    <div class="table-wrap"><table>
-     <thead><tr><th>Date / Dátum</th><th>Description / Leírás</th><th>Type / Típus</th><th>Payment / Fizetés</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Modified / Módosítás</th><th>Action / Művelet</th></tr></thead>
+     <thead><tr><th>UUID</th><th>Date / Dátum</th><th>Description / Leírás</th><th>Type / Típus</th><th>Payment / Fizetés</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Modified / Módosítás</th><th>Action / Művelet</th></tr></thead>
      <tbody>${entries.map(e=>{
        const debit=e.lines.reduce((s,l)=>s+Number(l.debit||0),0);
        const credit=e.lines.reduce((s,l)=>s+Number(l.credit||0),0);
        return `<tr>
-         <td>${e.entry_date||""}</td>
+         <td>${e.entry_uuid||e.id}</td><td>${e.entry_date||""}</td>
          <td>${e.description||""}</td>
          <td>${e.entry_type||""}</td>
          <td>${e.payment_method||""}</td>
          <td>${money(debit)}</td>
          <td>${money(credit)}</td>
          <td>${e.modified_at?`${e.modified_at}<br>${e.modified_by||""}`:"-"}</td>
-         <td>${user.role==="ADMIN"?(e.editable?`<button class="small" onclick="openJournalEntry('${e.id}')">Edit / Módosítás</button>`:`<button class="small" onclick="openCorrectionEntry('${e.id}')">Correction / Korrekció</button>`):""}</td>
+         <td>${user.role==="ADMIN"?(e.editable?`<button class="small" onclick="openJournalEntry('${e.id}')">Edit / Módosítás</button> <button class="small ghost-btn" onclick="deleteJournalEntry('${e.id}')">Delete / Törlés</button>`:`<button class="small" onclick="openCorrectionEntry('${e.id}')">Correction / Korrekció</button>`):""}</td>
        </tr>`;
-     }).join("") || `<tr><td colspan="8" class="muted">No journal entries / Nincs főkönyvi tétel.</td></tr>`}</tbody>
+     }).join("") || `<tr><td colspan="9" class="muted">No journal entries / Nincs főkönyvi tétel.</td></tr>`}</tbody>
    </table></div>
  </div>`;
 }
@@ -675,6 +679,7 @@ async function openJournalEntry(id){
  document.querySelector('[name="credit_account"]').value=creditLine.account_code||"";
  $("#form").onsubmit=async ev=>{
    ev.preventDefault();
+   await withSubmitLock(ev, async ()=>{
    const f=Object.fromEntries(new FormData(ev.target));
    const amt=Number(f.amount||0);
    if(amt<=0){alert("Az összegnek nagyobbnak kell lennie nullánál. / Amount must be greater than zero.");return}
@@ -694,8 +699,18 @@ async function openJournalEntry(id){
      })});
      closeModal();renderAccounts();
    }catch(err){alert(err.message)}
+   });
  };
 }
+
+async function deleteJournalEntry(id){
+ if(!confirm("Biztosan törölni szeretnéd ezt az aktuális havi főkönyvi tételt? / Are you sure you want to delete this current-month ledger entry?")) return;
+ try{
+   await api(`/api/finance/journal-entries/${id}`,{method:"DELETE"});
+   await renderJournalEntriesPanel();
+ }catch(err){alert(err.message)}
+}
+
 async function openCorrectionEntry(id){
  const original=await api(`/api/finance/journal-entries/${id}`);
  const accounts=await api("/api/accounts");
@@ -724,6 +739,7 @@ async function openCorrectionEntry(id){
  toggleCorrectionLines();
  $("#form").onsubmit=async ev=>{
    ev.preventDefault();
+   await withSubmitLock(ev, async ()=>{
    const f=Object.fromEntries(new FormData(ev.target));
    if(String(f.entry_date).slice(0,7)!==new Date().toISOString().slice(0,7)){
      alert("Korrekció csak az aktuális nyitott hónapban könyvelhető. / Correction must be posted in current open month.");
@@ -739,6 +755,7 @@ async function openCorrectionEntry(id){
      ];
    }
    try{await api(`/api/finance/journal-entries/${id}/correction`,{method:"POST",body:JSON.stringify(body)});closeModal();renderAccounts()}catch(err){alert(err.message)}
+   });
  };
 }
 function toggleCorrectionLines(){
@@ -807,3 +824,10 @@ if(token)boot();
 (function forceCompletedGreenStyle(){const s=document.createElement("style");s.textContent=".cal-event.Completed,.badge.Completed{background:var(--green)!important;color:#07101d!important;}";document.head.appendChild(s);})();
 
 (function ledgerEditStyle(){const s=document.createElement("style");s.textContent=".clickable-row{cursor:pointer}.clickable-row:hover{outline:2px solid var(--blue)}";document.head.appendChild(s);})();
+async function withSubmitLock(evt, fn){
+ const btn=evt.submitter||evt.target.querySelector("button[type=submit],button:not([type])");
+ if(btn && btn.disabled) return;
+ if(btn){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent="Mentés folyamatban...";}
+ try{return await fn();}
+ finally{if(btn){btn.disabled=false;btn.textContent=btn.dataset.oldText||"Save";}}
+}
