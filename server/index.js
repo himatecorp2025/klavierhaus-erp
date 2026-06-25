@@ -23,6 +23,7 @@ function ensureRuntimeMigrations(){
     const jobCols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
     if(!jobCols.includes("job_key")) db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
     if(!jobCols.includes("client_phone")) db.prepare("ALTER TABLE jobs ADD COLUMN client_phone TEXT").run();
+    if(!jobCols.includes("planned_job_id")) db.prepare("ALTER TABLE jobs ADD COLUMN planned_job_id TEXT").run();
 
     const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
     if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
@@ -125,6 +126,34 @@ function ensureRuntimeMigrations(){
     try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id)").run(); } catch(e) {}
     try { db.prepare("CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)").run(); } catch(e) {}
 
+    const plannedCols = db.prepare("PRAGMA table_info(planned_jobs)").all().map(c=>c.name);
+    const addPlannedCol = (name, ddl) => { if(!plannedCols.includes(name)) db.prepare(`ALTER TABLE planned_jobs ADD COLUMN ${name} ${ddl}`).run(); };
+    addPlannedCol("planned_key", "TEXT");
+    addPlannedCol("planned_type", "TEXT");
+    addPlannedCol("title", "TEXT");
+    addPlannedCol("client_id", "TEXT");
+    addPlannedCol("client_name", "TEXT");
+    addPlannedCol("client_phone", "TEXT");
+    addPlannedCol("piano_id", "TEXT");
+    addPlannedCol("piano_name", "TEXT");
+    addPlannedCol("service_address", "TEXT");
+    addPlannedCol("preferred_assigned_to", "TEXT");
+    addPlannedCol("priority", "TEXT");
+    addPlannedCol("expected_revenue", "REAL DEFAULT 0");
+    addPlannedCol("probability", "TEXT DEFAULT '100% - Biztos'");
+    addPlannedCol("estimated_hours", "REAL DEFAULT 0");
+    addPlannedCol("target_date", "TEXT");
+    addPlannedCol("status", "TEXT");
+    addPlannedCol("block_reason", "TEXT");
+    addPlannedCol("next_step", "TEXT");
+    addPlannedCol("notes", "TEXT");
+    addPlannedCol("converted_job_id", "TEXT");
+    addPlannedCol("created_by", "TEXT");
+    addPlannedCol("archived_at", "TEXT");
+    addPlannedCol("archived_by", "TEXT");
+    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_jobs_key ON planned_jobs(planned_key)").run(); } catch(e) {}
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)").run(); } catch(e) {}
+
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
   }
@@ -176,6 +205,32 @@ function balanceAccountFromPaymentMethod(payment){
   if(p.includes("bank") || p.includes("transfer") || p.includes("card") || p.includes("credit")) return "BANK";
   if(p.includes("invoice")) return "AR";
   return "BANK";
+}
+
+function generatePlannedJobKey(){
+  ensureRuntimeMigrations();
+  const year=new Date().getFullYear();
+  const rows=db.prepare("SELECT planned_key FROM planned_jobs WHERE planned_key LIKE ?").all(`PLN-${year}-%`);
+  let max=0;
+  for(const r of rows){
+    const m=String(r.planned_key||"").match(/-(\d{4,})$/);
+    if(m) max=Math.max(max, Number(m[1]));
+  }
+  return `PLN-${year}-${String(max+1).padStart(4,"0")}`;
+}
+function isActivePlannedStatus(status){
+  return !["Converted / Naptárba helyezve","Archived / Archivált","Cancelled / Törölve"].includes(String(status||""));
+}
+function findScheduleConflicts(assignedTo,startTime,endTime,excludeJobId=null){
+  if(!assignedTo || !startTime || !endTime) return [];
+  let sql=`SELECT id,job_key,title,assigned_to,start_time,end_time,status FROM jobs
+           WHERE assigned_to=?
+             AND COALESCE(status,'Open') NOT IN ('Completed','Cancelled')
+             AND (? < end_time AND ? > start_time)`;
+  const params=[assignedTo,startTime,endTime];
+  if(excludeJobId){ sql += " AND id<>?"; params.push(excludeJobId); }
+  sql += " ORDER BY start_time";
+  return db.prepare(sql).all(...params);
 }
 function inventoryCategoryCode(category){
   const c=String(category||"").toLowerCase();
@@ -315,6 +370,81 @@ app.post("/api/login",(req,res)=>{
 });
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
+
+
+app.get("/api/planned-jobs", auth, (req,res)=>{
+  ensureRuntimeMigrations();
+  const includeAll=req.query.include_all==="1" || req.user.role==="SUPERADMIN";
+  const rows=includeAll
+    ? db.prepare("SELECT * FROM planned_jobs ORDER BY created_at DESC").all()
+    : db.prepare("SELECT * FROM planned_jobs WHERE archived_at IS NULL AND COALESCE(status,'') NOT IN ('Archived / Archivált','Cancelled / Törölve') ORDER BY created_at DESC").all();
+  res.json(rows);
+});
+
+app.post("/api/planned-jobs", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const b=req.body||{};
+  if(!b.title) return res.status(400).json({error:"Title is required / Munka neve kötelező"});
+  if(!b.client_name) return res.status(400).json({error:"Client is required / Ügyfél kötelező"});
+  const id=b.id||rid("PLN");
+  const plannedKey=b.planned_key||generatePlannedJobKey();
+  const cols=["id","planned_key","planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes","created_by"];
+  const vals=[id,plannedKey,b.planned_type||"Planned new / Tervezett, még nem lefixált",b.title||"",b.client_id||"",b.client_name||"",b.client_phone||"",b.piano_id||"",b.piano_name||"",b.service_address||"",b.preferred_assigned_to||"",b.priority||"Medium",Number(b.expected_revenue||0),b.probability||"100% - Biztos",Number(b.estimated_hours||0),b.target_date||"",b.status||"Waiting for client / Ügyfélre vár",b.block_reason||"",b.next_step||"",b.notes||"",req.user.name||""];
+  db.prepare(`INSERT INTO planned_jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...vals);
+  res.json(db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(id));
+});
+
+app.put("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
+  if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
+  const allowed=["planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes"];
+  const body={...req.body};
+  if(body.expected_revenue!==undefined) body.expected_revenue=Number(body.expected_revenue||0);
+  if(body.estimated_hours!==undefined) body.estimated_hours=Number(body.estimated_hours||0);
+  const cols=allowed.filter(c=>body[c]!==undefined);
+  if(cols.length) db.prepare(`UPDATE planned_jobs SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]), req.params.id);
+  res.json(db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id));
+});
+
+app.delete("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
+  if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
+  db.prepare("UPDATE planned_jobs SET status='Archived / Archivált', archived_at=?, archived_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
+  res.json({ok:true});
+});
+
+app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const planned=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
+  if(!planned) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
+  if(!isActivePlannedStatus(planned.status)) return res.status(400).json({error:"This planned job is not active / Ez a tervezett munka már nem aktív"});
+  const b=req.body||{};
+  const assigned=b.assigned_to || planned.preferred_assigned_to;
+  const title=b.title || planned.title;
+  const start=b.start_time;
+  const end=b.end_time;
+  if(!assigned || !title || !start || !end) return res.status(400).json({error:"Assigned to, title, start and end are required / Felelős, cím, kezdés és befejezés kötelező"});
+  if(new Date(end)<=new Date(start)) return res.status(400).json({error:"End must be after start / A befejezés később legyen, mint a kezdés"});
+  const conflicts=findScheduleConflicts(assigned,start,end);
+  if(conflicts.length){
+    const c=conflicts[0];
+    return res.status(409).json({error:`Schedule conflict / Időpontütközés: ${assigned} already has ${c.title||c.job_key||c.id} between ${c.start_time} and ${c.end_time}.` , conflicts});
+  }
+  const jobId=rid("J");
+  db.prepare(`INSERT INTO jobs(
+    id,job_key,planned_job_id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
+    assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+    planned_hours,travel_minutes,service_address,instructions
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    jobId,stableJobKey(),planned.id,null,title,"Standalone",planned.client_id||"",planned.client_name||"",planned.client_phone||"",planned.piano_id||"",planned.piano_name||"",
+    assigned,req.user.name,planned.priority||"Medium","Open",start,end,"America/New_York",Number(b.planned_amount||planned.expected_revenue||0),b.pricing_basis||"Converted from planned job / Tervezett munkából áthelyezve",
+    Number(b.planned_hours||planned.estimated_hours||0),Number(b.travel_minutes||0),b.service_address||planned.service_address||"",b.instructions||planned.next_step||planned.notes||""
+  );
+  db.prepare("UPDATE planned_jobs SET status='Converted / Naptárba helyezve', converted_job_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(jobId, planned.id);
+  res.json({ok:true,planned:db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(planned.id),job:db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId)});
+});
 
 app.get("/api/inventory", auth, (req,res)=>{
   ensureRuntimeMigrations();
@@ -668,7 +798,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const required=["title","assigned_to","start_time","end_time"];
   for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
   const id=req.body.id || rid("J");
-  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions"]
+  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
     .filter(c=>c==="id" || c==="created_by" || req.body[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(req.body.job_key||stableJobKey()):(c==="created_by"?req.user.name:req.body[c]))));
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
