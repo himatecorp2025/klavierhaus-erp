@@ -413,11 +413,16 @@ const financialCategoryOptions={
    ["OTHER_ASSET","Other Assets / Egyéb eszközök"]
  ],
  LIABILITY:[
-   ["AP","Accounts Payable / Szállítói tartozás"],
    ["LOAN","Loans Payable / Hitelek"],
-   ["CHECK_PAYABLE","Check Payables / Csekkes tartozás"],
    ["BANK_LOAN","Bank Loan / Bankkölcsön"],
-   ["OTHER_SOURCE","Other Sources / Egyéb forrás"]
+   ["INSURANCE_LIABILITY","Insurance Liabilities / Biztosítási kötelezettségek"],
+   ["OTHER_LONG_TERM_SOURCE","Other Long-Term Sources / Egyéb hosszú lejáratú források"],
+   ["AP","Accounts Payable / Szállítói tartozás"],
+   ["CHECK_PAYABLE","Check Payables / Csekkes tartozás"],
+   ["RENT_PAYABLE","Rent / Bérleti díj"],
+   ["UTILITIES_PAYABLE","Utilities / Rezsi"],
+   ["SHORT_TERM_OPERATING","Short-Term Operating Expenses / Rövid lejáratú működési kiadások"],
+   ["OTHER_SHORT_TERM_SOURCE","Other Short-Term Sources / Egyéb rövid lejáratú források"]
  ],
  EQUITY:[
    ["OWNER_EQUITY","Owner Equity / Saját tőke"],
@@ -426,6 +431,7 @@ const financialCategoryOptions={
 };
 const balanceAccountOptions=[
  ["","No automatic balance impact / Nincs automatikus mérleghatás"],
+ ["ASSET_HEADER","--- Assets / Eszközök ---"],
  ["CASH","Cash / Készpénz"],
  ["BANK","Bank Account / Bankszámla"],
  ["CHECKS","Undeposited Checks / Befizetés előtti csekkek"],
@@ -433,19 +439,38 @@ const balanceAccountOptions=[
  ["INVENTORY","Inventory / Készlet"],
  ["COMPANY_PIANOS","Company Pianos / Céges zongorák"],
  ["TOOLS","Tools and Equipment / Szerszámok és berendezések"],
- ["OTHER_ASSET","Other Assets / Egyéb eszközök"]
+ ["OTHER_ASSET","Other Assets / Egyéb eszközök"],
+ ["SOURCE_HEADER","--- Sources / Források ---"],
+ ["LOAN","Loans Payable / Hitelek"],
+ ["BANK_LOAN","Bank Loan / Bankkölcsön"],
+ ["INSURANCE_LIABILITY","Insurance Liabilities / Biztosítási kötelezettségek"],
+ ["OTHER_LONG_TERM_SOURCE","Other Long-Term Sources / Egyéb hosszú lejáratú források"],
+ ["AP","Accounts Payable / Szállítói tartozás"],
+ ["CHECK_PAYABLE","Check Payables / Csekkes tartozás"],
+ ["RENT_PAYABLE","Rent / Bérleti díj"],
+ ["UTILITIES_PAYABLE","Utilities / Rezsi"],
+ ["SHORT_TERM_OPERATING","Short-Term Operating Expenses / Rövid lejáratú működési kiadások"],
+ ["OWNER_EQUITY","Owner Equity / Saját tőke"],
+ ["OTHER_SOURCE","Other Sources / Egyéb forrás"]
 ];
 function finLabel(value){
  const all=[...financialCategoryOptions.INCOME,...financialCategoryOptions.EXPENSE,...financialCategoryOptions.ASSET,...financialCategoryOptions.LIABILITY,...financialCategoryOptions.EQUITY,...balanceAccountOptions];
  return all.find(x=>x[0]===value)?.[1] || value || "";
 }
 function mainTypeLabel(v){return ({INCOME:"Income / Bevétel",EXPENSE:"Expense / Kiadás",ASSET:"Asset / Eszköz",LIABILITY:"Liability / Kötelezettség",EQUITY:"Equity / Saját tőke"})[v]||v||""}
-function recurrenceLabel(v){return v==="MONTHLY"?"Monthly recurring / Havi ismétlődő":"One-time / Egyszeri"}
+function recurrenceLabel(v){return v==="MONTHLY"?"Monthly / Havi":"One-time / Egyszeri"}
+function signedAmountHTML(item){
+ const t=String(item?.main_type||"").toUpperCase();
+ const positive=t==="INCOME" || t==="ASSET";
+ const sign=positive?"+":"-";
+ const cls=positive?"amount-positive":"amount-negative";
+ return `<span class="${cls}">${sign} ${money(Math.abs(Number(item?.amount||0)))}</span>`;
+}
 function paymentOptions(selected=""){
  return ["","Cash","Check","Bank Transfer","Credit Card","Invoice","Other"].map(x=>`<option value="${x}" ${x===selected?"selected":""}>${x||"Select / Válassz"}</option>`).join("");
 }
 function optionsFrom(list,selected=""){
- return list.map(x=>`<option value="${x[0]}" ${x[0]===selected?"selected":""}>${x[1]}</option>`).join("");
+ return list.map(x=>`<option value="${x[0]}" ${x[0]===selected?"selected":""} ${String(x[0]).endsWith("_HEADER")?"disabled":""}>${x[1]}</option>`).join("");
 }
 async function renderFinance(){
  const currentMonth=currentMonthKey();
@@ -475,7 +500,7 @@ async function renderFinance(){
    <div class="finance-filters">
      <label>Month / Hónap <input id="finFilterMonth" type="month" value="${currentMonth}"></label>
      <label>Type / Típus <select id="finFilterType"><option value="">All / Összes</option><option value="INCOME">Income / Bevétel</option><option value="EXPENSE">Expense / Kiadás</option><option value="ASSET">Asset / Eszköz</option><option value="LIABILITY">Liability / Kötelezettség</option><option value="EQUITY">Equity / Saját tőke</option></select></label>
-     <label>Recurrence / Ismétlődés <select id="finFilterRec"><option value="">All / Összes</option><option value="ONE_TIME">One-time / Egyszeri</option><option value="MONTHLY">Monthly recurring / Havi ismétlődő</option></select></label>
+     <label>Recurrence / Ismétlődés <select id="finFilterRec"><option value="">All / Összes</option><option value="ONE_TIME">One-time / Egyszeri</option><option value="MONTHLY">Monthly / Havi</option></select></label>
      <button class="small" onclick="applyFinanceFilters()">Filter / Szűrés</button>
      <button class="small ghost-btn" onclick="clearFinanceFilters()">Clear / Törlés</button>
    </div>
@@ -484,16 +509,16 @@ async function renderFinance(){
 }
 function financeTableHTML(items){
  return `<div class="table-wrap"><table><thead><tr>
-   <th>Date / Dátum</th><th>Title / Megnevezés</th><th>Type / Típus</th><th>Category / Kategória</th><th>Recurrence / Ismétlődés</th><th>Amount / Összeg</th><th>Payment / Fizetés</th><th>Balance impact / Mérleghatás</th><th>Actions / Műveletek</th>
+   <th>Date / Dátum</th><th>Title / Megnevezés</th><th>Type / Típus</th><th>Category / Kategória</th><th>Recurrence / Ismétlődés</th><th>Payment / Fizetés</th><th>Balance impact / Mérleghatás</th><th>Amount / Összeg</th><th>Actions / Műveletek</th>
  </tr></thead><tbody>${items.map(x=>`<tr>
    <td>${x.item_date||""}</td>
    <td><b>${x.title||""}</b><br><small>${x.description||""}</small></td>
    <td>${mainTypeLabel(x.main_type)}</td>
    <td>${finLabel(x.category)}</td>
    <td>${recurrenceLabel(x.recurrence)}</td>
-   <td>${money(x.amount)}</td>
    <td>${x.payment_method||""}</td>
    <td>${finLabel(x.balance_account)}</td>
+   <td>${signedAmountHTML(x)}</td>
    <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="ADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
  </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
 }
@@ -531,7 +556,7 @@ function openFinancialItem(row=null){
    <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${row?.title||""}" required placeholder="Piano sale, tuning, rent..."></div>
    <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" min="0" step="0.01" value="${row?.amount||0}" required></div>
    <div class="field"><label>${req("Category / Kategória")}</label><select name="category" id="financialCategory">${optionsFrom(categoryList,row?.category||"")}</select></div>
-   <div class="field"><label>${req("Recurrence / Ismétlődés")}</label><select name="recurrence"><option value="ONE_TIME" ${row?.recurrence!=="MONTHLY"?"selected":""}>One-time / Egyszeri</option><option value="MONTHLY" ${row?.recurrence==="MONTHLY"?"selected":""}>Monthly recurring / Havi ismétlődő</option></select></div>
+   <div class="field"><label>${req("Recurrence / Ismétlődés")}</label><select name="recurrence"><option value="ONE_TIME" ${row?.recurrence!=="MONTHLY"?"selected":""}>One-time / Egyszeri</option><option value="MONTHLY" ${row?.recurrence==="MONTHLY"?"selected":""}>Monthly / Havi</option></select></div>
    <div class="field"><label>Payment method / Fizetési mód</label><select name="payment_method">${paymentOptions(row?.payment_method||"")}</select></div>
    <div class="field"><label>Balance account / Mérlegoldali hatás</label><select name="balance_account">${optionsFrom(balanceAccountOptions,row?.balance_account||"")}</select></div>
    <div class="field"><label>Job ID / Munka ID</label><input name="job_id" value="${row?.job_id||""}"></div>
@@ -614,10 +639,15 @@ function renderIncomeSheetHTML(d, includeTrial=true){
    "Other Assets (Egyéb eszközök)"
  ];
  const fallbackSources=[
-   "Accounts Payable (Szállítói tartozás)",
    "Loans Payable (Hitelek)",
-   "Check Payables (Csekkes tartozás)",
    "Bank Loan (Bankkölcsön)",
+   "Insurance Liabilities (Biztosítási kötelezettségek)",
+   "Other Long-Term Sources (Egyéb hosszú lejáratú források)",
+   "Accounts Payable (Szállítói tartozás)",
+   "Check Payables (Csekkes tartozás)",
+   "Rent (Bérleti díj)",
+   "Utilities (Rezsi)",
+   "Short-Term Operating Expenses (Rövid lejáratú működési kiadások)",
    "Owner Equity (Saját tőke)",
    "Other Sources (Egyéb forrás)"
  ];
@@ -686,17 +716,19 @@ function renderIncomeSheetHTML(d, includeTrial=true){
 
    <div class="cf-balance">
      <div class="cf-card">
-       <div class="cf-card-head">Assets ($) <span>(Eszközök $)</span></div>
+       <div class="cf-card-head cf-card-head-sum"><span>Assets ($) <small>(Eszközök $)</small></span><b>${money(d.totals.assets||0)}</b></div>
        <div class="cf-card-body">${assetRows}</div>
      </div>
 
      <div class="cf-card">
-       <div class="cf-card-head">Sources ($) <span>(Források $)</span></div>
+       <div class="cf-card-head cf-card-head-sum"><span>Sources ($) <small>(Források $)</small></span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
        <div class="cf-card-body">${sourceRows}</div>
      </div>
    </div>
 
-   <div class="cf-footer">
+   <div class="cf-footer cf-footer-grid">
+     <div class="cf-line total"><span>Total Assets (Összes eszköz)</span><b>${money(d.totals.assets||0)}</b></div>
+     <div class="cf-line total"><span>Total Sources (Összes forrás)</span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
      <div class="cf-line total"><span>Net Worth (Nettó vagyon)</span><b>${money(d.totals.netWorth)}</b></div>
    </div>
  </div>${trial}`;
