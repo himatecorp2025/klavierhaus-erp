@@ -40,6 +40,9 @@ function boot(){
  if(!token)return;
  $("#login").classList.add("hidden");
  $("#app").classList.remove("hidden");
+ document.body.classList.add("sidebar-collapsed");
+ const sb=document.getElementById("sidebarToggle");
+ if(sb) sb.onclick=toggleSidebar;
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
  let nav=navs[user.role]||navs.WORKER;
  $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${n[1]}</button>`).join("");
@@ -53,6 +56,7 @@ function boot(){
  };
  render("scheduler");
 }
+function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
 function money(n){return "$"+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0})}
 function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge ${c}">${v||""}</span>`}
 function fmtDate(d){return d.toISOString().slice(0,10)}
@@ -68,6 +72,7 @@ function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
+function isSuperadmin(){return user && (user.role==="SUPERADMIN" || Number(user.is_superadmin||0)===1)}
 
 function ensureView(id){
  let el=document.getElementById(id);
@@ -301,6 +306,13 @@ function openJobDetails(j){
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent="Job details / Munka részletei";
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
+ const closed=["Completed","Partially completed","Cancelled"].includes(String(j.status||""));
+ const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
+ if(!closed){
+   actionButtons.push(`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`);
+   actionButtons.push(`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`);
+ }
+ if(isSuperadmin()) actionButtons.push(`<button type="button" class="danger-btn" onclick="deleteJob('${jobRef(j)}')">Delete job / Munka törlése</button>`);
  $("#form").innerHTML=`<div class="work-card">
  <h4>${badge(j.priority)} ${j.title}</h4>
  <p class="muted"><b>Job key / Munkaazonosító:</b> ${j.job_key||j.id||""}</p><p><b>Work category / Munkakategória:</b> ${j.job_type==="Part-work" ? "Part-work / Részmunka" : "Standalone / Önálló munka"}</p>
@@ -312,10 +324,16 @@ function openJobDetails(j){
  <p><b>Address / Cím:</b> ${j.service_address||""}</p>
  <p><b>Estimated / Előzetes:</b> ${money(j.planned_amount)} · ${j.pricing_basis||""}</p>
  <p><b>Status / Státusz:</b> ${badge(j.status)}</p>
+ ${closed?`<p class="muted"><b>View only / Csak megtekintés:</b> ez a munka már lezárt vagy részlezárt.</p>`:""}
  ${j.job_type==="Part-work"?`<p><b>Remaining tasks / Hátralévő feladatok:</b><br>${j.instructions||""}</p>`:""}
  </div>
- <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>${j.status==="Completed"?"":`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`}${j.status==="Completed"?"":`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`}</div>`;
+ <div class="actions">${actionButtons.join("")}</div>`;
  $("#form").onsubmit=e=>e.preventDefault()
+}
+async function deleteJob(id){
+ if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+ if(!confirm("Delete this job from visible system? / Töröljük ezt a munkát a látható rendszerből?")) return;
+ try{await api(`/api/jobs/${encodeURIComponent(id)}`,{method:"DELETE"}); closeModal(); await renderScheduler();}catch(err){alert(err.message)}
 }
 function openReassign(j){
  $("#modal").classList.remove("hidden");
@@ -364,7 +382,13 @@ function headerLabel(key,c){
 }
 async function renderTable(key){
  let s=schemas[key],data=await api("/api/"+s.api);
- $("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${s.title}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ Add / Új</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel(key,c)}</th>`).join("")}<th>Actions / Műveletek</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue(key,c,r)}</td>`).join("")}<td>${key==="contacts"?`<button class="small" onclick="clientProfile('${r.id}')">Profile / Adatlap</button>`:""}<button class="small" onclick='openForm("${key}",${esc(r)})'>Edit / Szerkesztés</button></td></tr>`).join("")}</tbody></table></div></div>`
+ $("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${s.title}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ Add / Új</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel(key,c)}</th>`).join("")}<th>Actions / Műveletek</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue(key,c,r)}</td>`).join("")}<td>${key==="contacts"?`<button class="small" onclick="clientProfile('${r.id}')">Profile / Adatlap</button>`:""}<button class="small" onclick='openForm("${key}",${esc(r)})'>Edit / Szerkesztés</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('${key}','${r.id}')">Delete / Törlés</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`
+}
+async function deleteGenericResource(key,id){
+ if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+ const s=schemas[key];
+ if(!s || !confirm("Delete this item? / Töröljük ezt a tételt?")) return;
+ try{await api(`/api/${s.api}/${encodeURIComponent(id)}`,{method:"DELETE"}); await renderTable(key);}catch(err){alert(err.message)}
 }
 function cellValue(key,c,r){
  if((c.includes("amount")||c.includes("value"))) return money(r[c]);
@@ -511,7 +535,7 @@ async function renderFinance(){
        <h3>Finance / Pénzügy</h3>
        <p class="muted">Tételes pénzügyi napló. Innen számol az eredménykimutatás és a mérleg.</p>
      </div>
-     <button onclick="openFinancialItem()">+ New Financial Item / Új pénzügyi tétel</button>
+     <div><button class="small" onclick="exportFinancialItemsCSV()">Export CSV</button> <button onclick="openFinancialItem()">+ New Financial Item / Új pénzügyi tétel</button></div>
    </div>
    <div class="grid kpis finance-kpis">
      <div class="kpi"><span>Passive income / Passzív jövedelem</span><strong>${money(passiveIncome)}</strong></div>
@@ -543,8 +567,11 @@ function financeTableHTML(items){
    <td>${x.payment_method||""}</td>
    <td>${finLabel(x.balance_account)}</td>
    <td>${signedAmountHTML(x)}</td>
-   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="ADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
+   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
  </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
+}
+function exportFinancialItemsCSV(){
+ api("/api/financial-items").then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="financial_items.csv";a.click()})
 }
 async function applyFinanceFilters(){
  const q=[];
@@ -823,40 +850,14 @@ async function renderClosedJobs(){
  let rows=[];
  try{ rows=await api("/api/closed-jobs"); }catch(e){ rows=[]; }
  const tableRows = rows.length ? rows.map(r=>`<tr>
-   <td>${r.job_key||r.job_id||""}</td>
-   <td>${r.title||""}</td>
-   <td>${r.client_name||""}</td>
-   <td>${r.piano_name||""}</td>
-   <td>${r.close_type||r.job_type||""}</td>
-   <td>${r.responsible_at_close||""}</td>
-   <td>${r.closed_by||""}</td>
-   <td>${r.closed_at||""}</td>
-   <td>${money(r.billed_amount)}</td>
-   <td>${r.payment_method||""}</td>
-   <td>${r.document_path?`<a href="${r.document_path}" target="_blank">Download / Letöltés</a>`:""}</td>
-   <td>${r.close_description||""}</td>
- </tr>`).join("") : `<tr><td colspan="12" class="muted">Még nincs lezárt munka.</td></tr>`;
-
- target.innerHTML=`<div class="panel">
-   <div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div>
-   <div class="table-wrap"><table>
-     <thead><tr>
-       <th>Munkaazonosító</th>
-       <th>Munka neve</th>
-       <th>Ügyfél</th>
-       <th>Zongora</th>
-       <th>Típus</th>
-       <th>Felelős lezáráskor</th>
-       <th>Lezárta</th>
-       <th>Lezárás ideje</th>
-       <th>Összeg</th>
-       <th>Fizetési mód</th>
-       <th>Számla/csekk</th>
-       <th>Leírás</th>
-     </tr></thead>
-     <tbody>${tableRows}</tbody>
-   </table></div>
- </div>`;
+   <td>${r.job_key||r.job_id||""}</td><td>${r.title||""}</td><td>${r.client_name||""}</td><td>${r.piano_name||""}</td><td>${r.close_type||r.job_type||""}</td><td>${r.responsible_at_close||""}</td><td>${r.closed_by||""}</td><td>${r.closed_at||""}</td><td>${money(r.billed_amount)}</td><td>${r.payment_method||""}</td><td>${r.document_path?`<a href="${r.document_path}" target="_blank">Download / Letöltés</a>`:""}</td><td>${r.close_description||""}</td><td>${isSuperadmin()?`<button class="small danger-btn" onclick="deleteClosedJob('${r.log_id}')">Delete / Törlés</button>`:""}</td>
+ </tr>`).join("") : `<tr><td colspan="13" class="muted">Még nincs lezárt munka.</td></tr>`;
+ target.innerHTML=`<div class="panel"><div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div><div class="table-wrap"><table><thead><tr><th>Munkaazonosító</th><th>Munka neve</th><th>Ügyfél</th><th>Zongora</th><th>Típus</th><th>Felelős lezáráskor</th><th>Lezárta</th><th>Lezárás ideje</th><th>Összeg</th><th>Fizetési mód</th><th>Számla/csekk</th><th>Leírás</th><th>Actions / Műveletek</th></tr></thead><tbody>${tableRows}</tbody></table></div></div>`;
+}
+async function deleteClosedJob(id){
+ if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+ if(!confirm("Delete this closed job and linked visible records? / Töröljük ezt a lezárt munkát és kapcsolódó látható tételeit?")) return;
+ try{await api(`/api/closed-jobs/${encodeURIComponent(id)}`,{method:"DELETE"}); await renderClosedJobs();}catch(err){alert(err.message)}
 }
 function exportClosedJobs(){
  api("/api/closed-jobs").then(data=>{
@@ -977,7 +978,7 @@ function openPlannedJobDetails(x){
  $("#form").innerHTML=`<div class="work-card">
    <h4>${x.planned_key||""} · ${x.title||""}</h4>
    <p><b>Type / Típus:</b> ${x.planned_type||""}</p><p><b>Client / Ügyfél:</b> ${x.client_name||""}</p><p><b>Phone / Telefon:</b> ${x.client_phone||""}</p><p><b>Piano / Zongora:</b> ${x.piano_name||""}</p><p><b>Address / Cím:</b> ${x.service_address||""}</p><p><b>Responsible / Felelős:</b> ${x.preferred_assigned_to||""}</p><p><b>Priority / Prioritás:</b> ${badge(x.priority||"Medium")}</p><p><b>Status / Állapot:</b> ${x.status||""}</p><p><b>Expected revenue / Várható bevétel:</b> ${money(x.expected_revenue||0)} · <b>Probability:</b> ${plannedProbabilityNumber(x)}% · <b>Weighted:</b> ${money(plannedWeightedRevenue(x))}</p><p><b>Estimated hours / Tervezett óraszám:</b> ${x.estimated_hours||""}</p><p><b>Target date / Cél dátum:</b> ${x.target_date||""}</p><p><b>Block reason / Elakadás oka:</b> ${x.block_reason||""}</p><p><b>Next step / Következő lépés:</b> ${x.next_step||""}</p><p><b>Notes / Megjegyzés:</b><br>${x.notes||""}</p>
- </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openPlannedJob(${esc(x)})'>Edit / Szerkesztés</button><button type="button" onclick='openConvertPlannedJob(${esc(x)})'>Convert to Scheduled Job / Áthelyezés naptárba</button><button type="button" class="danger" onclick="archivePlannedJob('${x.id}')">Archive / Archiválás</button></div>`;
+ </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button><button type="button" onclick='openPlannedJob(${esc(x)})'>Edit / Szerkesztés</button><button type="button" onclick='openConvertPlannedJob(${esc(x)})'>Convert to Scheduled Job / Áthelyezés naptárba</button>${isSuperadmin()?`<button type="button" class="danger" onclick="archivePlannedJob('${x.id}')">Delete / Törlés</button>`:`<button type="button" class="danger" onclick="archivePlannedJob('${x.id}')">Archive / Archiválás</button>`}</div>`;
  $("#form").onsubmit=e=>e.preventDefault();
 }
 function openConvertPlannedJob(x){
@@ -1134,8 +1135,24 @@ async function exportInventoryPDF(){
  win.document.close();
 }
 
-async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
-function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
+async function renderUsers(){
+ let u=await api("/api/users");
+ const canEdit=isSuperadmin();
+ $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions / Műveletek</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td><td>${canEdit?`<button class="small" onclick='openUser(${esc(x)})'>Edit / Szerkesztés</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete / Törlés</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`
+}
+function openUser(row=null){
+ const isEdit=!!row;
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent=isEdit?"Edit user / Felhasználó szerkesztése":"Add user / Felhasználó hozzáadása";
+ let roleOptions=user.role==="ADMIN"&&!isSuperadmin()? ["ADMIN","MANAGER","WORKER"]:["ADMIN","MANAGER","WORKER"];
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?"New password / Új jelszó":"Password / Jelszó"}</label><input name="password" ${isEdit?"":"required"} placeholder="${isEdit?"Leave empty to keep current / Hagyd üresen, ha marad":""}"></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="field"><label>Status / Státusz</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?"Save changes":"Create user"}</button></div>`;
+ $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target)); if(isEdit && !body.password) delete body.password; if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else await api("/api/users",{method:"POST",body:JSON.stringify(body)}); closeModal();renderUsers()}catch(err){alert(err.message)}}
+}
+async function deleteUser(id){
+ if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+ if(!confirm("Delete this user? / Töröljük ezt a felhasználót?")) return;
+ try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
+}
 if(token)boot();
 
 
