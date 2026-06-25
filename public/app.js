@@ -407,7 +407,11 @@ async function loadMonthlyIncomeStatement(month){
 }
 function renderIncomeSheetHTML(d, includeTrial=true){
  const acct=c=>d.trialBalance.filter(a=>a.category===c);
- const balanceRows=(arr,fallback)=>arr.length ? arr.map(a=>`<div class="cf-line"><span>${a.name_en} <small>(${a.name_hu})</small></span><b>${money(a.balance)}</b></div>`).join("") : fallback.map(x=>`<div class="cf-line empty"><span>${x}</span><b>—</b></div>`).join("");
+
+ const lineRows=(arr,fallback)=>arr.length
+   ? arr.map(a=>`<div class="cf-line"><span>${a.name_en} <small>(${a.name_hu})</small></span><b>${money(a.balance)}</b></div>`).join("")
+   : fallback.map(x=>`<div class="cf-line empty"><span>${x}</span><b>—</b></div>`).join("");
+
  const fallbackIncome=[
    "Service Revenue (Szolgáltatási bevétel)",
    "Interest Income (Kamatbevétel)",
@@ -445,29 +449,35 @@ function renderIncomeSheetHTML(d, includeTrial=true){
    "Other Sources (Egyéb forrás)"
  ];
 
- const incomeRows=balanceRows(acct("REVENUE"),fallbackIncome);
- const expenseRows=balanceRows(acct("EXPENSE"),fallbackExpenses);
- const assetRows=balanceRows(acct("ASSET"),fallbackAssets);
- const sourceRows=balanceRows([...acct("LIABILITY"),...acct("EQUITY")],fallbackSources);
+ const incomeRows=lineRows(acct("REVENUE"),fallbackIncome);
+ const expenseRows=lineRows(acct("EXPENSE"),fallbackExpenses);
+ const assetRows=lineRows(acct("ASSET"),fallbackAssets);
+ const sourceRows=lineRows([...acct("LIABILITY"),...acct("EQUITY")],fallbackSources);
 
  const trial=includeTrial?`<div class="panel income-trial-table no-print-break">
-   <h3>Monthly Trial Balance (Havi főkönyvi kivonat)</h3>
-   <p class="muted">General Ledger has been removed. This section is kept as a technical summary placeholder. (A Főkönyv funkció törölve lett, ez technikai összesítő hely.)</p>
-   <div class="table-wrap"><table><thead><tr><th>Code</th><th>Account</th><th>Category</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No ledger data (Nincs főkönyvi adat)</td></tr>`}</tbody></table></div>
+   <h3>Technical Summary (Technikai összesítő)</h3>
+   <p class="muted">General Ledger has been removed. This section is kept only for export compatibility. (A Főkönyv funkció törölve lett, ez csak export-kompatibilitási hely.)</p>
+   <div class="table-wrap"><table>
+     <thead><tr><th>Code</th><th>Account</th><th>Category</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
+     <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No ledger data (Nincs főkönyvi adat)</td></tr>`}</tbody>
+   </table></div>
  </div>`:"";
 
- return `<div class="cashflow-layout">
-   <div class="cf-topbar">
-     <div class="cf-label">Business (Foglalkozás)</div>
-     <div class="cf-titleblock">
-       <h2>Income Statement (Eredménykimutatás)</h2>
-       <p>Calendar-first work management financial overview (Naptárközpontú munkakezelési pénzügyi áttekintés)</p>
-     </div>
-     <div class="cf-label right">Klavierhaus</div>
+ return `<div class="grid kpis">
+   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
+   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
+   <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
+   <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
+ </div>
+
+ <div class="cashflow-layout">
+   <div class="cf-main-title">
+     <h2>Income Statement (Eredménykimutatás)</h2>
+     <p>Cashflow-style monthly business overview (Cashflow-jellegű havi vállalati áttekintés)</p>
    </div>
 
    <div class="cf-upper">
-     <div class="cf-income-expense">
+     <div class="cf-left-stack">
        <div class="cf-card">
          <div class="cf-card-head">Income ($/month) <span>(Bevételek $/hó)</span></div>
          <div class="cf-card-body">${incomeRows}</div>
@@ -479,7 +489,7 @@ function renderIncomeSheetHTML(d, includeTrial=true){
        </div>
      </div>
 
-     <div class="cf-summary">
+     <div class="cf-right-stack">
        <div class="cf-card cf-bookkeeper">
          <div class="cf-card-head">Bookkeeper <span>(Könyvvizsgáló)</span></div>
          <div class="cf-card-body">
@@ -500,11 +510,13 @@ function renderIncomeSheetHTML(d, includeTrial=true){
    </div>
 
    <div class="cf-balance-title">Balance Sheet (Mérleg)</div>
+
    <div class="cf-balance">
      <div class="cf-card">
        <div class="cf-card-head">Assets ($) <span>(Eszközök $)</span></div>
        <div class="cf-card-body">${assetRows}</div>
      </div>
+
      <div class="cf-card">
        <div class="cf-card-head">Sources ($) <span>(Források $)</span></div>
        <div class="cf-card-body">${sourceRows}</div>
@@ -634,19 +646,19 @@ function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").text
 if(token)boot();
 
 
+
+
+
 (function incomeStatementCashflowLayoutStyle(){
  const s=document.createElement("style");
  s.textContent=`
- .cashflow-layout{display:flex;flex-direction:column;gap:18px;max-width:1180px;margin:0 auto;}
- .cf-topbar{display:grid;grid-template-columns:220px 1fr 220px;align-items:start;gap:16px;}
- .cf-label{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:12px 16px;font-weight:800;text-align:center;box-shadow:var(--shadow);}
- .cf-label.right{text-align:center;}
- .cf-titleblock{text-align:center;}
- .cf-titleblock h2{font-size:30px;margin:0 0 4px;}
- .cf-titleblock p{margin:0;color:var(--muted);}
+ .cashflow-layout{display:flex;flex-direction:column;gap:18px;margin-top:18px;}
+ .cf-main-title{text-align:center;padding:4px 0 0;}
+ .cf-main-title h2{font-size:30px;margin:0 0 4px;}
+ .cf-main-title p{margin:0;color:var(--muted);}
  .cf-upper{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;align-items:stretch;}
- .cf-income-expense{display:flex;flex-direction:column;gap:18px;}
- .cf-summary{display:flex;flex-direction:column;gap:18px;}
+ .cf-left-stack{display:flex;flex-direction:column;gap:18px;}
+ .cf-right-stack{display:flex;flex-direction:column;gap:18px;}
  .cf-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);}
  .cf-card-head{background:var(--panel-2);border-bottom:1px solid var(--line);padding:12px 16px;font-size:18px;font-weight:900;}
  .cf-card-head span{color:var(--muted);font-weight:700;font-size:14px;}
@@ -656,18 +668,17 @@ if(token)boot();
  .cf-line small{color:var(--muted);font-weight:600;}
  .cf-line b{font-variant-numeric:tabular-nums;}
  .cf-line.empty b{color:var(--muted);}
- .cf-line.big{min-height:70px;align-items:center;font-size:19px;border-bottom:0;}
+ .cf-line.big{min-height:92px;align-items:center;font-size:19px;border-bottom:0;}
  .cf-line.total{font-size:18px;font-weight:900;border-bottom:0;}
  .cf-line.cashflow{font-size:19px;font-weight:950;border-bottom:0;}
  .cf-rule{height:2px;background:var(--line);margin:18px 0;}
- .cf-bookkeeper{min-height:260px;}
- .cf-cashflow{min-height:185px;display:flex;flex-direction:column;justify-content:center;}
- .cf-balance-title{text-align:center;font-size:30px;font-weight:950;margin-top:6px;}
+ .cf-bookkeeper{min-height:285px;}
+ .cf-cashflow{min-height:210px;display:flex;flex-direction:column;justify-content:center;}
+ .cf-balance-title{text-align:center;font-size:30px;font-weight:950;margin-top:8px;}
  .cf-balance{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
  .cf-footer{max-width:560px;margin-left:auto;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:10px 18px;box-shadow:var(--shadow);}
  .no-print-break{break-inside:avoid;}
  @media(max-width:980px){
-   .cf-topbar{grid-template-columns:1fr;}
    .cf-upper,.cf-balance{grid-template-columns:1fr;}
    .cf-footer{max-width:none;width:auto;}
  }
