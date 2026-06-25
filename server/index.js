@@ -50,10 +50,16 @@ function ensureRuntimeMigrations(){
       job_id TEXT,
       client_id TEXT,
       piano_id TEXT,
+      source_type TEXT,
+      source_id TEXT,
       created_by TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`).run();
+
+    const finCols = db.prepare("PRAGMA table_info(financial_items)").all().map(c=>c.name);
+    if(!finCols.includes("source_type")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_type TEXT").run();
+    if(!finCols.includes("source_id")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_id TEXT").run();
 
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
@@ -213,9 +219,9 @@ app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   if(!["ONE_TIME","MONTHLY"].includes(recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
   if(Number.isNaN(amount) || amount<0) return res.status(400).json({error:"Amount must be a positive number / Az összeg nem lehet negatív"});
   db.prepare(`INSERT INTO financial_items(
-    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,created_by
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,req.body.payment_method||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.user.name
+    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,req.body.payment_method||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.body.source_type||null,req.body.source_id||null,req.user.name
   );
   res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(id));
 });
@@ -224,7 +230,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
-  const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id"];
+  const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id","source_type","source_id"];
   const body={...req.body};
   if(body.amount!==undefined) body.amount=Number(body.amount||0);
   if(body.main_type!==undefined && !["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(body.main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
@@ -521,6 +527,40 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
 });
 
+
+function financeBalanceAccountFromPayment(paymentMethod){
+  const p=String(paymentMethod||"").trim().toLowerCase();
+  if(p.includes("cash")) return "CASH";
+  if(p.includes("check") || p.includes("cheque")) return "CHECKS";
+  if(p.includes("bank")) return "BANK";
+  if(p.includes("card") || p.includes("credit")) return "BANK";
+  if(p.includes("invoice")) return "AR";
+  return "BANK";
+}
+
+function createFinancialItemForClosedJob({job,billed,payment,desc,storedPath,userName}){
+  ensureRuntimeMigrations();
+  const amount=Number(billed||0);
+  if(!amount || amount<=0) return null;
+  const existing=db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get("closed_job", job.id);
+  if(existing) return existing;
+  const id=rid("FI");
+  const itemDate=(nowISO()).slice(0,10);
+  const title=`${job.title || "Closed job"}${job.client_name ? " - " + job.client_name : ""}`;
+  const description=[
+    "Automatically created from closed job / Automatikusan létrehozva lezárt munkából",
+    desc || "",
+    storedPath ? `Invoice/check file: ${storedPath}` : ""
+  ].filter(Boolean).join("\n");
+  const balanceAccount=financeBalanceAccountFromPayment(payment);
+  db.prepare(`INSERT INTO financial_items(
+    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id,itemDate,title,description,amount,"INCOME","SERVICE_REVENUE","ONE_TIME",payment||"",balanceAccount,job.id,job.client_id||null,job.piano_id||null,"closed_job",job.id,userName||"System"
+  );
+  return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
+}
+
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
@@ -577,7 +617,10 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
 
   db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":"Részlezárás"}: ${job.title}`,closeType==="Full"?"Closed Job":"Partial Close","Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
-res.json({ok:true,next_job_id:nextJobId,storedPath});
+
+  const financialItem=createFinancialItemForClosedJob({job,billed,payment,desc,storedPath,userName:req.user.name});
+
+  res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
 });
 
 
