@@ -4,10 +4,10 @@ let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
 
 const navs={
- SUPERADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
- ADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
- MANAGER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
- WORKER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"]]
+ SUPERADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
+ ADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
+ MANAGER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
+ WORKER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"]]
 };
 
 const schemas={
@@ -15,6 +15,16 @@ contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client nam
 pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["brand","Brand / Márka"],["model","Model / Típus / modell"],["serial_no","Serial No. / Gyári szám"],["ownership_type","Ownership / Tulajdon","select",["Customer owned","Company owned"]],["owner_contact_id","Owner Contact ID / Ügyfél ID"],["location","Location / Helyszín"],["estimated_value","Estimated value / Becsült érték - csak céges tulajdonnál","number"]],cols:["id","brand","model","serial_no","ownership_type","owner_contact_id","location","estimated_value"]},
 knowledge_base:{api:"knowledge_base",title:"Invoices / Számlák",fields:[["title","Title / Cím"],["category","Category / Kategória"],["content_type","Content type / Tartalomtípus"],["body","Body / Tartalom","textarea"],["stored_path","Attachment path / Melléklet útvonal"],["owner","Relationship owner / Kapcsolattartó gazda"],["amount","Amount / Összeg","number"],["payment_method","Payment method / Fizetési mód"],["invoice_number","Invoice number / Számlaszám"],],cols:["id","title","category","owner","amount","payment_method","invoice_number","stored_path","created_at"]}
 };
+
+const inventoryMainCategories=[
+ "Piano / Zongora","Upright Piano / Pianínó","Piano Part / Zongoraalkatrész","Tool / Munkaeszköz","Machine / Gép","Equipment / Berendezés","Material / Anyag","Accessory / Tartozék","Office Asset / Irodai eszköz","Other / Egyéb"
+];
+const pianoPartCategories=[
+ "Keyboard / Billentyűzet","Keys / Billentyűk","Action Mechanism / Mechanika","Hammer / Kalapács","Hammer Felt / Kalapácsfilc","Damper / Tompító","Damper Felt / Tompítófilc","Strings / Húrok","Bass Strings / Basszushúrok","Treble Strings / Magas húrok","Soundboard / Rezonánslap","Bridge / Híd","Pinblock / Hangolótőke","Tuning Pins / Hangolószegek","Agraffes / Agraffok","Cast Iron Frame / Öntöttvas keret","Pedals / Pedálok","Sustain Pedal / Jobb pedál","Soft Pedal / Bal pedál","Sostenuto Pedal / Középső pedál","Cabinet / Bútorzat","Lid / Fedél","Music Desk / Kottatartó","Legs / Lábak","Casters / Görgők","Bench / Zongoraszék","Other Piano Part / Egyéb zongoraalkatrész"
+];
+const acquisitionTypes=["Purchased / Vásárolt","Manufactured / Gyártott","Donated / Adomány","Transferred / Átvett","Existing stock / Meglévő készlet","Other / Egyéb"];
+const inventoryConditions=["New / Új","Used / Használt","Needs Repair / Javítandó","Under Repair / Javítás alatt","Refurbished / Felújított","Broken / Hibás","Scrap / Selejt"];
+const inventoryStatuses=["In Stock / Készleten","In Use / Használatban","Reserved / Lefoglalva","Installed / Beépítve","Sold / Eladva","Disposed / Selejtezve","Lost / Elveszett"];
 
 const $=s=>document.querySelector(s);
 const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}}).then(async r=>{const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:text||"Non-JSON response"}}if(!r.ok)throw new Error(j.error||`API ${r.status}`);return j});
@@ -44,7 +54,11 @@ function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge $
 function fmtDate(d){return d.toISOString().slice(0,10)}
 function startOfWeek(d){let x=new Date(d);let day=x.getDay();let diff=(day===0?-6:1-day);x.setDate(x.getDate()+diff);x.setHours(0,0,0,0);return x}
 function addDays(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
-function localDT(d){let x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneOffset());return x.toISOString().slice(0,16)}
+function localDT(d){
+ let x=new Date(d);
+ const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"}).formatToParts(x).reduce((a,p)=>{a[p.type]=p.value;return a},{});
+ return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
 function hhmm(s){let d=new Date(s);return d.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})}
 function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
@@ -80,6 +94,7 @@ async function render(v){
  if(v==="closed_jobs")return renderClosedJobs();
  if(v==="income_statement")return renderIncomeStatement();
  if(v==="finance")return renderFinance();
+ if(v==="inventory")return renderInventory();
  if(v==="users")return renderUsers();
  return renderTable(v);
 }
@@ -217,7 +232,7 @@ ${["Károly","Alex","Paul","Misi","Said"].map(n=>`<option ${row?.assigned_to===n
    if(!validateDateField(startInput) || !validateDateField(endInput)) return;
    if(new Date(b.end_time)<=new Date(b.start_time)){alert("A befejezés nem lehet korábbi, mint a kezdés. / End must be after start.");return}
    if(isPastDate(b.start_time)){
-     const ok=confirm("Visszamenőleges dátumot adtál meg. Biztosan ezt akarod? / You entered a past date. Are you sure?");
+     const ok=confirm("New York-i idő szerint visszamenőleges dátumot adtál meg. Biztosan ezt akarod? / You entered a past date based on New York time. Are you sure?");
      if(!ok) return;
    }
 
@@ -263,17 +278,13 @@ function validateDateField(input){
  if(!/^\d{4}$/.test(year)){alert("Az évszám pontosan 4 számjegyből álljon. / Year must be exactly 4 digits."); return false}
  return true;
 }
-function nowInNewYorkLocalString(){
- const parts=new Intl.DateTimeFormat("en-US",{
-   timeZone:"America/New_York",
-   year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false
- }).formatToParts(new Date()).reduce((a,p)=>{a[p.type]=p.value;return a;},{});
+function newYorkNowLocal(){
+ const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"}).formatToParts(new Date()).reduce((a,p)=>{a[p.type]=p.value;return a},{});
  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 function isPastDate(value){
- const v=String(value||"").slice(0,16);
- if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return false;
- return v < nowInNewYorkLocalString();
+ if(!value) return false;
+ return String(value).slice(0,16) < newYorkNowLocal();
 }
 
 function toggleInstructionsField(){
@@ -527,7 +538,7 @@ function financeTableHTML(items){
    <td>${x.payment_method||""}</td>
    <td>${finLabel(x.balance_account)}</td>
    <td>${signedAmountHTML(x)}</td>
-   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="SUPERADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
+   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="ADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
  </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
 }
 async function applyFinanceFilters(){
@@ -675,10 +686,10 @@ function renderIncomeSheetHTML(d, includeTrial=true){
  </div>`:"";
 
  return `<div class="grid kpis">
+   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
+   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
    <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
    <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
-   <div class="kpi"><span>Assets / Eszközök</span><strong>${money(d.totals.assets||0)}</strong></div>
-   <div class="kpi"><span>Sources / Források</span><strong>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</strong></div>
  </div>
 
  <div class="cashflow-layout">
@@ -854,33 +865,142 @@ function exportClosedJobs(){
  });
 }
 
-async function renderUsers(){
- let u=await api("/api/users");
- const canSuper=user.role==="SUPERADMIN";
- $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th>${canSuper?"<th>Actions / Műveletek</th>":""}</tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td>${canSuper?`<td><button class="small" onclick='openUser(${esc(x)})'>Edit / Szerkesztés</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete / Törlés</button></td>`:""}</tr>`).join("")}</tbody></table></div></div>`
+function optionTags(arr,val=""){
+ return arr.map(o=>`<option value="${String(o).replaceAll('"','&quot;')}" ${o===val?"selected":""}>${o}</option>`).join("");
 }
-function openUser(row=null){
+function invValue(x){return (Number(x.purchase_price||0)||Number(x.manufacturing_cost||0)||0)*Number(x.quantity||1)}
+function invStatusBadge(status){
+ const st=String(status||"");
+ const cls=st.includes("Sold")||st.includes("Disposed")||st.includes("Lost")?"Low":(st.includes("Reserved")?"Urgent":"Medium");
+ return `<span class="badge ${cls}">${st}</span>`;
+}
+async function renderInventory(){
+ const target=forceShowView("inventory");
+ let items=[]; let status={};
+ try{items=await api("/api/inventory");}catch(e){items=[];}
+ try{status=await api("/api/inventory/check-status");}catch(e){status={};}
+ const locations=[...new Set(items.map(x=>x.location).filter(Boolean))].sort();
+ const dueClass=status.status==="OVERDUE"?"danger-text":(status.status==="DUE_SOON"?"warning-text":"");
+ const canExport=user.role==="ADMIN"||user.role==="SUPERADMIN";
+ target.innerHTML=`<div class="panel inventory-check-panel">
+   <div class="toolbar">
+     <div>
+       <h3>Inventory / Leltár</h3>
+       <p class="muted">Belső eszköz-, alkatrész-, gép- és anyagnyilvántartás.</p>
+     </div>
+     <div><button onclick="openInventoryItem()">+ Add inventory item / Új leltári tétel</button>${canExport?` <button class="small" onclick="exportInventoryPDF()">Export Inventory PDF / Leltár PDF</button>`:""}</div>
+   </div>
+   <div class="inventory-status-grid">
+     <div class="kpi"><span>Next inventory check / Következő leltár</span><strong class="${dueClass}">${status.nextDue||"—"}</strong></div>
+     <div class="kpi"><span>Status / Állapot</span><strong class="${dueClass}">${status.status==="OVERDUE"?"Overdue / Lejárt":status.status==="DUE_SOON"?"Due soon / Esedékes":"OK"}</strong></div>
+     <div class="kpi"><span>Last inventory / Utolsó leltár</span><strong>${status.lastInventory?.check_date||"—"}</strong><small>${status.lastInventory?.completed_by||""}</small></div>
+     <div class="kpi"><span>Total value / Összes érték</span><strong>${money(items.reduce((s,x)=>s+invValue(x),0))}</strong></div>
+   </div>
+   <div class="actions left-actions"><button type="button" onclick="markInventoryCompleted()">✓ Mark Inventory Completed / Leltár elvégezve</button></div>
+ </div>
+ <div class="panel">
+   <div class="toolbar"><h3>Inventory Items / Leltári tételek</h3><button class="small" onclick="clearInventoryFilters()">Clear filters / Szűrők törlése</button></div>
+   <div class="finance-filters inventory-filters">
+     <input id="invSearch" placeholder="Search / Keresés" oninput="applyInventoryFilters()">
+     <select id="invMainCategory" onchange="applyInventoryFilters()"><option value="">All main categories / Minden főkategória</option>${optionTags(inventoryMainCategories)}</select>
+     <select id="invPartCategory" onchange="applyInventoryFilters()"><option value="">All piano parts / Minden zongoraalkatrész</option>${optionTags(pianoPartCategories)}</select>
+     <select id="invStatus" onchange="applyInventoryFilters()"><option value="">All statuses / Minden státusz</option>${optionTags(inventoryStatuses)}</select>
+     <select id="invCondition" onchange="applyInventoryFilters()"><option value="">All conditions / Minden állapot</option>${optionTags(inventoryConditions)}</select>
+     <select id="invLocation" onchange="applyInventoryFilters()"><option value="">All locations / Minden hely</option>${optionTags(locations)}</select>
+   </div>
+   <div id="inventoryTableWrap"></div>
+ </div>`;
+ renderInventoryTable(items);
+ window.__inventoryItems=items;
+}
+function renderInventoryTable(items){
+ const wrap=document.getElementById("inventoryTableWrap");
+ if(!wrap)return;
+ const rows=items.map(x=>`<tr>
+   <td><b>${x.inventory_id||""}</b></td>
+   <td>${x.item_name||""}<br><small class="muted">${x.notes||""}</small></td>
+   <td>${x.main_category||""}</td>
+   <td>${x.piano_part_category||""}</td>
+   <td>${Number(x.quantity||0)} ${x.unit||""}</td>
+   <td>${x.condition_status||""}</td>
+   <td>${x.location||""}</td>
+   <td>${invStatusBadge(x.status)}</td>
+   <td>${money(x.purchase_price||0)}</td>
+   <td>${money(x.manufacturing_cost||0)}</td>
+   <td>${money(invValue(x))}</td>
+   <td><button class="small" onclick='openInventoryItem(${esc(x)})'>Edit / Szerkesztés</button> <button class="small danger-btn" onclick="deleteInventoryItem('${x.id}')">Delete / Törlés</button></td>
+ </tr>`).join("");
+ wrap.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Inventory ID / Leltár ID</th><th>Name / Név</th><th>Main category / Főkategória</th><th>Piano part / Zongoraalkatrész</th><th>Qty / Mennyiség</th><th>Condition / Állapot</th><th>Location / Hely</th><th>Status / Státusz</th><th>Purchase / Beszerzés</th><th>Manufacturing / Gyártás</th><th>Total value / Összérték</th><th>Actions / Műveletek</th></tr></thead><tbody>${rows||`<tr><td colspan="12" class="muted">No inventory items / Nincs leltári tétel.</td></tr>`}</tbody></table></div>`;
+}
+function applyInventoryFilters(){
+ const all=window.__inventoryItems||[];
+ const q=(document.getElementById("invSearch")?.value||"").toLowerCase().trim();
+ const mc=document.getElementById("invMainCategory")?.value||"";
+ const pc=document.getElementById("invPartCategory")?.value||"";
+ const st=document.getElementById("invStatus")?.value||"";
+ const co=document.getElementById("invCondition")?.value||"";
+ const lo=document.getElementById("invLocation")?.value||"";
+ const filtered=all.filter(x=>{
+   const hay=[x.inventory_id,x.item_name,x.main_category,x.piano_part_category,x.supplier,x.manufacturer,x.location,x.notes].join(" ").toLowerCase();
+   return (!q||hay.includes(q)) && (!mc||x.main_category===mc) && (!pc||x.piano_part_category===pc) && (!st||x.status===st) && (!co||x.condition_status===co) && (!lo||x.location===lo);
+ });
+ renderInventoryTable(filtered);
+}
+function clearInventoryFilters(){["invSearch","invMainCategory","invPartCategory","invStatus","invCondition","invLocation"].forEach(id=>{const el=document.getElementById(id); if(el) el.value="";}); applyInventoryFilters();}
+async function openInventoryItem(row=null){
  const isEdit=!!row;
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=isEdit?"Edit user / Felhasználó szerkesztése":"Add user / Felhasználó hozzáadása";
- let roleOptions=(user.role==="ADMIN"||user.role==="SUPERADMIN")?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?"New password / Új jelszó (optional)":"Password / Jelszó"}</label><input name="password" ${isEdit?"":"required"}></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="field"><label>Status</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option><option ${row?.status==="Deleted"?"selected":""}>Deleted</option></select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?"Save changes":"Create user"}</button></div>`;
+ $("#modalTitle").textContent=isEdit?"Edit inventory item / Leltári tétel szerkesztése":"New inventory item / Új leltári tétel";
+ $("#form").innerHTML=`<div class="form-grid">
+   <div class="field"><label>Inventory ID / Leltár azonosító</label><input value="${row?.inventory_id||"Automatically generated / Automatikusan generált"}" disabled></div>
+   <div class="field"><label>${req("Item name / Tétel neve")}</label><input name="item_name" value="${row?.item_name||""}" required></div>
+   <div class="field"><label>${req("Main category / Főkategória")}</label><select name="main_category">${optionTags(inventoryMainCategories,row?.main_category||"Other / Egyéb")}</select></div>
+   <div class="field"><label>Piano part category / Zongoraalkatrész kategória</label><select name="piano_part_category"><option value="">—</option>${optionTags(pianoPartCategories,row?.piano_part_category||"")}</select></div>
+   <div class="field"><label>Item type / Tétel típusa</label><input name="item_type" value="${row?.item_type||""}"></div>
+   <div class="field"><label>Acquisition type / Beszerzés módja</label><select name="acquisition_type">${optionTags(acquisitionTypes,row?.acquisition_type||"Existing stock / Meglévő készlet")}</select></div>
+   <div class="field"><label>Supplier / Beszállító</label><input name="supplier" value="${row?.supplier||""}"></div>
+   <div class="field"><label>Manufacturer / Gyártó</label><input name="manufacturer" value="${row?.manufacturer||""}"></div>
+   <div class="field"><label>Purchase price / Beszerzési ár</label><input name="purchase_price" type="number" step="0.01" value="${row?.purchase_price||0}"></div>
+   <div class="field"><label>Manufacturing cost / Gyártási költség</label><input name="manufacturing_cost" type="number" step="0.01" value="${row?.manufacturing_cost||0}"></div>
+   <div class="field"><label>Quantity / Darabszám</label><input name="quantity" type="number" step="0.01" value="${row?.quantity||1}"></div>
+   <div class="field"><label>Unit / Mértékegység</label><input name="unit" value="${row?.unit||"piece"}"></div>
+   <div class="field"><label>Condition / Állapot</label><select name="condition_status">${optionTags(inventoryConditions,row?.condition_status||"Used / Használt")}</select></div>
+   <div class="field"><label>Location / Hely</label><input name="location" value="${row?.location||""}" placeholder="Workshop shelf A / Műhely polc A"></div>
+   <div class="field"><label>Status / Státusz</label><select name="status">${optionTags(inventoryStatuses,row?.status||"In Stock / Készleten")}</select></div>
+   <div class="field full"><label>Notes / Megjegyzés</label><textarea name="notes">${row?.notes||""}</textarea></div>
+ </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Save / Mentés</button></div>`;
  $("#form").onsubmit=async e=>{
    e.preventDefault();
    const body=Object.fromEntries(new FormData(e.target));
-   if(isEdit && !body.password) delete body.password;
+   ["purchase_price","manufacturing_cost","quantity"].forEach(k=>body[k]=Number(body[k]||0));
    try{
-     if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
-     else await api("/api/users",{method:"POST",body:JSON.stringify(body)});
-     closeModal();renderUsers()
+     if(isEdit) await api(`/api/inventory/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
+     else await api("/api/inventory",{method:"POST",body:JSON.stringify(body)});
+     closeModal(); await renderInventory();
    }catch(err){alert(err.message)}
- }
+ };
 }
-async function deleteUser(id){
- if(user.role!=="SUPERADMIN") return alert("Only Superadmin can delete users / Csak a Superadmin törölhet felhasználót.");
- if(!confirm("Biztosan törlöd/deaktiválod ezt a felhasználót? / Delete/deactivate this user?")) return;
- try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
+async function deleteInventoryItem(id){
+ if(!confirm("Delete this inventory item? / Töröljük ezt a leltári tételt?"))return;
+ try{await api(`/api/inventory/${id}`,{method:"DELETE"}); await renderInventory();}catch(err){alert(err.message)}
 }
+async function markInventoryCompleted(){
+ if(!confirm("Mark quarterly inventory completed today? / Leltár elvégezve mai dátummal?"))return;
+ try{const r=await api("/api/inventory/complete",{method:"POST",body:JSON.stringify({})}); alert(`Inventory completed. Next due: ${r.nextDue}`); await renderInventory();}catch(err){alert(err.message)}
+}
+async function exportInventoryPDF(){
+ const items=await api("/api/inventory");
+ const status=await api("/api/inventory/check-status").catch(()=>({}));
+ const totalValue=items.reduce((s,x)=>s+invValue(x),0);
+ const generated=new Date().toLocaleString("en-US",{timeZone:"America/New_York"});
+ const rows=items.map(x=>`<tr><td>${x.inventory_id||""}</td><td>${x.item_name||""}</td><td>${x.main_category||""}</td><td>${x.piano_part_category||""}</td><td>${Number(x.quantity||0)} ${x.unit||""}</td><td>${x.condition_status||""}</td><td>${x.location||""}</td><td>${x.status||""}</td><td>${money(x.purchase_price||0)}</td><td>${money(x.manufacturing_cost||0)}</td><td>${money(invValue(x))}</td><td>${x.notes||""}</td></tr>`).join("");
+ const win=window.open("","_blank");
+ win.document.write(`<!doctype html><html><head><title>Klavierhaus Inventory Report</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px}h1{margin-bottom:4px}.meta{border-bottom:2px solid #111;margin-bottom:16px;padding-bottom:10px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #999;padding:5px;text-align:left;vertical-align:top}th{background:#eee}.summary{display:flex;gap:18px;margin:12px 0}.box{border:1px solid #999;padding:10px;border-radius:6px}</style></head><body><div class="meta"><h1>Klavierhaus Inventory Report / Leltárjelentés</h1><p><b>Inventory date / Leltár dátuma:</b> ${status.today||""}</p><p><b>Generated / Export ideje:</b> ${generated}</p><p><b>Exported by / Exportálta:</b> ${user.name}</p></div><div class="summary"><div class="box"><b>Total items / Tételek száma:</b> ${items.length}</div><div class="box"><b>Total estimated value / Összes becsült érték:</b> ${money(totalValue)}</div><div class="box"><b>Next inventory / Következő leltár:</b> ${status.nextDue||""}</div></div><table><thead><tr><th>Inventory ID</th><th>Item name</th><th>Main category</th><th>Piano part</th><th>Quantity</th><th>Condition</th><th>Location</th><th>Status</th><th>Purchase price</th><th>Manufacturing cost</th><th>Total value</th><th>Notes</th></tr></thead><tbody>${rows||`<tr><td colspan="12">No inventory items.</td></tr>`}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+ win.document.close();
+}
+
+async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
+function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
 if(token)boot();
 
 
