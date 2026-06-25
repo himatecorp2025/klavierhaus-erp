@@ -39,3 +39,23 @@
 .planned-card:hover{border-color:var(--blue);transform:translateY(-1px)}.planned-card.blocked{border-left:5px solid var(--orange)}.planned-card.planned{border-left:5px solid var(--blue)}
 .planned-title{font-size:17px;font-weight:900;margin-bottom:8px}.planned-meta{font-size:13px;color:var(--muted);margin:5px 0}.planned-money{border-top:1px solid var(--line);margin-top:10px;padding-top:9px;font-size:15px}.planned-money b{color:var(--green)}.planned-money small{color:var(--muted);margin-left:8px}
 button.danger{background:var(--red);color:white}@media(max-width:980px){.planned-board{grid-template-columns:1fr}}
+
+
+/* Responsive collapsible sidebar / Reszponzív becsúszó menü */
+.sidebar-toggle{position:fixed;top:14px;left:14px;z-index:120;width:46px;height:46px;border-radius:14px;background:var(--blue);color:#05111e;font-size:22px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.app-shell{display:grid;grid-template-columns:280px minmax(0,1fr);transition:grid-template-columns .22s ease;min-height:100vh}
+.sidebar{width:280px;overflow:hidden;transition:transform .22s ease,opacity .22s ease,padding .22s ease;border-right:1px solid var(--line)}
+.main{min-width:0;transition:padding .22s ease;padding-top:72px}
+body.sidebar-collapsed .app-shell{grid-template-columns:0 minmax(0,1fr)}
+body.sidebar-collapsed .sidebar{transform:translateX(-100%);opacity:0;padding-left:0;padding-right:0;border-right:0;pointer-events:none}
+body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
+@media(max-width:900px){
+  .app-shell{grid-template-columns:minmax(0,1fr)!important;display:grid}
+  .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:110;width:min(82vw,300px);box-shadow:20px 0 60px rgba(0,0,0,.42)}
+  body.sidebar-collapsed .sidebar{transform:translateX(-105%)}
+  body:not(.sidebar-collapsed) .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
+  body:not(.sidebar-collapsed) .sidebar-toggle{left:min(calc(82vw + 12px),312px)}
+  .main{padding:72px 14px 18px}
+  .toolbar{align-items:flex-start;flex-direction:column}
+}
+@media(max-width:520px){.sidebar-toggle{top:10px;left:10px}.main{padding-left:10px;padding-right:10px}.panel{padding:12px}.modal-box{width:98vw;padding:12px}.actions{flex-wrap:wrap}.actions button{width:100%}}
