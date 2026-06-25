@@ -57,9 +57,73 @@ function ensureRuntimeMigrations(){
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`).run();
 
-    const finCols = db.prepare("PRAGMA table_info(financial_items)").all().map(c=>c.name);
-    if(!finCols.includes("source_type")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_type TEXT").run();
-    if(!finCols.includes("source_id")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_id TEXT").run();
+    const financialCols = db.prepare("PRAGMA table_info(financial_items)").all().map(c=>c.name);
+    if(!financialCols.includes("source_type")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_type TEXT").run();
+    if(!financialCols.includes("source_id")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_id TEXT").run();
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_financial_items_source ON financial_items(source_type, source_id)").run(); } catch(e) {}
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (
+      id TEXT PRIMARY KEY,
+      inventory_id TEXT UNIQUE,
+      item_name TEXT NOT NULL,
+      main_category TEXT,
+      piano_part_category TEXT,
+      item_type TEXT,
+      acquisition_type TEXT,
+      supplier TEXT,
+      manufacturer TEXT,
+      purchase_price REAL DEFAULT 0,
+      manufacturing_cost REAL DEFAULT 0,
+      quantity REAL DEFAULT 1,
+      unit TEXT,
+      condition_status TEXT,
+      location TEXT,
+      linked_piano_id TEXT,
+      linked_client_id TEXT,
+      status TEXT DEFAULT 'In Stock',
+      notes TEXT,
+      deleted_at TEXT,
+      deleted_by TEXT,
+      created_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS inventory_checks (
+      id TEXT PRIMARY KEY,
+      check_date TEXT NOT NULL,
+      completed_by TEXT,
+      item_count INTEGER DEFAULT 0,
+      total_value REAL DEFAULT 0,
+      snapshot_json TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+
+    const inventoryCols = db.prepare("PRAGMA table_info(inventory_items)").all().map(c=>c.name);
+    const addInvCol = (name, ddl) => { if(!inventoryCols.includes(name)) db.prepare(`ALTER TABLE inventory_items ADD COLUMN ${name} ${ddl}`).run(); };
+    addInvCol("inventory_id", "TEXT");
+    addInvCol("item_name", "TEXT");
+    addInvCol("main_category", "TEXT");
+    addInvCol("piano_part_category", "TEXT");
+    addInvCol("item_type", "TEXT");
+    addInvCol("acquisition_type", "TEXT");
+    addInvCol("supplier", "TEXT");
+    addInvCol("manufacturer", "TEXT");
+    addInvCol("purchase_price", "REAL DEFAULT 0");
+    addInvCol("manufacturing_cost", "REAL DEFAULT 0");
+    addInvCol("quantity", "REAL DEFAULT 1");
+    addInvCol("unit", "TEXT");
+    addInvCol("condition_status", "TEXT");
+    addInvCol("location", "TEXT");
+    addInvCol("linked_piano_id", "TEXT");
+    addInvCol("linked_client_id", "TEXT");
+    addInvCol("status", "TEXT DEFAULT 'In Stock'");
+    addInvCol("notes", "TEXT");
+    addInvCol("deleted_at", "TEXT");
+    addInvCol("deleted_by", "TEXT");
+    addInvCol("created_by", "TEXT");
+    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id)").run(); } catch(e) {}
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)").run(); } catch(e) {}
 
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
@@ -84,7 +148,6 @@ function ensureJobKeyColumn(){
   }
 }
 ensureRuntimeMigrations();
-ensureSimonAlexSuperadmin();
 
 const upload = multer({
   dest: UPLOAD_DIR,
@@ -103,37 +166,77 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function today(){ return new Date().toISOString().slice(0,10); }
 function nowISO(){ return new Date().toISOString(); }
-function isSuperadminUser(user){ return !!(user && (user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1)); }
-function isAdminLike(user){ return !!(user && (user.role === "ADMIN" || user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1)); }
-function superPermit(...roles){ return (req,res,next)=>{
-  if(isSuperadminUser(req.user)) return next();
-  return roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"});
-}; }
-function ensureSimonAlexSuperadmin(){
-  try{
-    const userCols=db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
-    if(!userCols.length){ console.warn("superadmin migration skipped: users table does not exist yet"); return; }
-    if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
-    if(!userCols.includes("is_superadmin")) db.prepare("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0").run();
+function nyToday(){
+  return new Intl.DateTimeFormat("en-CA", {timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit"}).format(new Date());
+}
+function balanceAccountFromPaymentMethod(payment){
+  const p=String(payment||"").trim().toLowerCase();
+  if(p.includes("cash")) return "CASH";
+  if(p.includes("check") || p.includes("cheque")) return "CHECKS";
+  if(p.includes("bank") || p.includes("transfer") || p.includes("card") || p.includes("credit")) return "BANK";
+  if(p.includes("invoice")) return "AR";
+  return "BANK";
+}
+function inventoryCategoryCode(category){
+  const c=String(category||"").toLowerCase();
+  if(c.includes("upright")) return "UPR";
+  if(c === "piano" || c.includes("grand")) return "PNO";
+  if(c.includes("part")) return "PRT";
+  if(c.includes("tool")) return "TOL";
+  if(c.includes("machine")) return "MCH";
+  if(c.includes("equipment")) return "EQP";
+  if(c.includes("material")) return "MAT";
+  if(c.includes("accessory")) return "ACC";
+  if(c.includes("office")) return "OFF";
+  return "OTH";
+}
+function nyYear(){
+  return new Intl.DateTimeFormat("en-CA", {timeZone:"America/New_York", year:"numeric"}).format(new Date());
+}
+function addMonthsToDate(dateStr, months){
+  const d=new Date(`${dateStr}T00:00:00`);
+  d.setMonth(d.getMonth()+months);
+  return d.toISOString().slice(0,10);
+}
+function generateInventoryId(mainCategory){
+  ensureRuntimeMigrations();
+  const year=nyYear();
+  const code=inventoryCategoryCode(mainCategory);
+  const rows=db.prepare("SELECT inventory_id FROM inventory_items WHERE inventory_id LIKE ?").all(`INV-${year}-%`);
+  let max=0;
+  for(const r of rows){
+    const m=String(r.inventory_id||"").match(/-(\d{4,})$/);
+    if(m) max=Math.max(max, Number(m[1]||0));
+  }
+  return `INV-${year}-${code}-${String(max+1).padStart(4,"0")}`;
+}
+function inventoryItemValue(item){
+  const unitCost=Number(item.purchase_price||0) || Number(item.manufacturing_cost||0) || 0;
+  return unitCost * Number(item.quantity||1);
+}
+function inventoryRowsActive(){
+  return db.prepare("SELECT * FROM inventory_items WHERE COALESCE(status,'')!='Deleted' ORDER BY created_at DESC").all();
+}
 
-    // Fontos: a role mezőben NEM tárolunk SUPERADMIN értéket, mert a régi SQLite séma
-    // tartalmazhat ADMIN/MANAGER/WORKER CHECK constraintet. A rejtett tulajdonosi jogot
-    // külön is_superadmin=1 flag adja. Login után a tokenben kap SUPERADMIN role-t.
-    const email=(process.env.SUPERADMIN_EMAIL || "simon.alex@klavierhaus.com").trim().toLowerCase();
-    const password=process.env.SUPERADMIN_PASSWORD || "simonalex123";
-    const hash=bcrypt.hashSync(password,10);
-    const existing=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(email);
-    if(existing){
-      db.prepare("UPDATE users SET name=?, password_hash=?, role='ADMIN', status='Active', hidden_user=1, is_superadmin=1, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run("Simon Alex", hash, existing.id);
-      console.log("Hidden SUPERADMIN ensured:", email);
-      return;
-    }
-    const id=rid("U");
-    db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)")
-      .run(id,"Simon Alex",email,hash,"ADMIN","Active",1,1);
-    console.log("Hidden SUPERADMIN created:", email);
-  }catch(e){ console.warn("superadmin migration skipped:", e.message); }
+function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
+  ensureRuntimeMigrations();
+  const amount=Number(billed||0);
+  if(!amount || amount<=0) return null;
+  const existing=db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get("closed_job", job.id);
+  if(existing) return existing;
+  const id=rid("FI");
+  const title=`Closed job revenue / Lezárt munka bevétele: ${job.title||job.job_key||job.id}`;
+  const description=[
+    job.client_name ? `Client / Ügyfél: ${job.client_name}` : "",
+    job.piano_name ? `Piano / Zongora: ${job.piano_name}` : "",
+    logId ? `Job log / Lezárási napló: ${logId}` : ""
+  ].filter(Boolean).join("\n");
+  db.prepare(`INSERT INTO financial_items(
+    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id,nyToday(),title,description,amount,"INCOME","SERVICE_REVENUE","ONE_TIME",payment||"",balanceAccountFromPaymentMethod(payment),job.id,job.client_id||null,job.piano_id||null,"closed_job",job.id,userName||"System"
+  );
+  return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
 }
 
 function auth(req,res,next){
@@ -143,20 +246,20 @@ function auth(req,res,next){
   try{ req.user=jwt.verify(token, JWT_SECRET); next(); }
   catch(e){ res.status(401).json({error:"Invalid token"}); }
 }
-function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
+function permit(...roles){ return (req,res,next)=> roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"}); }
 
 function canCloseJob(user, job){
-  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
+  if(user.role === "ADMIN") return true;
   return job.assigned_to === user.name;
 }
 function canEditJob(user, job){
-  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
+  if(user.role === "ADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER" && job.created_by === user.name) return true;
   return false;
 }
 function canReassignJob(user, job){
-  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
+  if(user.role === "ADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER") return true;
   return false;
@@ -204,17 +307,81 @@ function getJobByAnyId(rawId, body={}){
 }
 
 app.post("/api/login",(req,res)=>{
-  ensureSimonAlexSuperadmin();
   const {email,password}=req.body;
-  const normalizedEmail=String(email||"").trim().toLowerCase();
-  const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?) AND status='Active'").get(normalizedEmail);
-  if(!u || !bcrypt.compareSync(String(password||""), u.password_hash)) return res.status(401).json({error:"Invalid login"});
-  const effectiveRole = Number(u.is_superadmin || 0) === 1 ? "SUPERADMIN" : u.role;
-  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:Number(u.is_superadmin||0)}, JWT_SECRET, {expiresIn:"12h"});
-  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:Number(u.is_superadmin||0)}});
+  const u=db.prepare("SELECT * FROM users WHERE email=? AND status='Active'").get(email);
+  if(!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({error:"Invalid login"});
+  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role}, JWT_SECRET, {expiresIn:"12h"});
+  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:u.role}});
 });
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
+
+app.get("/api/inventory", auth, (req,res)=>{
+  ensureRuntimeMigrations();
+  const includeDeleted = req.query.include_deleted === "1" && (req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin||0)===1);
+  const rows = includeDeleted
+    ? db.prepare("SELECT * FROM inventory_items ORDER BY created_at DESC").all()
+    : db.prepare("SELECT * FROM inventory_items WHERE COALESCE(status,'')!='Deleted' ORDER BY created_at DESC").all();
+  res.json(rows);
+});
+
+app.post("/api/inventory", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const b=req.body || {};
+  if(!String(b.item_name||"").trim()) return res.status(400).json({error:"Item name is required / Tétel neve kötelező"});
+  const id=rid("INVITEM");
+  const inventoryId=generateInventoryId(b.main_category || "Other");
+  const cols=["id","inventory_id","item_name","main_category","piano_part_category","item_type","acquisition_type","supplier","manufacturer","purchase_price","manufacturing_cost","quantity","unit","condition_status","location","linked_piano_id","linked_client_id","status","notes","created_by"];
+  const vals=[id,inventoryId,b.item_name||"",b.main_category||"Other",b.piano_part_category||"",b.item_type||"",b.acquisition_type||"Existing stock",b.supplier||"",b.manufacturer||"",Number(b.purchase_price||0),Number(b.manufacturing_cost||0),Number(b.quantity||1),b.unit||"piece",b.condition_status||"Used",b.location||"",b.linked_piano_id||"",b.linked_client_id||"",b.status||"In Stock",b.notes||"",req.user.name||""];
+  db.prepare(`INSERT INTO inventory_items(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...vals);
+  res.json(db.prepare("SELECT * FROM inventory_items WHERE id=?").get(id));
+});
+
+app.put("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
+  if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
+  const allowed=["item_name","main_category","piano_part_category","item_type","acquisition_type","supplier","manufacturer","purchase_price","manufacturing_cost","quantity","unit","condition_status","location","linked_piano_id","linked_client_id","status","notes"];
+  const body={...req.body};
+  ["purchase_price","manufacturing_cost","quantity"].forEach(k=>{ if(body[k]!==undefined) body[k]=Number(body[k]||0); });
+  const cols=allowed.filter(c=>body[c]!==undefined);
+  if(cols.length) db.prepare(`UPDATE inventory_items SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]), req.params.id);
+  res.json(db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id));
+});
+
+app.delete("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
+  if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
+  db.prepare("UPDATE inventory_items SET status='Deleted', deleted_at=?, deleted_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
+  res.json({ok:true});
+});
+
+app.get("/api/inventory/check-status", auth, (req,res)=>{
+  ensureRuntimeMigrations();
+  const last=db.prepare("SELECT * FROM inventory_checks ORDER BY check_date DESC, created_at DESC LIMIT 1").get();
+  const todayStr=nyToday();
+  const nextDue=last ? addMonthsToDate(last.check_date, 3) : todayStr;
+  const diffDays=Math.ceil((new Date(`${nextDue}T00:00:00`)-new Date(`${todayStr}T00:00:00`))/(1000*60*60*24));
+  res.json({
+    lastInventory:last||null,
+    today:todayStr,
+    nextDue,
+    status: diffDays < 0 ? "OVERDUE" : (diffDays <= 14 ? "DUE_SOON" : "OK"),
+    daysUntilDue:diffDays
+  });
+});
+
+app.post("/api/inventory/complete", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const rows=inventoryRowsActive();
+  const totalValue=rows.reduce((s,r)=>s+inventoryItemValue(r),0);
+  const checkDate=nyToday();
+  const id=rid("INVCHECK");
+  db.prepare("INSERT INTO inventory_checks(id,check_date,completed_by,item_count,total_value,snapshot_json) VALUES(?,?,?,?,?,?)")
+    .run(id,checkDate,req.user.name||"",rows.length,totalValue,JSON.stringify(rows));
+  res.json({ok:true,check:db.prepare("SELECT * FROM inventory_checks WHERE id=?").get(id),nextDue:addMonthsToDate(checkDate,3)});
+});
 
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   ensureRuntimeMigrations();
@@ -276,7 +443,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id));
 });
 
-app.delete("/api/financial-items/:id", auth, permit("SUPERADMIN"), (req,res)=>{
+app.delete("/api/financial-items/:id", auth, permit("ADMIN"), (req,res)=>{
   ensureRuntimeMigrations();
   db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
   res.json({ok:true});
@@ -416,38 +583,24 @@ app.get("/api/income-statement", auth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
-app.get("/api/users", auth, permit("ADMIN","MANAGER","SUPERADMIN"), (req,res)=> {
-  ensureSimonAlexSuperadmin();
-  // Hidden system owner is never returned in the visible user list.
-  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
+app.get("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=> {
+  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users ORDER BY role,name").all());
 });
-app.post("/api/users", auth, permit("ADMIN","MANAGER","SUPERADMIN"), (req,res)=>{
+app.post("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
-  if(role === "SUPERADMIN") return res.status(403).json({error:"SUPERADMIN cannot be created from the visible user form"});
   if(req.user.role==="MANAGER" && role==="ADMIN") return res.status(403).json({error:"Managers cannot create admins"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user) VALUES(?,?,?,?,?,?,0)").run(id,name,email,hash,role,"Active");
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status) VALUES(?,?,?,?,?,?)").run(id,name,email,hash,role,"Active");
   res.json({id,name,email,role,status:"Active"});
 });
-app.put("/api/users/:id", auth, permit("SUPERADMIN"), (req,res)=>{
-  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
-  if(!target) return res.status(404).json({error:"User not found"});
-  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be edited from the visible user list"});
+app.put("/api/users/:id", auth, permit("ADMIN"), (req,res)=>{
   const allowed=["name","email","role","status"];
-  if(req.body.role === "SUPERADMIN") return res.status(403).json({error:"SUPERADMIN role is reserved"});
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
   if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
   res.json(db.prepare("SELECT id,name,email,role,status FROM users WHERE id=?").get(req.params.id));
-});
-app.delete("/api/users/:id", auth, permit("SUPERADMIN"), (req,res)=>{
-  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
-  if(!target) return res.status(404).json({error:"User not found"});
-  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be deleted"});
-  db.prepare("UPDATE users SET status='Deleted', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.params.id);
-  res.json({ok:true});
 });
 
 function createResourceRoutes(key, table, prefix, write, roles){
@@ -577,40 +730,6 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
 });
 
-
-function financeBalanceAccountFromPayment(paymentMethod){
-  const p=String(paymentMethod||"").trim().toLowerCase();
-  if(p.includes("cash")) return "CASH";
-  if(p.includes("check") || p.includes("cheque")) return "CHECKS";
-  if(p.includes("bank")) return "BANK";
-  if(p.includes("card") || p.includes("credit")) return "BANK";
-  if(p.includes("invoice")) return "AR";
-  return "BANK";
-}
-
-function createFinancialItemForClosedJob({job,billed,payment,desc,storedPath,userName}){
-  ensureRuntimeMigrations();
-  const amount=Number(billed||0);
-  if(!amount || amount<=0) return null;
-  const existing=db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get("closed_job", job.id);
-  if(existing) return existing;
-  const id=rid("FI");
-  const itemDate=(nowISO()).slice(0,10);
-  const title=`${job.title || "Closed job"}${job.client_name ? " - " + job.client_name : ""}`;
-  const description=[
-    "Automatically created from closed job / Automatikusan létrehozva lezárt munkából",
-    desc || "",
-    storedPath ? `Invoice/check file: ${storedPath}` : ""
-  ].filter(Boolean).join("\n");
-  const balanceAccount=financeBalanceAccountFromPayment(payment);
-  db.prepare(`INSERT INTO financial_items(
-    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,itemDate,title,description,amount,"INCOME","SERVICE_REVENUE","ONE_TIME",payment||"",balanceAccount,job.id,job.client_id||null,job.piano_id||null,"closed_job",job.id,userName||"System"
-  );
-  return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
-}
-
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
@@ -662,14 +781,14 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(closeType==="Full"?"Completed":"Partially completed",closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
 
+  const logId=rid("LOG");
   db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(rid("LOG"),job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+    .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
 
   db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":"Részlezárás"}: ${job.title}`,closeType==="Full"?"Closed Job":"Partial Close","Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
 
-  const financialItem=createFinancialItemForClosedJob({job,billed,payment,desc,storedPath,userName:req.user.name});
-
+  const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
   res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
 });
 
