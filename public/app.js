@@ -407,21 +407,116 @@ async function loadMonthlyIncomeStatement(month){
 }
 function renderIncomeSheetHTML(d, includeTrial=true){
  const acct=c=>d.trialBalance.filter(a=>a.category===c);
- const rows=arr=>arr.map(a=>`<div class="cf-row"><span>${a.name_en}<br><small>${a.name_hu}</small></span><b>${money(a.balance)}</b></div>`).join("")||"<p class='muted'>No data / Nincs adat</p>";
- const trial=includeTrial?`<div class="panel income-trial-table"><h3>Monthly trial balance / Havi főkönyvi kivonat</h3><div class="table-wrap"><table><thead><tr><th>Code / Kód</th><th>Account / Számla</th><th>Category / Kategória</th><th>Debit / Tartozik</th><th>Credit / Követel</th><th>Balance / Egyenleg</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("")}</tbody></table></div></div>`:"";
- return `<div class="grid kpis">
-   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
-   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
-   <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
-   <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
- </div>
- <div class="cashflow-sheet">
-   <div class="cf-box"><h3>Income / Bevételek</h3>${rows(acct("REVENUE"))}</div>
-   <div class="cf-box"><h3>Expenses / Kiadások</h3>${rows(acct("EXPENSE"))}<div class="cf-total"><span>Monthly Cash Flow / Havi készpénzáramlás</span><b>${money(d.totals.profit)}</b></div></div>
-   <div class="cf-box"><h3>Assets / Eszközök</h3>${rows(acct("ASSET"))}</div>
-   <div class="cf-box"><h3>Liabilities & Equity / Kötelezettségek és saját tőke</h3>${rows([...acct("LIABILITY"),...acct("EQUITY")])}<div class="cf-total"><span>Net Worth / Nettó vagyon</span><b>${money(d.totals.netWorth)}</b></div></div>
+ const balanceRows=(arr,fallback)=>arr.length ? arr.map(a=>`<div class="cf-line"><span>${a.name_en} <small>(${a.name_hu})</small></span><b>${money(a.balance)}</b></div>`).join("") : fallback.map(x=>`<div class="cf-line empty"><span>${x}</span><b>—</b></div>`).join("");
+ const fallbackIncome=[
+   "Service Revenue (Szolgáltatási bevétel)",
+   "Interest Income (Kamatbevétel)",
+   "Dividend Income (Osztalékbevétel)",
+   "Real Estate Income (Ingatlanbevétel)",
+   "Business Income (Üzleti bevétel)",
+   "Other Income (Egyéb bevétel)"
+ ];
+ const fallbackExpenses=[
+   "Taxes (Adók)",
+   "Materials Expense (Anyagköltség)",
+   "Contractor Labor (Alvállalkozói munkadíj)",
+   "Transportation (Szállítás)",
+   "Rent (Bérleti díj)",
+   "Insurance (Biztosítás)",
+   "Repair Expense (Javítási költség)",
+   "Other Expense (Egyéb költség)"
+ ];
+ const fallbackAssets=[
+   "Cash (Készpénz)",
+   "Bank Account (Bankszámla)",
+   "Undeposited Checks (Befizetés előtti csekkek)",
+   "Accounts Receivable (Vevőkövetelés)",
+   "Inventory (Készlet)",
+   "Company Pianos (Céges zongorák)",
+   "Tools and Equipment (Szerszámok és berendezések)",
+   "Other Assets (Egyéb eszközök)"
+ ];
+ const fallbackSources=[
+   "Accounts Payable (Szállítói tartozás)",
+   "Loans Payable (Hitelek)",
+   "Check Payables (Csekkes tartozás)",
+   "Bank Loan (Bankkölcsön)",
+   "Owner Equity (Saját tőke)",
+   "Other Sources (Egyéb forrás)"
+ ];
+
+ const incomeRows=balanceRows(acct("REVENUE"),fallbackIncome);
+ const expenseRows=balanceRows(acct("EXPENSE"),fallbackExpenses);
+ const assetRows=balanceRows(acct("ASSET"),fallbackAssets);
+ const sourceRows=balanceRows([...acct("LIABILITY"),...acct("EQUITY")],fallbackSources);
+
+ const trial=includeTrial?`<div class="panel income-trial-table no-print-break">
+   <h3>Monthly Trial Balance (Havi főkönyvi kivonat)</h3>
+   <p class="muted">General Ledger has been removed. This section is kept as a technical summary placeholder. (A Főkönyv funkció törölve lett, ez technikai összesítő hely.)</p>
+   <div class="table-wrap"><table><thead><tr><th>Code</th><th>Account</th><th>Category</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No ledger data (Nincs főkönyvi adat)</td></tr>`}</tbody></table></div>
+ </div>`:"";
+
+ return `<div class="cashflow-layout">
+   <div class="cf-topbar">
+     <div class="cf-label">Business (Foglalkozás)</div>
+     <div class="cf-titleblock">
+       <h2>Income Statement (Eredménykimutatás)</h2>
+       <p>Calendar-first work management financial overview (Naptárközpontú munkakezelési pénzügyi áttekintés)</p>
+     </div>
+     <div class="cf-label right">Klavierhaus</div>
+   </div>
+
+   <div class="cf-upper">
+     <div class="cf-income-expense">
+       <div class="cf-card">
+         <div class="cf-card-head">Income ($/month) <span>(Bevételek $/hó)</span></div>
+         <div class="cf-card-body">${incomeRows}</div>
+       </div>
+
+       <div class="cf-card">
+         <div class="cf-card-head">Expenses ($/month) <span>(Kiadások $/hó)</span></div>
+         <div class="cf-card-body">${expenseRows}</div>
+       </div>
+     </div>
+
+     <div class="cf-summary">
+       <div class="cf-card cf-bookkeeper">
+         <div class="cf-card-head">Bookkeeper <span>(Könyvvizsgáló)</span></div>
+         <div class="cf-card-body">
+           <div class="cf-line big"><span>Passive Income (Passzív jövedelem)</span><b>${money(Math.max(0,d.totals.revenue||0))}</b></div>
+           <div class="cf-rule"></div>
+           <div class="cf-line total"><span>Total Income (Összes bevétel)</span><b>${money(d.totals.revenue)}</b></div>
+         </div>
+       </div>
+
+       <div class="cf-card cf-cashflow">
+         <div class="cf-card-body">
+           <div class="cf-line total"><span>Total Expenses (Összes kiadás)</span><b>${money(d.totals.expenses)}</b></div>
+           <div class="cf-rule"></div>
+           <div class="cf-line cashflow"><span>Monthly Cash Flow (Havi készpénzáramlás)</span><b>${money(d.totals.profit)}</b></div>
+         </div>
+       </div>
+     </div>
+   </div>
+
+   <div class="cf-balance-title">Balance Sheet (Mérleg)</div>
+   <div class="cf-balance">
+     <div class="cf-card">
+       <div class="cf-card-head">Assets ($) <span>(Eszközök $)</span></div>
+       <div class="cf-card-body">${assetRows}</div>
+     </div>
+     <div class="cf-card">
+       <div class="cf-card-head">Sources ($) <span>(Források $)</span></div>
+       <div class="cf-card-body">${sourceRows}</div>
+     </div>
+   </div>
+
+   <div class="cf-footer">
+     <div class="cf-line total"><span>Net Worth (Nettó vagyon)</span><b>${money(d.totals.netWorth)}</b></div>
+   </div>
  </div>${trial}`;
 }
+
 async function renderIncomeStatement(){
  const currentMonth=currentMonthKey();
  const d=await loadMonthlyIncomeStatement(currentMonth);
@@ -537,5 +632,47 @@ function exportClosedJobs(){
 async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
 function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
 if(token)boot();
+
+
+(function incomeStatementCashflowLayoutStyle(){
+ const s=document.createElement("style");
+ s.textContent=`
+ .cashflow-layout{display:flex;flex-direction:column;gap:18px;max-width:1180px;margin:0 auto;}
+ .cf-topbar{display:grid;grid-template-columns:220px 1fr 220px;align-items:start;gap:16px;}
+ .cf-label{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:12px 16px;font-weight:800;text-align:center;box-shadow:var(--shadow);}
+ .cf-label.right{text-align:center;}
+ .cf-titleblock{text-align:center;}
+ .cf-titleblock h2{font-size:30px;margin:0 0 4px;}
+ .cf-titleblock p{margin:0;color:var(--muted);}
+ .cf-upper{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;align-items:stretch;}
+ .cf-income-expense{display:flex;flex-direction:column;gap:18px;}
+ .cf-summary{display:flex;flex-direction:column;gap:18px;}
+ .cf-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);}
+ .cf-card-head{background:var(--panel-2);border-bottom:1px solid var(--line);padding:12px 16px;font-size:18px;font-weight:900;}
+ .cf-card-head span{color:var(--muted);font-weight:700;font-size:14px;}
+ .cf-card-body{padding:14px 18px;}
+ .cf-line{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;border-bottom:1px solid rgba(148,163,184,.22);padding:8px 0;min-height:34px;}
+ .cf-line span{font-weight:650;}
+ .cf-line small{color:var(--muted);font-weight:600;}
+ .cf-line b{font-variant-numeric:tabular-nums;}
+ .cf-line.empty b{color:var(--muted);}
+ .cf-line.big{min-height:70px;align-items:center;font-size:19px;border-bottom:0;}
+ .cf-line.total{font-size:18px;font-weight:900;border-bottom:0;}
+ .cf-line.cashflow{font-size:19px;font-weight:950;border-bottom:0;}
+ .cf-rule{height:2px;background:var(--line);margin:18px 0;}
+ .cf-bookkeeper{min-height:260px;}
+ .cf-cashflow{min-height:185px;display:flex;flex-direction:column;justify-content:center;}
+ .cf-balance-title{text-align:center;font-size:30px;font-weight:950;margin-top:6px;}
+ .cf-balance{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
+ .cf-footer{max-width:560px;margin-left:auto;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:10px 18px;box-shadow:var(--shadow);}
+ .no-print-break{break-inside:avoid;}
+ @media(max-width:980px){
+   .cf-topbar{grid-template-columns:1fr;}
+   .cf-upper,.cf-balance{grid-template-columns:1fr;}
+   .cf-footer{max-width:none;width:auto;}
+ }
+ `;
+ document.head.appendChild(s);
+})();
 
 (function forceCompletedGreenStyle(){const s=document.createElement("style");s.textContent=".cal-event.Completed,.badge.Completed{background:var(--green)!important;color:#07101d!important;}";document.head.appendChild(s);})();
