@@ -295,18 +295,43 @@ function incomeStatementPayload(month){
     COMPANY_PIANOS:["Company Pianos","Céges zongorák","ASSET"],
     TOOLS:["Tools and Equipment","Szerszámok és berendezések","ASSET"],
     OTHER_ASSET:["Other Assets","Egyéb eszközök","ASSET"],
-    AP:["Accounts Payable","Szállítói tartozás","LIABILITY"],
     LOAN:["Loans Payable","Hitelek","LIABILITY"],
-    CHECK_PAYABLE:["Check Payables","Csekkes tartozás","LIABILITY"],
     BANK_LOAN:["Bank Loan","Bankkölcsön","LIABILITY"],
+    INSURANCE_LIABILITY:["Insurance Liabilities","Biztosítási kötelezettségek","LIABILITY"],
+    OTHER_LONG_TERM_SOURCE:["Other Long-Term Sources","Egyéb hosszú lejáratú források","LIABILITY"],
+    AP:["Accounts Payable","Szállítói tartozás","LIABILITY"],
+    CHECK_PAYABLE:["Check Payables","Csekkes tartozás","LIABILITY"],
+    RENT_PAYABLE:["Rent","Bérleti díj","LIABILITY"],
+    UTILITIES_PAYABLE:["Utilities","Rezsi","LIABILITY"],
+    SHORT_TERM_OPERATING:["Short-Term Operating Expenses","Rövid lejáratú működési kiadások","LIABILITY"],
+    OTHER_SHORT_TERM_SOURCE:["Other Short-Term Sources","Egyéb rövid lejáratú források","LIABILITY"],
     OWNER_EQUITY:["Owner Equity","Saját tőke","EQUITY"],
     OTHER_SOURCE:["Other Sources","Egyéb forrás","EQUITY"]
   };
+  const accountOrder={
+    REVENUE:0,EXPENSE:100,ASSET:200,LIABILITY:300,EQUITY:400,
+    SERVICE_REVENUE:1,PIANO_SALE:2,PASSIVE_REVENUE:3,OTHER_INCOME:20,
+    TAX:101,MATERIALS:102,CONTRACTOR:103,TRANSPORT:104,RENT:105,INSURANCE:106,OTHER_EXPENSE:130,
+    CASH:201,BANK:202,CHECKS:203,AR:204,INVENTORY:205,COMPANY_PIANOS:206,TOOLS:207,OTHER_ASSET:230,
+    LOAN:301,BANK_LOAN:302,INSURANCE_LIABILITY:303,OTHER_LONG_TERM_SOURCE:304,AP:321,CHECK_PAYABLE:322,RENT_PAYABLE:323,UTILITIES_PAYABLE:324,SHORT_TERM_OPERATING:325,OTHER_SHORT_TERM_SOURCE:340,
+    OWNER_EQUITY:401,OTHER_SOURCE:420
+  };
   function addBalance(code, amount, preferredCategory){
     const n=categoryNames[code] || [code,code,preferredCategory||"ASSET"];
-    const a=account(code,n[0],n[1],n[2]);
-    a.balance += Number(amount||0);
-    if(Number(amount||0)>=0) a.debit_total += Number(amount||0); else a.credit_total += Math.abs(Number(amount||0));
+    const categoryOverride = preferredCategory && !categoryNames[code] ? preferredCategory : n[2];
+    const a=account(code,n[0],n[1],categoryOverride);
+    a.balance += Math.abs(Number(amount||0));
+    if(Number(amount||0)>=0) a.debit_total += Math.abs(Number(amount||0)); else a.credit_total += Math.abs(Number(amount||0));
+  }
+  function expenseSourceAccount(item){
+    const code=String(item.balance_account||"").trim();
+    const meta=categoryNames[code];
+    if(meta && (meta[2]==="LIABILITY" || meta[2]==="EQUITY")) return code;
+    const cat=String(item.category||"").trim();
+    if(cat==="RENT") return "RENT_PAYABLE";
+    if(cat==="INSURANCE") return "INSURANCE_LIABILITY";
+    if(cat==="TAX" || cat==="MATERIALS" || cat==="CONTRACTOR" || cat==="TRANSPORT") return "SHORT_TERM_OPERATING";
+    return "OTHER_SHORT_TERM_SOURCE";
   }
   rows.forEach(x=>{
     const amount=Number(x.amount||0);
@@ -315,7 +340,7 @@ function incomeStatementPayload(month){
       if(x.balance_account) addBalance(x.balance_account, amount, 'ASSET');
     } else if(x.main_type==='EXPENSE'){
       addBalance(x.category || 'OTHER_EXPENSE', amount, 'EXPENSE');
-      if(x.balance_account) addBalance(x.balance_account, -amount, 'ASSET');
+      addBalance(expenseSourceAccount(x), amount, 'LIABILITY');
     } else if(x.main_type==='ASSET'){
       addBalance(x.category || x.balance_account || 'OTHER_ASSET', amount, 'ASSET');
     } else if(x.main_type==='LIABILITY'){
@@ -324,15 +349,16 @@ function incomeStatementPayload(month){
       addBalance(x.category || 'OWNER_EQUITY', amount, 'EQUITY');
     }
   });
-  const trialBalance=Object.values(accounts).sort((a,b)=>String(a.category+a.code).localeCompare(String(b.category+b.code)));
+  const trialBalance=Object.values(accounts).sort((a,b)=>(accountOrder[a.code]??999)-(accountOrder[b.code]??999));
   const assets=trialBalance.filter(a=>a.category==='ASSET').reduce((s,a)=>s+Number(a.balance||0),0);
   const liabilities=trialBalance.filter(a=>a.category==='LIABILITY').reduce((s,a)=>s+Number(a.balance||0),0);
   const equity=trialBalance.filter(a=>a.category==='EQUITY').reduce((s,a)=>s+Number(a.balance||0),0);
+  const sources=liabilities+equity;
   return {
     month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
     accountingLogic:{source:"financial_items",generalLedger:"simple_internal_finance_register"},
     counts:{openJobs,closedJobs:closedJobs.length,financialItems:rows.length},
-    totals:{passiveIncome,oneTimeIncome,revenue,recurringExpenses,oneTimeExpenses,expenses,profit:revenue-expenses,assets,liabilities,equity,netWorth:assets-liabilities},
+    totals:{passiveIncome,oneTimeIncome,revenue,recurringExpenses,oneTimeExpenses,expenses,profit:revenue-expenses,assets,liabilities,equity,sources,netWorth:assets-sources},
     trialBalance,
     items:rows
   };
