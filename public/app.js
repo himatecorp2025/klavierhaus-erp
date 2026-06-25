@@ -262,10 +262,17 @@ function validateDateField(input){
  if(!/^\d{4}$/.test(year)){alert("Az évszám pontosan 4 számjegyből álljon. / Year must be exactly 4 digits."); return false}
  return true;
 }
+function nowInNewYorkLocalString(){
+ const parts=new Intl.DateTimeFormat("en-US",{
+   timeZone:"America/New_York",
+   year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false
+ }).formatToParts(new Date()).reduce((a,p)=>{a[p.type]=p.value;return a;},{});
+ return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
 function isPastDate(value){
- const d=new Date(value);
- const now=new Date();
- return d.getTime() < now.getTime();
+ const v=String(value||"").slice(0,16);
+ if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return false;
+ return v < nowInNewYorkLocalString();
 }
 
 function toggleInstructionsField(){
@@ -667,10 +674,10 @@ function renderIncomeSheetHTML(d, includeTrial=true){
  </div>`:"";
 
  return `<div class="grid kpis">
-   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
-   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
    <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
    <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
+   <div class="kpi"><span>Assets / Eszközök</span><strong>${money(d.totals.assets||0)}</strong></div>
+   <div class="kpi"><span>Sources / Források</span><strong>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</strong></div>
  </div>
 
  <div class="cashflow-layout">
