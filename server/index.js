@@ -35,6 +35,26 @@ function ensureRuntimeMigrations(){
 
     db.prepare("UPDATE pianos SET ownership_type=COALESCE(ownership_type, ownership, 'Customer owned')").run();
     db.prepare("UPDATE pianos SET display_name=trim(COALESCE(brand,'') || ' ' || COALESCE(model,'')) WHERE display_name IS NULL OR display_name=''").run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS financial_items (
+      id TEXT PRIMARY KEY,
+      item_date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      amount REAL NOT NULL DEFAULT 0,
+      main_type TEXT NOT NULL,
+      category TEXT,
+      recurrence TEXT NOT NULL DEFAULT 'ONE_TIME',
+      payment_method TEXT,
+      balance_account TEXT,
+      job_id TEXT,
+      client_id TEXT,
+      piano_id TEXT,
+      created_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
   }
@@ -155,66 +175,177 @@ app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  const rows=db.prepare(`
-    SELECT id, job_key AS job_id, title AS job_title, client_name, piano_name,
-           completed_at AS entry_date, billed_amount, payment_method,
-           invoice_number, 'Completed job' AS invoice_status
-    FROM jobs
-    WHERE status='Completed'
-    ORDER BY completed_at DESC
-  `).all().map(r=>({...r,lines:[]}));
-  res.json(rows);
+  ensureRuntimeMigrations();
+  const rows=db.prepare("SELECT * FROM financial_items ORDER BY item_date DESC, created_at DESC").all();
+  res.json(rows.map(r=>({...r,lines:[]})));
 });
 
+app.get("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const where=[];
+  const params=[];
+  const {month, main_type, recurrence, category}=req.query;
+  if(month && /^\d{4}-\d{2}$/.test(month)){
+    const start=`${month}-01`;
+    const next=new Date(`${start}T00:00:00`);
+    next.setMonth(next.getMonth()+1);
+    const end=next.toISOString().slice(0,10);
+    where.push("((recurrence='MONTHLY' AND item_date < ?) OR (recurrence!='MONTHLY' AND item_date >= ? AND item_date < ?))");
+    params.push(end,start,end);
+  }
+  if(main_type){ where.push("main_type=?"); params.push(main_type); }
+  if(recurrence){ where.push("recurrence=?"); params.push(recurrence); }
+  if(category){ where.push("category=?"); params.push(category); }
+  const sql=`SELECT * FROM financial_items ${where.length?"WHERE "+where.join(" AND "):""} ORDER BY item_date DESC, created_at DESC`;
+  res.json(db.prepare(sql).all(...params));
+});
 
-app.get("/api/income-statement/monthly", auth, (req,res)=>{
-  const month = req.query.month || today().slice(0,7);
-  if(!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({error:"Month must be YYYY-MM"});
+app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const id=req.body.id || rid("FI");
+  const item_date=req.body.item_date || today();
+  const title=(req.body.title||"").trim();
+  const amount=Number(req.body.amount||0);
+  const main_type=req.body.main_type;
+  const recurrence=req.body.recurrence || "ONE_TIME";
+  if(!title) return res.status(400).json({error:"Title is required / Megnevezés kötelező"});
+  if(!["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
+  if(!["ONE_TIME","MONTHLY"].includes(recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
+  if(Number.isNaN(amount) || amount<0) return res.status(400).json({error:"Amount must be a positive number / Az összeg nem lehet negatív"});
+  db.prepare(`INSERT INTO financial_items(
+    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,created_by
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,req.body.payment_method||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.user.name
+  );
+  res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(id));
+});
+
+app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  ensureRuntimeMigrations();
+  const existing=db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id);
+  if(!existing) return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
+  const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id"];
+  const body={...req.body};
+  if(body.amount!==undefined) body.amount=Number(body.amount||0);
+  if(body.main_type!==undefined && !["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(body.main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
+  if(body.recurrence!==undefined && !["ONE_TIME","MONTHLY"].includes(body.recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
+  const cols=allowed.filter(c=>body[c]!==undefined);
+  if(cols.length) db.prepare(`UPDATE financial_items SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]),req.params.id);
+  res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id));
+});
+
+app.delete("/api/financial-items/:id", auth, permit("ADMIN"), (req,res)=>{
+  ensureRuntimeMigrations();
+  db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
+  res.json({ok:true});
+});
+
+function financialItemsForMonth(month){
   const monthStart = `${month}-01`;
   const nextMonth = new Date(`${monthStart}T00:00:00`);
   nextMonth.setMonth(nextMonth.getMonth()+1);
   const monthEnd = nextMonth.toISOString().slice(0,10);
+  const rows=db.prepare(`
+    SELECT * FROM financial_items
+    WHERE (recurrence='MONTHLY' AND item_date < ?)
+       OR (recurrence!='MONTHLY' AND item_date >= ? AND item_date < ?)
+    ORDER BY item_date, created_at
+  `).all(monthEnd,monthStart,monthEnd);
+  return {monthStart,monthEnd,rows};
+}
 
-  const closedJobs=db.prepare(`
-    SELECT * FROM jobs
-    WHERE status='Completed'
-      AND completed_at >= ? AND completed_at < ?
-  `).all(monthStart,monthEnd);
-
-  const revenue=closedJobs.reduce((s,j)=>s+Number(j.billed_amount||j.planned_amount||0),0);
-  const expenses=0;
+function incomeStatementPayload(month){
+  ensureRuntimeMigrations();
+  if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Month must be YYYY-MM");
+  const {monthStart,monthEnd,rows}=financialItemsForMonth(month);
+  const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,monthEnd);
   const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
 
-  res.json({
-    month,
-    monthStart,
-    monthEndExclusive:monthEnd,
-    generatedAt:new Date().toISOString(),
-    accountingLogic:{source:"closed_jobs_and_invoices",generalLedger:"removed"},
-    counts:{openJobs,closedJobs:closedJobs.length},
-    totals:{revenue,expenses,profit:revenue-expenses,assets:0,liabilities:0,equity:0,netWorth:0},
-    trialBalance:[]
+  const incomeItems=rows.filter(x=>x.main_type==='INCOME');
+  const expenseItems=rows.filter(x=>x.main_type==='EXPENSE');
+  const passiveIncome=incomeItems.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
+  const oneTimeIncome=incomeItems.filter(x=>x.recurrence!=='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
+  const revenue=passiveIncome+oneTimeIncome;
+  const recurringExpenses=expenseItems.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
+  const oneTimeExpenses=expenseItems.filter(x=>x.recurrence!=='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
+  const expenses=recurringExpenses+oneTimeExpenses;
+
+  const accounts={};
+  function account(code,name_en,name_hu,category){
+    if(!accounts[code]) accounts[code]={code,name_en,name_hu,category,debit_total:0,credit_total:0,balance:0};
+    return accounts[code];
+  }
+  const categoryNames={
+    SERVICE_REVENUE:["Service Revenue","Szolgáltatási bevétel","REVENUE"],
+    PIANO_SALE:["Piano Sale Revenue","Zongoraeladás bevétele","REVENUE"],
+    PASSIVE_REVENUE:["Recurring Revenue","Ismétlődő bevétel","REVENUE"],
+    OTHER_INCOME:["Other Income","Egyéb bevétel","REVENUE"],
+    MATERIALS:["Materials Expense","Anyagköltség","EXPENSE"],
+    CONTRACTOR:["Contractor Labor","Alvállalkozói munkadíj","EXPENSE"],
+    TRANSPORT:["Transportation","Szállítás","EXPENSE"],
+    RENT:["Rent","Bérleti díj","EXPENSE"],
+    INSURANCE:["Insurance","Biztosítás","EXPENSE"],
+    TAX:["Taxes","Adók","EXPENSE"],
+    OTHER_EXPENSE:["Other Expense","Egyéb kiadás","EXPENSE"],
+    CASH:["Cash","Készpénz","ASSET"],
+    BANK:["Bank Account","Bankszámla","ASSET"],
+    CHECKS:["Undeposited Checks","Befizetés előtti csekkek","ASSET"],
+    AR:["Accounts Receivable","Vevőkövetelés","ASSET"],
+    INVENTORY:["Inventory","Készlet","ASSET"],
+    COMPANY_PIANOS:["Company Pianos","Céges zongorák","ASSET"],
+    TOOLS:["Tools and Equipment","Szerszámok és berendezések","ASSET"],
+    OTHER_ASSET:["Other Assets","Egyéb eszközök","ASSET"],
+    AP:["Accounts Payable","Szállítói tartozás","LIABILITY"],
+    LOAN:["Loans Payable","Hitelek","LIABILITY"],
+    CHECK_PAYABLE:["Check Payables","Csekkes tartozás","LIABILITY"],
+    BANK_LOAN:["Bank Loan","Bankkölcsön","LIABILITY"],
+    OWNER_EQUITY:["Owner Equity","Saját tőke","EQUITY"],
+    OTHER_SOURCE:["Other Sources","Egyéb forrás","EQUITY"]
+  };
+  function addBalance(code, amount, preferredCategory){
+    const n=categoryNames[code] || [code,code,preferredCategory||"ASSET"];
+    const a=account(code,n[0],n[1],n[2]);
+    a.balance += Number(amount||0);
+    if(Number(amount||0)>=0) a.debit_total += Number(amount||0); else a.credit_total += Math.abs(Number(amount||0));
+  }
+  rows.forEach(x=>{
+    const amount=Number(x.amount||0);
+    if(x.main_type==='INCOME'){
+      addBalance(x.category || (x.recurrence==='MONTHLY'?'PASSIVE_REVENUE':'SERVICE_REVENUE'), amount, 'REVENUE');
+      if(x.balance_account) addBalance(x.balance_account, amount, 'ASSET');
+    } else if(x.main_type==='EXPENSE'){
+      addBalance(x.category || 'OTHER_EXPENSE', amount, 'EXPENSE');
+      if(x.balance_account) addBalance(x.balance_account, -amount, 'ASSET');
+    } else if(x.main_type==='ASSET'){
+      addBalance(x.category || x.balance_account || 'OTHER_ASSET', amount, 'ASSET');
+    } else if(x.main_type==='LIABILITY'){
+      addBalance(x.category || 'OTHER_SOURCE', amount, 'LIABILITY');
+    } else if(x.main_type==='EQUITY'){
+      addBalance(x.category || 'OWNER_EQUITY', amount, 'EQUITY');
+    }
   });
+  const trialBalance=Object.values(accounts).sort((a,b)=>String(a.category+a.code).localeCompare(String(b.category+b.code)));
+  const assets=trialBalance.filter(a=>a.category==='ASSET').reduce((s,a)=>s+Number(a.balance||0),0);
+  const liabilities=trialBalance.filter(a=>a.category==='LIABILITY').reduce((s,a)=>s+Number(a.balance||0),0);
+  const equity=trialBalance.filter(a=>a.category==='EQUITY').reduce((s,a)=>s+Number(a.balance||0),0);
+  return {
+    month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
+    accountingLogic:{source:"financial_items",generalLedger:"simple_internal_finance_register"},
+    counts:{openJobs,closedJobs:closedJobs.length,financialItems:rows.length},
+    totals:{passiveIncome,oneTimeIncome,revenue,recurringExpenses,oneTimeExpenses,expenses,profit:revenue-expenses,assets,liabilities,equity,netWorth:assets-liabilities},
+    trialBalance,
+    items:rows
+  };
+}
+
+app.get("/api/income-statement/monthly", auth, (req,res)=>{
+  try{ res.json(incomeStatementPayload(req.query.month || today().slice(0,7))); }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.get("/api/income-statement", auth, (req,res)=>{
-  const month=today().slice(0,7);
-  const monthStart = `${month}-01`;
-  const nextMonth = new Date(`${monthStart}T00:00:00`);
-  nextMonth.setMonth(nextMonth.getMonth()+1);
-  const monthEnd = nextMonth.toISOString().slice(0,10);
-  const closedJobs=db.prepare(`
-    SELECT * FROM jobs
-    WHERE status='Completed'
-      AND completed_at >= ? AND completed_at < ?
-  `).all(monthStart,monthEnd);
-  const revenue=closedJobs.reduce((s,j)=>s+Number(j.billed_amount||j.planned_amount||0),0);
-  const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
-  res.json({
-    counts:{openJobs,closedJobs:closedJobs.length},
-    totals:{revenue,expenses:0,profit:revenue,assets:0,liabilities:0,equity:0,netWorth:0},
-    trialBalance:[]
-  });
+  try{ res.json(incomeStatementPayload(today().slice(0,7))); }
+  catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.get("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=> {
@@ -516,7 +647,6 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
