@@ -103,26 +103,36 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function today(){ return new Date().toISOString().slice(0,10); }
 function nowISO(){ return new Date().toISOString(); }
-function isSuperadminUser(user){ return user && user.role === "SUPERADMIN"; }
-function isAdminLike(user){ return user && (user.role === "ADMIN" || user.role === "SUPERADMIN"); }
+function isSuperadminUser(user){ return !!(user && (user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1)); }
+function isAdminLike(user){ return !!(user && (user.role === "ADMIN" || user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1)); }
 function superPermit(...roles){ return (req,res,next)=>{
-  if(req.user && req.user.role === "SUPERADMIN") return next();
+  if(isSuperadminUser(req.user)) return next();
   return roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"});
 }; }
 function ensureSimonAlexSuperadmin(){
   try{
     const userCols=db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
+    if(!userCols.length){ console.warn("superadmin migration skipped: users table does not exist yet"); return; }
     if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
-    const email="simon.alex@klavierhaus.com";
+    if(!userCols.includes("is_superadmin")) db.prepare("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0").run();
+
+    // Fontos: a role mezőben NEM tárolunk SUPERADMIN értéket, mert a régi SQLite séma
+    // tartalmazhat ADMIN/MANAGER/WORKER CHECK constraintet. A rejtett tulajdonosi jogot
+    // külön is_superadmin=1 flag adja. Login után a tokenben kap SUPERADMIN role-t.
+    const email=(process.env.SUPERADMIN_EMAIL || "simon.alex@klavierhaus.com").trim().toLowerCase();
+    const password=process.env.SUPERADMIN_PASSWORD || "simonalex123";
+    const hash=bcrypt.hashSync(password,10);
     const existing=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(email);
     if(existing){
-      db.prepare("UPDATE users SET name=?, role='SUPERADMIN', status='Active', hidden_user=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run("Simon Alex", existing.id);
+      db.prepare("UPDATE users SET name=?, password_hash=?, role='ADMIN', status='Active', hidden_user=1, is_superadmin=1, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run("Simon Alex", hash, existing.id);
+      console.log("Hidden SUPERADMIN ensured:", email);
       return;
     }
     const id=rid("U");
-    const hash=bcrypt.hashSync(process.env.SUPERADMIN_PASSWORD || "simonalex123",10);
-    db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user) VALUES(?,?,?,?,?,?,?)")
-      .run(id,"Simon Alex",email,hash,"SUPERADMIN","Active",1);
+    db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)")
+      .run(id,"Simon Alex",email,hash,"ADMIN","Active",1,1);
+    console.log("Hidden SUPERADMIN created:", email);
   }catch(e){ console.warn("superadmin migration skipped:", e.message); }
 }
 
@@ -133,20 +143,20 @@ function auth(req,res,next){
   try{ req.user=jwt.verify(token, JWT_SECRET); next(); }
   catch(e){ res.status(401).json({error:"Invalid token"}); }
 }
-function permit(...roles){ return (req,res,next)=> (req.user.role === "SUPERADMIN" || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
+function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 
 function canCloseJob(user, job){
-  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
+  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
   return job.assigned_to === user.name;
 }
 function canEditJob(user, job){
-  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
+  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER" && job.created_by === user.name) return true;
   return false;
 }
 function canReassignJob(user, job){
-  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
+  if(user.role === "ADMIN" || isSuperadminUser(user)) return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER") return true;
   return false;
@@ -194,11 +204,14 @@ function getJobByAnyId(rawId, body={}){
 }
 
 app.post("/api/login",(req,res)=>{
+  ensureSimonAlexSuperadmin();
   const {email,password}=req.body;
-  const u=db.prepare("SELECT * FROM users WHERE email=? AND status='Active'").get(email);
-  if(!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({error:"Invalid login"});
-  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role}, JWT_SECRET, {expiresIn:"12h"});
-  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:u.role}});
+  const normalizedEmail=String(email||"").trim().toLowerCase();
+  const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?) AND status='Active'").get(normalizedEmail);
+  if(!u || !bcrypt.compareSync(String(password||""), u.password_hash)) return res.status(401).json({error:"Invalid login"});
+  const effectiveRole = Number(u.is_superadmin || 0) === 1 ? "SUPERADMIN" : u.role;
+  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:Number(u.is_superadmin||0)}, JWT_SECRET, {expiresIn:"12h"});
+  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:Number(u.is_superadmin||0)}});
 });
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
