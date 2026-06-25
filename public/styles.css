@@ -26,3 +26,7 @@
 .cf-card-head-sum small{color:var(--muted);font-weight:700;font-size:14px}
 .cf-footer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:none;width:100%}
 .cf-footer-grid .cf-line{background:#081525;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0}
+
+/* Inventory / Leltár module */
+.inventory-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:12px}.left-actions{justify-content:flex-start}.danger-text{color:var(--red)!important}.warning-text{color:var(--orange)!important}.danger-btn{background:#3a1111!important;color:#fff!important}.danger-btn:hover{background:var(--red)!important;color:#fff!important}.inventory-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:14px}.inventory-check-panel .kpi small{display:block;color:var(--muted);margin-top:4px}.inventory-check-panel strong{font-size:22px}
+
