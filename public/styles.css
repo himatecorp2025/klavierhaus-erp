@@ -17,3 +17,12 @@
 .financial-form textarea{min-height:120px}
 .danger-btn{background:#3a1420!important;color:#ffd7df!important;border:1px solid #733044!important}
 .danger-btn:hover{background:var(--red)!important;color:white!important}
+
+/* Finance balance fix / Pénzügyi mérleg javítás */
+.amount-positive{color:var(--green);font-weight:900;white-space:nowrap}
+.amount-negative{color:var(--red);font-weight:900;white-space:nowrap}
+.cf-card-head-sum{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.cf-card-head-sum b{font-size:18px;font-variant-numeric:tabular-nums;color:var(--green)}
+.cf-card-head-sum small{color:var(--muted);font-weight:700;font-size:14px}
+.cf-footer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:none;width:100%}
+.cf-footer-grid .cf-line{background:#081525;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0}
