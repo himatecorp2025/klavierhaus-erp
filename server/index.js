@@ -126,6 +126,35 @@ function ensureRuntimeMigrations(){
     try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id)").run(); } catch(e) {}
     try { db.prepare("CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)").run(); } catch(e) {}
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS planned_jobs (
+      id TEXT PRIMARY KEY,
+      planned_key TEXT UNIQUE,
+      planned_type TEXT,
+      title TEXT NOT NULL,
+      client_id TEXT,
+      client_name TEXT,
+      client_phone TEXT,
+      piano_id TEXT,
+      piano_name TEXT,
+      service_address TEXT,
+      preferred_assigned_to TEXT,
+      priority TEXT DEFAULT 'Medium',
+      expected_revenue REAL DEFAULT 0,
+      probability TEXT DEFAULT '100% - Biztos',
+      estimated_hours REAL DEFAULT 0,
+      target_date TEXT,
+      status TEXT,
+      block_reason TEXT,
+      next_step TEXT,
+      notes TEXT,
+      converted_job_id TEXT,
+      created_by TEXT,
+      archived_at TEXT,
+      archived_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+
     const plannedCols = db.prepare("PRAGMA table_info(planned_jobs)").all().map(c=>c.name);
     const addPlannedCol = (name, ddl) => { if(!plannedCols.includes(name)) db.prepare(`ALTER TABLE planned_jobs ADD COLUMN ${name} ${ddl}`).run(); };
     addPlannedCol("planned_key", "TEXT");
