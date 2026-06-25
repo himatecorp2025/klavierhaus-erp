@@ -26,3 +26,4 @@
 .cf-card-head-sum small{color:var(--muted);font-weight:700;font-size:14px}
 .cf-footer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:none;width:100%}
 .cf-footer-grid .cf-line{background:#081525;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0}
+
