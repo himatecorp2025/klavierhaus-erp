@@ -4,6 +4,7 @@ let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
 
 const navs={
+ SUPERADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
  ADMIN:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
  MANAGER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["users","Users / Felhasználók"]],
  WORKER:[["scheduler","Scheduler / Naptár"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"]]
@@ -526,7 +527,7 @@ function financeTableHTML(items){
    <td>${x.payment_method||""}</td>
    <td>${finLabel(x.balance_account)}</td>
    <td>${signedAmountHTML(x)}</td>
-   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="ADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
+   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${user.role==="SUPERADMIN"?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
  </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
 }
 async function applyFinanceFilters(){
@@ -853,8 +854,33 @@ function exportClosedJobs(){
  });
 }
 
-async function renderUsers(){let u=await api("/api/users");$("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td></tr>`).join("")}</tbody></table></div></div>`}
-function openUser(){$("#modal").classList.remove("hidden");$("#modalTitle").textContent="Add user / Felhasználó hozzáadása";let roleOptions=user.role==="ADMIN"?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];$("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" required></div><div class="field"><label>Password / Jelszó</label><input name="password" required></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option>${r}</option>`).join("")}</select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Create user</button></div>`;$("#form").onsubmit=async e=>{e.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();renderUsers()}catch(err){alert(err.message)}}}
+async function renderUsers(){
+ let u=await api("/api/users");
+ const canSuper=user.role==="SUPERADMIN";
+ $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th>${canSuper?"<th>Actions / Műveletek</th>":""}</tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td>${canSuper?`<td><button class="small" onclick='openUser(${esc(x)})'>Edit / Szerkesztés</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete / Törlés</button></td>`:""}</tr>`).join("")}</tbody></table></div></div>`
+}
+function openUser(row=null){
+ const isEdit=!!row;
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent=isEdit?"Edit user / Felhasználó szerkesztése":"Add user / Felhasználó hozzáadása";
+ let roleOptions=(user.role==="ADMIN"||user.role==="SUPERADMIN")?["ADMIN","MANAGER","WORKER"]:["MANAGER","WORKER"];
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?"New password / Új jelszó (optional)":"Password / Jelszó"}</label><input name="password" ${isEdit?"":"required"}></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="field"><label>Status</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option><option ${row?.status==="Deleted"?"selected":""}>Deleted</option></select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?"Save changes":"Create user"}</button></div>`;
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   const body=Object.fromEntries(new FormData(e.target));
+   if(isEdit && !body.password) delete body.password;
+   try{
+     if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
+     else await api("/api/users",{method:"POST",body:JSON.stringify(body)});
+     closeModal();renderUsers()
+   }catch(err){alert(err.message)}
+ }
+}
+async function deleteUser(id){
+ if(user.role!=="SUPERADMIN") return alert("Only Superadmin can delete users / Csak a Superadmin törölhet felhasználót.");
+ if(!confirm("Biztosan törlöd/deaktiválod ezt a felhasználót? / Delete/deactivate this user?")) return;
+ try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
+}
 if(token)boot();
 
 
