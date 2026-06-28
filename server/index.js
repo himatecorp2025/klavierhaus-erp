@@ -1123,6 +1123,44 @@ app.delete("/api/inventory-checks/:id", auth, requireSuperadmin, (req,res)=>{
   res.json({ok:true});
 });
 
+
+app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
+  const confirmation=String(req.body?.confirmation||"");
+  if(confirmation!=="DELETE EVERYTHING") return res.status(400).json({error:"Exact confirmation is required"});
+  const exists=(table)=>!!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  const clear=(table, where="")=>{ if(exists(table)) db.prepare(`DELETE FROM ${table} ${where}`).run(); };
+  const tx=db.transaction(()=>{
+    [
+      "financial_items",
+      "job_logs",
+      "knowledge_base",
+      "jobs",
+      "planned_jobs",
+      "inventory_checks",
+      "inventory_items",
+      "pianos",
+      "contacts"
+    ].forEach(t=>clear(t));
+    if(exists("users")){
+      db.prepare("DELETE FROM users WHERE COALESCE(hidden_user,0)=0 AND COALESCE(is_superadmin,0)=0").run();
+      db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1 WHERE lower(email)=lower(?)").run("simon.alex@klavierhaus.com");
+    }
+    if(exists("sqlite_sequence")){
+      db.prepare("DELETE FROM sqlite_sequence WHERE name NOT IN ('users')").run();
+    }
+  });
+  tx();
+  try{
+    if(fs.existsSync(UPLOAD_DIR)){
+      for(const name of fs.readdirSync(UPLOAD_DIR)){
+        const fp=path.join(UPLOAD_DIR,name);
+        try{ fs.rmSync(fp,{recursive:true,force:true}); }catch(e){}
+      }
+    }
+  }catch(e){}
+  res.json({ok:true});
+});
+
 app.use((err,req,res,next)=>{
   if(err) return res.status(400).json({error:err.message || "Upload error"});
   next();
