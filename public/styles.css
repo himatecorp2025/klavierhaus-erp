@@ -59,3 +59,5 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
   .toolbar{align-items:flex-start;flex-direction:column}
 }
 @media(max-width:520px){.sidebar-toggle{top:10px;left:10px}.main{padding-left:10px;padding-right:10px}.panel{padding:12px}.modal-box{width:98vw;padding:12px}.actions{flex-wrap:wrap}.actions button{width:100%}}
+.delete-everything-btn{background:#651515!important;color:#fff!important;border:1px solid #ff5b5b!important;margin-top:auto;box-shadow:0 0 0 1px rgba(255,91,91,.15)}
+.delete-everything-btn:hover{background:#ff5b5b!important;color:#07101d!important}
