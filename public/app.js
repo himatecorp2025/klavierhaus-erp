@@ -2,6 +2,8 @@
 let token=localStorage.getItem("kh_token");
 let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
+let currentView="scheduler";
+let currentLang="en";
 
 const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
@@ -30,27 +32,103 @@ const plannedJobTypes=["Blocked existing / Meglévő, de megakadt","Planned new 
 const plannedJobStatuses=["Blocked / Elakadt","Waiting for client / Ügyfélre vár","Waiting for parts / Alkatrészre vár","Need quote / Árajánlat szükséges","Ready to schedule / Időzíthető","Converted / Naptárba helyezve","Archived / Archivált","Cancelled / Törölve"];
 const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% - Közepes","25% - Bizonytalan"];
 
+
+const staticTranslations={
+ en:{
+   appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users"
+ },
+ hu:{
+   appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók"
+ }
+};
+function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
+function loadLanguage(){currentLang=localStorage.getItem(userLangKey())||"en"; if(!["en","hu"].includes(currentLang)) currentLang="en";}
+function setLanguage(lang){
+  currentLang=lang==="hu"?"hu":"en";
+  localStorage.setItem(userLangKey(),currentLang);
+  updateLanguageButtons();
+  if(token && currentView) render(currentView); else applyLanguageToDOM();
+}
+function tr(key){return (staticTranslations[currentLang]&&staticTranslations[currentLang][key])||staticTranslations.en[key]||key;}
+function navLabel(view){return tr(view)||view;}
+function splitBilingualText(text){
+  if(!text || !text.includes(" / ")) return text;
+  if(/\bD\s*\$?\d/i.test(text) || /\bC\s*\$?\d/i.test(text)) return text;
+  const parts=text.split(" / ");
+  if(parts.length<2) return text;
+  return currentLang==="hu" ? parts.slice(1).join(" / ").trim() : parts[0].trim();
+}
+function applyLanguageToDOM(root=document.body){
+  if(!root) return;
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(node){
+    if(!node.nodeValue || !node.nodeValue.includes(" / ")) return NodeFilter.FILTER_REJECT;
+    const p=node.parentElement;
+    if(!p || ["SCRIPT","STYLE","TEXTAREA"].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+    return NodeFilter.FILTER_ACCEPT;
+  }});
+  const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(n=>{n.nodeValue=splitBilingualText(n.nodeValue)});
+  document.querySelectorAll("input[placeholder],textarea[placeholder],button[title]").forEach(el=>{
+    if(el.placeholder) el.placeholder=splitBilingualText(el.placeholder);
+    if(el.title) el.title=splitBilingualText(el.title);
+  });
+  const title=document.querySelector(".login-card h1"); if(title) title.textContent=tr("appTitle");
+  const sub=document.querySelector(".login-card p"); if(sub) sub.textContent=tr("loginSubtitle");
+  const passLabel=document.querySelector('label[for="password"], #loginForm label:nth-of-type(2)'); if(passLabel) passLabel.textContent=tr("password");
+  const loginBtn=document.querySelector("#loginForm button"); if(loginBtn) loginBtn.textContent=tr("login");
+  const subtitle=document.getElementById("headerSubtitle"); if(subtitle) subtitle.textContent=tr("operations");
+  const logoutBtn=document.getElementById("logoutBtn"); if(logoutBtn) logoutBtn.textContent=tr("logout");
+  const delBtn=document.getElementById("deleteEverythingBtn"); if(delBtn) delBtn.textContent=tr("deleteEverything");
+  updateLanguageButtons();
+  updateCountdownDisplay();
+}
+function updateLanguageButtons(){
+  const en=document.getElementById("langEnBtn"), hu=document.getElementById("langHuBtn");
+  if(en) en.classList.toggle("active",currentLang==="en");
+  if(hu) hu.classList.toggle("active",currentLang==="hu");
+}
+
 const $=s=>document.querySelector(s);
 const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}}).then(async r=>{const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:text||"Non-JSON response"}}if(!r.ok)throw new Error(j.error||`API ${r.status}`);return j});
 
-$("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));boot()}else alert("Login failed")};
+$("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));loadLanguage();boot()}else alert(currentLang==="hu"?"Sikertelen belépés":"Login failed")};
 $("#logoutBtn").onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
 let inactivityTimer = null;
+let countdownInterval = null;
+let logoutAt = 0;
 function logoutNow(){
-  localStorage.clear();
+  localStorage.removeItem("kh_token");
+  localStorage.removeItem("kh_user");
   location.reload();
+}
+function updateCountdownDisplay(){
+  const el=document.getElementById("sessionCountdown");
+  if(!el || !token) return;
+  const remaining=Math.max(0, logoutAt-Date.now());
+  const totalSeconds=Math.ceil(remaining/1000);
+  const mm=String(Math.floor(totalSeconds/60)).padStart(2,"0");
+  const ss=String(totalSeconds%60).padStart(2,"0");
+  el.textContent=`${tr("logoutIn")}: ${mm}:${ss}`;
+  el.classList.toggle("warning", remaining<=60000);
 }
 function resetInactivityTimer(){
   if(!token) return;
+  logoutAt=Date.now()+INACTIVITY_LIMIT_MS;
   if(inactivityTimer) clearTimeout(inactivityTimer);
+  if(countdownInterval) clearInterval(countdownInterval);
   inactivityTimer = setTimeout(()=>{
-    alert("Security logout / Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.");
+    alert(tr("securityLogout"));
     logoutNow();
   }, INACTIVITY_LIMIT_MS);
+  countdownInterval=setInterval(updateCountdownDisplay,1000);
+  updateCountdownDisplay();
 }
 document.addEventListener("click", resetInactivityTimer, true);
+document.addEventListener("click", ()=>setTimeout(()=>applyLanguageToDOM(),0), false);
 
 async function deleteEverything(){
   if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
@@ -70,6 +148,7 @@ async function deleteEverything(){
 
 function boot(){
  if(!token)return;
+ loadLanguage();
  $("#login").classList.add("hidden");
  $("#app").classList.remove("hidden");
  document.body.classList.add("sidebar-collapsed");
@@ -77,7 +156,7 @@ function boot(){
  if(sb) sb.onclick=toggleSidebar;
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
  let nav=navs[user.role]||navs.WORKER;
- $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${n[1]}</button>`).join("");
+ $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
  const danger=document.getElementById("deleteEverythingBtn");
  if(danger) danger.classList.toggle("hidden", !isSuperadmin());
  resetInactivityTimer();
@@ -90,6 +169,7 @@ function boot(){
    render(b.dataset.v);
  };
  render("scheduler");
+ applyLanguageToDOM();
 }
 function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
 function money(n){return "$"+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0})}
@@ -133,15 +213,19 @@ function forceShowView(id){
  return el;
 }
 async function render(v){
+ currentView=v;
  forceShowView(v);
- if(v==="scheduler")return renderScheduler();
- if(v==="planned_jobs")return renderPlannedJobs();
- if(v==="closed_jobs")return renderClosedJobs();
- if(v==="income_statement")return renderIncomeStatement();
- if(v==="finance")return renderFinance();
- if(v==="inventory")return renderInventory();
- if(v==="users")return renderUsers();
- return renderTable(v);
+ const pageTitle=document.getElementById("pageTitle");
+ if(pageTitle) pageTitle.textContent=navLabel(v);
+ if(v==="scheduler") await renderScheduler();
+ else if(v==="planned_jobs") await renderPlannedJobs();
+ else if(v==="closed_jobs") await renderClosedJobs();
+ else if(v==="income_statement") await renderIncomeStatement();
+ else if(v==="finance") await renderFinance();
+ else if(v==="inventory") await renderInventory();
+ else if(v==="users") await renderUsers();
+ else await renderTable(v);
+ applyLanguageToDOM();
 }
 
 async function renderScheduler(){
@@ -571,14 +655,6 @@ async function renderFinance(){
        <p class="muted">Tételes pénzügyi napló. Innen számol az eredménykimutatás és a mérleg.</p>
      </div>
      <div><button class="small" onclick="exportFinancialItemsCSV()">Export CSV</button> <button onclick="openFinancialItem()">+ New Financial Item / Új pénzügyi tétel</button></div>
-   </div>
-   <div class="grid kpis finance-kpis">
-     <div class="kpi"><span>Passive income / Passzív jövedelem</span><strong>${money(passiveIncome)}</strong></div>
-     <div class="kpi"><span>Total income / Összes bevétel</span><strong>${money(totalIncome)}</strong></div>
-     <div class="kpi"><span>Total expenses / Összes kiadás</span><strong>${money(totalExpenses)}</strong></div>
-     <div class="kpi"><span>Cash flow / Készpénzáramlás</span><strong>${money(totalIncome-totalExpenses)}</strong></div>
-     <div class="kpi"><span>Assets / Eszközök</span><strong>${money(assets)}</strong></div>
-     <div class="kpi"><span>Sources / Források</span><strong>${money(sources)}</strong></div>
    </div>
    <div class="finance-filters">
      <label>Month / Hónap <input id="finFilterMonth" type="month" value="${currentMonth}"></label>
@@ -1190,7 +1266,7 @@ async function deleteUser(id){
  if(!confirm("Delete this user? / Töröljük ezt a felhasználót?")) return;
  try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
 }
-if(token)boot();
+if(token){loadLanguage();boot();}else{loadLanguage();applyLanguageToDOM();}
 
 
 
