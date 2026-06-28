@@ -61,3 +61,16 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 @media(max-width:520px){.sidebar-toggle{top:10px;left:10px}.main{padding-left:10px;padding-right:10px}.panel{padding:12px}.modal-box{width:98vw;padding:12px}.actions{flex-wrap:wrap}.actions button{width:100%}}
 .delete-everything-btn{background:#651515!important;color:#fff!important;border:1px solid #ff5b5b!important;margin-top:auto;box-shadow:0 0 0 1px rgba(255,91,91,.15)}
 .delete-everything-btn:hover{background:#ff5b5b!important;color:#07101d!important}
+
+/* Session countdown and language selector */
+.main-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.header-left{min-width:240px}
+.header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.session-countdown{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.session-countdown.warning{border-color:var(--orange);color:var(--orange);box-shadow:0 0 0 2px rgba(255,159,67,.18)}
+.language-switcher{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px}
+.lang-btn{min-width:42px;padding:7px 9px;border-radius:999px;background:transparent;font-size:18px;line-height:1}
+.lang-btn.active,.lang-btn:hover{background:var(--blue);color:#05111e}
+.delete-everything-btn{margin-top:0!important}
+.finance-kpis{display:none!important}
+@media(max-width:720px){.main-header{padding-left:48px}.header-right{justify-content:flex-start;width:100%}.session-countdown{font-size:13px}.lang-btn{min-width:38px}}
