@@ -34,7 +34,39 @@ const $=s=>document.querySelector(s);
 const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}}).then(async r=>{const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:text||"Non-JSON response"}}if(!r.ok)throw new Error(j.error||`API ${r.status}`);return j});
 
 $("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));boot()}else alert("Login failed")};
-$("#logoutBtn").onclick=()=>{localStorage.clear();location.reload()};
+$("#logoutBtn").onclick=()=>logoutNow();
+
+const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
+let inactivityTimer = null;
+function logoutNow(){
+  localStorage.clear();
+  location.reload();
+}
+function resetInactivityTimer(){
+  if(!token) return;
+  if(inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(()=>{
+    alert("Security logout / Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.");
+    logoutNow();
+  }, INACTIVITY_LIMIT_MS);
+}
+document.addEventListener("click", resetInactivityTimer, true);
+
+async function deleteEverything(){
+  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+  const first = confirm("WARNING / FIGYELMEZTETÉS\n\nThis will permanently delete ALL business data from the system.\nEz véglegesen töröl MINDEN üzleti adatot a rendszerből.\n\nThis action cannot be undone. / A művelet nem visszavonható.\n\nContinue? / Folytatod?");
+  if(!first) return;
+  const typed = prompt("Final confirmation / Végső megerősítés\n\nType exactly: DELETE EVERYTHING\nÍrd be pontosan: DELETE EVERYTHING");
+  if(typed !== "DELETE EVERYTHING"){
+    alert("Confirmation text did not match. Nothing was deleted. / A megerősítő szöveg nem egyezett. Semmi nem törlődött.");
+    return;
+  }
+  try{
+    await api("/api/system/delete-everything",{method:"POST",body:JSON.stringify({confirmation:typed})});
+    alert("All business data has been deleted. You will be logged out. / Minden üzleti adat törölve lett. Most kijelentkeztetünk.");
+    logoutNow();
+  }catch(err){alert(err.message)}
+}
 
 function boot(){
  if(!token)return;
@@ -46,6 +78,9 @@ function boot(){
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
  let nav=navs[user.role]||navs.WORKER;
  $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${n[1]}</button>`).join("");
+ const danger=document.getElementById("deleteEverythingBtn");
+ if(danger) danger.classList.toggle("hidden", !isSuperadmin());
+ resetInactivityTimer();
  $("#nav").onclick=e=>{
    let b=e.target.closest("button");
    if(!b)return;
@@ -718,10 +753,10 @@ function renderIncomeSheetHTML(d, includeTrial=true){
  </div>`:"";
 
  return `<div class="grid kpis">
-   <div class="kpi"><span>Open jobs / Nyitott munkák</span><strong>${d.counts.openJobs}</strong></div>
-   <div class="kpi"><span>Closed jobs / Lezárt munkák</span><strong>${d.counts.closedJobs}</strong></div>
    <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
-   <div class="kpi"><span>Profit / Eredmény</span><strong>${money(d.totals.profit)}</strong></div>
+   <div class="kpi"><span>Expenses / Kiadások</span><strong>${money(d.totals.expenses)}</strong></div>
+   <div class="kpi"><span>Assets / Eszközök</span><strong>${money(d.totals.assets||0)}</strong></div>
+   <div class="kpi"><span>Sources / Források</span><strong>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</strong></div>
  </div>
 
  <div class="cashflow-layout">
@@ -820,18 +855,20 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
  const html=renderIncomeSheetHTML(d,true);
  const win=window.open("", "_blank");
  win.document.write(`<!doctype html><html><head><title>${filename}</title><style>
-   body{font-family:Arial,sans-serif;color:#111;padding:24px}
-   h1,h2,h3{margin-bottom:6px}
-   .pdf-meta{border-bottom:2px solid #111;margin-bottom:18px;padding-bottom:10px}
-   .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
-   .kpi,.cf-box,.panel{border:1px solid #999;border-radius:8px;padding:12px;margin-bottom:12px}
-   .kpi span{display:block;color:#555}.kpi strong{font-size:24px}
-   .cashflow-sheet{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-   .cf-row,.cf-total{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:6px 0}
-   .cf-total{font-weight:bold;border-top:2px solid #111;border-bottom:0;margin-top:8px}
-   table{width:100%;border-collapse:collapse;font-size:12px}
-   th,td{border:1px solid #aaa;padding:6px;text-align:left}
-   th{background:#eee}
+   :root{--bg:#07101d;--panel:#0d1b2e;--panel-2:#13243b;--panel2:#13243b;--text:#f4f7fb;--muted:#9fb0c7;--line:#27405f;--blue:#4aa3ff;--green:#2ecc71;--red:#ff5b5b;--orange:#ff9f43;--purple:#b084f5;--shadow:0 12px 35px rgba(0,0,0,.25)}
+   *{box-sizing:border-box}
+   body{font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);padding:22px;margin:0}
+   .pdf-meta{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin-bottom:18px;padding:18px;box-shadow:var(--shadow)}
+   .pdf-meta h1{margin:0 0 8px;font-size:24px}.pdf-meta p{margin:4px 0;color:var(--muted)}
+   .grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(4,1fr);margin-bottom:18px}.kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+   .kpi span{color:var(--muted);display:block}.kpi strong{font-size:26px}
+   .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow)}
+   .cashflow-layout{display:flex;flex-direction:column;gap:18px;margin-top:18px}.cf-main-title{text-align:center;padding:4px 0 0}.cf-main-title h2{font-size:30px;margin:0 0 4px}.cf-main-title p{margin:0;color:var(--muted)}
+   .cf-upper{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;align-items:stretch}.cf-left-stack,.cf-right-stack{display:flex;flex-direction:column;gap:18px}
+   .cf-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)}
+   .cf-card-head{background:var(--panel-2);border-bottom:1px solid var(--line);padding:12px 16px;font-size:18px;font-weight:900}.cf-card-head span{color:var(--muted);font-weight:700;font-size:14px}.cf-card-head-sum{display:flex;justify-content:space-between;gap:14px}.cf-card-head-sum b{font-size:19px}
+   .cf-card-body{padding:14px 18px}.cf-line{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;border-bottom:1px solid rgba(148,163,184,.22);padding:8px 0;min-height:34px}.cf-line span{font-weight:650}.cf-line small{color:var(--muted);font-weight:600}.cf-line b{font-variant-numeric:tabular-nums}.cf-line.big{min-height:88px;align-items:center;font-size:19px;border-bottom:0}.cf-line.total{font-size:18px;font-weight:900;border-bottom:0}.cf-line.cashflow{font-size:19px;font-weight:950;border-bottom:0}.cf-rule{height:2px;background:var(--line);margin:18px 0}.cf-bookkeeper{min-height:270px}.cf-cashflow{min-height:190px;display:flex;flex-direction:column;justify-content:center}.cf-balance-title{text-align:center;font-size:30px;font-weight:950;margin-top:8px}.cf-balance{display:grid;grid-template-columns:1fr 1fr;gap:22px}.cf-footer{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:10px 18px;box-shadow:var(--shadow)}.cf-footer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid var(--line);padding:7px;text-align:left}th{background:var(--panel-2)}.muted{color:var(--muted)}
+   @media print{body{background:#fff;color:#111;padding:12px}.pdf-meta,.kpi,.panel,.cf-card,.cf-footer{box-shadow:none;break-inside:avoid}.pdf-meta,.kpi,.panel,.cf-card,.cf-footer{background:#fff;color:#111;border-color:#aaa}.cf-card-head,th{background:#eee;color:#111}.cf-main-title p,.muted,.cf-card-head span,.cf-line small{color:#555}.no-print{display:none!important}.cf-upper,.cf-balance{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:repeat(4,1fr)}}
  </style></head><body>
    <div class="pdf-meta">
      <h1>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h1>
@@ -840,7 +877,7 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
      <p><b>Generated / Letöltés időbélyege:</b> ${generated}</p>
    </div>
    ${html}
-   <script>window.onload=function(){document.title=${JSON.stringify(filename)};window.print();}</script>
+   <script>window.onload=function(){document.title=${JSON.stringify(filename)};setTimeout(()=>window.print(),250);}</script>
  </body></html>`);
  win.document.close();
 }
