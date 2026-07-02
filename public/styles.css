@@ -123,3 +123,15 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 .theme-switcher{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px}
 .theme-btn{min-width:42px;padding:7px 9px;border-radius:999px;background:transparent;font-size:18px;line-height:1}
 .theme-btn.active,.theme-btn:hover{background:var(--blue);color:#05111e}
+
+/* Customer status and optional piano linkage */
+.customer-status-icon{font-size:20px;display:inline-flex;align-items:center;justify-content:center;min-width:34px;line-height:1.2}
+.customer-status-help{margin:8px 0 12px;font-weight:800}
+.client-search-grid{display:grid;grid-template-columns:minmax(240px,1fr) minmax(190px,260px);gap:12px;align-items:end}
+.client-search-grid label{margin:0}
+#contactPianoSection{grid-column:1/-1;margin-top:12px}
+#contactPianoSection.hidden{display:none!important}
+.inline-piano-form{margin-top:12px}
+:root[data-theme="light"] .logout-btn{background:#221522!important;color:#ffffff!important}
+:root[data-theme="light"] .logout-btn:hover{background:#4b2348!important;color:#ffffff!important}
+@media(max-width:720px){.client-search-grid{grid-template-columns:1fr}.customer-status-icon{font-size:19px;min-width:30px}}
