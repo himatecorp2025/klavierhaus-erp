@@ -187,6 +187,8 @@ function ensureRuntimeMigrations(){
     // Superadmin runtime migration / Rejtett rendszertulajdonos létrehozása
     try {
       const userCols = db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
+      if(!userCols.includes("phone")) db.prepare("ALTER TABLE users ADD COLUMN phone TEXT").run();
+      if(!userCols.includes("address")) db.prepare("ALTER TABLE users ADD COLUMN address TEXT").run();
       if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
       if(!userCols.includes("is_superadmin")) db.prepare("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0").run();
       const superEmail = "simon.alex@klavierhaus.com";
@@ -775,31 +777,46 @@ app.get("/api/income-statement", auth, (req,res)=>{
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
-app.get("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=> {
-  // Hidden superadmin is never listed, not even to normal Alex/admin.
-  res.json(db.prepare("SELECT id,name,email,role,status,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
+app.get("/api/users", auth, (req,res)=> {
+  // Hidden superadmin is never listed. Everyone may see the visible team list.
+  ensureRuntimeMigrations();
+  res.json(db.prepare("SELECT id,name,email,role,status,phone,address,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
+
 app.post("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  ensureRuntimeMigrations();
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
   if(req.user.role==="MANAGER" && role==="ADMIN") return res.status(403).json({error:"Managers cannot create admins"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)").run(id,name,email,hash,role,"Active",0,0);
-  res.json({id,name,email,role,status:"Active"});
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
+    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",0,0);
+  res.json({id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||""});
 });
-app.put("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
+
+app.put("/api/users/:id", auth, (req,res)=>{
+  ensureRuntimeMigrations();
   const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if(!target) return res.status(404).json({error:"User not found"});
-  if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be edited from list"});
-  const allowed=["name","email","role","status"];
-  const cols=allowed.filter(c=>req.body[c]!==undefined);
+  if(Number(target.hidden_user||0)===1 && !isSuperadminUser(req.user)) return res.status(403).json({error:"Hidden system owner cannot be edited"});
+
+  const selfEdit = req.user.id === target.id;
+  const superEdit = isSuperadminUser(req.user);
+  if(!selfEdit && !superEdit) return res.status(403).json({error:"You can edit only your own profile / Csak a saját profilodat szerkesztheted"});
+
+  let allowed = selfEdit && !superEdit ? ["name","email","phone","address"] : ["name","email","role","status","phone","address"];
+  if(!superEdit && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"Only superadmin can change role or status"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
+
+  const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
   if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
-  res.json(db.prepare("SELECT id,name,email,role,status FROM users WHERE id=?").get(req.params.id));
+  const u=db.prepare("SELECT id,name,email,role,status,phone,address FROM users WHERE id=?").get(req.params.id);
+  res.json(u);
 });
+
 app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
   const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if(!target) return res.status(404).json({error:"User not found"});
