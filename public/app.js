@@ -4,6 +4,8 @@ let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
 let currentView="scheduler";
 let currentLang="en";
+let currentSchedulerWorker="ALL";
+let schedulerWorkersCache=null;
 
 const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
@@ -36,11 +38,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters..."
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", all:"Összes", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert..."
  }
 };
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
@@ -188,6 +190,23 @@ function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
 function isSuperadmin(){return user && (user.role==="SUPERADMIN" || Number(user.is_superadmin||0)===1)}
+function bi(en,hu){return currentLang==="hu"?hu:en}
+function parenLabel(str){ const m=String(str||"").match(/^\s*(.*?)\s*\((.*?)\)\s*$/); return m ? (currentLang==="hu"?m[2]:m[1]) : String(str||""); }
+async function loadSchedulerWorkers(){
+  if(schedulerWorkersCache) return schedulerWorkersCache;
+  try{ schedulerWorkersCache=await api("/api/schedule-workers"); }catch(e){ schedulerWorkersCache=["Károly","Alex","Misi","Paul","Said"].map((name,i)=>({id:String(i+1),name})); }
+  return schedulerWorkersCache;
+}
+const workerColorPalette=["#4aa3ff","#b084f5","#ff9f43","#f5c542","#22d3ee","#a78bfa","#38bdf8","#f472b6","#c084fc","#60a5fa","#fbbf24","#2dd4bf"];
+function workerColor(name){
+  const s=String(name||""); let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
+  return workerColorPalette[h%workerColorPalette.length];
+}
+function nyNowLocalString(){ return localDT(new Date()); }
+function isClosedJobStatus(status){ return ["Completed","Partially completed","Failed"].includes(String(status||"")); }
+function isOverdueJob(j){ return !isClosedJobStatus(j.status) && String(j.end_time||"") && String(j.end_time).slice(0,16) < nyNowLocalString(); }
+function calendarEventClass(j){ if(String(j.status)==="Failed" || isOverdueJob(j)) return "Failed"; if(["Completed","Partially completed"].includes(String(j.status||""))) return "Completed"; return "WorkerColor"; }
+function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="background:${workerColor(j.assigned_to)};color:#07101d"` : ""; }
 
 function ensureView(id){
  let el=document.getElementById(id);
@@ -230,11 +249,15 @@ async function render(v){
 
 async function renderScheduler(){
  const jobs=await api("/api/jobs");
+ const workers=await loadSchedulerWorkers();
+ const visibleJobs=jobs.filter(j=>currentSchedulerWorker==="ALL" || String(j.assigned_to||"")===currentSchedulerWorker);
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const hours=Array.from({length:15},(_,i)=>i+7);
  const weekDates=week.map(d=>fmtDate(d));
+ const workerOptions=[`<option value="ALL" ${currentSchedulerWorker==="ALL"?"selected":""}>${tr("all")}</option>`,...workers.map(w=>`<option value="${String(w.name).replaceAll('"','&quot;')}" ${currentSchedulerWorker===w.name?"selected":""}>${w.name}</option>`)].join("");
+ const legend=workers.map(w=>`<span class="worker-legend-item"><i style="background:${workerColor(w.name)}"></i>${w.name}</span>`).join("");
 
- let html=`<div class="panel"><div class="toolbar"><div><h3>Weekly Scheduler / Heti naptár</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p></div><div><button class="small" onclick="moveWeek(-1)">← Previous / Előző</button><button class="small" onclick="goThisWeek()">This week / Aktuális hét</button><button class="small" onclick="moveWeek(1)">Next / Következő →</button><button onclick="openJob()">+ Add Job / Új munka</button></div></div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">Time</div>`;
+ let html=`<div class="panel"><div class="toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select onchange="currentSchedulerWorker=this.value;renderScheduler()">${workerOptions}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div><div class="worker-legend"><span class="worker-legend-item completed"><i></i>${bi("Completed / Partially completed","Elvégzett / részlezárt")}</span><span class="worker-legend-item failed"><i></i>${bi("Failed / overdue","Sikertelen / lejárt")}</span>${legend}</div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">${bi("Time","Idő")}</div>`;
  html+=week.map(d=>`<div class="cal-head"><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b><br><span>${fmtDate(d)}</span></div>`).join("");
 
  for(const h of hours){
@@ -243,19 +266,20 @@ async function renderScheduler(){
      const dayStr=fmtDate(day);
      const pf=`${dayStr}T${String(h).padStart(2,"0")}:00`;
      html+=`<div class="cal-cell" onclick="openJob('${pf}')">`;
-     html+=jobs
+     html+=visibleJobs
        .filter(j=>{
           const datePart=String(j.start_time||"").slice(0,10);
           const hourPart=Number(String(j.start_time||"").slice(11,13));
           return datePart===dayStr && hourPart===h;
        })
-       .map(j=>`<div class="cal-event ${j.status==="Completed"?"Completed":(j.priority||"Medium")}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><br>${j.assigned_to} · ${j.title}<br><small>${j.job_type||""} · ${money(j.planned_amount)} · ${j.status}</small></div>`)
+       .map(j=>`<div class="cal-event ${calendarEventClass(j)}" ${calendarEventStyle(j)} onclick='event.stopPropagation();openJobDetails(${esc(j)})'><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><br>${j.assigned_to} · ${j.title}<br><small>${j.job_type||""} · ${money(j.planned_amount)} · ${j.status}${isOverdueJob(j)?" · "+bi("Overdue","Lejárt határidő"):""}</small></div>`)
        .join("");
      html+=`</div>`;
    }
  }
  html+=`</div></div></div>`;
  $("#scheduler").innerHTML=html;
+ applyLanguageToDOM();
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
 
@@ -425,7 +449,7 @@ function openJobDetails(j){
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent="Job details / Munka részletei";
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
- const closed=["Completed","Partially completed","Cancelled"].includes(String(j.status||""));
+ const closed=isClosedJobStatus(j.status) || String(j.status||"")==="Cancelled";
  const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
  if(!closed){
    actionButtons.push(`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`);
@@ -478,13 +502,13 @@ function openReassign(j){
  }
 }
 function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezárása";$("#form").innerHTML=`<p class="muted">Billed amount / Számlázandó összeg kötelező. Ha 0, nem kell fájl. Ha nagyobb mint 0, fizetési mód és számla/csekk fájl kötelező.</p><div class="form-grid">
-<div class="field"><label>${req("Close type / Lezárás típusa")}</label><select name="close_type" id="closeType" onchange="toggleNextJob()"><option>Full</option><option>Partial</option></select></div>
+<div class="field"><label>${req("Close type / Lezárás típusa")}</label><select name="close_type" id="closeType" onchange="toggleNextJob()"><option>Full</option><option>Partial</option><option>Failed</option></select></div>
 <div class="field"><label>${req("Billed amount / Számlázandó összeg")}</label><input name="billed_amount" type="number" value="${j.planned_amount||0}" required></div>
 <div class="field"><label>${req("Payment method / Fizetési mód")}</label><select name="payment_method" required><option value="">Select payment method / Válassz fizetési módot</option><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Warranty Work</option></select></div>
 <div class="field"><label>Invoice number / Számla vagy csekk szám</label><input name="invoice_number"></div><div class="field"><label>Invoice/check file / Számla vagy csekk fájl</label><input name="file" type="file"></div>
 <div class="field full"><label>${req("Close description / Elvégzett munka leírása")}</label><textarea name="close_description" required></textarea></div>
 <div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select name="next_assigned_to"><option>Károly</option><option>Alex</option><option>Paul</option><option>Misi</option><option>Said</option></select></div><div class="field"><label>Next priority</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input name="next_start_time" type="datetime-local"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input name="next_end_time" type="datetime-local"></div><div class="field"><label>Next planned amount</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save closeout / Lezárás mentése</button></div>`;
-$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(!payment){alert("Fizetési mód kötelező. / Payment method is required.");return}if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}
+$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(billed>0&&!payment){alert("Fizetési mód kötelező, ha az összeg nagyobb mint 0. / Payment method is required when billed amount is greater than zero.");return}if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}
 if(file && file.name && !isAllowedInvoiceFile(file.name)){alert("Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel. / Only PDF, JPG, JPEG or PNG files are allowed.");return}
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
@@ -501,7 +525,20 @@ function headerLabel(key,c){
 }
 async function renderTable(key){
  let s=schemas[key],data=await api("/api/"+s.api);
- $("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${s.title}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ Add / Új</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel(key,c)}</th>`).join("")}<th>Actions / Műveletek</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue(key,c,r)}</td>`).join("")}<td>${key==="contacts"?`<button class="small" onclick="clientProfile('${r.id}')">Profile / Adatlap</button>`:""}<button class="small" onclick='openForm("${key}",${esc(r)})'>Edit / Szerkesztés</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('${key}','${r.id}')">Delete / Törlés</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`
+ if(key==="contacts") return renderContactsTable(data);
+ $("#"+key).innerHTML=`<div class="panel"><div class="toolbar"><h3>${splitBilingualText(s.title)}</h3><div><button class="small" onclick="exportTable('${key}')">Export CSV</button><button onclick="openForm('${key}')">+ ${bi("Add","Új")}</button></div></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel(key,c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${data.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue(key,c,r)}</td>`).join("")}<td><button class="small" onclick='openForm("${key}",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('${key}','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`
+}
+async function renderContactsTable(data){
+ const pianos=await api("/api/pianos").catch(()=>[]);
+ const q=(document.getElementById("clientSearchInput")?.value||"").trim().toLowerCase();
+ const filtered=q.length>=3 ? data.filter(c=>{
+   const owned=pianos.filter(p=>p.owner_contact_id===c.id);
+   const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
+   return hay.includes(q);
+ }) : data;
+ const s=schemas.contacts;
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search"><label>${tr("searchClients")}<input id="clientSearchInput" value="${(document.getElementById("clientSearchInput")?.value||"").replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="render('contacts')"></label></div><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
+ const input=document.getElementById("clientSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
 }
 async function deleteGenericResource(key,id){
  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
@@ -517,8 +554,8 @@ function cellValue(key,c,r){
 async function clientProfile(id){
  let p=await api(`/api/client-profile/${id}`);
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent="Client profile / Ügyfélprofil";
- $("#form").innerHTML=`<div class="work-card"><h4>${p.client.name} · ${p.client.id}</h4><p><b>Phone / Telefon:</b> ${p.client.phone||""}</p><p><b>Address / Cím:</b> ${p.client.address||""}</p><p><b>Last visit / Utolsó látogatás:</b> ${p.lastVisit||""}</p><p><b>Last job / Legutóbbi munka:</b> ${p.lastJob||""}</p><h3>Pianos / Zongorák</h3>${p.pianos.map(x=>`<p>${x.display_name||`${x.brand||""} ${x.model||""}`} · ${x.serial_no||""} · ${x.ownership_type||x.ownership||"Customer owned"}</p>`).join("")||"<p>No pianos</p>"}<h3>Jobs / Munkák</h3>${p.jobs.map(x=>`<p>${x.start_time} · ${x.title} · ${x.assigned_to} · ${x.status}</p>`).join("")||"<p>No jobs</p>"}</div><div class="panel"><h3>Add piano to client / Zongora hozzáadása ügyfélhez</h3><div class="form-grid"><div class="field"><label>Brand / Márka</label><input name="brand" form="pianoAddForm"></div><div class="field"><label>Model / Típus</label><input name="model" form="pianoAddForm"></div><div class="field"><label>Serial No. / Gyári szám</label><input name="serial_no" form="pianoAddForm"></div><div class="field"><label>Ownership / Tulajdon</label><select name="ownership_type" form="pianoAddForm" onchange="document.getElementById('clientPianoValueBox').classList.toggle('hidden',this.value!=='Company owned')"><option>Customer owned</option><option>Company owned</option></select></div><div class="field"><label>Location / Helyszín</label><input name="location" form="pianoAddForm" value="${p.client.address||""}"></div><div class="field hidden" id="clientPianoValueBox"><label>Estimated value / Becsült érték</label><input name="estimated_value" type="number" form="pianoAddForm" value="0"></div></div></div><form id="pianoAddForm"></form><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Close</button><button type="button" onclick="addPianoToClient('${p.client.id}')">Add piano / Zongora hozzáadása</button></div>`;
+ $("#modalTitle").textContent=bi("Client profile","Ügyfélprofil");
+ $("#form").innerHTML=`<div class="work-card"><h4>${p.client.name} · ${p.client.id}</h4><p><b>${bi("Phone","Telefon")}:</b> ${p.client.phone||""}</p><p><b>${bi("Address","Cím")}:</b> ${p.client.address||""}</p><p><b>${bi("Last visit","Utolsó látogatás")}:</b> ${p.lastVisit||""}</p><p><b>${bi("Last job","Legutóbbi munka")}:</b> ${p.lastJob||""}</p><h3>${bi("Pianos","Zongorák")}</h3>${p.pianos.map(x=>`<p>${x.display_name||`${x.brand||""} ${x.model||""}`} · ${x.serial_no||""} · ${x.ownership_type||x.ownership||"Customer owned"}</p>`).join("")||`<p>${bi("No pianos linked","Nincs kapcsolt zongora")}</p>`}<h3>${bi("Jobs","Munkák")}</h3>${p.jobs.map(x=>`<p>${x.start_time} · ${x.title} · ${x.assigned_to} · ${x.status}</p>`).join("")||`<p>${bi("No jobs","Nincs munka")}</p>`}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button></div>`;
  $("#form").onsubmit=e=>e.preventDefault()
 }
 async function addPianoToClient(clientId){
@@ -528,7 +565,6 @@ async function addPianoToClient(clientId){
  try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await clientProfile(clientId)}catch(err){alert(err.message)}
 }
 function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?"Edit ":"Add ")+s.title;$("#form").innerHTML=`<div class="form-grid">${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save</button></div>`;
- if(key==="contacts"){ attachClientPianoSelector(row); }
  $("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});try{let saved;
 if(row) saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});
 if(key==="contacts"){const clientId=(row&&row.id)||saved.id; const ids=[...document.querySelectorAll('input[name="client_piano_ids"]:checked')].map(x=>x.value); if(clientId) await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}
@@ -657,7 +693,7 @@ async function renderFinance(){
      <div><button class="small" onclick="exportFinancialItemsCSV()">Export CSV</button> <button onclick="openFinancialItem()">+ New Financial Item / Új pénzügyi tétel</button></div>
    </div>
    <div class="finance-filters">
-     <label>Month / Hónap <input id="finFilterMonth" type="month" value="${currentMonth}"></label>
+     <label>${bi("Month","Hónap")} <input id="finFilterMonth" type="month" value="${currentMonth}"></label>
      <label>Type / Típus <select id="finFilterType"><option value="">All / Összes</option><option value="INCOME">Income / Bevétel</option><option value="EXPENSE">Expense / Kiadás</option><option value="ASSET">Asset / Eszköz</option><option value="LIABILITY">Liability / Kötelezettség</option><option value="EQUITY">Equity / Saját tőke</option></select></label>
      <label>Recurrence / Ismétlődés <select id="finFilterRec"><option value="">All / Összes</option><option value="ONE_TIME">One-time / Egyszeri</option><option value="MONTHLY">Monthly / Havi</option></select></label>
      <button class="small" onclick="applyFinanceFilters()">Filter / Szűrés</button>
@@ -769,8 +805,8 @@ function renderIncomeSheetHTML(d, includeTrial=true){
  const acct=c=>d.trialBalance.filter(a=>a.category===c);
 
  const lineRows=(arr,fallback)=>arr.length
-   ? arr.map(a=>`<div class="cf-line"><span>${a.name_en} <small>(${a.name_hu})</small></span><b>${money(a.balance)}</b></div>`).join("")
-   : fallback.map(x=>`<div class="cf-line empty"><span>${x}</span><b>—</b></div>`).join("");
+   ? arr.map(a=>`<div class="cf-line"><span>${currentLang==="hu"?(a.name_hu||a.name_en):(a.name_en||a.name_hu)}</span><b>${money(a.balance)}</b></div>`).join("")
+   : fallback.map(x=>`<div class="cf-line empty"><span>${parenLabel(x)}</span><b>—</b></div>`).join("");
 
  const fallbackIncome=[
    "Service Revenue (Szolgáltatási bevétel)",
@@ -820,78 +856,78 @@ function renderIncomeSheetHTML(d, includeTrial=true){
  const sourceRows=lineRows([...acct("LIABILITY"),...acct("EQUITY")],fallbackSources);
 
  const trial=includeTrial?`<div class="panel income-trial-table no-print-break">
-   <h3>Technical Summary (Technikai összesítő)</h3>
-   <p class="muted">General Ledger has been removed. This section is kept only for export compatibility. (A Főkönyv funkció törölve lett, ez csak export-kompatibilitási hely.)</p>
+   <h3>${bi("Technical Summary","Technikai összesítő")}</h3>
+   <p class="muted">${bi("General Ledger has been removed. This section is kept only for export compatibility.","A Főkönyv funkció törölve lett, ez csak export-kompatibilitási hely.")}</p>
    <div class="table-wrap"><table>
-     <thead><tr><th>Code</th><th>Account</th><th>Category</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-     <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No ledger data (Nincs főkönyvi adat)</td></tr>`}</tbody>
+     <thead><tr><th>${bi("Code","Kód")}</th><th>${bi("Account","Számla")}</th><th>${bi("Category","Kategória")}</th><th>${bi("Debit","Tartozik")}</th><th>${bi("Credit","Követel")}</th><th>${bi("Balance","Egyenleg")}</th></tr></thead>
+     <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">${bi("No ledger data","Nincs főkönyvi adat")}</td></tr>`}</tbody>
    </table></div>
  </div>`:"";
 
  return `<div class="grid kpis">
-   <div class="kpi"><span>Revenue / Bevétel</span><strong>${money(d.totals.revenue)}</strong></div>
-   <div class="kpi"><span>Expenses / Kiadások</span><strong>${money(d.totals.expenses)}</strong></div>
-   <div class="kpi"><span>Assets / Eszközök</span><strong>${money(d.totals.assets||0)}</strong></div>
-   <div class="kpi"><span>Sources / Források</span><strong>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</strong></div>
+   <div class="kpi"><span>${bi("Revenue","Bevétel")}</span><strong>${money(d.totals.revenue)}</strong></div>
+   <div class="kpi"><span>${bi("Expenses","Kiadások")}</span><strong>${money(d.totals.expenses)}</strong></div>
+   <div class="kpi"><span>${bi("Assets","Eszközök")}</span><strong>${money(d.totals.assets||0)}</strong></div>
+   <div class="kpi"><span>${bi("Sources","Források")}</span><strong>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</strong></div>
  </div>
 
  <div class="cashflow-layout">
    <div class="cf-main-title">
-     <h2>Income Statement (Eredménykimutatás)</h2>
-     <p>Cashflow-style monthly business overview (Cashflow-jellegű havi vállalati áttekintés)</p>
+     <h2>${bi("Income Statement","Eredménykimutatás")}</h2>
+     <p>${bi("Cashflow-style monthly business overview","Cashflow-jellegű havi vállalati áttekintés")}</p>
    </div>
 
    <div class="cf-upper">
      <div class="cf-left-stack">
        <div class="cf-card">
-         <div class="cf-card-head">Income ($/month) <span>(Bevételek $/hó)</span></div>
+         <div class="cf-card-head">${bi("Income ($/month)","Bevételek ($/hó)")}</div>
          <div class="cf-card-body">${incomeRows}</div>
        </div>
 
        <div class="cf-card">
-         <div class="cf-card-head">Expenses ($/month) <span>(Kiadások $/hó)</span></div>
+         <div class="cf-card-head">${bi("Expenses ($/month)","Kiadások ($/hó)")}</div>
          <div class="cf-card-body">${expenseRows}</div>
        </div>
      </div>
 
      <div class="cf-right-stack">
        <div class="cf-card cf-bookkeeper">
-         <div class="cf-card-head">Bookkeeper <span>(Könyvvizsgáló)</span></div>
+         <div class="cf-card-head">${bi("Bookkeeper","Könyvvizsgáló")}</div>
          <div class="cf-card-body">
-           <div class="cf-line big"><span>Passive Income (Passzív jövedelem)</span><b>${money(d.totals.passiveIncome||0)}</b></div>
+           <div class="cf-line big"><span>${bi("Passive Income","Passzív jövedelem")}</span><b>${money(d.totals.passiveIncome||0)}</b></div>
            <div class="cf-rule"></div>
-           <div class="cf-line total"><span>Total Income (Összes bevétel)</span><b>${money(d.totals.revenue)}</b></div>
+           <div class="cf-line total"><span>${bi("Total Income","Összes bevétel")}</span><b>${money(d.totals.revenue)}</b></div>
          </div>
        </div>
 
        <div class="cf-card cf-cashflow">
          <div class="cf-card-body">
-           <div class="cf-line total"><span>Total Expenses (Összes kiadás)</span><b>${money(d.totals.expenses)}</b></div>
+           <div class="cf-line total"><span>${bi("Total Expenses","Összes kiadás")}</span><b>${money(d.totals.expenses)}</b></div>
            <div class="cf-rule"></div>
-           <div class="cf-line cashflow"><span>Monthly Cash Flow (Havi készpénzáramlás)</span><b>${money(d.totals.profit)}</b></div>
+           <div class="cf-line cashflow"><span>${bi("Monthly Cash Flow","Havi készpénzáramlás")}</span><b>${money(d.totals.profit)}</b></div>
          </div>
        </div>
      </div>
    </div>
 
-   <div class="cf-balance-title">Balance Sheet (Mérleg)</div>
+   <div class="cf-balance-title">${bi("Balance Sheet","Mérleg")}</div>
 
    <div class="cf-balance">
      <div class="cf-card">
-       <div class="cf-card-head cf-card-head-sum"><span>Assets ($) <small>(Eszközök $)</small></span><b>${money(d.totals.assets||0)}</b></div>
+       <div class="cf-card-head cf-card-head-sum"><span>${bi("Assets ($)","Eszközök ($)")}</span><b>${money(d.totals.assets||0)}</b></div>
        <div class="cf-card-body">${assetRows}</div>
      </div>
 
      <div class="cf-card">
-       <div class="cf-card-head cf-card-head-sum"><span>Sources ($) <small>(Források $)</small></span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
+       <div class="cf-card-head cf-card-head-sum"><span>${bi("Sources ($)","Források ($)")}</span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
        <div class="cf-card-body">${sourceRows}</div>
      </div>
    </div>
 
    <div class="cf-footer cf-footer-grid">
-     <div class="cf-line total"><span>Total Assets (Összes eszköz)</span><b>${money(d.totals.assets||0)}</b></div>
-     <div class="cf-line total"><span>Total Sources (Összes forrás)</span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
-     <div class="cf-line total"><span>Net Worth (Nettó vagyon)</span><b>${money(d.totals.netWorth)}</b></div>
+     <div class="cf-line total"><span>${bi("Total Assets","Összes eszköz")}</span><b>${money(d.totals.assets||0)}</b></div>
+     <div class="cf-line total"><span>${bi("Total Sources","Összes forrás")}</span><b>${money(d.totals.sources||((d.totals.liabilities||0)+(d.totals.equity||0)))}</b></div>
+     <div class="cf-line total"><span>${bi("Net Worth","Nettó vagyon")}</span><b>${money(d.totals.netWorth)}</b></div>
    </div>
  </div>${trial}`;
 }
@@ -905,10 +941,10 @@ async function renderIncomeStatement(){
  $("#income_statement").innerHTML=`<div class="panel no-print">
    <div class="toolbar">
      <div>
-       <h3>Current monthly export / Aktuális havi export</h3>
-       <p class="muted">Current month / Aktuális hónap: <b>${d.month}</b> · Period start / Időszak kezdete: <b>${d.monthStart}</b> · Generated / Lekérés ideje: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
+       <h3>${bi("Current monthly export","Aktuális havi export")}</h3>
+       <p class="muted">${bi("Current month","Aktuális hónap")}: <b>${d.month}</b> · ${bi("Period start","Időszak kezdete")}: <b>${d.monthStart}</b> · ${bi("Generated","Lekérés ideje")}: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
      </div>
-     <button onclick="exportIncomeStatementPDF('${d.month}')">Export current month PDF / Aktuális hónap PDF</button>
+     <button onclick="exportIncomeStatementPDF('${d.month}')">${bi("Export current month PDF","Aktuális hónap PDF export")}</button>
    </div>
  </div>
 
@@ -917,10 +953,10 @@ async function renderIncomeStatement(){
  </div>
 
  <div class="panel no-print">
-   <div class="toolbar"><h3>Previous monthly income statements / Korábbi havi eredménykimutatások</h3></div>
+   <div class="toolbar"><h3>${bi("Previous monthly income statements","Korábbi havi eredménykimutatások")}</h3></div>
    <div class="table-wrap"><table>
-     <thead><tr><th>Month / Hónap</th><th>Period start / Időszak kezdete</th><th>Revenue / Bevétel</th><th>Expenses / Kiadások</th><th>Profit / Eredmény</th><th>Export</th></tr></thead>
-     <tbody>${pastRows.map(x=>`<tr><td>${x.month}</td><td>${x.monthStart}</td><td>${money(x.totals.revenue)}</td><td>${money(x.totals.expenses)}</td><td>${money(x.totals.profit)}</td><td><button class="small" onclick="exportIncomeStatementPDF('${x.month}')">PDF</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No previous monthly data / Nincs korábbi havi adat.</td></tr>`}</tbody>
+     <thead><tr><th>${bi("Month","Hónap")}</th><th>${bi("Period start","Időszak kezdete")}</th><th>${bi("Revenue","Bevétel")}</th><th>${bi("Expenses","Kiadások")}</th><th>${bi("Profit","Eredmény")}</th><th>Export</th></tr></thead>
+     <tbody>${pastRows.map(x=>`<tr><td>${x.month}</td><td>${x.monthStart}</td><td>${money(x.totals.revenue)}</td><td>${money(x.totals.expenses)}</td><td>${money(x.totals.profit)}</td><td><button class="small" onclick="exportIncomeStatementPDF('${x.month}')">PDF</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">${bi("No previous monthly data","Nincs korábbi havi adat.")}</td></tr>`}</tbody>
    </table></div>
  </div>`;
 }
@@ -948,8 +984,8 @@ async function exportIncomeStatementPDF(month=currentMonthKey()){
  </style></head><body>
    <div class="pdf-meta">
      <h1>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h1>
-     <p><b>Month / Hónap:</b> ${d.month}</p>
-     <p><b>Period start / Időszak kezdete:</b> ${d.monthStart}</p>
+     <p><b>${bi("Month","Hónap")}:</b> ${d.month}</p>
+     <p><b>${bi("Period start","Időszak kezdete")}:</b> ${d.monthStart}</p>
      <p><b>Generated / Letöltés időbélyege:</b> ${generated}</p>
    </div>
    ${html}
@@ -962,10 +998,11 @@ async function renderClosedJobs(){
  const target=forceShowView("closed_jobs");
  let rows=[];
  try{ rows=await api("/api/closed-jobs"); }catch(e){ rows=[]; }
+ const headers=[bi("Job ID","Munkaazonosító"),bi("Job name","Munka neve"),bi("Client","Ügyfél"),bi("Piano","Zongora"),bi("Type","Típus"),bi("Responsible at close","Felelős lezáráskor"),bi("Closed by","Lezárta"),bi("Closed at","Lezárás ideje"),bi("Amount","Összeg"),bi("Payment method","Fizetési mód"),bi("Invoice/check","Számla/csekk"),bi("Description","Leírás"),bi("Actions","Műveletek")];
  const tableRows = rows.length ? rows.map(r=>`<tr>
-   <td>${r.job_key||r.job_id||""}</td><td>${r.title||""}</td><td>${r.client_name||""}</td><td>${r.piano_name||""}</td><td>${r.close_type||r.job_type||""}</td><td>${r.responsible_at_close||""}</td><td>${r.closed_by||""}</td><td>${r.closed_at||""}</td><td>${money(r.billed_amount)}</td><td>${r.payment_method||""}</td><td>${r.document_path?`<a href="${r.document_path}" target="_blank">Download / Letöltés</a>`:""}</td><td>${r.close_description||""}</td><td>${isSuperadmin()?`<button class="small danger-btn" onclick="deleteClosedJob('${r.log_id}')">Delete / Törlés</button>`:""}</td>
- </tr>`).join("") : `<tr><td colspan="13" class="muted">Még nincs lezárt munka.</td></tr>`;
- target.innerHTML=`<div class="panel"><div class="toolbar"><h3>Closed Jobs / Lezárt munkák</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div><div class="table-wrap"><table><thead><tr><th>Munkaazonosító</th><th>Munka neve</th><th>Ügyfél</th><th>Zongora</th><th>Típus</th><th>Felelős lezáráskor</th><th>Lezárta</th><th>Lezárás ideje</th><th>Összeg</th><th>Fizetési mód</th><th>Számla/csekk</th><th>Leírás</th><th>Actions / Műveletek</th></tr></thead><tbody>${tableRows}</tbody></table></div></div>`;
+   <td>${r.job_key||r.job_id||""}</td><td>${r.title||""}</td><td>${r.client_name||""}</td><td>${r.piano_name||""}</td><td>${r.close_type||r.job_type||""}</td><td>${r.responsible_at_close||""}</td><td>${r.closed_by||""}</td><td>${r.closed_at||""}</td><td>${money(r.billed_amount)}</td><td>${r.payment_method||""}</td><td>${r.document_path?`<a href="${r.document_path}" target="_blank">${bi("Download","Letöltés")}</a>`:""}</td><td>${r.close_description||""}</td><td>${isSuperadmin()?`<button class="small danger-btn" onclick="deleteClosedJob('${r.log_id}')">${bi("Delete","Törlés")}</button>`:""}</td>
+ </tr>`).join("") : `<tr><td colspan="13" class="muted">${tr("noClosedJobs")}</td></tr>`;
+ target.innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Closed Jobs","Lezárt munkák")}</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div><div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div></div>`;
 }
 async function deleteClosedJob(id){
  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
