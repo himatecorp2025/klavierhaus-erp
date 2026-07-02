@@ -197,12 +197,47 @@ async function loadSchedulerWorkers(){
   try{ schedulerWorkersCache=await api("/api/schedule-workers"); }catch(e){ schedulerWorkersCache=["Károly","Alex","Misi","Paul","Said"].map((name,i)=>({id:String(i+1),name})); }
   return schedulerWorkersCache;
 }
-const workerColorPalette=["#4aa3ff","#b084f5","#ff9f43","#f5c542","#22d3ee","#a78bfa","#38bdf8","#f472b6","#c084fc","#60a5fa","#fbbf24","#2dd4bf"];
-function workerColor(name){
-  const s=String(name||""); let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
-  return workerColorPalette[h%workerColorPalette.length];
+const workerColorPalette=[
+  {hex:"#2563EB",dot:"🔵",name:"Blue"},
+  {hex:"#7C3AED",dot:"🟣",name:"Purple"},
+  {hex:"#EA580C",dot:"🟠",name:"Orange"},
+  {hex:"#EAB308",dot:"🟡",name:"Yellow"},
+  {hex:"#92400E",dot:"🟤",name:"Brown"},
+  {hex:"#0891B2",dot:"🔷",name:"Teal"},
+  {hex:"#DB2777",dot:"🌸",name:"Pink"},
+  {hex:"#4338CA",dot:"🔹",name:"Indigo"},
+  {hex:"#65A30D",dot:"🫒",name:"Olive"},
+  {hex:"#C2410C",dot:"🟧",name:"Deep orange"},
+  {hex:"#0F766E",dot:"🟩",name:"Deep teal"},
+  {hex:"#A16207",dot:"🟨",name:"Amber"}
+];
+const knownWorkerColorIndexes={"Károly":0,"Karoly":0,"Alex":1,"Misi":2,"Paul":3,"Pol":3,"Said":4};
+function workerColorInfo(name){
+  const n=String(name||"").trim();
+  if(Object.prototype.hasOwnProperty.call(knownWorkerColorIndexes,n)) return workerColorPalette[knownWorkerColorIndexes[n]];
+  const workers=(schedulerWorkersCache||[]).map(w=>String(w.name||"").trim()).filter(Boolean);
+  const idx=workers.indexOf(n);
+  const start=5;
+  if(idx>=0) return workerColorPalette[(start+idx)%workerColorPalette.length];
+  let h=0; for(let i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0;
+  return workerColorPalette[(start+h)%workerColorPalette.length];
+}
+function workerColor(name){ return workerColorInfo(name).hex; }
+function workerFilterLabel(value, workers=[]){
+  if(value==="ALL") return `🟢 ◎ ${bi("All Jobs","Összes munka")}`;
+  if(value==="COMPLETED") return `🟢 ✓ ${bi("Completed","Elvégzett")}`;
+  if(value==="FAILED") return `🔴 ✕ ${bi("Failed / Overdue","Sikertelen / lejárt")}`;
+  const name=String(value||"").replace(/^worker:/,"");
+  const info=workerColorInfo(name);
+  return `${info.dot} ● ${name}`;
 }
 function nyNowLocalString(){ return localDT(new Date()); }
+function currentNYTimeString(){
+  try{return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:currentLang!=="hu"}).format(new Date());}
+  catch(e){return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
+}
+function updateNYClock(){ const el=document.getElementById("currentNYClock"); if(el) el.textContent=currentNYTimeString(); }
+setInterval(updateNYClock,30000);
 function isClosedJobStatus(status){ return ["Completed","Partially completed","Failed"].includes(String(status||"")); }
 function isOverdueJob(j){ return !isClosedJobStatus(j.status) && String(j.end_time||"") && String(j.end_time).slice(0,16) < nyNowLocalString(); }
 function calendarEventClass(j){ if(String(j.status)==="Failed" || isOverdueJob(j)) return "Failed"; if(["Completed","Partially completed"].includes(String(j.status||""))) return "Completed"; return "WorkerColor"; }
@@ -243,6 +278,7 @@ async function render(v){
  else if(v==="finance") await renderFinance();
  else if(v==="inventory") await renderInventory();
  else if(v==="users") await renderUsers();
+ else if(v==="pianos") await renderPianos();
  else await renderTable(v);
  applyLanguageToDOM();
 }
@@ -250,14 +286,20 @@ async function render(v){
 async function renderScheduler(){
  const jobs=await api("/api/jobs");
  const workers=await loadSchedulerWorkers();
- const visibleJobs=jobs.filter(j=>currentSchedulerWorker==="ALL" || String(j.assigned_to||"")===currentSchedulerWorker);
+ const visibleJobs=jobs.filter(j=>{
+   if(currentSchedulerWorker==="ALL") return true;
+   if(currentSchedulerWorker==="COMPLETED") return ["Completed","Partially completed"].includes(String(j.status||""));
+   if(currentSchedulerWorker==="FAILED") return String(j.status||"")==="Failed" || isOverdueJob(j);
+   if(String(currentSchedulerWorker).startsWith("worker:")) return String(j.assigned_to||"")===String(currentSchedulerWorker).slice(7);
+   return String(j.assigned_to||"")===currentSchedulerWorker;
+ });
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const hours=Array.from({length:15},(_,i)=>i+7);
  const weekDates=week.map(d=>fmtDate(d));
- const workerOptions=[`<option value="ALL" ${currentSchedulerWorker==="ALL"?"selected":""}>${tr("all")}</option>`,...workers.map(w=>`<option value="${String(w.name).replaceAll('"','&quot;')}" ${currentSchedulerWorker===w.name?"selected":""}>${w.name}</option>`)].join("");
- const legend=workers.map(w=>`<span class="worker-legend-item"><i style="background:${workerColor(w.name)}"></i>${w.name}</span>`).join("");
+ const baseOptions=["ALL","COMPLETED","FAILED"].map(v=>`<option value="${v}" ${currentSchedulerWorker===v?"selected":""}>${workerFilterLabel(v,workers)}</option>`).join("");
+ const workerOptions=workers.map(w=>{const val=`worker:${String(w.name).replaceAll('"','&quot;')}`;return `<option value="${val}" ${currentSchedulerWorker===`worker:${w.name}`?"selected":""}>${workerFilterLabel(`worker:${w.name}`,workers)}</option>`}).join("");
 
- let html=`<div class="panel"><div class="toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select onchange="currentSchedulerWorker=this.value;renderScheduler()">${workerOptions}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div><div class="worker-legend"><span class="worker-legend-item completed"><i></i>${bi("Completed / Partially completed","Elvégzett / részlezárt")}</span><span class="worker-legend-item failed"><i></i>${bi("Failed / overdue","Sikertelen / lejárt")}</span>${legend}</div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">${bi("Time","Idő")}</div>`;
+ let html=`<div class="panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${baseOptions}${workerOptions}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">${bi("Time","Idő")}</div>`;
  html+=week.map(d=>`<div class="cal-head"><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b><br><span>${fmtDate(d)}</span></div>`).join("");
 
  for(const h of hours){
@@ -279,6 +321,7 @@ async function renderScheduler(){
  }
  html+=`</div></div></div>`;
  $("#scheduler").innerHTML=html;
+ updateNYClock();
  applyLanguageToDOM();
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
@@ -523,6 +566,29 @@ function headerLabel(key,c){
  };
  return map[key]?.[c] || c;
 }
+
+function pianoSearchMatch(p, q){
+ const raw=String(q||"").trim().toLowerCase();
+ if(!raw) return true;
+ const brandModel=[p.brand,p.model,p.display_name].join(" ").toLowerCase();
+ if(raw.length===1) return brandModel.includes(raw);
+ const ownership=String(p.ownership_type||p.ownership||"").toLowerCase();
+ const ownershipHu=ownership.includes("company")?"céges company firm tulajdon cég":"ügyfél customer client";
+ const hay=[p.id,p.brand,p.model,p.display_name,p.serial_no,p.location,p.owner_contact_id,p.owner_name,p.client_name,p.estimated_value,ownership,ownershipHu].join(" ").toLowerCase();
+ return hay.includes(raw);
+}
+async function renderPianos(){
+ const s=schemas.pianos;
+ const data=await api("/api/pianos");
+ const q=(document.getElementById("pianoSearchInput")?.value||"");
+ const filtered=data.filter(p=>pianoSearchMatch(p,q));
+ const cols=["id","brand","model","serial_no","ownership_type","owner_name","location","estimated_value"];
+ const label={id:bi("Piano ID","Zongora ID"),brand:bi("Brand","Márka"),model:bi("Model","Típus"),serial_no:bi("Serial No.","Gyári szám"),ownership_type:bi("Ownership","Tulajdon"),owner_name:bi("Client / Owner","Ügyfél / tulajdonos"),location:bi("Location","Helyszín"),estimated_value:bi("Estimated value","Becsült érték")};
+ $("#pianos").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div><button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button></div></div><div class="client-search"><label>${bi("Search pianos by brand, model, client, location or ownership","Zongorák keresése márka, modell, ügyfél, helyszín vagy tulajdon szerint")}<input id="pianoSearchInput" value="${q.replaceAll('"','&quot;')}" placeholder="${bi("Example: D, F212, John Smith, company, céges","Példa: D, F212, John Smith, company, céges")}" oninput="renderPianos()"></label><p class="muted">${bi("1 character searches only brand/model. 2+ characters search all relevant fields.","1 karakter csak márkában/modellben keres. 2+ karakter minden releváns mezőben keres.")}</p></div><div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]||c}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${cols.map(c=>`<td>${c==="estimated_value"?money(r[c]):(r[c]??"")}</td>`).join("")}<td><button class="small" onclick='openForm("pianos",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${cols.length+1}" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
+ const input=document.getElementById("pianoSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
+ applyLanguageToDOM();
+}
+
 async function renderTable(key){
  let s=schemas[key],data=await api("/api/"+s.api);
  if(key==="contacts") return renderContactsTable(data);
@@ -544,7 +610,7 @@ async function deleteGenericResource(key,id){
  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
  const s=schemas[key];
  if(!s || !confirm("Delete this item? / Töröljük ezt a tételt?")) return;
- try{await api(`/api/${s.api}/${encodeURIComponent(id)}`,{method:"DELETE"}); await renderTable(key);}catch(err){alert(err.message)}
+ try{await api(`/api/${s.api}/${encodeURIComponent(id)}`,{method:"DELETE"}); await render(key);}catch(err){alert(err.message)}
 }
 function cellValue(key,c,r){
  if((c.includes("amount")||c.includes("value"))) return money(r[c]);
