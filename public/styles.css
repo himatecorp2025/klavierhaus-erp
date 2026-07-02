@@ -89,3 +89,11 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 .client-search label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-weight:800}
 .client-search input{width:min(520px,100%)}
 @media(max-width:900px){.scheduler-actions{justify-content:flex-start}.inline-label select{min-width:100%}.worker-legend{align-items:flex-start}}
+
+/* Scheduler New York clock and compact filter legend */
+.scheduler-toolbar{align-items:flex-start}
+.ny-time-box{display:inline-flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:#081525;color:var(--muted);font-weight:800}
+.ny-time-box strong{color:var(--text);font-size:18px;font-variant-numeric:tabular-nums}
+.worker-filter-select{min-width:240px;font-weight:900}
+.worker-legend{display:none!important}
+@media(max-width:900px){.scheduler-toolbar{flex-direction:column}.scheduler-actions{width:100%;justify-content:flex-start}.worker-filter-select{width:100%;min-width:0}.ny-time-box{width:100%;justify-content:space-between}}
