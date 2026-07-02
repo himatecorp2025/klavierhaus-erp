@@ -4,6 +4,7 @@ let user=JSON.parse(localStorage.getItem("kh_user")||"null");
 let currentWeekStart=startOfWeek(new Date());
 let currentView="scheduler";
 let currentLang="en";
+let currentTheme="dark";
 let currentSchedulerWorker="ALL";
 let schedulerWorkersCache=null;
 
@@ -11,7 +12,7 @@ const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
  ADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
  MANAGER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
- WORKER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"]]
+ WORKER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]]
 };
 
 const schemas={
@@ -38,11 +39,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters..."
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", all:"Összes", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert..."
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", all:"Összes", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása"
  }
 };
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
@@ -84,12 +85,25 @@ function applyLanguageToDOM(root=document.body){
   const logoutBtn=document.getElementById("logoutBtn"); if(logoutBtn) logoutBtn.textContent=tr("logout");
   const delBtn=document.getElementById("deleteEverythingBtn"); if(delBtn) delBtn.textContent=tr("deleteEverything");
   updateLanguageButtons();
+  updateThemeButtons();
+  const themeDark=document.getElementById("themeDarkBtn"); if(themeDark) themeDark.title=tr("themeDark");
+  const themeLight=document.getElementById("themeLightBtn"); if(themeLight) themeLight.title=tr("themeLight");
   updateCountdownDisplay();
 }
 function updateLanguageButtons(){
   const en=document.getElementById("langEnBtn"), hu=document.getElementById("langHuBtn");
   if(en) en.classList.toggle("active",currentLang==="en");
   if(hu) hu.classList.toggle("active",currentLang==="hu");
+}
+
+function userThemeKey(){return user?.id ? `kh_theme_${user.id}` : "kh_theme_guest";}
+function loadTheme(){currentTheme=localStorage.getItem(userThemeKey())||"dark"; if(!["dark","light"].includes(currentTheme)) currentTheme="dark"; applyTheme();}
+function setTheme(theme){currentTheme=theme==="light"?"light":"dark"; localStorage.setItem(userThemeKey(),currentTheme); applyTheme();}
+function applyTheme(){document.documentElement.setAttribute("data-theme",currentTheme); updateThemeButtons();}
+function updateThemeButtons(){
+  const dark=document.getElementById("themeDarkBtn"), light=document.getElementById("themeLightBtn");
+  if(dark) dark.classList.toggle("active",currentTheme==="dark");
+  if(light) light.classList.toggle("active",currentTheme==="light");
 }
 
 const $=s=>document.querySelector(s);
@@ -151,6 +165,7 @@ async function deleteEverything(){
 function boot(){
  if(!token)return;
  loadLanguage();
+ loadTheme();
  $("#login").classList.add("hidden");
  $("#app").classList.remove("hidden");
  document.body.classList.add("sidebar-collapsed");
@@ -1353,23 +1368,59 @@ async function exportInventoryPDF(){
 
 async function renderUsers(){
  let u=await api("/api/users");
- const canEdit=isSuperadmin();
- $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>Users / Felhasználók</h3><button onclick="openUser()">+ Add user</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions / Műveletek</th></tr></thead><tbody>${u.map(x=>`<tr><td>${x.name}</td><td>${x.email}</td><td>${x.role}</td><td>${x.status}</td><td>${canEdit?`<button class="small" onclick='openUser(${esc(x)})'>Edit / Szerkesztés</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete / Törlés</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`
+ const canAdd=user.role==="ADMIN" || user.role==="MANAGER" || isSuperadmin();
+ const rows=u.map(x=>{
+   const isMe=x.id===user.id;
+   const profileBtn=isMe?`<button class="small" onclick='openUser(${esc(x)},true)'>${tr("myProfile")}</button>`:"";
+   const superBtns=isSuperadmin()?` <button class="small" onclick='openUser(${esc(x)},false)'>${tr("editUser")}</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete</button>`:"";
+   return `<tr><td>${x.name||""}</td><td>${x.email||""}</td><td>${x.role||""}</td><td>${x.phone||""}</td><td>${x.address||""}</td><td>${x.status||""}</td><td>${profileBtn}${superBtns}</td></tr>`;
+ }).join("");
+ $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>Status</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+ applyLanguageToDOM(document.getElementById("users"));
 }
-function openUser(row=null){
+function openUser(row=null, selfProfile=false){
  const isEdit=!!row;
+ const canFullEdit=isSuperadmin() && isEdit && !selfProfile;
+ const canCreate=!isEdit && (user.role==="ADMIN" || user.role==="MANAGER" || isSuperadmin());
+ if(!isEdit && !canCreate) return alert("Forbidden");
+ if(isEdit && !canFullEdit && row.id!==user.id) return alert("You can edit only your own profile / Csak a saját profilodat szerkesztheted");
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=isEdit?"Edit user / Felhasználó szerkesztése":"Add user / Felhasználó hozzáadása";
- let roleOptions=user.role==="ADMIN"&&!isSuperadmin()? ["ADMIN","MANAGER","WORKER"]:["ADMIN","MANAGER","WORKER"];
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name / Név</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?"New password / Új jelszó":"Password / Jelszó"}</label><input name="password" ${isEdit?"":"required"} placeholder="${isEdit?"Leave empty to keep current / Hagyd üresen, ha marad":""}"></div><div class="field"><label>Role / Jogosultság</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="field"><label>Status / Státusz</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?"Save changes":"Create user"}</button></div>`;
- $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target)); if(isEdit && !body.password) delete body.password; if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else await api("/api/users",{method:"POST",body:JSON.stringify(body)}); closeModal();renderUsers()}catch(err){alert(err.message)}}
+ $("#modalTitle").textContent=isEdit?(selfProfile?tr("myProfile"):tr("editUser")):tr("addUser");
+ let roleOptions=["ADMIN","MANAGER","WORKER"];
+ const roleField = canFullEdit || !isEdit ? `<div class="field"><label>Role</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div>` : "";
+ const statusField = canFullEdit ? `<div class="field"><label>Status</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
+ $("#form").innerHTML=`<div class="form-grid">
+ <div class="field"><label>Name</label><input name="name" value="${row?.name||""}" required></div>
+ <div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div>
+ <div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"} placeholder="${isEdit?tr("leaveEmpty"):""}"></div>
+ <div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div>
+ <div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>
+ ${roleField}${statusField}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ $("#form").onsubmit=async e=>{
+   e.preventDefault();
+   try{
+     let body=Object.fromEntries(new FormData(e.target));
+     if(isEdit && !body.password) delete body.password;
+     if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
+     else await api("/api/users",{method:"POST",body:JSON.stringify(body)});
+     closeModal();
+     if(row && row.id===user.id){
+       user={...user,name:body.name||user.name,email:body.email||user.email};
+       localStorage.setItem("kh_user",JSON.stringify(user));
+       const info=document.getElementById("userInfo"); if(info) info.textContent=`${user.name} · ${user.role}`;
+     }
+     renderUsers();
+   }catch(err){alert(err.message)}
+ }
+ applyLanguageToDOM(document.getElementById("modal"));
 }
 async function deleteUser(id){
  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
  if(!confirm("Delete this user? / Töröljük ezt a felhasználót?")) return;
  try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
 }
-if(token){loadLanguage();boot();}else{loadLanguage();applyLanguageToDOM();}
+
+if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();applyLanguageToDOM();}
 
 
 
