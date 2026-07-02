@@ -74,3 +74,18 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 .delete-everything-btn{margin-top:0!important}
 .finance-kpis{display:none!important}
 @media(max-width:720px){.main-header{padding-left:48px}.header-right{justify-content:flex-start;width:100%}.session-countdown{font-size:13px}.lang-btn{min-width:38px}}
+
+/* Scheduler worker filter and colors */
+.scheduler-actions{display:flex;align-items:end;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.inline-label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-weight:800;font-size:13px}
+.inline-label select{min-width:160px;padding:8px 10px}
+.worker-legend{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid var(--line);background:#081525;border-radius:12px}
+.worker-legend-item{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;font-weight:800}
+.worker-legend-item i{width:14px;height:14px;border-radius:50%;display:inline-block;background:var(--blue)}
+.worker-legend-item.completed i{background:var(--green)}
+.worker-legend-item.failed i{background:var(--red)}
+.cal-event.Failed,.badge.Failed{background:var(--red)!important;color:#fff!important}
+.client-search{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:12px;background:#081525}
+.client-search label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-weight:800}
+.client-search input{width:min(520px,100%)}
+@media(max-width:900px){.scheduler-actions{justify-content:flex-start}.inline-label select{min-width:100%}.worker-legend{align-items:flex-start}}
