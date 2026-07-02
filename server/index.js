@@ -37,6 +37,19 @@ function ensureRuntimeMigrations(){
     db.prepare("UPDATE pianos SET ownership_type=COALESCE(ownership_type, ownership, 'Customer owned')").run();
     db.prepare("UPDATE pianos SET display_name=trim(COALESCE(brand,'') || ' ' || COALESCE(model,'')) WHERE display_name IS NULL OR display_name=''").run();
 
+    // Customer status and purchase-interest fields / Ügyfélállapot és vásárlási érdeklődés mezők
+    try {
+      const contactCols = db.prepare("PRAGMA table_info(contacts)").all().map(c=>c.name);
+      const addContactCol = (name, ddl) => { if(!contactCols.includes(name)) db.prepare(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`).run(); };
+      addContactCol("has_piano", "INTEGER DEFAULT 0");
+      addContactCol("interested_buying", "INTEGER DEFAULT 0");
+      addContactCol("interest_brand", "TEXT");
+      addContactCol("interest_model", "TEXT");
+      addContactCol("interest_budget", "REAL DEFAULT 0");
+      addContactCol("interest_timeline", "TEXT");
+      addContactCol("interest_notes", "TEXT");
+    } catch(e) { console.warn("contact status migration skipped:", e.message); }
+
     db.prepare(`CREATE TABLE IF NOT EXISTS financial_items (
       id TEXT PRIMARY KEY,
       item_date TEXT NOT NULL,
@@ -245,6 +258,16 @@ app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
+function nextContactId(){
+  const rows = db.prepare("SELECT id FROM contacts WHERE id LIKE 'C-%'").all();
+  let max = 0;
+  for(const r of rows){
+    const m = String(r.id||"").match(/^C-(\d{1,5})$/);
+    if(m) max = Math.max(max, Number(m[1]));
+  }
+  const next = Math.min(max + 1, 99999);
+  return `C-${String(next).padStart(5,"0")}`;
+}
 function today(){ return new Date().toISOString().slice(0,10); }
 function nowISO(){ return new Date().toISOString(); }
 function nyToday(){
@@ -828,7 +851,7 @@ app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
 function createResourceRoutes(key, table, prefix, write, roles){
   app.get(`/api/${key}`, auth, (req,res)=>res.json(db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC`).all()));
   app.post(`/api/${key}`, auth, permit(...roles), (req,res)=>{
-    const id=req.body.id || rid(prefix);
+    const id=req.body.id || (key==="contacts" ? nextContactId() : rid(prefix));
     const cols=["id",...write].filter(c=>c==="id" || req.body[c]!==undefined);
     db.prepare(`INSERT INTO ${table}(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:req.body[c]));
     res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id));
@@ -843,7 +866,7 @@ function createResourceRoutes(key, table, prefix, write, roles){
     res.json({ok:true});
   });
 }
-createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/pianos", auth, (req,res)=>{
   ensureRuntimeMigrations();
@@ -871,8 +894,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,req.body.owner_contact_id||null,req.body.location||"",estimated,"Active",req.body.notes||"");
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
-  if(String(ownershipType).toLowerCase().includes("company"))
-res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(id));
+  res.json(piano);
 });
 
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -881,8 +903,8 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
-  if(piano && String(piano.ownership_type||piano.ownership||"").toLowerCase().includes("company"))
-res.json(piano);
+  if(!piano) return res.status(404).json({error:"Piano not found"});
+  res.json(piano);
 });
 
 
@@ -1050,6 +1072,18 @@ app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
   res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));
 });
 
+app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
+  if(!client) return res.status(404).json({error:"Client not found"});
+  const pianoId=String(req.body.piano_id||"").trim();
+  if(!pianoId) return res.status(400).json({error:"piano_id is required"});
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);
+  if(!piano) return res.status(404).json({error:"Piano not found"});
+  db.prepare("UPDATE pianos SET owner_contact_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id,piano.id);
+  db.prepare("UPDATE contacts SET has_piano=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id);
+  res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(piano.id));
+});
+
 app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   ensureRuntimeMigrations();
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
@@ -1064,8 +1098,7 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
-  if(String(ownershipType).toLowerCase().includes("company"))
-res.json(piano);
+  res.json(piano);
 });
 
 
@@ -1083,8 +1116,7 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   const ownershipType=req.body.ownership_type || "Customer owned", estimated=Number(req.body.estimated_value||0);
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active","");
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
-  if(String(ownershipType).toLowerCase().includes("company") && typeof createPianoAssetEntry==="function")
-res.json(piano);
+  res.json(piano);
 });
 app.get("/api/closed-jobs", auth, (req,res)=>{
   const rows=db.prepare(`
