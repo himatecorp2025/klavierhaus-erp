@@ -424,6 +424,12 @@ app.post("/api/login",(req,res)=>{
 });
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
+app.get("/api/schedule-workers", auth, (req,res)=>{
+  ensureRuntimeMigrations();
+  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 ORDER BY name").all();
+  res.json(rows);
+});
+
 
 
 app.get("/api/planned-jobs", auth, (req,res)=>{
@@ -963,7 +969,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   }
 
   const closeType=req.body.close_type;
-  if(!["Partial","Full"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial or Full"});
+  if(!["Partial","Full","Failed"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial, Full or Failed"});
 
   const billed=Number(req.body.billed_amount);
   if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
@@ -972,7 +978,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(!desc) return res.status(400).json({error:"Close description is required"});
 
   const payment=req.body.payment_method || "";
-  if(!payment) return res.status(400).json({error:"Payment method is required / Fizetési mód kötelező"});
+  if(billed > 0 && !payment) return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});
 
   if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
@@ -1000,14 +1006,14 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   }
 
   db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(closeType==="Full"?"Completed":"Partially completed",closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+    .run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
 
   const logId=rid("LOG");
   db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
     .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
 
   db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":"Részlezárás"}: ${job.title}`,closeType==="Full"?"Closed Job":"Partial Close","Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
+    .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
 
   const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
   res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
@@ -1080,7 +1086,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
     FROM job_logs jl
     LEFT JOIN jobs j ON j.id=jl.job_id
     LEFT JOIN jobs nj ON nj.id=jl.next_job_id
-    WHERE jl.log_type IN ('Full','Partial')
+    WHERE jl.log_type IN ('Full','Partial','Failed')
     ORDER BY jl.created_at DESC
   `).all();
   res.json(rows);
