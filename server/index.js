@@ -830,7 +830,16 @@ createResourceRoutes("contacts","contacts","C",["name","company","type","email",
 
 app.get("/api/pianos", auth, (req,res)=>{
   ensureRuntimeMigrations();
-  res.json(db.prepare("SELECT * FROM pianos ORDER BY display_name, brand, model").all());
+  const rows=db.prepare(`
+    SELECT p.*,
+           c.name AS owner_name,
+           c.name AS client_name,
+           c.address AS owner_address
+    FROM pianos p
+    LEFT JOIN contacts c ON c.id = p.owner_contact_id
+    ORDER BY p.display_name, p.brand, p.model
+  `).all();
+  res.json(rows);
 });
 
 app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
