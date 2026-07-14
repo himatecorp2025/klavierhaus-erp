@@ -41,11 +41,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", settings:"Settings", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", settings:"Beállítások", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
@@ -56,6 +56,7 @@ function setLanguage(lang){
   updateLanguageButtons();
   renderNavigation();
   updateStaticChromeLanguage();
+  updateMobileNavigationLanguage();
   if(token && currentView) render(currentView); else applyLanguageToDOM();
 }
 function tr(key){return (staticTranslations[currentLang]&&staticTranslations[currentLang][key])||staticTranslations.en[key]||key;}
@@ -204,7 +205,8 @@ async function boot(){
    $("#pageTitle").textContent=b.textContent;
    render(b.dataset.v);
  };
- render("scheduler");
+ initMobileAppShell();
+ render(isMobileAppViewport()?"today":"scheduler");
  applyLanguageToDOM();
 }
 function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
@@ -318,7 +320,8 @@ async function render(v){
  forceShowView(v);
  const pageTitle=document.getElementById("pageTitle");
  if(pageTitle) pageTitle.textContent=navLabel(v);
- if(v==="scheduler") await renderScheduler();
+ if(v==="today") await renderToday();
+ else if(v==="scheduler") await renderScheduler();
  else if(v==="planned_jobs") await renderPlannedJobs();
  else if(v==="closed_jobs") await renderClosedJobs();
  else if(v==="income_statement") await renderIncomeStatement();
@@ -329,6 +332,65 @@ async function render(v){
  else if(v==="pianos") await renderPianos();
  else await renderTable(v);
  applyLanguageToDOM();
+}
+
+
+function isMobileAppViewport(){ return window.matchMedia("(max-width: 900px)").matches; }
+function nyDateKey(date=new Date()){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date).reduce((a,p)=>{a[p.type]=p.value;return a},{});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function mobileTimeRange(j){ return `${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}`; }
+function mobileJobAddressLink(address){ return address?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`:""; }
+function updateMobileNavigationLanguage(){
+  document.querySelectorAll("[data-mobile-label]").forEach(el=>{el.textContent=tr(el.dataset.mobileLabel)});
+  const title=document.getElementById("mobileMoreTitle"); if(title) title.textContent=tr("more");
+  updateMobileNavigationActive();
+}
+function updateMobileNavigationActive(){
+  document.querySelectorAll(".mobile-nav-btn[data-mobile-view]").forEach(btn=>btn.classList.toggle("active",btn.dataset.mobileView===currentView));
+  const more=document.getElementById("mobileMoreBtn");
+  if(more) more.classList.toggle("active",!["today","contacts","pianos"].includes(currentView));
+}
+function closeMobileMore(){ const sheet=document.getElementById("mobileMoreSheet"); if(sheet){sheet.classList.add("hidden");sheet.setAttribute("aria-hidden","true");document.body.classList.remove("mobile-sheet-open");} }
+function openMobileMore(){
+  const sheet=document.getElementById("mobileMoreSheet"), items=document.getElementById("mobileMoreItems"); if(!sheet||!items)return;
+  const all=(navs[user?.role]||navs.WORKER).filter(n=>!['contacts','pianos'].includes(n[0]) && (n[0]==="settings"?isAdmin():(userPermissions.all||userPermissions.permissions.includes(`${n[0]}.view`))));
+  const top=`<button type="button" class="mobile-more-item ${currentView==='scheduler'?'active':''}" data-more-view="scheduler"><span>📅</span><b>${tr('calendar')}</b></button>`;
+  items.innerHTML=top+all.filter(n=>n[0]!=="scheduler").map(n=>`<button type="button" class="mobile-more-item ${currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
+  sheet.classList.remove("hidden");sheet.setAttribute("aria-hidden","false");document.body.classList.add("mobile-sheet-open");
+  items.querySelectorAll("[data-more-view]").forEach(btn=>btn.onclick=()=>{closeMobileMore();render(btn.dataset.moreView);});
+  const profile=document.getElementById("mobileProfileBtn"); if(profile) profile.onclick=()=>{closeMobileMore();openMyProfile();};
+  const logout=document.getElementById("mobileLogoutBtn"); if(logout) logout.onclick=()=>logoutNow();
+}
+function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",users:"👤",settings:"⚙️",scheduler:"📅"})[view]||"•"; }
+function initMobileAppShell(){
+  const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
+  nav.querySelectorAll("[data-mobile-view]").forEach(btn=>btn.onclick=()=>render(btn.dataset.mobileView));
+  const add=document.getElementById("mobileAddJobBtn"); if(add) add.onclick=()=>openJob();
+  const more=document.getElementById("mobileMoreBtn"); if(more) more.onclick=openMobileMore;
+  const close=document.getElementById("mobileMoreClose"); if(close) close.onclick=closeMobileMore;
+  const backdrop=document.querySelector("#mobileMoreSheet .mobile-sheet-backdrop"); if(backdrop) backdrop.onclick=closeMobileMore;
+  window.addEventListener("resize",()=>{ if(!isMobileAppViewport()&&currentView==="today") render("scheduler"); });
+  updateMobileNavigationLanguage();
+}
+async function renderToday(){
+  const target=ensureView("today");
+  const jobs=await api("/api/jobs");
+  await loadSchedulerWorkers();
+  const today=nyDateKey();
+  const mine=jobs.filter(j=>String(j.start_time||"").slice(0,10)===today && (!user?.id || !j.assigned_user_id || String(j.assigned_user_id)===String(user.id))).sort((a,b)=>String(a.start_time).localeCompare(String(b.start_time)));
+  const next=mine.find(j=>String(j.end_time||"").slice(0,16)>=nyNowLocalString());
+  const cards=mine.map(j=>{
+    const map=mobileJobAddressLink(j.service_address);
+    return `<article class="today-job-card ${calendarEventClass(j)}" style="--job-accent:${workerColor(j.assigned_to)}" onclick='openJobDetails(${esc(j)})'>
+      <div class="today-job-time">${mobileTimeRange(j)}</div>
+      <div class="today-job-main"><h3>${j.title||bi("Untitled job","Névtelen munka")}</h3><p>${j.client_name||""}${j.piano_name?` · ${j.piano_name}`:""}</p><p class="today-job-address">${j.service_address||""}</p></div>
+      <div class="today-job-actions" onclick="event.stopPropagation()">${j.client_phone?`<a class="app-action" href="tel:${String(j.client_phone).replace(/[^+\d]/g,'')}">☎ ${bi("Call","Hívás")}</a>`:""}${map?`<a class="app-action" href="${map}" target="_blank" rel="noopener">⌖ ${bi("Map","Térkép")}</a>`:""}<button class="app-action" type="button" onclick='openJobDetails(${esc(j)})'>› ${bi("Details","Részletek")}</button></div>
+    </article>`;
+  }).join("");
+  target.innerHTML=`<div class="mobile-today-shell"><section class="today-hero"><div><span>${bi("Today in New York","Ma New Yorkban")}</span><h2>${new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",weekday:"long",month:"long",day:"numeric"}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><section class="today-summary"><div><b>${mine.length}</b><span>${bi("jobs today","mai munka")}</span></div><div><b>${next?String(next.start_time).slice(11,16):"—"}</b><span>${bi("next start","következő kezdés")}</span></div></section><section class="today-list"><div class="today-list-head"><h2>${bi("My jobs today","Mai munkáim")}</h2><button type="button" onclick="render('scheduler')">${bi("Full calendar","Teljes naptár")} →</button></div>${cards||`<div class="today-empty"><span>✓</span><h3>${bi("No jobs scheduled for today","Mára nincs ütemezett munka")}</h3><button type="button" onclick="openJob()">＋ ${tr('newJob')}</button></div>`}</section></div>`;
+  updateMobileNavigationActive();
 }
 
 async function renderScheduler(){
