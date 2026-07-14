@@ -7,6 +7,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Database = require("better-sqlite3");
+const AdmZip = require("adm-zip");
 require("dotenv").config();
 
 const app = express();
@@ -18,7 +19,8 @@ if(!JWT_SECRET || JWT_SECRET.length < 32){
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 
-const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
+const db = new Database(DB_PATH);
 db.pragma("foreign_keys = ON");
 
 function ensureRuntimeMigrations(){
@@ -228,59 +230,29 @@ function ensureRuntimeMigrations(){
 }
 ensureRuntimeMigrations();
 
+function runMigration(id, fn){
+  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
+  if(db.prepare("SELECT id FROM schema_migrations WHERE id=?").get(id)) return;
+  db.transaction(()=>{fn();db.prepare("INSERT INTO schema_migrations(id) VALUES(?)").run(id);})();
+}
 function ensureManagementTables(){
-  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    id TEXT PRIMARY KEY,
-    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (
-    role TEXT NOT NULL,
-    permission TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    updated_by TEXT,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(role,permission)
-  )`).run();
-  db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
-    id TEXT PRIMARY KEY,
-    event_time TEXT DEFAULT CURRENT_TIMESTAMP,
-    user_id TEXT,
-    user_name TEXT,
-    user_role TEXT,
-    action TEXT NOT NULL,
-    module TEXT,
-    record_id TEXT,
-    old_value TEXT,
-    new_value TEXT,
-    success INTEGER DEFAULT 1,
-    details TEXT
-  )`).run();
-  db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (
-    id TEXT PRIMARY KEY,
-    file_name TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size INTEGER DEFAULT 0,
-    status TEXT NOT NULL,
-    created_by TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    restored_at TEXT,
-    restored_by TEXT
-  )`).run();
-  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
-  const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
-    MANAGER:[...commonView,'finance.view','income_statement.view'],
-    WORKER:[...commonView],
-    VIEWER:[...commonView]
-  };
-  const ins=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
-  Object.entries(defaults).forEach(([role,perms])=>perms.forEach(p=>ins.run(role,p,'SYSTEM')));
+  runMigration('001_management_tables',()=>{
+    db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (role TEXT NOT NULL,permission TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,updated_by TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(role,permission))`).run();
+    db.prepare(`CREATE TABLE IF NOT EXISTS role_definitions (role TEXT PRIMARY KEY,active INTEGER NOT NULL DEFAULT 1,system_role INTEGER NOT NULL DEFAULT 0,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_by TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
+    db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY,event_time TEXT DEFAULT CURRENT_TIMESTAMP,user_id TEXT,user_name TEXT,user_role TEXT,action TEXT NOT NULL,module TEXT,record_id TEXT,old_value TEXT,new_value TEXT,success INTEGER DEFAULT 1,details TEXT)`).run();
+    db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (id TEXT PRIMARY KEY,file_name TEXT NOT NULL,file_path TEXT NOT NULL,file_size INTEGER DEFAULT 0,status TEXT NOT NULL,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,restored_at TEXT,restored_by TEXT)`).run();
+  });
+  runMigration('002_seed_roles',()=>{
+    const common=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+    const defaults={ADMIN:[...common,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],MANAGER:[...common,'finance.view','income_statement.view'],WORKER:[...common],VIEWER:[...common]};
+    const ri=db.prepare('INSERT OR IGNORE INTO role_definitions(role,active,system_role,created_by) VALUES(?,1,1,?)');['ADMIN','MANAGER','WORKER','VIEWER'].forEach(r=>ri.run(r,'SYSTEM'));
+    const pi=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');Object.entries(defaults).forEach(([r,ps])=>ps.forEach(p=>pi.run(r,p,'SYSTEM')));
+  });
 }
 ensureManagementTables();
 
 const BACKUP_DIR=process.env.BACKUP_DIR || path.join(__dirname,'backups');
 fs.mkdirSync(BACKUP_DIR,{recursive:true});
-const DB_PATH=process.env.DB_PATH || path.join(__dirname,'db','klavierhaus_v6.sqlite');
 function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details=''){
   try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details)
     VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'');}catch(e){console.warn('audit log failed:',e.message)}
@@ -288,18 +260,20 @@ function audit(req, action, module, recordId, oldValue=null, newValue=null, succ
 function hasPermission(user, permission){
   if(isSuperadminUser(user)) return true;
   if(!user) return false;
+  const roleDef=db.prepare('SELECT active FROM role_definitions WHERE role=?').get(user.role);
+  if(roleDef && Number(roleDef.active)!==1) return false;
   const row=db.prepare('SELECT enabled FROM role_permissions WHERE role=? AND permission=?').get(user.role,permission);
   return !!(row && Number(row.enabled)===1);
 }
 function requirePermission(permission){return (req,res,next)=>hasPermission(req.user,permission)?next():res.status(403).json({error:'PERMISSION_DENIED'});}
 function createBackup(createdBy='SYSTEM'){
   const stamp=new Date().toISOString().replace(/[:.]/g,'-');
-  const name=`klavierhaus-backup-${stamp}.sqlite`;
-  const target=path.join(BACKUP_DIR,name);
+  const name=`klavierhaus-backup-${stamp}.zip`; const target=path.join(BACKUP_DIR,name);
   db.pragma('wal_checkpoint(FULL)');
-  fs.copyFileSync(DB_PATH,target);
-  const size=fs.statSync(target).size;
-  const id=rid('BKP');
+  const zip=new AdmZip(); zip.addLocalFile(DB_PATH,'database','klavierhaus_v6.sqlite');
+  if(fs.existsSync(UPLOAD_DIR)) zip.addLocalFolder(UPLOAD_DIR,'uploads');
+  zip.addFile('manifest.json',Buffer.from(JSON.stringify({createdAt:new Date().toISOString(),createdBy},null,2))); zip.writeZip(target);
+  const size=fs.statSync(target).size,id=rid('BKP');
   db.prepare('INSERT INTO backup_log(id,file_name,file_path,file_size,status,created_by) VALUES(?,?,?,?,?,?)').run(id,name,target,size,'SUCCESS',createdBy);
   return db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log WHERE id=?').get(id);
 }
@@ -311,7 +285,7 @@ function maybeWeeklyBackup(){
 maybeWeeklyBackup();
 setInterval(maybeWeeklyBackup,12*60*60*1000).unref();
 function validMagic(filePath){
-  const b=fs.readFileSync(filePath); if(!b.length) return false;
+  const fd=fs.openSync(filePath,'r'),b=Buffer.alloc(8);const n=fs.readSync(fd,b,0,8,0);fs.closeSync(fd);if(!n)return false;
   const pdf=b.slice(0,5).toString()==='%PDF-';
   const jpg=b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF;
   const png=b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;
@@ -337,7 +311,7 @@ const upload = multer({
   limits:{fileSize:20*1024*1024},
   fileFilter: (req,file,cb)=>{
     const ok = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname || "");
-    if(!ok) return cb(new Error("Only PDF, JPG, JPEG or PNG files are allowed / Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel"));
+    if(!ok){const err=new Error("INVALID_FILE_TYPE");err.code="INVALID_FILE_TYPE";return cb(err);}
     cb(null,true);
   }
 });
@@ -919,7 +893,8 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   ensureRuntimeMigrations();
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
-  if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
+  if(role==="SUPERADMIN") return res.status(403).json({error:"SUPERADMIN_CREATE_FORBIDDEN"});
+  const rd=db.prepare("SELECT active FROM role_definitions WHERE role=?").get(role);if(!rd||Number(rd.active)!==1)return res.status(400).json({error:"INVALID_OR_INACTIVE_ROLE"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
   db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
@@ -942,7 +917,8 @@ app.put("/api/users/:id", auth, (req,res)=>{
 
   let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
-  if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
+  if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"SUPERADMIN_CREATE_FORBIDDEN"});
+  if(req.body.role!==undefined){const rd=db.prepare("SELECT active FROM role_definitions WHERE role=?").get(req.body.role);if(!rd||Number(rd.active)!==1)return res.status(400).json({error:"INVALID_OR_INACTIVE_ROLE"});}
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
@@ -1145,40 +1121,24 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
 
-  let nextJobId=null;
-  if(closeType==="Partial"){
-    const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
-    for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
-
-    nextJobId=rid("J");
-    db.prepare(`INSERT INTO jobs(
-      id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
-      assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
-      planned_hours,travel_minutes,service_address,instructions
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",
-        job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
-        req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",
-        req.body.next_start_time,req.body.next_end_time,"America/New_York",
-        Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",
-        Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),
-        req.body.next_service_address||job.service_address,req.body.next_instructions||""
-      );
-  }
-
-  db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
-
-  const logId=rid("LOG");
-  db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
-
-  db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
-
-  const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
-  res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
+  const closeTx=db.transaction(()=>{
+    let nextJobId=null;
+    if(closeType==="Partial"){
+      const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
+      for(const field of required) if(!req.body[field]){const err=new Error(`${field} is required for partial close`);err.code='REQUIRED_FIELDS';throw err;}
+      nextJobId=rid("J");
+      db.prepare(`INSERT INTO jobs(id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
+    }
+    db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+    const logId=rid("LOG");
+    db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+    db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
+    const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
+    audit(req,'CLOSE','jobs',job.id,job,{closeType,billed,payment,nextJobId,logId,financialItemId:financialItem?.id||null});
+    return {nextJobId,financialItem};
+  });
+  try{const result=closeTx();res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null});}
+  catch(err){if(req.file){try{fs.unlinkSync(req.file.path)}catch(e){}}return res.status(400).json({error:err.code||err.message||'TRANSACTION_FAILED'});}
 });
 
 
@@ -1307,8 +1267,12 @@ app.get('/api/my-permissions',auth,(req,res)=>{
   const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
   res.json({all:false,permissions});
 });
+app.get('/api/settings/roles',auth,requirePermission('users.roles'),(req,res)=>res.json(db.prepare('SELECT role,active,system_role FROM role_definitions ORDER BY system_role DESC,role').all()));
+app.post('/api/settings/roles',auth,requirePermission('permissions.manage'),(req,res)=>{const role=String(req.body?.role||'').trim().toUpperCase().replace(/[^A-Z0-9_]/g,'_');if(!role)return res.status(400).json({error:'REQUIRED_FIELDS'});if(db.prepare('SELECT role FROM role_definitions WHERE role=?').get(role))return res.status(409).json({error:'ROLE_ALREADY_EXISTS'});db.prepare('INSERT INTO role_definitions(role,active,system_role,created_by,updated_by) VALUES(?,1,0,?,?)').run(role,req.user.name||'',req.user.name||'');audit(req,'CREATE','roles',role,null,{role,active:1});res.json({role,active:1});});
+app.put('/api/settings/roles/:role',auth,requirePermission('permissions.manage'),(req,res)=>{const role=String(req.params.role||'').toUpperCase();if(role==='ADMIN')return res.status(403).json({error:'PROTECTED_ROLE'});const old=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);if(!old)return res.status(404).json({error:'ROLE_NOT_FOUND'});db.prepare('UPDATE role_definitions SET active=?,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE role=?').run(req.body.active?1:0,req.user.name||'',role);const now=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);audit(req,'UPDATE','roles',role,old,now);res.json(now);});
+app.delete('/api/settings/roles/:role',auth,requireSuperadmin,(req,res)=>{const role=String(req.params.role||'').toUpperCase();if(['ADMIN','MANAGER','WORKER','VIEWER'].includes(role))return res.status(403).json({error:'PROTECTED_ROLE'});if(db.prepare('SELECT COUNT(*) n FROM users WHERE role=?').get(role).n)return res.status(409).json({error:'ROLE_IN_USE'});const old=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);if(!old)return res.status(404).json({error:'ROLE_NOT_FOUND'});db.transaction(()=>{db.prepare('DELETE FROM role_permissions WHERE role=?').run(role);db.prepare('DELETE FROM role_definitions WHERE role=?').run(role);})();audit(req,'MASTER_DELETE','roles',role,old,null);res.json({ok:true});});
 app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
-  const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
+  const roles=db.prepare("SELECT role,active,system_role FROM role_definitions ORDER BY system_role DESC,role").all();
   const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
@@ -1317,6 +1281,8 @@ app.put('/api/settings/permissions',auth,requirePermission('permissions.manage')
   const {role,permission,enabled}=req.body||{};
   if(!role||!permission) return res.status(400).json({error:'REQUIRED_FIELDS'});
   if(role==='SUPERADMIN') return res.status(403).json({error:'SUPERADMIN_PERMISSIONS_FIXED'});
+  const requiredAdmin=new Set(['users.view','users.create','users.roles','permissions.manage','audit.view']);
+  if(role==='ADMIN' && !enabled && requiredAdmin.has(permission)) return res.status(403).json({error:'PROTECTED_ADMIN_PERMISSION'});
   const old=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
   db.prepare(`INSERT INTO role_permissions(role,permission,enabled,updated_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(role,permission) DO UPDATE SET enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(role,permission,enabled?1:0,req.user.name||'');
@@ -1339,8 +1305,7 @@ app.post('/api/backups/:id/restore',auth,requireSuperadmin,(req,res)=>{
   const {password,confirmation}=req.body||{}; if(confirmation!=='RESTORE BACKUP')return res.status(400).json({error:'RESTORE_CONFIRMATION_REQUIRED'});
   const owner=db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);if(!owner||!bcrypt.compareSync(String(password||''),owner.password_hash))return res.status(401).json({error:'INVALID_PASSWORD'});
   const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});
-  const safety=createBackup('PRE_RESTORE'); db.close(); fs.copyFileSync(b.file_path,DB_PATH);
-  return res.json({ok:true,restartRequired:true,safetyBackup:safety.file_name});
+  const safety=createBackup('PRE_RESTORE');const zip=new AdmZip(b.file_path),entry=zip.getEntry('database/klavierhaus_v6.sqlite');if(!entry)return res.status(400).json({error:'BACKUP_INVALID'});const tmp=DB_PATH+'.restore';fs.writeFileSync(tmp,entry.getData());const files=zip.getEntries().filter(e=>!e.isDirectory&&e.entryName.startsWith('uploads/'));db.close();fs.copyFileSync(tmp,DB_PATH);fs.rmSync(tmp,{force:true});fs.rmSync(UPLOAD_DIR,{recursive:true,force:true});fs.mkdirSync(UPLOAD_DIR,{recursive:true});for(const e of files){const rel=e.entryName.slice(8);if(!rel)continue;const out=path.join(UPLOAD_DIR,rel);fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,e.getData());}return res.json({ok:true,restartRequired:true,safetyBackup:safety.file_name});
 });
 
 app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
@@ -1381,11 +1346,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.use((err,req,res,next)=>{
-  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.message||"UPLOAD_ERROR"); return res.status(400).json({error:code}); }
+  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.code==="INVALID_FILE_TYPE"?"INVALID_FILE_TYPE":(err.message||"UPLOAD_ERROR")); return res.status(400).json({error:code}); }
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
