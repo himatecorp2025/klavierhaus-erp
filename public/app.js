@@ -119,7 +119,7 @@ function applyLanguageToDOM(root=document.body){
   if(loginBrandName) loginBrandName.textContent=branding.company_name||"Klavierhaus";
   const sub=document.querySelector(".login-card p"); if(sub) sub.textContent=tr("loginSubtitle");
   const passLabel=document.querySelector('label[for="password"], #loginForm label:nth-of-type(2)'); if(passLabel) passLabel.textContent=tr("password");
-  const loginBtn=document.querySelector("#loginForm button"); if(loginBtn) loginBtn.textContent=tr("login");
+  const loginBtn=document.querySelector('#loginForm button[type="submit"]'); if(loginBtn) loginBtn.textContent=tr("login");
   const subtitle=document.getElementById("headerSubtitle"); if(subtitle) subtitle.textContent=tr("operations");
   const logoutBtn=document.getElementById("logoutBtn"); if(logoutBtn) logoutBtn.textContent=tr("logout");
   const delBtn=document.getElementById("deleteEverythingBtn"); if(delBtn) delBtn.textContent=tr("deleteEverything");
@@ -403,7 +403,21 @@ function initCustomSelectSystem(){
  document.addEventListener('scroll',event=>{if(activeCustomSelect && (event.target===activeCustomSelect.menu || activeCustomSelect.menu.contains(event.target)))return;closeCustomSelect();},true);
 }
 
-$("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));loadLanguage();boot()}else alert(currentLang==="hu"?"Sikertelen belépés":"Login failed")};
+function initLoginExperience(){
+ const form=document.getElementById("loginForm");
+ const email=document.getElementById("loginEmail");
+ const password=document.getElementById("loginPassword");
+ const toggle=document.getElementById("toggleLoginPassword");
+ if(email && !email.value){email.value=localStorage.getItem("kh_last_login_email")||"";}
+ if(toggle && password){
+  const sync=()=>{const visible=password.type==="text";toggle.classList.toggle("active",visible);toggle.setAttribute("aria-pressed",String(visible));toggle.setAttribute("aria-label",visible?"Hide password":"Show password");toggle.setAttribute("title",visible?"Hide password":"Show password");toggle.innerHTML=visible?'<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.7 10.7 0 0112 4c5.5 0 9 6 9 6a16.7 16.7 0 01-2.5 3.2M6.6 6.6C4.3 8.1 3 10 3 10s3.5 6 9 6a9.7 9.7 0 004-.8"/></svg>':'<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.7"/></svg>';};
+  toggle.onclick=()=>{password.type=password.type==="password"?"text":"password";sync();password.focus({preventScroll:true});};
+  sync();
+ }
+ if(form){form.addEventListener("animationend",()=>{}, {once:true});}
+}
+
+$("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));localStorage.setItem("kh_last_login_email",String(fd.email||""));loadLanguage();boot()}else alert(currentLang==="hu"?"Sikertelen belépés":"Login failed")};
 $("#logoutBtn").onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
@@ -628,9 +642,11 @@ function forceShowView(id){
 async function render(v,opts={}){
  if(currentView && currentView!==v && !opts.noHistory) viewHistory.push(currentView);
  currentView=v;
+ document.body.dataset.currentView=v;
  forceShowView(v);
  const pageTitle=document.getElementById("pageTitle");
  if(pageTitle) pageTitle.textContent=navLabel(v);
+ updateMobileGlobalNotificationBell();
  if(v==="today") await renderToday();
  else if(v==="scheduler") await renderScheduler();
  else if(v==="planned_jobs") await renderPlannedJobs();
@@ -2197,23 +2213,46 @@ function formatNotificationTime(value){
  if(Number.isNaN(d.getTime()))return String(value);
  return new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{dateStyle:'medium',timeStyle:'short',timeZone:'America/New_York'}).format(d);
 }
+async function syncSystemAppBadge(count){
+ const safeCount=Math.max(0,Number(count||0));
+ try{
+  if('setAppBadge' in navigator){
+   if(safeCount>0) await navigator.setAppBadge(safeCount);
+   else if('clearAppBadge' in navigator) await navigator.clearAppBadge();
+  }
+ }catch(error){console.debug('App badge API unavailable:',error?.message||error);}
+ try{
+  if('serviceWorker' in navigator){
+   const registration=await navigator.serviceWorker.ready;
+   const worker=navigator.serviceWorker.controller||registration.active||registration.waiting;
+   worker?.postMessage({type:'SET_BADGE',count:safeCount});
+  }
+ }catch(error){console.debug('Service worker badge sync unavailable:',error?.message||error);}
+}
 function setNotificationBadges(count){
  notificationUnreadCount=Math.max(0,Number(count||0));
  document.querySelectorAll('.notification-badge').forEach(b=>{b.textContent=notificationUnreadCount;b.classList.toggle('hidden',notificationUnreadCount===0);});
- if('setAppBadge' in navigator){notificationUnreadCount?navigator.setAppBadge(notificationUnreadCount).catch(()=>{}):navigator.clearAppBadge?.().catch(()=>{});}
- navigator.serviceWorker?.controller?.postMessage({type:'SET_BADGE',count:notificationUnreadCount});
+ void syncSystemAppBadge(notificationUnreadCount);
 }
 async function refreshNotificationCount(){
  if(!token)return;
  try{const result=await api('/api/notifications/count');setNotificationBadges(result.count);}catch(error){console.warn('Notification count unavailable:',error.message);}
 }
+function updateMobileGlobalNotificationBell(){
+ const bell=document.getElementById('mobileGlobalNotificationBell');
+ if(!bell)return;
+ const mobile=isMobileAppViewport();
+ const useLocalHeader=currentView==='today'||currentView==='notifications';
+ bell.classList.toggle('hidden',!mobile||useLocalHeader||!token);
+ bell.onclick=openNotifications;
+}
 function openNotifications(){closeMobileMore();render('notifications');}
 function initNotificationCenter(){
- const desktop=document.getElementById('desktopNotificationBell');if(desktop)desktop.onclick=openNotifications;
+ const desktop=document.getElementById('desktopNotificationBell');if(desktop)desktop.onclick=openNotifications;const mobileGlobal=document.getElementById('mobileGlobalNotificationBell');if(mobileGlobal)mobileGlobal.onclick=openNotifications;updateMobileGlobalNotificationBell();
  if(notificationPollTimer)clearInterval(notificationPollTimer);
  refreshNotificationCount();notificationPollTimer=setInterval(refreshNotificationCount,30000);
- navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='OPEN_NOTIFICATIONS')openNotifications();if(event.data?.type==='NOTIFICATION_COUNT')setNotificationBadges(event.data.count);});
- if(new URLSearchParams(location.search).get('openNotifications')==='1')setTimeout(openNotifications,100);
+ if(!window.__khNotificationSwListenerBound){navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='OPEN_NOTIFICATIONS')openNotifications();if(event.data?.type==='NOTIFICATION_COUNT')setNotificationBadges(event.data.count);});window.__khNotificationSwListenerBound=true;}
+ if(new URLSearchParams(location.search).get('openNotifications')==='1')setTimeout(openNotifications,100);if(!window.__khNotificationResizeBound){window.addEventListener('resize',updateMobileGlobalNotificationBell,{passive:true});window.__khNotificationResizeBound=true;}
 }
 async function renderNotifications(){
  const box=ensureView('notifications');
@@ -2364,6 +2403,7 @@ async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/downlo
 async function restoreBackup(id){const confirmation=prompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'));if(confirmation!=='RESTORE BACKUP')return;const password=prompt(bi('Enter your password.','Add meg a jelszavad.'));try{const r=await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});alert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'));logoutNow();}catch(e){showError(e.message)}}
 
 
+initLoginExperience();
 if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();loadBranding().then(applyLanguageToDOM);}
 
 
