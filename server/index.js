@@ -41,6 +41,15 @@ function ensureRuntimeMigrations(){
     if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
     if(!pianoCols.includes("display_name")) db.prepare("ALTER TABLE pianos ADD COLUMN display_name TEXT").run();
     if(!pianoCols.includes("asset_recorded")) db.prepare("ALTER TABLE pianos ADD COLUMN asset_recorded INTEGER DEFAULT 0").run();
+    if(!pianoCols.includes("external_reference")) db.prepare("ALTER TABLE pianos ADD COLUMN external_reference TEXT").run();
+    if(!pianoCols.includes("import_source")) db.prepare("ALTER TABLE pianos ADD COLUMN import_source TEXT").run();
+    if(!pianoCols.includes("import_batch_id")) db.prepare("ALTER TABLE pianos ADD COLUMN import_batch_id TEXT").run();
+    if(!pianoCols.includes("original_description")) db.prepare("ALTER TABLE pianos ADD COLUMN original_description TEXT").run();
+    if(!pianoCols.includes("owner_resolution")) db.prepare("ALTER TABLE pianos ADD COLUMN owner_resolution TEXT").run();
+    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_import_reference ON pianos(import_source,external_reference) WHERE import_source IS NOT NULL AND external_reference IS NOT NULL").run(); } catch(e) {}
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id)").run(); } catch(e) {}
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution)").run(); } catch(e) {}
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)").run(); } catch(e) {}
 
     db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''), id), workflow_step_no=COALESCE(workflow_step_no,1), workflow_status=COALESCE(NULLIF(workflow_status,''), CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
     // Rebuild existing parent-child chains without any maximum number of steps.
@@ -99,6 +108,12 @@ function ensureRuntimeMigrations(){
         completed_at TEXT,
         summary_json TEXT
       )`).run();
+      const importCols = db.prepare("PRAGMA table_info(import_batches)").all().map(c=>c.name);
+      const addImportCol = (name, ddl) => { if(!importCols.includes(name)) db.prepare(`ALTER TABLE import_batches ADD COLUMN ${name} ${ddl}`).run(); };
+      addImportCol("imported_pianos", "INTEGER DEFAULT 0");
+      addImportCol("updated_clients", "INTEGER DEFAULT 0");
+      addImportCol("unidentified_owner_pianos", "INTEGER DEFAULT 0");
+      addImportCol("client_not_found", "INTEGER DEFAULT 0");
       db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference ON contacts(import_source, external_reference) WHERE import_source IS NOT NULL AND external_reference IS NOT NULL`).run();
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)`).run();
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)`).run();
@@ -730,6 +745,63 @@ function analyzeClientImportFile(buffer,originalFilename){
   const count=cat=>records.filter(x=>x.category===cat).length;
   const summary={filename:originalFilename,totalRows:records.length,newClients:count('NEW'),alreadyImported:count('ALREADY_IMPORTED'),possibleDuplicates:count('POSSIBLE_DUPLICATE'),invalidRows:count('INVALID'),missingDataClients:records.filter(x=>x.category==='NEW'&&x.hasMissingData).length};
   return {source,headers,summary,records};
+}
+
+function normalizePianoDescription(value){
+  return String(value??'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+}
+function analyzePianoImportFile(buffer,originalFilename){
+  const rows=parseXlsxSheet(buffer,'Piano Import Ready');
+  if(!rows.length)throw new Error('PIANO_IMPORT_READY_EMPTY');
+  const headers=(rows[0]||[]).map(x=>String(x??'').trim());
+  const required=['Piano External Reference','Client External Reference','Client Name','Owner Resolution','Original Source Description','Import Piano Description','Location','Ownership Type','Status','Source Rows','Source Piano Sheet Row','Import Decision'];
+  const missing=required.filter(h=>!headers.includes(h));
+  if(missing.length){const e=new Error('MISSING_COLUMNS');e.missingColumns=missing;throw e;}
+  const index=Object.fromEntries(headers.map((h,i)=>[h,i]));
+  const source='NEW_YORK_CUSTOMER_LIST_2024_PIANOS';
+  const clientSource='NEW_YORK_CUSTOMER_LIST_2024';
+  const clients=db.prepare('SELECT id,name,external_reference,import_source,has_piano FROM contacts').all();
+  const clientByRef=new Map(clients.filter(x=>x.import_source===clientSource&&x.external_reference).map(x=>[String(x.external_reference),x]));
+  const existing=db.prepare('SELECT id,display_name,original_description,owner_contact_id,external_reference,import_source FROM pianos').all();
+  const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
+  const existingOwnerDescription=new Map();
+  for(const p of existing){
+    const d=normalizePianoDescription(p.original_description||p.display_name);
+    if(p.owner_contact_id&&d&&!existingOwnerDescription.has(`${p.owner_contact_id}::${d}`))existingOwnerDescription.set(`${p.owner_contact_id}::${d}`,p);
+  }
+  const seenRefs=new Set(); const records=[];
+  for(let r=1;r<rows.length;r++){
+    const cells=rows[r]||[]; if(!cells.some(v=>String(v??'').trim()))continue;
+    const get=h=>String(cells[index[h]]??'').trim();
+    const rec={rowNumber:r+1,externalReference:get('Piano External Reference'),clientExternalReference:get('Client External Reference'),clientName:get('Client Name'),ownerResolution:get('Owner Resolution'),originalDescription:get('Original Source Description'),description:get('Import Piano Description'),location:get('Location'),ownershipType:get('Ownership Type')||'Customer owned',status:get('Status')||'Active',sourceRows:get('Source Rows'),sourcePianoSheetRow:get('Source Piano Sheet Row'),importDecision:get('Import Decision')};
+    let category='NEW_MATCHED',reason='',client=null,match=null;
+    if(normalizeText(rec.importDecision)!=='import'){category='INVALID';reason='IMPORT_DECISION_NOT_IMPORT';}
+    else if(!rec.externalReference){category='INVALID';reason='MISSING_PIANO_EXTERNAL_REFERENCE';}
+    else if(seenRefs.has(rec.externalReference)){category='INVALID';reason='DUPLICATE_REFERENCE_IN_FILE';}
+    else if(!rec.description){category='INVALID';reason='MISSING_PIANO_DESCRIPTION';}
+    else{
+      seenRefs.add(rec.externalReference);
+      match=exactRefs.get(`${source}::${rec.externalReference}`)||null;
+      if(match){category='ALREADY_IMPORTED';reason='EXTERNAL_REFERENCE_MATCH';}
+      else if(normalizeText(rec.ownerResolution)==='unidentified owner'&&!rec.clientExternalReference){category='NEW_UNIDENTIFIED_OWNER';reason='UNIDENTIFIED_OWNER_ALLOWED';}
+      else{
+        client=clientByRef.get(rec.clientExternalReference)||null;
+        if(!client){category='CLIENT_NOT_FOUND';reason='CLIENT_EXTERNAL_REFERENCE_NOT_FOUND';}
+        else{
+          const descMatch=existingOwnerDescription.get(`${client.id}::${normalizePianoDescription(rec.description)}`)||null;
+          if(descMatch){category='POSSIBLE_DUPLICATE';reason='OWNER_DESCRIPTION_MATCH';match=descMatch;}
+        }
+      }
+    }
+    rec.category=category;rec.reason=reason;rec.client=client;rec.match=match;records.push(rec);
+  }
+  if(!records.length)throw new Error('PIANO_IMPORT_READY_EMPTY');
+  const count=cat=>records.filter(x=>x.category===cat).length;
+  const matchedClients=new Set(records.filter(x=>x.category==='NEW_MATCHED'&&x.client).map(x=>x.client.id));
+  const clientCounts={}; for(const rec of records.filter(x=>x.category==='NEW_MATCHED'&&x.client)){clientCounts[rec.client.id]=(clientCounts[rec.client.id]||0)+1;}
+  const multiClientRows=Object.entries(clientCounts).filter(([,n])=>n>1).map(([id,n])=>{const c=clients.find(x=>x.id===id);return {id,name:c?.name||id,count:n};});
+  const summary={filename:originalFilename,totalRows:records.length,newMatched:count('NEW_MATCHED'),newUnidentifiedOwner:count('NEW_UNIDENTIFIED_OWNER'),alreadyImported:count('ALREADY_IMPORTED'),clientNotFound:count('CLIENT_NOT_FOUND'),possibleDuplicates:count('POSSIBLE_DUPLICATE'),invalidRows:count('INVALID'),clientsReceivingPianos:matchedClients.size,clientsChangingToOwner:[...matchedClients].filter(id=>!Number(clients.find(x=>x.id===id)?.has_piano||0)).length,multiplePianoClients:multiClientRows.length};
+  return {source,clientSource,headers,summary,records,multiplePianoClients:multiClientRows};
 }
 
 function auth(req,res,next){
@@ -1378,6 +1450,90 @@ app.post('/api/imports/clients/:batchId/commit',auth,permit('ADMIN'),(req,res)=>
   }
 });
 
+const pianoImportUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:15*1024*1024},fileFilter:(req,file,cb)=>cb(null,/\.xlsx$/i.test(file.originalname||''))});
+app.post('/api/imports/pianos/analyze',auth,permit('ADMIN'),pianoImportUpload.single('file'),(req,res)=>{
+  if(!req.file)return res.status(400).json({error:'INVALID_EXCEL_FILE'});
+  try{
+    const analysis=analyzePianoImportFile(req.file.buffer,req.file.originalname||'pianos.xlsx');
+    const fileHash=crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const existingBatch=db.prepare('SELECT * FROM import_batches WHERE import_source=? AND file_hash=?').get(analysis.source,fileHash);
+    if(existingBatch&&existingBatch.status==='COMPLETED')return res.status(409).json({error:'FILE_ALREADY_IMPORTED'});
+    const batchId=existingBatch?.id||rid('IMP');
+    const summaryJson=JSON.stringify({source:analysis.source,clientSource:analysis.clientSource,summary:analysis.summary,records:analysis.records,multiplePianoClients:analysis.multiplePianoClients});
+    if(existingBatch){
+      db.prepare(`UPDATE import_batches SET original_filename=?,status='PREVIEW',total_rows=?,importable_rows=?,skipped_duplicates=?,failed_rows=?,imported_by_user_id=?,summary_json=?,completed_at=NULL WHERE id=?`).run(req.file.originalname,analysis.summary.totalRows,analysis.summary.newMatched+analysis.summary.newUnidentifiedOwner,analysis.summary.alreadyImported+analysis.summary.possibleDuplicates,analysis.summary.invalidRows+analysis.summary.clientNotFound,req.user.id,summaryJson,batchId);
+    }else{
+      db.prepare(`INSERT INTO import_batches(id,import_source,original_filename,file_hash,status,total_rows,importable_rows,skipped_duplicates,failed_rows,imported_by_user_id,summary_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(batchId,analysis.source,req.file.originalname,fileHash,'PREVIEW',analysis.summary.totalRows,analysis.summary.newMatched+analysis.summary.newUnidentifiedOwner,analysis.summary.alreadyImported+analysis.summary.possibleDuplicates,analysis.summary.invalidRows+analysis.summary.clientNotFound,req.user.id,summaryJson);
+    }
+    res.json({batchId,summary:analysis.summary,records:analysis.records,multiplePianoClients:analysis.multiplePianoClients});
+  }catch(err){
+    console.error('piano import analyze failed:',err);
+    const status=err.message==='MISSING_COLUMNS'?400:400;
+    res.status(status).json({error:err.message,missingColumns:err.missingColumns||[]});
+  }
+});
+
+app.post('/api/imports/pianos/:batchId/commit',auth,permit('ADMIN'),(req,res)=>{
+  const batchId=req.params.batchId;
+  const batch=db.prepare('SELECT * FROM import_batches WHERE id=?').get(batchId);
+  if(!batch)return res.status(404).json({error:'IMPORT_BATCH_NOT_FOUND'});
+  if(batch.status==='COMPLETED')return res.status(409).json({error:'IMPORT_BATCH_ALREADY_COMPLETED'});
+  if(batch.status!=='PREVIEW')return res.status(409).json({error:'IMPORT_BATCH_NOT_READY'});
+  if(!isSuperadminUser(req.user)&&String(batch.imported_by_user_id||'')!==String(req.user.id||''))return res.status(403).json({error:'IMPORT_BATCH_OWNER_MISMATCH'});
+  let stored; try{stored=JSON.parse(batch.summary_json||'{}');}catch(_e){return res.status(400).json({error:'IMPORT_PREVIEW_DATA_MISSING'});}
+  const records=Array.isArray(stored.records)?stored.records:[]; if(!records.length)return res.status(400).json({error:'IMPORT_PREVIEW_DATA_MISSING'});
+  const source=String(stored.source||batch.import_source||'NEW_YORK_CUSTOMER_LIST_2024_PIANOS');
+  const clientSource=String(stored.clientSource||'NEW_YORK_CUSTOMER_LIST_2024');
+  const commit=db.transaction(()=>{
+    const current=db.prepare('SELECT status FROM import_batches WHERE id=?').get(batchId); if(!current||current.status!=='PREVIEW')throw new Error('IMPORT_BATCH_NOT_READY');
+    const clients=db.prepare('SELECT id,name,external_reference,import_source,has_piano FROM contacts').all();
+    const clientByRef=new Map(clients.filter(x=>x.import_source===clientSource&&x.external_reference).map(x=>[String(x.external_reference),x]));
+    const existing=db.prepare('SELECT id,display_name,original_description,owner_contact_id,external_reference,import_source FROM pianos').all();
+    const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
+    const ownerDesc=new Map(); for(const p of existing){const d=normalizePianoDescription(p.original_description||p.display_name);if(p.owner_contact_id&&d&&!ownerDesc.has(`${p.owner_contact_id}::${d}`))ownerDesc.set(`${p.owner_contact_id}::${d}`,p);}
+    const insert=db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const updateClient=db.prepare('UPDATE contacts SET has_piano=1,updated_at=CURRENT_TIMESTAMP WHERE id=?');
+    let importedPianos=0,updatedClients=0,unidentifiedOwnerPianos=0,skippedAlreadyImported=0,skippedPossibleDuplicates=0,clientNotFound=0,invalidRows=0,failedRows=0;
+    const touched=new Set();
+    for(const rec of records){
+      if(rec.category==='ALREADY_IMPORTED'){skippedAlreadyImported++;continue;}
+      if(rec.category==='POSSIBLE_DUPLICATE'){skippedPossibleDuplicates++;continue;}
+      if(rec.category==='CLIENT_NOT_FOUND'){clientNotFound++;continue;}
+      if(rec.category==='INVALID'){invalidRows++;continue;}
+      if(!['NEW_MATCHED','NEW_UNIDENTIFIED_OWNER'].includes(rec.category)){invalidRows++;continue;}
+      if(exactRefs.has(`${source}::${rec.externalReference}`)){skippedAlreadyImported++;continue;}
+      let client=null,ownerId=null,ownerResolution='UNIDENTIFIED_OWNER',ownership='Unknown';
+      if(rec.category==='NEW_MATCHED'){
+        client=clientByRef.get(rec.clientExternalReference)||null;
+        if(!client){clientNotFound++;continue;}
+        const duplicate=ownerDesc.get(`${client.id}::${normalizePianoDescription(rec.description)}`);
+        if(duplicate){skippedPossibleDuplicates++;continue;}
+        ownerId=client.id;ownerResolution='MATCHED_CLIENT';ownership=rec.ownershipType||'Customer owned';
+      }else{unidentifiedOwnerPianos++;}
+      const id=rid('P');
+      const display=String(rec.description||rec.originalDescription||'Unknown piano').trim();
+      insert.run(id,'','','',null,ownership,ownership,display,ownerId,String(rec.location||'').trim(),0,String(rec.status||'Active'),'',String(rec.externalReference||'').trim(),source,batchId,String(rec.originalDescription||rec.description||'').trim(),ownerResolution);
+      exactRefs.set(`${source}::${rec.externalReference}`,{id,owner_contact_id:ownerId,original_description:rec.originalDescription,display_name:display});
+      if(ownerId){ownerDesc.set(`${ownerId}::${normalizePianoDescription(rec.description)}`,{id});touched.add(ownerId);}
+      importedPianos++;
+    }
+    for(const id of touched){const c=clients.find(x=>x.id===id);if(c&&!Number(c.has_piano||0)){updateClient.run(id);updatedClients++;}}
+    const result={batchId,source,filename:batch.original_filename,totalRows:records.length,importedPianos,updatedClients,unidentifiedOwnerPianos,skippedAlreadyImported,skippedPossibleDuplicates,clientNotFound,invalidRows,failedRows};
+    db.prepare(`UPDATE import_batches SET status='COMPLETED',imported_pianos=?,updated_clients=?,unidentified_owner_pianos=?,client_not_found=?,skipped_duplicates=?,failed_rows=?,completed_at=CURRENT_TIMESTAMP,summary_json=? WHERE id=? AND status='PREVIEW'`).run(importedPianos,updatedClients,unidentifiedOwnerPianos,clientNotFound,skippedAlreadyImported+skippedPossibleDuplicates,failedRows+invalidRows,JSON.stringify(result),batchId);
+    return result;
+  });
+  try{
+    const result=commit(); req.skipAutoAudit=true;
+    audit(req,'PIANO_IMPORT_COMPLETED','imports',batchId,null,result,1,`Imported ${result.importedPianos} pianos; updated ${result.updatedClients} clients; unidentified ${result.unidentifiedOwnerPianos}; skipped ${result.skippedAlreadyImported+result.skippedPossibleDuplicates}`,'TECHNICAL');
+    res.json({ok:true,...result});
+  }catch(err){
+    console.error('piano import commit failed:',err);
+    try{db.prepare(`UPDATE import_batches SET status='FAILED',failed_rows=COALESCE(failed_rows,0)+1,summary_json=? WHERE id=? AND status='PREVIEW'`).run(JSON.stringify({error:err.message}),batchId);}catch(_e){}
+    req.skipAutoAudit=true;audit(req,'PIANO_IMPORT_FAILED','imports',batchId,null,null,0,err.message,'TECHNICAL');
+    res.status(500).json({error:err.message==='IMPORT_BATCH_NOT_READY'?err.message:'PIANO_IMPORT_FAILED'});
+  }
+});
+
 function createResourceRoutes(key, table, prefix, write, roles){
   app.get(`/api/${key}`, auth, (req,res)=>res.json(db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC`).all()));
   app.post(`/api/${key}`, auth, permit(...roles), (req,res)=>{
@@ -1392,6 +1548,9 @@ function createResourceRoutes(key, table, prefix, write, roles){
     res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
   });
   app.delete(`/api/${key}/:id`, auth, requireSuperadmin, (req,res)=>{
+    if(key==="contacts"){
+      db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(req.params.id);
+    }
     db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
     res.json({ok:true});
   });
@@ -1420,18 +1579,22 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
   const ownershipType=req.body.ownership_type || req.body.ownership || "Customer owned";
   const estimated=Number(req.body.estimated_value||0);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,req.body.owner_contact_id||null,req.body.location||"",estimated,"Active",req.body.notes||"");
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,ownershipType,ownershipType,display,req.body.owner_contact_id||null,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,req.body.owner_resolution||null);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
 });
 
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   ensureRuntimeMigrations();
-  const allowed=["brand","model","serial_no","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes"];
+  const allowed=["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
+  if(req.body.owner_contact_id!==undefined){
+    if(req.body.owner_contact_id) db.prepare("UPDATE pianos SET owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned' WHERE id=?").run(req.params.id);
+    else db.prepare("UPDATE pianos SET owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown' WHERE id=?").run(req.params.id);
+  }
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!piano) return res.status(404).json({error:"Piano not found"});
   res.json(piano);
@@ -1640,7 +1803,7 @@ app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"
   if(!pianoId) return res.status(400).json({error:"piano_id is required"});
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);
   if(!piano) return res.status(404).json({error:"Piano not found"});
-  db.prepare("UPDATE pianos SET owner_contact_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id,piano.id);
+  db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id,piano.id);
   db.prepare("UPDATE contacts SET has_piano=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id);
   res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(piano.id));
 });
@@ -1666,8 +1829,8 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));});
 app.put("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const ids = Array.isArray(req.body.piano_ids) ? req.body.piano_ids : [];
-  db.prepare("UPDATE pianos SET owner_contact_id=NULL WHERE owner_contact_id=?").run(req.params.id);
-  const upd=db.prepare("UPDATE pianos SET owner_contact_id=? WHERE id=?"); ids.forEach(id=>upd.run(req.params.id,id));
+  db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(req.params.id);
+  const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?"); ids.forEach(id=>upd.run(req.params.id,id));
   res.json({ok:true,piano_ids:ids});
 });
 app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -1898,7 +2061,6 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
