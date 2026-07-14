@@ -195,3 +195,18 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
   .mobile-page-title{display:flex;align-items:center;gap:8px;margin-bottom:10px}.mobile-page-title h2{margin:0;font-size:21px}.mobile-back-btn{min-width:44px;width:44px;height:44px;border-radius:50%;font-size:34px;line-height:1;padding:0;background:var(--panel2);color:var(--text)}
   .daily-calendar-scroll{margin-inline:-4px}.daily-calendar{height:1050px}.branding-logo-form{flex-direction:column;align-items:stretch}.branding-logo-form>*{width:100%}
 }
+
+/* Final branding, audit and mobile modal corrections */
+.login-page{position:relative;background-image:var(--login-background,none);background-size:cover;background-position:center;background-repeat:no-repeat;isolation:isolate}
+.login-page.has-brand-background::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.25);z-index:-1;pointer-events:none}
+.login-page.has-brand-background .login-card{backdrop-filter:blur(2px);background:color-mix(in srgb,var(--panel) 90%,transparent)}
+.login-background-preview{height:180px;border-radius:16px;border:1px solid var(--line);background-color:var(--panel2);background-position:center;background-size:cover;background-repeat:no-repeat;margin:10px 0 14px}
+.audit-type-switch{display:inline-flex;gap:6px;padding:5px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;margin-bottom:14px}.audit-type-switch button{background:transparent;color:var(--muted)}.audit-type-switch button.active{background:var(--blue);color:#07101d}
+@media(max-width:900px){
+  .modal{align-items:flex-end;padding:calc(8px + env(safe-area-inset-top)) 0 calc(82px + env(safe-area-inset-bottom))!important;overflow:hidden}
+  .modal-box{width:100vw;max-height:calc(100dvh - 96px - env(safe-area-inset-top) - env(safe-area-inset-bottom))!important;margin:0!important;padding:0 14px!important;display:flex;flex-direction:column;overflow:hidden;border-radius:24px 24px 0 0}
+  .modal-header{flex:0 0 auto;position:sticky;top:0!important;margin:0 -14px;padding:14px;background:var(--panel);z-index:6;border-bottom:1px solid var(--line)}
+  #form{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 0 calc(92px + env(safe-area-inset-bottom))}
+  #form>.actions,.modal-box .actions{position:sticky!important;bottom:0!important;z-index:7;background:var(--panel)!important;margin:12px -2px 0;padding:12px 2px calc(12px + env(safe-area-inset-bottom))!important;border-top:1px solid var(--line)}
+  .mobile-bottom-nav{z-index:140}.modal{z-index:220}.mobile-more-sheet{z-index:210}
+}
