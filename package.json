@@ -13,6 +13,7 @@
     "init-db": "node server/init-db.js"
   },
   "dependencies": {
+    "adm-zip": "0.5.16",
     "bcryptjs": "2.4.3",
     "better-sqlite3": "11.10.0",
     "cors": "2.8.5",
