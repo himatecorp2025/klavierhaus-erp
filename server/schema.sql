@@ -406,11 +406,28 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   subscription_json TEXT NOT NULL,
   user_agent TEXT,
   language TEXT DEFAULT 'en',
+  device_id TEXT,
+  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+
+CREATE TABLE IF NOT EXISTS notification_devices (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'NOT_CONFIGURED' CHECK(status IN ('NOT_CONFIGURED','ENABLED','BLOCKED','UNSUPPORTED')),
+  platform TEXT,
+  user_agent TEXT,
+  language TEXT DEFAULT 'en',
+  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id,device_id),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS notification_preferences (
   user_id TEXT PRIMARY KEY,
   push_enabled INTEGER DEFAULT 1,
@@ -428,3 +445,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(e
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_devices_user_status ON notification_devices(user_id,status);
