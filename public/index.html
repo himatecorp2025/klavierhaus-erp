@@ -4,6 +4,7 @@
 
 
 
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -24,18 +25,19 @@
       <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
       <h1><span data-brand-name>Klavierhaus</span> Work Management</h1>
       <p>Calendar-first job management</p>
-      <form id="loginForm">
+      <form id="loginForm" method="post" action="/api/login" autocomplete="on">
         <label>Email</label>
-        <input name="email" type="email" required autocomplete="username">
+        <input id="loginEmail" name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false">
         <label>Password</label>
-        <div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button id="toggleLoginPassword" class="password-toggle" type="button" aria-label="Show password" title="Show password">◉</button></div>
-        <button type="submit">Login / Belépés</button>
+        <div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button id="toggleLoginPassword" class="password-toggle" type="button" aria-label="Show password" title="Show password" aria-pressed="false"><span aria-hidden="true">◉</span></button></div>
+        <button id="loginSubmitButton" type="submit">Login</button>
       </form>
     </div>
   </section>
 
   <section id="app" class="app-shell hidden">
     <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle menu">☰</button>
+    <button id="mobileGlobalNotificationBell" class="notification-bell mobile-global-notification-bell hidden" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button>
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
