@@ -10,6 +10,14 @@ let currentClientStatusFilter="ALL";
 let currentClientPage=1;
 let showOnlyMissingClientData=false;
 const CLIENTS_PER_PAGE=25;
+let currentPianoPage=1;
+const PIANOS_PER_PAGE=25;
+let currentPianoSearch="";
+let currentPianoOwnershipFilter="ALL";
+let currentPianoStatusFilter="ALL";
+let currentPianoMinValue="";
+let currentPianoMaxValue="";
+let pianoOwnerContactsCache=[];
 let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
 
@@ -22,7 +30,7 @@ const navs={
 
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["billing_address","Billing address / Számlázási cím"],["has_piano","Has piano? / Van zongorája?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interested_buying","Interested in buying? / Vásárlási érdeklődő?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interest_brand","Interested brand / Érdeklődött márka"],["interest_model","Interested model / Érdeklődött modell"],["interest_budget","Budget / Keretösszeg","number"],["interest_timeline","Timeline / Várható vásárlási idő"],["interest_notes","Purchase interest notes / Vásárlási érdeklődés megjegyzés","textarea"],["owner","Relationship owner / Kapcsolattartó gazda"],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["customer_status_icon","name","phone","email","address","last_contact","next_step"]},
-pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["brand","Brand / Márka"],["model","Model / Típus / modell"],["serial_no","Serial No. / Gyári szám"],["ownership_type","Ownership / Tulajdon","select",["Customer owned","Company owned"]],["owner_contact_id","Owner Contact ID / Ügyfél ID"],["location","Location / Helyszín"],["estimated_value","Estimated value / Becsült érték - csak céges tulajdonnál","number"]],cols:["id","brand","model","serial_no","ownership_type","owner_contact_id","location","estimated_value"]},
+pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["display_name","Piano name / description / Zongora neve / leírás"],["brand","Brand / Márka"],["model","Model / Típus / modell"],["serial_no","Serial No. / Gyári szám"],["year","Year / Év","number"],["status","Status / Státusz"],["ownership_type","Ownership / Tulajdon","select",["Customer owned","Company owned","Consignment","Rental","Unknown"]],["owner_contact_id","Owner client / Tulajdonos ügyfél"],["location","Location / Helyszín"],["estimated_value","Estimated value / Becsült érték","number"],["notes","Notes / Megjegyzés","textarea"]],cols:["display_name","serial_no","status","location","ownership_type","estimated_value"]},
 knowledge_base:{api:"knowledge_base",title:"Invoices / Számlák",fields:[["title","Title / Cím"],["category","Category / Kategória"],["content_type","Content type / Tartalomtípus"],["body","Body / Tartalom","textarea"],["stored_path","Attachment path / Melléklet útvonal"],["owner","Relationship owner / Kapcsolattartó gazda"],["amount","Amount / Összeg","number"],["payment_method","Payment method / Fizetési mód"],["invoice_number","Invoice number / Számlaszám"],],cols:["id","title","category","owner","amount","payment_method","invoice_number","stored_path","created_at"]}
 };
 
@@ -764,26 +772,107 @@ function headerLabel(key,c){
  return map[key]?.[c] || c;
 }
 
-function pianoSearchMatch(p, q){
+function pianoDisplayName(p){
+ return String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()||p.original_description||bi("Unknown piano","Ismeretlen zongora"));
+}
+function pianoOwnerLabel(p){
+ if(p.owner_name) return p.owner_name;
+ const ownership=String(p.ownership_type||p.ownership||"").toLowerCase();
+ if(ownership.includes("company")) return bi("Klavierhaus / Company piano","Klavierhaus / Céges zongora");
+ if(ownership.includes("consign")) return bi("Consignment","Bizományos");
+ if(ownership.includes("rental")) return bi("Rental","Bérelt");
+ return bi("Unidentified owner","Ismeretlen tulajdonos");
+}
+function pianoOwnershipGroup(p){
+ const ownership=String(p.ownership_type||p.ownership||"").toLowerCase();
+ if(p.owner_contact_id || p.owner_resolution==="MATCHED_CLIENT") return "MATCHED_CLIENT";
+ if(ownership.includes("company")) return "COMPANY_OWNED";
+ if(ownership.includes("consign")) return "CONSIGNMENT";
+ if(ownership.includes("rental")) return "RENTAL";
+ return "UNIDENTIFIED_OWNER";
+}
+function pianoSearchMatch(p,q){
  const raw=String(q||"").trim().toLowerCase();
  if(!raw) return true;
- const brandModel=[p.brand,p.model,p.display_name].join(" ").toLowerCase();
- if(raw.length===1) return brandModel.includes(raw);
- const ownership=String(p.ownership_type||p.ownership||"").toLowerCase();
- const ownershipHu=ownership.includes("company")?"céges company firm tulajdon cég":"ügyfél customer client";
- const hay=[p.id,p.brand,p.model,p.display_name,p.serial_no,p.location,p.owner_contact_id,p.owner_name,p.client_name,p.estimated_value,ownership,ownershipHu].join(" ").toLowerCase();
+ const hay=[p.brand,p.model,p.display_name,p.original_description,p.serial_no,p.location,p.owner_address,p.owner_name,p.client_name,p.status,p.ownership_type,p.ownership].join(" ").toLowerCase();
  return hay.includes(raw);
 }
+function pianoPaginationHtml(page,totalPages,totalItems){
+ if(totalPages<=1) return `<div class="client-pagination single"><span>${bi("Showing","Megjelenítve")} ${totalItems}</span></div>`;
+ const pages=new Set([1,totalPages,page-2,page-1,page,page+1,page+2]);
+ const valid=[...pages].filter(x=>x>=1&&x<=totalPages).sort((a,b)=>a-b);
+ let last=0,buttons="";
+ valid.forEach(p=>{if(last&&p-last>1)buttons+=`<span class="page-gap">…</span>`;buttons+=`<button type="button" class="page-btn ${p===page?"active":""}" onclick="setPianoPage(${p})">${p}</button>`;last=p;});
+ return `<div class="client-pagination"><button type="button" class="page-btn" ${page<=1?"disabled":""} onclick="setPianoPage(${page-1})">‹</button>${buttons}<button type="button" class="page-btn" ${page>=totalPages?"disabled":""} onclick="setPianoPage(${page+1})">›</button><span class="page-summary">${bi("Page","Oldal")} ${page}/${totalPages} · ${totalItems} ${bi("pianos","zongora")}</span></div>`;
+}
+function setPianoPage(page){currentPianoPage=Math.max(1,Number(page)||1);renderPianos();}
+function clearPianoFilters(){currentPianoSearch="";currentPianoOwnershipFilter="ALL";currentPianoStatusFilter="ALL";currentPianoMinValue="";currentPianoMaxValue="";currentPianoPage=1;renderPianos();}
+function setupPianoTableScroll(){
+ const top=document.getElementById("pianosScrollTop"),bottom=document.getElementById("pianosTableWrap"),spacer=top?.querySelector(".table-scroll-spacer"),table=bottom?.querySelector("table");
+ if(!top||!bottom||!spacer||!table)return;
+ const syncWidth=()=>{spacer.style.width=`${table.scrollWidth}px`;top.classList.toggle("hidden-scroll",table.scrollWidth<=bottom.clientWidth+1);};
+ let syncing=false;
+ top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;bottom.scrollLeft=top.scrollLeft;syncing=false;});
+ bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;top.scrollLeft=bottom.scrollLeft;syncing=false;});
+ syncWidth();
+ if(window.ResizeObserver){const ro=new ResizeObserver(syncWidth);ro.observe(table);ro.observe(bottom);}
+}
+function pianoStatusOptions(data){
+ const values=[...new Set(data.map(p=>String(p.status||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+ return `<option value="ALL">${bi("All statuses","Minden státusz")}</option>`+values.map(v=>`<option value="${htmlText(v)}" ${currentPianoStatusFilter===v?"selected":""}>${htmlText(v)}</option>`).join("");
+}
 async function renderPianos(){
- const s=schemas.pianos;
  const data=await api("/api/pianos");
- const q=(document.getElementById("pianoSearchInput")?.value||"");
- const filtered=data.filter(p=>pianoSearchMatch(p,q));
- const cols=["id","display_name","serial_no","ownership_type","owner_name","location","estimated_value"];
- const label={id:bi("Piano ID","Zongora ID"),display_name:bi("Piano","Zongora"),serial_no:bi("Serial No.","Gyári szám"),ownership_type:bi("Ownership","Tulajdon"),owner_name:bi("Client / Owner","Ügyfél / tulajdonos"),location:bi("Location","Helyszín"),estimated_value:bi("Estimated value","Becsült érték")};
- $("#pianos").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button></div></div><div class="client-search"><label>${bi("Search pianos by brand, model, client, location or ownership","Zongorák keresése márka, modell, ügyfél, helyszín vagy tulajdon szerint")}<input id="pianoSearchInput" value="${q.replaceAll('"','&quot;')}" placeholder="${bi("Example: D, F212, John Smith, company, céges","Példa: D, F212, John Smith, company, céges")}" oninput="renderPianos()"></label><p class="muted">${bi("1 character searches only brand/model. 2+ characters search all relevant fields.","1 karakter csak márkában/modellben keres. 2+ karakter minden releváns mezőben keres.")}</p></div><div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]||c}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${cols.map(c=>`<td>${c==="estimated_value"?money(r[c]):c==="owner_name"?(r[c]||((r.owner_resolution==="UNIDENTIFIED_OWNER")?bi("Unidentified owner","Ismeretlen tulajdonos"):"—")):(r[c]??"")}</td>`).join("")}<td><button class="small" onclick='openForm("pianos",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${cols.length+1}" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
- const input=document.getElementById("pianoSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
+ const min=currentPianoMinValue===""?null:Number(currentPianoMinValue),max=currentPianoMaxValue===""?null:Number(currentPianoMaxValue);
+ const filtered=data.filter(p=>{
+   if(!pianoSearchMatch(p,currentPianoSearch))return false;
+   if(currentPianoOwnershipFilter!=="ALL"&&pianoOwnershipGroup(p)!==currentPianoOwnershipFilter)return false;
+   if(currentPianoStatusFilter!=="ALL"&&String(p.status||"")!==currentPianoStatusFilter)return false;
+   const value=Number(p.estimated_value||0);
+   if(min!==null&&(!Number.isFinite(value)||value<min))return false;
+   if(max!==null&&(!Number.isFinite(value)||value>max))return false;
+   return true;
+ });
+ const totalPages=Math.max(1,Math.ceil(filtered.length/PIANOS_PER_PAGE));
+ currentPianoPage=Math.min(Math.max(1,currentPianoPage),totalPages);
+ const start=(currentPianoPage-1)*PIANOS_PER_PAGE,pageRows=filtered.slice(start,start+PIANOS_PER_PAGE);
+ const pagination=pianoPaginationHtml(currentPianoPage,totalPages,filtered.length);
+ const cols=["owner_name","display_name","serial_no","status","location","ownership_type","estimated_value"];
+ const label={owner_name:bi("Client / Owner","Ügyfél / tulajdonos"),display_name:bi("Piano","Zongora"),serial_no:bi("Serial No.","Gyári szám"),status:bi("Status","Státusz"),location:bi("Location","Helyszín"),ownership_type:bi("Ownership","Tulajdon"),estimated_value:bi("Estimated value","Becsült érték")};
+ const ownerOptions=[['ALL',bi('All ownership types','Minden tulajdonosi típus')],['MATCHED_CLIENT',bi('Linked to client','Ügyfélhez kapcsolt')],['UNIDENTIFIED_OWNER',bi('Unidentified owner','Ismeretlen tulajdonos')],['COMPANY_OWNED',bi('Company pianos','Céges zongorák')],['CONSIGNMENT',bi('Consignment','Bizományos')],['RENTAL',bi('Rental','Bérelt')]];
+ $("#pianos").innerHTML=`<div class="panel piano-list-panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button></div></div><div class="piano-filter-grid"><label>${bi("Search","Keresés")}<input id="pianoSearchInput" value="${htmlText(currentPianoSearch)}" placeholder="${bi("Client, piano, serial number or address","Ügyfél, zongora, gyári szám vagy cím")}" oninput="currentPianoSearch=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Ownership","Tulajdon")}<select onchange="currentPianoOwnershipFilter=this.value;currentPianoPage=1;renderPianos()">${ownerOptions.map(([v,t])=>`<option value="${v}" ${currentPianoOwnershipFilter===v?"selected":""}>${t}</option>`).join("")}</select></label><label>${bi("Status","Státusz")}<select onchange="currentPianoStatusFilter=this.value;currentPianoPage=1;renderPianos()">${pianoStatusOptions(data)}</select></label><label>${bi("Minimum value (USD)","Minimum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMinValue)}" oninput="currentPianoMinValue=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Maximum value (USD)","Maximum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMaxValue)}" oninput="currentPianoMaxValue=this.value;currentPianoPage=1;renderPianos()"></label><div class="piano-filter-actions"><button type="button" class="small ghost-btn" onclick="clearPianoFilters()">${bi("Clear filters","Szűrők törlése")}</button></div></div>${pagination}<div class="table-scroll-top" id="pianosScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap pianos-table-wrap" id="pianosTableWrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${htmlText(r.status||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="8" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
+ const input=document.getElementById("pianoSearchInput");if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+ requestAnimationFrame(setupPianoTableScroll);
  applyLanguageToDOM();
+}
+async function pianoInfo(id){
+ const [pianos,contacts]=await Promise.all([api('/api/pianos'),api('/api/contacts')]);
+ const p=pianos.find(x=>String(x.id)===String(id));if(!p)return showError(bi('Piano not found.','A zongora nem található.'));
+ const owner=contacts.find(c=>String(c.id)===String(p.owner_contact_id));
+ $("#modal").classList.remove("hidden");$("#modalTitle").textContent=bi("Piano information","Zongora információ");
+ const importInfo=isAdmin()?`<details class="piano-import-info"><summary>${bi("Import information","Importálási információk")}</summary><p><b>${bi("External reference","Külső referencia")}:</b> ${htmlText(p.external_reference||'—')}</p><p><b>${bi("Import source","Importforrás")}:</b> ${htmlText(p.import_source||'—')}</p><p><b>${bi("Import batch","Importköteg")}:</b> ${htmlText(p.import_batch_id||'—')}</p><p><b>${bi("Owner resolution","Tulajdonosi feloldás")}:</b> ${htmlText(p.owner_resolution||'—')}</p><p><b>${bi("Original description","Eredeti leírás")}:</b> ${htmlText(p.original_description||'—')}</p></details>`:'';
+ $("#form").innerHTML=`<div class="work-card piano-info-card"><div class="piano-info-grid"><p><b>Piano ID:</b> ${htmlText(p.id)}</p><p><b>${bi("Client / owner","Ügyfél / tulajdonos")}:</b> ${htmlText(owner?.name||pianoOwnerLabel(p))}</p><p><b>${bi("Piano","Zongora")}:</b> ${htmlText(pianoDisplayName(p))}</p><p><b>${bi("Serial number","Gyári szám")}:</b> ${htmlText(p.serial_no||'—')}</p><p><b>${bi("Brand","Márka")}:</b> ${htmlText(p.brand||'—')}</p><p><b>${bi("Model","Modell")}:</b> ${htmlText(p.model||'—')}</p><p><b>${bi("Year","Év")}:</b> ${htmlText(p.year||'—')}</p><p><b>${bi("Status","Státusz")}:</b> ${htmlText(p.status||'—')}</p><p><b>${bi("Location","Helyszín")}:</b> ${mapLink(p.location)||'—'}</p><p><b>${bi("Ownership","Tulajdon")}:</b> ${htmlText(p.ownership_type||p.ownership||'—')}</p><p><b>${bi("Estimated value","Becsült érték")}:</b> ${money(p.estimated_value)}</p><p class="full"><b>${bi("Notes","Megjegyzés")}:</b> ${htmlText(p.notes||'—')}</p></div>${importInfo}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button>${!p.owner_contact_id?`<button type="button" class="small" onclick="openPianoEdit('${p.id}',true)">${bi("Assign customer","Ügyfél hozzárendelése")}</button>`:''}<button type="button" onclick="openPianoEdit('${p.id}')">${bi("Edit","Szerkesztés")}</button></div>`;
+ $("#form").onsubmit=e=>e.preventDefault();applyLanguageToDOM(document.getElementById('modal'));
+}
+async function openPianoEdit(id,focusOwner=false){
+ const pianos=await api('/api/pianos');const p=pianos.find(x=>String(x.id)===String(id));if(!p)return;
+ openForm('pianos',p);
+ if(focusOwner)setTimeout(()=>document.getElementById('pianoOwnerFilter')?.focus(),150);
+}
+async function setupPianoFormBehavior(row){
+ const ownerField=document.querySelector('[data-field="owner_contact_id"]');if(!ownerField)return;
+ const current=String(row?.owner_contact_id||'');
+ try{pianoOwnerContactsCache=await api('/api/contacts');}catch(e){pianoOwnerContactsCache=[];}
+ ownerField.innerHTML=`<label>${bi("Owner client","Tulajdonos ügyfél")}</label><input id="pianoOwnerFilter" type="search" placeholder="${bi("Search by client name, email, phone or address","Keresés ügyfélnév, e-mail, telefon vagy cím alapján")}" oninput="filterPianoOwnerOptions(this.value)"><select id="pianoOwnerSelect" name="owner_contact_id"><option value="">${bi("No linked client / unidentified or company-owned","Nincs kapcsolt ügyfél / ismeretlen vagy céges")}</option>${pianoOwnerContactsCache.map(c=>`<option value="${htmlText(c.id)}" ${String(c.id)===current?'selected':''}>${htmlText(c.name||'')} · ${htmlText(c.address||c.email||c.phone||'')}</option>`).join('')}</select>`;
+ const ownership=document.querySelector('[name="ownership_type"]');const ownerSelect=document.getElementById('pianoOwnerSelect');
+ const sync=()=>{if(ownerSelect?.value&&ownership)ownership.value='Customer owned';};
+ ownerSelect?.addEventListener('change',sync);
+ ownership?.addEventListener('change',()=>{if(ownership.value!=='Customer owned'&&ownerSelect)ownerSelect.value='';});
+}
+function filterPianoOwnerOptions(value){
+ const select=document.getElementById('pianoOwnerSelect');if(!select)return;
+ const q=String(value||'').trim().toLowerCase();
+ [...select.options].forEach((o,i)=>{if(i===0){o.hidden=false;return;}const c=pianoOwnerContactsCache.find(x=>String(x.id)===String(o.value));const hay=[c?.name,c?.email,c?.phone,c?.address].join(' ').toLowerCase();o.hidden=!!q&&!hay.includes(q);});
 }
 
 async function renderTable(key){
@@ -1053,8 +1142,9 @@ async function commitPianoImport(){
 }
 function renderPianoImportCompleted(result){const box=document.getElementById('pianoImportResult');if(!box)return;box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Piano import completed','A zongoraimport befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported pianos','Importált zongorák')}</span><strong>${Number(result.importedPianos||0)}</strong></div><div class="import-stat"><span>${bi('Clients updated as owners','Owner státuszra frissített ügyfelek')}</span><strong>${Number(result.updatedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Unidentified owner','Ismeretlen tulajdonos')}</span><strong>${Number(result.unidentifiedOwnerPianos||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedAlreadyImported||0)+Number(result.skippedPossibleDuplicates||0)}</strong></div><div class="import-stat"><span>${bi('Client not found','Ügyfél nem található')}</span><strong>${Number(result.clientNotFound||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Invalid/failed rows','Hibás sorok')}</span><strong>${Number(result.invalidRows||0)+Number(result.failedRows||0)}</strong></div></div><div class="actions"><button type="button" onclick="closeModal();render('pianos')">${bi('View pianos','Zongorák megtekintése')}</button></div></div>`;}
 
-function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`<div class="form-grid">${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
+function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
+ if(key==="pianos") setupPianoFormBehavior(row);
  applyLanguageToDOM(document.getElementById("modal"));
  $("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}try{let saved;
 if(row) saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});
