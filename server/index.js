@@ -76,7 +76,33 @@ function ensureRuntimeMigrations(){
       addContactCol("interest_budget", "REAL DEFAULT 0");
       addContactCol("interest_timeline", "TEXT");
       addContactCol("interest_notes", "TEXT");
-    } catch(e) { console.warn("contact status migration skipped:", e.message); }
+      addContactCol("billing_address", "TEXT");
+      addContactCol("external_reference", "TEXT");
+      addContactCol("import_source", "TEXT");
+      addContactCol("import_batch_id", "TEXT");
+      db.prepare(`CREATE TABLE IF NOT EXISTS import_batches (
+        id TEXT PRIMARY KEY,
+        import_source TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        file_hash TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PREVIEW',
+        total_rows INTEGER DEFAULT 0,
+        importable_rows INTEGER DEFAULT 0,
+        imported_clients INTEGER DEFAULT 0,
+        skipped_duplicates INTEGER DEFAULT 0,
+        missing_data_clients INTEGER DEFAULT 0,
+        failed_rows INTEGER DEFAULT 0,
+        imported_by_user_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        completed_at TEXT,
+        summary_json TEXT
+      )`).run();
+      db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference ON contacts(import_source, external_reference) WHERE import_source IS NOT NULL AND external_reference IS NOT NULL`).run();
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)`).run();
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)`).run();
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id)`).run();
+      db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source ON import_batches(import_source, file_hash)`).run();
+    } catch(e) { console.warn("contact/import migration skipped:", e.message); }
 
     db.prepare(`CREATE TABLE IF NOT EXISTS financial_items (
       id TEXT PRIMARY KEY,
@@ -1098,7 +1124,7 @@ function createResourceRoutes(key, table, prefix, write, roles){
     res.json({ok:true});
   });
 }
-createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","billing_address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/pianos", auth, (req,res)=>{
   ensureRuntimeMigrations();
@@ -1558,7 +1584,6 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
