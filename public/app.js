@@ -901,8 +901,33 @@ function renderClientImportSummary(data){
  const box=document.getElementById('clientImportResult');if(!box)return;
  const s=data.summary;
  const cards=[['totalRows',bi('Rows found','Talált sorok')],['newClients',bi('New clients','Új ügyfelek')],['alreadyImported',bi('Already imported','Már importálva')],['possibleDuplicates',bi('Possible duplicates','Lehetséges duplikációk')],['missingDataClients',bi('Missing-data clients','Hiányos adatú ügyfelek')],['invalidRows',bi('Invalid rows','Hibás sorok')]];
- box.innerHTML=`<div class="import-summary"><div class="import-file"><b>${bi('File','Fájl')}:</b> ${htmlText(s.filename||'')}<br><span class="muted">${bi('Preview batch','Előnézeti köteg')}: ${htmlText(data.batchId||'')}</span></div><div class="import-summary-grid">${cards.map(([k,l])=>`<button type="button" class="import-stat ${k}" onclick="showClientImportCategory('${k}')"><span>${l}</span><strong>${Number(s[k]||0)}</strong></button>`).join('')}</div><div id="clientImportCategory"></div><div class="import-preview-note">${bi('No client has been saved yet. Final importing will be added in the next step.','Még egyetlen ügyfél sem került mentésre. A végleges importálás a következő lépésben készül el.')}</div></div>`;
+ box.innerHTML=`<div class="import-summary"><div class="import-file"><b>${bi('File','Fájl')}:</b> ${htmlText(s.filename||'')}<br><span class="muted">${bi('Preview batch','Előnézeti köteg')}: ${htmlText(data.batchId||'')}</span></div><div class="import-summary-grid">${cards.map(([k,l])=>`<button type="button" class="import-stat ${k}" onclick="showClientImportCategory('${k}')"><span>${l}</span><strong>${Number(s[k]||0)}</strong></button>`).join('')}</div><div id="clientImportCategory"></div><div class="import-preview-note">${bi('The analysis is complete. Only NEW clients will be imported; possible duplicates and invalid rows will be skipped.','Az elemzés elkészült. Csak az ÚJ ügyfelek kerülnek importálásra; a lehetséges duplikációkat és hibás sorokat a rendszer kihagyja.')}</div><div class="actions import-final-actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="button" id="clientImportCommitBtn" onclick="commitClientImport()" ${Number(s.newClients||0)<1?'disabled':''}>${bi(`Import ${Number(s.newClients||0)} clients`,`${Number(s.newClients||0)} ügyfél importálása`)}</button></div></div>`;
  showClientImportCategory('newClients');
+}
+
+async function commitClientImport(){
+ const data=currentClientImportAnalysis;if(!data?.batchId)return showError(bi('Analyze the file before importing.','Importálás előtt elemezd a fájlt.'));
+ const summary=data.summary||{};const count=Number(summary.newClients||0);const missing=Number(summary.missingDataClients||0);
+ if(count<1)return showError(bi('There are no new clients to import.','Nincs importálható új ügyfél.'));
+ const ok=confirm(bi(`Import ${count} clients?\n\n${missing} clients will be imported with missing basic data. Possible duplicates and invalid rows will be skipped.`,`Importálod a(z) ${count} ügyfelet?\n\n${missing} ügyfél hiányos alapadatokkal kerül be. A lehetséges duplikációkat és hibás sorokat a rendszer kihagyja.`));
+ if(!ok)return;
+ const button=document.getElementById('clientImportCommitBtn');
+ if(button){button.disabled=true;button.textContent=bi('Importing…','Importálás…');}
+ try{
+  const result=await api(`/api/imports/clients/${encodeURIComponent(data.batchId)}/commit`,{method:'POST',body:JSON.stringify({confirm:true})});
+  currentClientImportAnalysis={...data,completed:true,importResult:result};
+  renderClientImportCompleted(result);
+  await render('contacts');
+ }catch(err){
+  const code=String(err.message||'');
+  const friendly=code==='IMPORT_BATCH_ALREADY_COMPLETED'?bi('This preview has already been imported.','Ezt az előnézetet már importálták.'):code==='IMPORT_BATCH_NOT_READY'?bi('This import preview is no longer ready. Analyze the file again.','Ez az importelőnézet már nem használható. Elemezd újra a fájlt.'):code==='IMPORT_PREVIEW_DATA_MISSING'?bi('The preview data is missing. Analyze the file again.','Az előnézeti adatok hiányoznak. Elemezd újra a fájlt.'):code==='CLIENT_IMPORT_FAILED'?bi('The import failed. No partial client import was kept.','Az importálás sikertelen. Részleges ügyfélimport nem maradt az adatbázisban.'):code;
+  showError(friendly);
+  if(button){button.disabled=false;button.textContent=bi(`Import ${count} clients`,`${count} ügyfél importálása`);}
+ }
+}
+function renderClientImportCompleted(result){
+ const box=document.getElementById('clientImportResult');if(!box)return;
+ box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Import completed successfully','Az importálás sikeresen befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported clients','Importált ügyfelek')}</span><strong>${Number(result.importedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Imported with missing data','Hiányos adatokkal importálva')}</span><strong>${Number(result.missingDataClients||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedDuplicates||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Failed rows','Hibás sorok')}</span><strong>${Number(result.failedRows||0)}</strong></div></div><p class="muted">${bi('The client list has been refreshed. The same completed file cannot be imported again.','Az ügyféllista frissült. Ugyanez a befejezett fájl nem importálható újra.')}</p><div class="actions"><button type="button" onclick="closeModal();render('contacts')">${bi('View clients','Ügyfelek megtekintése')}</button></div></div>`;
 }
 function showClientImportCategory(kind){
  const data=currentClientImportAnalysis;if(!data)return;
