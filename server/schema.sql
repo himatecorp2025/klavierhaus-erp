@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS pianos (
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
   parent_job_id TEXT,
+  workflow_root_id TEXT,
+  workflow_step_no INTEGER DEFAULT 1,
+  workflow_status TEXT DEFAULT 'ACTIVE',
+  finalized_at TEXT,
   title TEXT NOT NULL,
   job_type TEXT DEFAULT 'Standalone',
   client_id TEXT,
