@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   email TEXT,
   phone TEXT,
   address TEXT,
+  billing_address TEXT,
+  external_reference TEXT,
+  import_source TEXT,
+  import_batch_id TEXT,
   priority TEXT DEFAULT 'Medium',
   status TEXT DEFAULT 'Active',
   owner TEXT,
@@ -194,6 +198,32 @@ INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
  ('logo_url','/icons/icon-512.png','SYSTEM'),
  ('login_background_url','','SYSTEM'),
  ('branding_version','1','SYSTEM');
+
+CREATE TABLE IF NOT EXISTS import_batches (
+  id TEXT PRIMARY KEY,
+  import_source TEXT NOT NULL,
+  original_filename TEXT NOT NULL,
+  file_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PREVIEW',
+  total_rows INTEGER DEFAULT 0,
+  importable_rows INTEGER DEFAULT 0,
+  imported_clients INTEGER DEFAULT 0,
+  skipped_duplicates INTEGER DEFAULT 0,
+  missing_data_clients INTEGER DEFAULT 0,
+  failed_rows INTEGER DEFAULT 0,
+  imported_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  summary_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference
+ON contacts(import_source, external_reference)
+WHERE import_source IS NOT NULL AND external_reference IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source
+ON import_batches(import_source, file_hash);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
