@@ -137,3 +137,14 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 @media(max-width:720px){.client-search-grid{grid-template-columns:1fr}.customer-status-icon{font-size:19px;min-width:30px}}
 
 .permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px}.permission-card{border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--panel-2)}.permission-row{display:flex;gap:10px;align-items:center;padding:8px 0}.permission-row input{width:auto}.settings-note{color:var(--muted)}
+
+
+/* Responsive data tables: preserve readability and allow horizontal touch/trackpad scrolling. */
+.table-wrap{display:block;width:100%;max-width:100%;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;border-radius:10px;}
+.table-wrap table{width:max-content;min-width:100%;table-layout:auto;}
+.table-wrap th,.table-wrap td{min-width:120px;white-space:normal;overflow-wrap:anywhere;}
+.table-wrap th:first-child,.table-wrap td:first-child{min-width:86px;}
+.contact-link{color:var(--accent,#60a5fa);text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+.contact-link:focus-visible{outline:2px solid currentColor;outline-offset:3px;border-radius:3px;}
+@media(max-width:760px){.table-wrap{margin-left:0;margin-right:0;padding-bottom:8px}.table-wrap table{min-width:980px}.table-wrap th,.table-wrap td{font-size:14px;padding:10px 9px}.client-search-grid{grid-template-columns:1fr!important}}
+@media(min-width:761px){.table-wrap::-webkit-scrollbar{height:12px}.table-wrap::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}}
