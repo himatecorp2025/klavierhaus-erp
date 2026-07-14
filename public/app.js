@@ -828,7 +828,7 @@ async function renderContactsTable(data){
    return hay.includes(q);
  });
  const s=schemas.contacts;
- $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search client-search-grid"><label>${tr("searchClients")}<input id="clientSearchInput" value="${(document.getElementById("clientSearchInput")?.value||"").replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div>${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search client-search-grid"><label>${tr("searchClients")}<input id="clientSearchInput" value="${(document.getElementById("clientSearchInput")?.value||"").replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
  const input=document.getElementById("clientSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
 }
 async function deleteGenericResource(key,id){
@@ -865,6 +865,54 @@ async function addPianoToClient(clientId){
  if(!(body.brand||body.model)){alert(bi("Enter at least a brand or model.","Legalább márkát vagy típust adj meg."));return}
  try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await clientProfile(clientId)}catch(err){alert(err.message)}
 }
+
+let currentClientImportAnalysis=null;
+function clientImportReasonLabel(code){
+ const labels={MISSING_CLIENT_NAME:bi('Missing client name','Hiányzó ügyfélnév'),NOT_READY:bi('Review Status is not Ready','A Review Status nem Ready'),MISSING_EXTERNAL_REFERENCE:bi('Missing external reference','Hiányzó külső referencia'),DUPLICATE_REFERENCE_IN_FILE:bi('Duplicate external reference in file','Duplikált külső referencia a fájlban'),EXTERNAL_REFERENCE_MATCH:bi('Already imported external reference','Már importált külső referencia'),EMAIL_MATCH:bi('Matching email in ERP','Egyező e-mail az ERP-ben'),PHONE_MATCH:bi('Matching phone in ERP','Egyező telefonszám az ERP-ben'),NAME_ADDRESS_MATCH:bi('Matching name and address in ERP','Egyező név és cím az ERP-ben')};
+ return labels[code]||code||'';
+}
+function clientImportCategoryLabel(code){return ({NEW:bi('New client','Új ügyfél'),ALREADY_IMPORTED:bi('Already imported','Már importálva'),POSSIBLE_DUPLICATE:bi('Possible duplicate','Lehetséges duplikáció'),INVALID:bi('Invalid row','Hibás sor')})[code]||code;}
+function openClientImportModal(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');
+ currentClientImportAnalysis=null;
+ $('#modal').classList.remove('hidden');
+ $('#modalTitle').textContent=bi('Import clients from Excel','Ügyfelek importálása Excelből');
+ $('#form').innerHTML=`<div class="client-import-intro"><p>${bi('Select the cleaned XLSX workbook. This step only analyzes the Import Ready sheet and does not save clients.','Válaszd ki a tisztított XLSX munkafüzetet. Ez a lépés csak elemzi az Import Ready lapot, ügyfelet még nem ment.')}</p><p class="muted">${bi('Only administrators and superadministrators can use bulk import.','A tömeges importot csak admin és szuperadmin használhatja.')}</p></div><div class="form-grid"><div class="field full"><label>${bi('Excel file (.xlsx)','Excel-fájl (.xlsx)')}</label><input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div></div><div id="clientImportResult"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button>${bi('Analyze file','Fájl elemzése')}</button></div>`;
+ $('#form').onsubmit=analyzeClientImport;
+ applyLanguageToDOM(document.getElementById('modal'));
+}
+async function analyzeClientImport(e){
+ e.preventDefault();
+ const file=e.target.querySelector('input[name="file"]')?.files?.[0];
+ if(!file)return showError(bi('Select an XLSX file.','Válassz ki egy XLSX-fájlt.'));
+ const button=e.target.querySelector('button[type="submit"],.actions button:last-child');
+ if(button){button.disabled=true;button.textContent=bi('Analyzing…','Elemzés…');}
+ try{
+  const fd=new FormData();fd.append('file',file,file.name);
+  currentClientImportAnalysis=await api('/api/imports/clients/analyze',{method:'POST',body:fd});
+  renderClientImportSummary(currentClientImportAnalysis);
+ }catch(err){
+  const msg=String(err.message||'');
+  const friendly=msg==='IMPORT_READY_SHEET_MISSING'?bi('The workbook does not contain an Import Ready sheet.','A munkafüzet nem tartalmaz Import Ready lapot.'):msg==='IMPORT_READY_EMPTY'?bi('The Import Ready sheet is empty.','Az Import Ready lap üres.'):msg==='INVALID_EXCEL_FILE'?bi('Only XLSX files are accepted.','Csak XLSX-fájl tölthető fel.'):msg==='FILE_ALREADY_IMPORTED'?bi('This file has already been imported.','Ezt a fájlt már korábban importálták.'):msg;
+  showError(friendly);
+ }finally{if(button){button.disabled=false;button.textContent=bi('Analyze file','Fájl elemzése');}}
+}
+function renderClientImportSummary(data){
+ const box=document.getElementById('clientImportResult');if(!box)return;
+ const s=data.summary;
+ const cards=[['totalRows',bi('Rows found','Talált sorok')],['newClients',bi('New clients','Új ügyfelek')],['alreadyImported',bi('Already imported','Már importálva')],['possibleDuplicates',bi('Possible duplicates','Lehetséges duplikációk')],['missingDataClients',bi('Missing-data clients','Hiányos adatú ügyfelek')],['invalidRows',bi('Invalid rows','Hibás sorok')]];
+ box.innerHTML=`<div class="import-summary"><div class="import-file"><b>${bi('File','Fájl')}:</b> ${htmlText(s.filename||'')}<br><span class="muted">${bi('Preview batch','Előnézeti köteg')}: ${htmlText(data.batchId||'')}</span></div><div class="import-summary-grid">${cards.map(([k,l])=>`<button type="button" class="import-stat ${k}" onclick="showClientImportCategory('${k}')"><span>${l}</span><strong>${Number(s[k]||0)}</strong></button>`).join('')}</div><div id="clientImportCategory"></div><div class="import-preview-note">${bi('No client has been saved yet. Final importing will be added in the next step.','Még egyetlen ügyfél sem került mentésre. A végleges importálás a következő lépésben készül el.')}</div></div>`;
+ showClientImportCategory('newClients');
+}
+function showClientImportCategory(kind){
+ const data=currentClientImportAnalysis;if(!data)return;
+ const map={newClients:r=>r.category==='NEW',alreadyImported:r=>r.category==='ALREADY_IMPORTED',possibleDuplicates:r=>r.category==='POSSIBLE_DUPLICATE',invalidRows:r=>r.category==='INVALID',missingDataClients:r=>r.category==='NEW'&&r.hasMissingData,totalRows:()=>true};
+ const rows=data.records.filter(map[kind]||map.totalRows);
+ const box=document.getElementById('clientImportCategory');if(!box)return;
+ box.innerHTML=`<div class="import-category-head"><b>${bi('Preview records','Előnézeti rekordok')}</b><span>${rows.length}</span></div><div class="table-wrap import-preview-table"><table><thead><tr><th>${bi('Row','Sor')}</th><th>${bi('Client','Ügyfél')}</th><th>${bi('Phone','Telefon')}</th><th>${bi('Email','E-mail')}</th><th>${bi('Address','Cím')}</th><th>${bi('External reference','Külső referencia')}</th><th>${bi('Category','Kategória')}</th><th>${bi('Reason','Indok')}</th></tr></thead><tbody>${rows.slice(0,250).map(r=>`<tr><td>${r.rowNumber||''}</td><td>${htmlText(r.name||'')}</td><td>${htmlText(r.phone||'')}</td><td>${htmlText(r.email||'')}</td><td>${htmlText(r.serviceAddress||'')}</td><td>${htmlText(r.externalReference||'')}</td><td>${clientImportCategoryLabel(r.category)}</td><td>${clientImportReasonLabel(r.reason)}${r.missingFields?.length?`<div class="muted">${bi('Missing','Hiányzik')}: ${r.missingFields.map(x=>x==='Phone or Email'?bi('Phone or email','Telefon vagy e-mail'):bi('Address','Cím')).join(', ')}</div>`:''}${r.match?`<div class="muted">${bi('ERP match','ERP-egyezés')}: ${htmlText(r.match.name||r.match.id||'')}</div>`:''}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">${bi('No records in this category.','Nincs rekord ebben a kategóriában.')}</td></tr>`}</tbody></table></div>${rows.length>250?`<p class="muted">${bi('Showing the first 250 records.','Az első 250 rekord látható.')}</p>`:''}`;
+}
+
+
 function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`<div class="form-grid">${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
  applyLanguageToDOM(document.getElementById("modal"));
