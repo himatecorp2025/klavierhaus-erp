@@ -1259,6 +1259,36 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
 });
 
 
+app.delete("/api/pianos", auth, requireSuperadmin, (req,res)=>{
+  const reset=db.transaction(()=>{
+    const deletedPianos=Number(db.prepare("SELECT COUNT(*) AS c FROM pianos").get().c||0);
+    const deletedImportBatches=Number(db.prepare("SELECT COUNT(*) AS c FROM import_batches WHERE UPPER(import_source) LIKE '%PIANO%'").get().c||0);
+
+    // Preserve historical jobs and finance records, but remove broken technical links.
+    db.prepare("UPDATE jobs SET piano_id=NULL WHERE piano_id IS NOT NULL AND piano_id<>''").run();
+    db.prepare("UPDATE planned_jobs SET piano_id='' WHERE piano_id IS NOT NULL AND piano_id<>''").run();
+    db.prepare("UPDATE journal_entries SET piano_id=NULL WHERE piano_id IS NOT NULL AND piano_id<>''").run();
+    db.prepare("UPDATE financial_items SET piano_id=NULL WHERE piano_id IS NOT NULL AND piano_id<>''").run();
+    db.prepare("UPDATE inventory_items SET linked_piano_id='' WHERE linked_piano_id IS NOT NULL AND linked_piano_id<>''").run();
+
+    db.prepare("DELETE FROM pianos").run();
+    db.prepare("DELETE FROM import_batches WHERE UPPER(import_source) LIKE '%PIANO%'").run();
+    db.prepare("DELETE FROM audit_log WHERE module='pianos' OR action GLOB 'PIANO_*' OR (module='imports' AND (action GLOB 'PIANO_*' OR LOWER(details) LIKE '%piano%'))").run();
+    db.prepare("UPDATE contacts SET has_piano=0,updated_at=CURRENT_TIMESTAMP WHERE has_piano<>0").run();
+
+    return {deletedPianos,deletedImportBatches};
+  });
+
+  try{
+    const result=reset();
+    req.skipAutoAudit=true;
+    res.json({ok:true,module:'pianos',...result});
+  }catch(err){
+    console.error('piano module reset failed:',err);
+    res.status(500).json({error:'PIANO_MODULE_RESET_FAILED'});
+  }
+});
+
 app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
   const piano=db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(req.params.id);
   db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
@@ -1719,4 +1749,3 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
