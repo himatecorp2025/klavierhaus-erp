@@ -1,4 +1,3 @@
-
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
@@ -9,14 +8,88 @@ const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.pragma("foreign_keys = ON");
+
+/**
+ * schema.sql intentionally contains table/view definitions but no indexes that
+ * depend on columns added by later migrations. This allows the same schema to
+ * run against both a new database and an older persistent Render database.
+ */
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
-function tryAlter(sql){ try { db.prepare(sql).run(); } catch(e) {} }
-tryAlter("ALTER TABLE contacts ADD COLUMN address TEXT");
-tryAlter("ALTER TABLE jobs ADD COLUMN job_type TEXT DEFAULT 'Standalone'");
-tryAlter("ALTER TABLE jobs ADD COLUMN pricing_basis TEXT");
-tryAlter("ALTER TABLE jobs ADD COLUMN last_reassigned_by TEXT");
-tryAlter("ALTER TABLE jobs ADD COLUMN reassignment_note TEXT");
+function tableColumns(tableName) {
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name));
+}
+
+function ensureColumn(tableName, columnName, definition) {
+  const columns = tableColumns(tableName);
+  if (!columns.has(columnName)) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`).run();
+  }
+}
+
+function ensureIndex(sql) {
+  db.exec(sql);
+}
+
+function runMigrations() {
+  const migrate = db.transaction(() => {
+    // Existing general migrations.
+    ensureColumn("contacts", "address", "TEXT");
+    ensureColumn("jobs", "job_type", "TEXT DEFAULT 'Standalone'");
+    ensureColumn("jobs", "pricing_basis", "TEXT");
+    ensureColumn("jobs", "last_reassigned_by", "TEXT");
+    ensureColumn("jobs", "reassignment_note", "TEXT");
+
+    // Customer import and customer-status fields.
+    ensureColumn("contacts", "billing_address", "TEXT");
+    ensureColumn("contacts", "external_reference", "TEXT");
+    ensureColumn("contacts", "import_source", "TEXT");
+    ensureColumn("contacts", "import_batch_id", "TEXT");
+    ensureColumn("contacts", "has_piano", "INTEGER DEFAULT 0");
+    ensureColumn("contacts", "interested_buying", "INTEGER DEFAULT 0");
+    ensureColumn("contacts", "interest_brand", "TEXT");
+    ensureColumn("contacts", "interest_model", "TEXT");
+    ensureColumn("contacts", "interest_budget", "REAL DEFAULT 0");
+    ensureColumn("contacts", "interest_timeline", "TEXT");
+    ensureColumn("contacts", "interest_notes", "TEXT");
+
+    // Piano import fields. These MUST exist before piano import indexes are created.
+    ensureColumn("pianos", "ownership_type", "TEXT DEFAULT 'Customer owned'");
+    ensureColumn("pianos", "display_name", "TEXT");
+    ensureColumn("pianos", "asset_recorded", "INTEGER DEFAULT 0");
+    ensureColumn("pianos", "external_reference", "TEXT");
+    ensureColumn("pianos", "import_source", "TEXT");
+    ensureColumn("pianos", "import_batch_id", "TEXT");
+    ensureColumn("pianos", "original_description", "TEXT");
+    ensureColumn("pianos", "owner_resolution", "TEXT");
+
+    // Older databases may already have import_batches without piano counters.
+    ensureColumn("import_batches", "imported_pianos", "INTEGER DEFAULT 0");
+    ensureColumn("import_batches", "updated_clients", "INTEGER DEFAULT 0");
+    ensureColumn("import_batches", "unidentified_owner_pianos", "INTEGER DEFAULT 0");
+    ensureColumn("import_batches", "client_not_found", "INTEGER DEFAULT 0");
+  });
+
+  migrate();
+
+  // Indexes are deliberately created only after all required legacy columns exist.
+  ensureIndex(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference
+    ON contacts(import_source, external_reference)
+    WHERE import_source IS NOT NULL AND external_reference IS NOT NULL`);
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)");
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)");
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id)");
+  ensureIndex(`CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source
+    ON import_batches(import_source, file_hash)`);
+  ensureIndex(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_import_reference
+    ON pianos(import_source, external_reference)
+    WHERE import_source IS NOT NULL AND external_reference IS NOT NULL`);
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id)");
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution)");
+  ensureIndex("CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)");
+}
+
+runMigrations();
 
 function id(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function addUser(name,email,password,role){
