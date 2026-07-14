@@ -396,7 +396,7 @@ const brandingUpload = multer({
     filename: (_req,file,cb)=>cb(null,`branding-${Date.now()}${path.extname(file.originalname||'').toLowerCase()||'.png'}`)
   }),
   limits:{fileSize:15*1024*1024},
-  fileFilter:(_req,file,cb)=>cb(null,['image/png','image/jpeg'].includes(file.mimetype))
+  fileFilter:(_req,file,cb)=>{const ok=['image/png','image/jpeg','image/jpg'].includes(String(file.mimetype||'').toLowerCase())||/\.(png|jpe?g)$/i.test(file.originalname||'');cb(ok?null:new Error('INVALID_FILE_TYPE'),ok)}
 });
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
@@ -1466,7 +1466,7 @@ app.put('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>{
 app.post('/api/settings/branding/logo',auth,permit('ADMIN'),brandingUpload.single('logo'),(req,res)=>{
   if(!req.file) return res.status(400).json({error:'INVALID_FILE_TYPE'});
   const dim=imageDimensions(req.file.path);
-  if(!dim||dim.width!==dim.height||dim.width<192){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'PWA_LOGO_REQUIREMENTS'});}
+  if(!dim||dim.width<192||dim.height<192){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'PWA_LOGO_REQUIREMENTS'});}
   const before=getBranding(); const logoUrl='/uploads/'+path.basename(req.file.path);
   setSetting('logo_url',logoUrl,req.user.name||''); bumpBrandingVersion(req.user.name||'');
   const after=getBranding(); audit(req,'UPDATE','branding','logo',before,after); res.json(after);
@@ -1558,7 +1558,6 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
