@@ -48,7 +48,8 @@ const staticTranslations={
    scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
-let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png'};
+let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
+let currentAuditType='WORK';
 let viewHistory=[];
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
 function loadLanguage(){currentLang=localStorage.getItem(userLangKey())||"en"; if(!["en","hu"].includes(currentLang)) currentLang="en";}
@@ -98,7 +99,7 @@ function applyLanguageToDOM(root=document.body){
     if(el.placeholder) el.placeholder=splitBilingualText(el.placeholder);
     if(el.title) el.title=splitBilingualText(el.title);
   });
-  const title=document.querySelector(".login-card h1"); if(title) title.textContent=tr("appTitle");
+  const title=document.querySelector(".login-card h1"); if(title) title.innerHTML=`<span data-brand-name>${htmlText(branding.company_name||"Klavierhaus")}</span>`;
   const sub=document.querySelector(".login-card p"); if(sub) sub.textContent=tr("loginSubtitle");
   const passLabel=document.querySelector('label[for="password"], #loginForm label:nth-of-type(2)'); if(passLabel) passLabel.textContent=tr("password");
   const loginBtn=document.querySelector("#loginForm button"); if(loginBtn) loginBtn.textContent=tr("login");
@@ -131,11 +132,20 @@ async function loadBranding(){
  try{branding=await fetch('/api/public/branding',{cache:'no-store'}).then(r=>r.json());}catch(e){}
  applyBranding();
 }
+function versionedBrandAsset(url){
+ const base=url||''; if(!base)return '';
+ return `${base}${base.includes('?')?'&':'?'}v=${encodeURIComponent(branding.branding_version||Date.now())}`;
+}
 function applyBranding(){
+ const logo=versionedBrandAsset(branding.logo_url||'/icons/icon-512.png');
  document.querySelectorAll('[data-brand-name]').forEach(el=>el.textContent=branding.company_name||'Klavierhaus');
- document.querySelectorAll('[data-brand-logo]').forEach(el=>{if(el.tagName==='IMG'){el.src=branding.logo_url||'/icons/icon-512.png';}else{el.innerHTML=`<img src="${branding.logo_url||'/icons/icon-512.png'}" alt="">`;}});
+ document.querySelectorAll('[data-brand-logo]').forEach(el=>{if(el.tagName==='IMG'){el.src=logo;}else{el.innerHTML=`<img src="${logo}" alt="">`;}});
+ const login=document.querySelector('.login-page');
+ if(login){const bg=versionedBrandAsset(branding.login_background_url||'');login.style.setProperty('--login-background',bg?`url("${bg}")`:'none');login.classList.toggle('has-brand-background',!!bg);}
  document.title=(branding.company_name||'Klavierhaus')+' Work Management';
  const apple=document.querySelector('meta[name="apple-mobile-web-app-title"]'); if(apple) apple.content=branding.short_name||branding.company_name;
+ const manifest=document.querySelector('link[rel="manifest"]'); if(manifest) manifest.href=`/manifest.webmanifest?v=${encodeURIComponent(branding.branding_version||Date.now())}`;
+ const appleIcon=document.querySelector('link[rel="apple-touch-icon"]'); if(appleIcon) appleIcon.href=logo;
 }
 function isStandalonePWA(){return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;}
 const $=s=>document.querySelector(s);
@@ -149,6 +159,7 @@ let inactivityTimer = null;
 let countdownInterval = null;
 let logoutAt = 0;
 function logoutNow(){
+  if(token){try{fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token},keepalive:true});}catch(e){}}
   localStorage.removeItem("kh_token");
   localStorage.removeItem("kh_user");
   location.reload();
@@ -180,17 +191,17 @@ document.addEventListener("click", resetInactivityTimer, true);
 document.addEventListener("click", ()=>setTimeout(()=>applyLanguageToDOM(),0), false);
 
 async function deleteEverything(){
-  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
-  const first = confirm("WARNING / FIGYELMEZTETÉS\n\nThis will permanently delete ALL business data from the system.\nEz véglegesen töröl MINDEN üzleti adatot a rendszerből.\n\nThis action cannot be undone. / A művelet nem visszavonható.\n\nContinue? / Folytatod?");
+  if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
+  const first = confirm(bi("WARNING\n\nThis will permanently delete ALL business data from the system.\n\nThis action cannot be undone.\n\nContinue?","FIGYELMEZTETÉS\n\nEz véglegesen töröl MINDEN üzleti adatot a rendszerből.\n\nA művelet nem visszavonható.\n\nFolytatod?"));
   if(!first) return;
-  const typed = prompt("Final confirmation / Végső megerősítés\n\nType exactly: DELETE EVERYTHING\nÍrd be pontosan: DELETE EVERYTHING");
+  const typed = prompt(bi("Final confirmation\n\nType exactly: DELETE EVERYTHING","Végső megerősítés\n\nÍrd be pontosan: DELETE EVERYTHING"));
   if(typed !== "DELETE EVERYTHING"){
-    alert("Confirmation text did not match. Nothing was deleted. / A megerősítő szöveg nem egyezett. Semmi nem törlődött.");
+    alert(bi("Confirmation text did not match. Nothing was deleted.","A megerősítő szöveg nem egyezett. Semmi nem törlődött."));
     return;
   }
   try{
     await api("/api/system/delete-everything",{method:"POST",body:JSON.stringify({confirmation:typed})});
-    alert("All business data has been deleted. You will be logged out. / Minden üzleti adat törölve lett. Most kijelentkeztetünk.");
+    alert(bi("All business data has been deleted. You will be logged out.","Minden üzleti adat törölve lett. Most kijelentkeztetünk."));
     logoutNow();
   }catch(err){alert(err.message)}
 }
@@ -507,7 +518,7 @@ async function openJob(prefill="", row=null){
  const pianoOptions=pianos.map(p=>`<option value="${(`${p.brand||""} ${p.model||""}`).trim().replaceAll('"',"&quot;")}">${p.serial_no||""} ${p.location||""}</option>`).join("");
 
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=row ? "Edit Job / Munka szerkesztése" : "New Job / Új munka";
+ $("#modalTitle").textContent=row ? bi("Edit Job","Munka szerkesztése") : bi("New Job","Új munka");
  $("#form").innerHTML=`<div class="form-grid">
 <div class="field"><label>${req("Job title / Munka neve")}</label><input name="title" value="${row?.title||""}" required placeholder="Piano tuning / Zongorahangolás"></div>
 <div class="field"><label>${req("Assigned to / Felelős")}</label>
@@ -595,9 +606,9 @@ ${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
    let b=Object.fromEntries(new FormData(ev.target));
 
    if(!validateDateField(startInput) || !validateDateField(endInput)) return;
-   if(new Date(b.end_time)<=new Date(b.start_time)){alert("A befejezés nem lehet korábbi, mint a kezdés. / End must be after start.");return}
+   if(new Date(b.end_time)<=new Date(b.start_time)){alert(bi("End must be after start.","A befejezés nem lehet korábbi, mint a kezdés."));return}
    if(b.job_type==="Part-work" && !(b.instructions||"").trim()){
-     alert("Részmunka esetén a hátralévő feladatok megadása kötelező. / Remaining tasks are required for part-work.");
+     alert(bi("Remaining tasks are required for part-work.","Részmunka esetén a hátralévő feladatok megadása kötelező."));
      return;
    }
    ["planned_amount","planned_hours"].forEach(k=>b[k]=Number(b[k]||0));
@@ -634,8 +645,8 @@ function toggleInstructionsField(){
 function validateDateField(input){
  const val=input.value||"";
  const year=val.slice(0,4);
- if(!val){alert("Kérlek, add meg pontosan a dátumot. / Please enter the exact date."); return false}
- if(!/^\d{4}$/.test(year)){alert("Az évszám pontosan 4 számjegyből álljon. / Year must be exactly 4 digits."); return false}
+ if(!val){alert(bi("Please enter the exact date.","Kérlek, add meg pontosan a dátumot.")); return false}
+ if(!/^\d{4}$/.test(year)){alert(bi("Year must be exactly 4 digits.","Az évszám pontosan 4 számjegyből álljon.")); return false}
  return true;
 }
 function newYorkNowLocal(){
@@ -654,7 +665,7 @@ function toggleInstructionsField(){
 }
 function openJobDetails(j){
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent="Job details / Munka részletei";
+ $("#modalTitle").textContent=bi("Job details","Munka részletei");
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
  const closed=isClosedJobStatus(j.status) || String(j.status||"")==="Cancelled";
  const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
@@ -690,14 +701,14 @@ async function openWorkflowHistory(id){
  }catch(err){alert(err.message)}
 }
 async function deleteJob(id){
- if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
- if(!confirm("Delete this job from visible system? / Töröljük ezt a munkát a látható rendszerből?")) return;
+ if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
+ if(!confirm(bi("Delete this job from the visible system?","Töröljük ezt a munkát a látható rendszerből?"))) return;
  try{await api(`/api/jobs/${encodeURIComponent(id)}`,{method:"DELETE"}); closeModal(); await renderScheduler();}catch(err){alert(err.message)}
 }
 async function openReassign(j){
  await loadSchedulerWorkers();
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent="Reassign job / Munka átadása";
+ $("#modalTitle").textContent=bi("Reassign job","Munka átadása");
  $("#form").innerHTML=`<div class="form-grid">
  <div class="field"><label>${req("Current responsible / Jelenlegi felelős")}</label><input value="${j.assigned_to||""}" disabled></div>
  <div class="field"><label>${req("New responsible / Új felelős")}</label>
@@ -718,15 +729,15 @@ async function openReassign(j){
    }catch(err){alert(err.message)}
  }
 }
-function openCloseJob(j){$("#modalTitle").textContent="Close Job / Munka lezárása";$("#form").innerHTML=`<p class="muted">Billed amount / Számlázandó összeg kötelező. Ha 0, nem kell fájl. Ha nagyobb mint 0, fizetési mód és számla/csekk fájl kötelező.</p><div class="form-grid">
+function openCloseJob(j){$("#modalTitle").textContent=bi("Close Job","Munka lezárása");$("#form").innerHTML=`<p class="muted">Billed amount / Számlázandó összeg kötelező. Ha 0, nem kell fájl. Ha nagyobb mint 0, fizetési mód és számla/csekk fájl kötelező.</p><div class="form-grid">
 <div class="field"><label>${req("Close type / Lezárás típusa")}</label><select name="close_type" id="closeType" onchange="toggleNextJob()"><option>Full</option><option>Partial</option><option>Failed</option></select></div>
 <div class="field"><label>${req("Billed amount / Számlázandó összeg")}</label><input name="billed_amount" type="number" value="${j.planned_amount||0}" required></div>
 <div class="field"><label>${req("Payment method / Fizetési mód")}</label><select name="payment_method" required><option value="">Select payment method / Válassz fizetési módot</option><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Warranty Work</option></select></div>
 <div class="field"><label>Invoice number / Számla vagy csekk szám</label><input name="invoice_number"></div><div class="field"><label>Invoice/check file / Számla vagy csekk fájl</label><input name="file" type="file"></div>
 <div class="field full"><label>${req("Close description / Elvégzett munka leírása")}</label><textarea name="close_description" required></textarea></div>
 <div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select name="next_assigned_user_id">${workerSelectOptions(j.assigned_user_id,j.assigned_to)}</select></div><div class="field"><label>Next priority</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input name="next_start_time" type="datetime-local"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input name="next_end_time" type="datetime-local"></div><div class="field"><label>Next planned amount</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>Save closeout / Lezárás mentése</button></div>`;
-$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(billed>0&&!payment){alert("Fizetési mód kötelező, ha az összeg nagyobb mint 0. / Payment method is required when billed amount is greater than zero.");return}if(billed>0&&(!file||!file.name)){alert("Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0.");return}
-if(file && file.name && !isAllowedInvoiceFile(file.name)){alert("Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel. / Only PDF, JPG, JPEG or PNG files are allowed.");return}
+$("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(billed>0&&!payment){alert(bi("Payment method is required when billed amount is greater than zero.","Fizetési mód kötelező, ha az összeg nagyobb mint 0."));return}if(billed>0&&(!file||!file.name)){alert(bi("An invoice/check file is required when the amount is greater than zero.","Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0."));return}
+if(file && file.name && !isAllowedInvoiceFile(file.name)){alert(bi("Only PDF, JPG, JPEG or PNG files are allowed.","Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel."));return}
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
 if(fd.get("close_type")==="Full"&&!confirm(bi("Close the entire workflow? Every earlier linked part-work will also become fully completed.","Lezárod a teljes munkafolyamatot? Minden korábbi kapcsolódó részmunka is teljesen lezárttá válik."))) return;
@@ -813,9 +824,9 @@ async function renderContactsTable(data){
  const input=document.getElementById("clientSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
 }
 async function deleteGenericResource(key,id){
- if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
+ if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
  const s=schemas[key];
- if(!s || !confirm("Delete this item? / Töröljük ezt a tételt?")) return;
+ if(!s || !confirm(bi("Delete this item?","Töröljük ezt a tételt?"))) return;
  try{await api(`/api/${s.api}/${encodeURIComponent(id)}`,{method:"DELETE"}); await render(key);}catch(err){alert(err.message)}
 }
 function htmlText(value){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));}
@@ -843,7 +854,7 @@ async function clientProfile(id){
 async function addPianoToClient(clientId){
  const form=document.getElementById("pianoAddForm");
  const body=Object.fromEntries(new FormData(form));
- if(!(body.brand||body.model)){alert("Legalább márkát vagy típust adj meg. / Enter at least brand or model.");return}
+ if(!(body.brand||body.model)){alert(bi("Enter at least a brand or model.","Legalább márkát vagy típust adj meg."));return}
  try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await clientProfile(clientId)}catch(err){alert(err.message)}
 }
 function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`<div class="form-grid">${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
@@ -895,10 +906,10 @@ async function attachClientPianoSelector(row){
  applyLanguageToDOM(document.getElementById("clientPianoSelector"));
 }
 async function addInlinePianoToClient(clientId){
- if(!clientId){alert("Előbb mentsd az ügyfelet. / Save the client first.");return}
+ if(!clientId){alert(bi("Save the client first.","Előbb mentsd az ügyfelet."));return}
  const brand=$("#newPianoBrand")?.value || "", model=$("#newPianoModel")?.value || "", serial_no=$("#newPianoSerial")?.value || "", location=$("#newPianoLocation")?.value || "", ownership_type=$("#newPianoOwnership")?.value || "Customer owned", estimated_value=Number($("#newPianoValue")?.value || 0);
- if(!brand && !model){alert("Legalább márkát vagy modellt adj meg. / Enter at least brand or model.");return}
- if(ownership_type==="Company owned" && estimated_value<=0){alert("Céges zongoránál kötelező a becsült érték. / Estimated value is required for company-owned piano.");return}
+ if(!brand && !model){alert(bi("Enter at least a brand or model.","Legalább márkát vagy modellt adj meg."));return}
+ if(ownership_type==="Company owned" && estimated_value<=0){alert(bi("Estimated value is required for a company-owned piano.","Céges zongoránál kötelező a becsült érték."));return}
  try{
    const existing=await api(`/api/contacts/${clientId}/pianos`).catch(()=>[]);
    const similar=existing.find(p=>String(p.brand||"").trim().toLowerCase()===brand.trim().toLowerCase() && String(p.model||"").trim().toLowerCase()===model.trim().toLowerCase() && (!serial_no || String(p.serial_no||"").trim().toLowerCase()===serial_no.trim().toLowerCase()));
@@ -913,7 +924,7 @@ async function addInlinePianoToClient(clientId){
 }
 
 function closeModal(){$("#modal").classList.add("hidden")}
-function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
+function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){alert(bi("No data","Nincs adat"));return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
 const financialCategoryOptions={
  INCOME:[
    ["SERVICE_REVENUE","Service Revenue / Szolgáltatási bevétel"],
@@ -1043,7 +1054,7 @@ function financeTableHTML(items){
  </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
 }
 function exportFinancialItemsCSV(){
- api("/api/financial-items").then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="financial_items.csv";a.click()})
+ api("/api/financial-items").then(data=>{if(!data.length){alert(bi("No data","Nincs adat"));return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="financial_items.csv";a.click()})
 }
 async function applyFinanceFilters(){
  const q=[];
@@ -1066,7 +1077,7 @@ function openFinancialItem(row=null){
  const selectedType=row?.main_type||"INCOME";
  const categoryList=financialCategoryOptions[selectedType]||financialCategoryOptions.INCOME;
  $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=isEdit?"Edit Financial Item / Pénzügyi tétel szerkesztése":"New Financial Item / Új pénzügyi tétel";
+ $("#modalTitle").textContent=isEdit?bi("Edit Financial Item","Pénzügyi tétel szerkesztése"):bi("New Financial Item","Új pénzügyi tétel");
  $("#form").innerHTML=`<div class="form-grid financial-form">
    <div class="field"><label>${req("Date / Dátum")}</label><input name="item_date" type="date" value="${row?.item_date||fmtDate(new Date())}" required></div>
    <div class="field"><label>${req("Main type / Fő típus")}</label><select name="main_type" id="financialMainType" onchange="refreshFinancialCategoryOptions()">
@@ -1105,7 +1116,7 @@ function refreshFinancialCategoryOptions(){
  if(cat) cat.innerHTML=optionsFrom(financialCategoryOptions[t]||financialCategoryOptions.INCOME,"");
 }
 async function deleteFinancialItem(id){
- if(!confirm("Biztosan törlöd ezt a pénzügyi tételt? / Delete this financial item?")) return;
+ if(!confirm(bi("Delete this financial item?","Biztosan törlöd ezt a pénzügyi tételt?"))) return;
  try{await api(`/api/financial-items/${id}`,{method:"DELETE"});await renderFinance()}catch(err){alert(err.message)}
 }
 function currentMonthKey(){
@@ -1330,13 +1341,13 @@ async function renderClosedJobs(){
  target.innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Closed Jobs","Lezárt munkák")}</h3><button class="small" onclick="exportClosedJobs()">Export CSV</button></div><div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div></div>`;
 }
 async function deleteClosedJob(id){
- if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
- if(!confirm("Delete this closed job and linked visible records? / Töröljük ezt a lezárt munkát és kapcsolódó látható tételeit?")) return;
+ if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
+ if(!confirm(bi("Delete this closed job and linked visible records?","Töröljük ezt a lezárt munkát és kapcsolódó látható tételeit?"))) return;
  try{await api(`/api/closed-jobs/${encodeURIComponent(id)}`,{method:"DELETE"}); await renderClosedJobs();}catch(err){alert(err.message)}
 }
 function exportClosedJobs(){
  api("/api/closed-jobs").then(data=>{
-   if(!data.length){alert("No data / Nincs adat");return}
+   if(!data.length){alert(bi("No data","Nincs adat"));return}
    let h=Object.keys(data[0]);
    let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");
    let a=document.createElement("a");
@@ -1476,15 +1487,15 @@ async function openConvertPlannedJob(x){
    e.preventDefault();
    const body=Object.fromEntries(new FormData(e.target));
    body.planned_amount=Number(body.planned_amount||0); body.planned_hours=Number(body.planned_hours||0);
-   try{const r=await api(`/api/planned-jobs/${x.id}/convert`,{method:"POST",body:JSON.stringify(body)}); alert(`Scheduled job created / Naptári munka létrejött: ${r.job?.job_key||r.job?.id||""}`); closeModal(); currentWeekStart=startOfWeek(new Date(body.start_time)); await renderScheduler();}catch(err){alert(err.message)}
+   try{const r=await api(`/api/planned-jobs/${x.id}/convert`,{method:"POST",body:JSON.stringify(body)}); alert(`${bi("Scheduled job created","Naptári munka létrejött")}: ${r.job?.job_key||r.job?.id||""}`); closeModal(); currentWeekStart=startOfWeek(new Date(body.start_time)); await renderScheduler();}catch(err){alert(err.message)}
  };
 }
 async function archivePlannedJob(id){
- if(!confirm("Archive this planned job? / Archiváljuk ezt a tervezett munkát?"))return;
+ if(!confirm(bi("Archive this planned job?","Archiváljuk ezt a tervezett munkát?")))return;
  try{await api(`/api/planned-jobs/${id}`,{method:"DELETE"}); closeModal(); await renderPlannedJobs();}catch(err){alert(err.message)}
 }
 function exportPlannedJobsCSV(){
- api("/api/planned-jobs?include_all=1").then(data=>{if(!data.length){alert("No data");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="planned_jobs.csv";a.click()})
+ api("/api/planned-jobs?include_all=1").then(data=>{if(!data.length){alert(bi("No data","Nincs adat"));return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="planned_jobs.csv";a.click()})
 }
 
 async function renderInventory(){
@@ -1594,11 +1605,11 @@ async function openInventoryItem(row=null){
  };
 }
 async function deleteInventoryItem(id){
- if(!confirm("Delete this inventory item? / Töröljük ezt a leltári tételt?"))return;
+ if(!confirm(bi("Delete this inventory item?","Töröljük ezt a leltári tételt?")))return;
  try{await api(`/api/inventory/${id}`,{method:"DELETE"}); await renderInventory();}catch(err){alert(err.message)}
 }
 async function markInventoryCompleted(){
- if(!confirm("Mark quarterly inventory completed today? / Leltár elvégezve mai dátummal?"))return;
+ if(!confirm(bi("Mark the quarterly inventory as completed today?","Leltár elvégezve mai dátummal?")))return;
  try{const r=await api("/api/inventory/complete",{method:"POST",body:JSON.stringify({})}); alert(`Inventory completed. Next due: ${r.nextDue}`); await renderInventory();}catch(err){alert(err.message)}
 }
 async function exportInventoryPDF(){
@@ -1652,20 +1663,29 @@ async function renderSettings(){
  const labels={'scheduler.view':bi('View scheduler','Naptár megtekintése'),'planned_jobs.view':bi('View planned jobs','Tervezett munkák megtekintése'),'contacts.view':bi('View clients','Ügyfelek megtekintése'),'pianos.view':bi('View pianos','Zongorák megtekintése'),'closed_jobs.view':bi('View closed jobs','Lezárt munkák megtekintése'),'knowledge_base.view':bi('View invoices','Számlák megtekintése'),'finance.view':bi('View finance','Pénzügy megtekintése'),'income_statement.view':bi('View income statement','Eredménykimutatás megtekintése'),'inventory.view':bi('View inventory','Leltár megtekintése'),'users.view':bi('View users','Felhasználók megtekintése'),'users.create':bi('Add employees','Munkavállaló hozzáadása'),'users.roles':bi('Assign or remove roles','Szerepkör adása vagy elvétele'),'permissions.manage':bi('Manage role permissions','Szerepkör-jogosultságok kezelése'),'audit.view':bi('View audit log','Módosítási napló megtekintése')};
  const matrix=p.roles.filter(r=>r!=='SUPERADMIN').map(role=>`<div class="permission-card"><h4>${role}</h4>${p.permissions.map(pm=>{const row=p.rows.find(x=>x.role===role&&x.permission===pm);return `<label class="permission-row"><input type="checkbox" ${row?.enabled?'checked':''} onchange="setRolePermission('${role}','${pm}',this.checked)"><span>${labels[pm]||pm}</span></label>`}).join('')}</div>`).join('');
  let backups='';if(isSuperadmin()){const rows=await api('/api/backups');backups=`<div class="panel"><div class="toolbar"><h3>${bi('Backups','Biztonsági mentések')}</h3><button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button></div><div class="table-wrap"><table><tbody>${rows.map(x=>`<tr><td>${x.created_at||''}</td><td>${x.file_name}</td><td><button class="small" onclick="downloadBackup('${x.id}')">${bi('Download','Letöltés')}</button><button class="small danger-btn" onclick="restoreBackup('${x.id}')">${bi('Restore','Visszaállítás')}</button></td></tr>`).join('')}</tbody></table></div></div>`}
- box.innerHTML=`${mobileBackHeader(bi('Settings','Beállítások'))}<div class="panel branding-panel"><h3>${bi('Branding','Arculat')}</h3><div class="branding-preview"><img src="${b.logo_url}" alt="logo"><div><b>${b.company_name}</b><small>${b.short_name}</small></div></div><form onsubmit="saveBranding(event)" class="form-grid"><label>${bi('Company name','Cégnév')}<input name="company_name" value="${String(b.company_name||'').replaceAll('"','&quot;')}" required></label><label>${bi('Short app name','Rövid alkalmazásnév')}<input name="short_name" value="${String(b.short_name||'').replaceAll('"','&quot;')}" required></label><div class="actions"><button type="submit">${bi('Save identity','Arculat mentése')}</button></div></form><form onsubmit="uploadBrandLogo(event)" class="branding-logo-form"><input type="file" name="logo" accept="image/png" required><button type="submit">${bi('Upload logo and PWA icon','Logó és PWA-ikon feltöltése')}</button><button type="button" class="small" onclick="resetBrandLogo()">${bi('Restore KH logo','KH-logó visszaállítása')}</button></form></div><div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${backups}`;
+ box.innerHTML=`${mobileBackHeader(bi('Settings','Beállítások'))}<div class="panel branding-panel"><h3>${bi('Branding','Arculat')}</h3><div class="branding-preview"><img src="${versionedBrandAsset(b.logo_url)}" alt="logo"><div><b>${b.company_name}</b><small>${b.short_name}</small></div></div><form onsubmit="saveBranding(event)" class="form-grid"><label>${bi('Company name','Cégnév')}<input name="company_name" value="${String(b.company_name||'').replaceAll('"','&quot;')}" required></label><label>${bi('Short app name','Rövid alkalmazásnév')}<input name="short_name" value="${String(b.short_name||'').replaceAll('"','&quot;')}" required></label><div class="actions"><button type="submit">${bi('Save identity','Arculat mentése')}</button></div></form><form onsubmit="uploadBrandLogo(event)" class="branding-logo-form"><input type="file" name="logo" accept="image/png,image/jpeg,.jpg,.jpeg" required><button type="submit">${bi('Upload logo and PWA icon','Logó és PWA-ikon feltöltése')}</button><button type="button" class="small" onclick="resetBrandLogo()">${bi('Restore KH logo','KH-logó visszaállítása')}</button></form><hr><h4>${bi('Login background','Bejelentkezési háttérkép')}</h4><div class="login-background-preview" style="${b.login_background_url?`background-image:linear-gradient(rgba(0,0,0,.25),rgba(0,0,0,.25)),url('${versionedBrandAsset(b.login_background_url)}')`:''}"></div><form onsubmit="uploadLoginBackground(event)" class="branding-logo-form"><input type="file" name="background" accept="image/png,image/jpeg,.jpg,.jpeg" required><button type="submit">${bi('Upload login background','Bejelentkezési háttérkép feltöltése')}</button><button type="button" class="small" onclick="resetLoginBackground()">${bi('Restore default background','Alapértelmezett háttér visszaállítása')}</button></form></div><div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${backups}`;
 }
 async function saveBranding(e){e.preventDefault();const body=Object.fromEntries(new FormData(e.target));branding=await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(body)});applyBranding();alert(bi('Branding saved.','Arculat elmentve.'));renderSettings();}
-async function uploadBrandLogo(e){e.preventDefault();const fd=new FormData(e.target);branding=await api('/api/settings/branding/logo',{method:'POST',body:fd});applyBranding();alert(bi('Logo updated. Reinstall the PWA to refresh the home-screen icon.','A logó frissült. A kezdőképernyős ikon frissítéséhez telepítsd újra a PWA-t.'));renderSettings();}
-async function resetBrandLogo(){branding=await api('/api/settings/branding/reset-logo',{method:'POST'});applyBranding();renderSettings();}
-async function renderAuditLog(){if(!isAdmin()&&!userPermissions.permissions.includes('audit.view')&&!userPermissions.all)return showError('PERMISSION_DENIED');const rows=await api('/api/audit-log?limit=1000');const box=$('#audit_log');box.innerHTML=`${mobileBackHeader(bi('Audit Log','Módosítási napló'))}<div class="panel"><div class="toolbar"><h3>${bi('Audit Log','Módosítási napló')}</h3><div>${isSuperadmin()?`<button class="small" onclick="downloadAuditLog()">${bi('Export CSV','CSV export')}</button><button class="small danger-btn" onclick="clearAuditLog()">${bi('Delete log','Napló törlése')}</button>`:''}</div></div><div class="table-wrap"><table><thead><tr><th>${bi('Time','Idő')}</th><th>${bi('User','Felhasználó')}</th><th>${bi('Role','Szerepkör')}</th><th>${bi('Action','Művelet')}</th><th>${bi('Module','Modul')}</th><th>ID</th><th>${bi('Old value','Régi érték')}</th><th>${bi('New value','Új érték')}</th><th>${bi('Details','Részletek')}</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.event_time||''}</td><td>${x.user_name||''}</td><td>${x.user_role||''}</td><td>${x.action||''}</td><td>${x.module||''}</td><td>${x.record_id||''}</td><td>${x.old_value||''}</td><td>${x.new_value||''}</td><td>${x.details||''}</td></tr>`).join('')}</tbody></table></div></div>`;}
-
+async function uploadBrandLogo(e){e.preventDefault();const fd=new FormData(e.target);branding=await api('/api/settings/branding/logo',{method:'POST',body:fd});await loadBranding();alert(bi('Logo updated. Reinstall the PWA to refresh the home-screen icon.','A logó frissült. A kezdőképernyős ikon frissítéséhez telepítsd újra a PWA-t.'));renderSettings();}
+async function resetBrandLogo(){branding=await api('/api/settings/branding/reset-logo',{method:'POST'});await loadBranding();renderSettings();}
+async function uploadLoginBackground(e){e.preventDefault();const fd=new FormData(e.target);branding=await api('/api/settings/branding/background',{method:'POST',body:fd});await loadBranding();alert(bi('Login background updated.','A bejelentkezési háttérkép frissült.'));renderSettings();}
+async function resetLoginBackground(){branding=await api('/api/settings/branding/reset-background',{method:'POST'});await loadBranding();renderSettings();}
+async function renderAuditLog(){
+ if(!isAdmin()&&!userPermissions.permissions.includes('audit.view')&&!userPermissions.all)return showError('PERMISSION_DENIED');
+ const rows=await api(`/api/audit-log?limit=1000&type=${currentAuditType}`); const box=$('#audit_log');
+ box.innerHTML=`${mobileBackHeader(bi('Audit Log','Módosítási napló'))}<div class="panel"><div class="audit-type-switch"><button class="${currentAuditType==='WORK'?'active':''}" onclick="setAuditType('WORK')">${bi('Work Audit','Munkaaudit')}</button><button class="${currentAuditType==='TECHNICAL'?'active':''}" onclick="setAuditType('TECHNICAL')">${bi('Technical Audit','Technikai audit')}</button></div><div class="toolbar"><h3>${currentAuditType==='WORK'?bi('Work Audit','Munkaaudit'):bi('Technical Audit','Technikai audit')}</h3><div>${isSuperadmin()?`<button class="small" onclick="downloadAuditLog()">${bi('Export CSV','CSV export')}</button><button class="small danger-btn" onclick="clearAuditLog()">${bi('Delete current log','Aktuális napló törlése')}</button>`:''}</div></div><div class="table-wrap"><table><thead><tr><th>${bi('Time','Idő')}</th><th>${bi('User','Felhasználó')}</th><th>${bi('Role','Szerepkör')}</th><th>${bi('Action','Művelet')}</th><th>${bi('Module','Modul')}</th><th>ID</th><th>${bi('Old value','Régi érték')}</th><th>${bi('New value','Új érték')}</th><th>${bi('Details','Részletek')}</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.event_time||''}</td><td>${x.user_name||''}</td><td>${x.user_role||''}</td><td>${x.action||''}</td><td>${x.module||''}</td><td>${x.record_id||''}</td><td>${x.old_value||''}</td><td>${x.new_value||''}</td><td>${x.details||''}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function setAuditType(type){currentAuditType=type==='TECHNICAL'?'TECHNICAL':'WORK';renderAuditLog();}
 async function setRolePermission(role,permission,enabled){try{await api('/api/settings/permissions',{method:'PUT',body:JSON.stringify({role,permission,enabled})});}catch(e){showError(e.message);renderSettings();}}
-async function downloadAuditLog(){const r=await fetch('/api/audit-log/export',{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='audit-log.csv';a.click();URL.revokeObjectURL(a.href);}
-async function clearAuditLog(){if(!isSuperadmin())return;if(confirm(bi('Delete the complete audit log?','Töröljük a teljes módosítási naplót?'))){await api('/api/audit-log',{method:'DELETE'});renderSettings();}}
+async function downloadAuditLog(){const r=await fetch(`/api/audit-log/export?type=${currentAuditType}`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=currentAuditType==='WORK'?'work-audit.csv':'technical-audit.csv';a.click();URL.revokeObjectURL(a.href);}
+async function clearAuditLog(){if(!isSuperadmin())return;if(confirm(bi('Delete the complete audit log?','Töröljük a teljes módosítási naplót?'))){await api(`/api/audit-log?type=${currentAuditType}`,{method:'DELETE'});renderSettings();}}
 async function createBackupNow(){try{await api('/api/backups',{method:'POST'});alert(bi('Backup created successfully.','A biztonsági mentés elkészült.'));renderSettings();}catch(e){showError(e.message)}}
 async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=r.headers.get('content-disposition')?.match(/filename="?([^";]+)/)?.[1]||'backup.sqlite';a.click();URL.revokeObjectURL(a.href);}
 async function restoreBackup(id){const confirmation=prompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'));if(confirmation!=='RESTORE BACKUP')return;const password=prompt(bi('Enter your password.','Add meg a jelszavad.'));try{const r=await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});alert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'));logoutNow();}catch(e){showError(e.message)}}
 
+
+const bilingualObserver=new MutationObserver(mutations=>{for(const m of mutations){for(const node of m.addedNodes){if(node.nodeType===1)applyLanguageToDOM(node);}}});
+bilingualObserver.observe(document.body,{childList:true,subtree:true});
 if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();loadBranding().then(applyLanguageToDOM);}
 
 
