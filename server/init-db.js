@@ -257,10 +257,13 @@ function runMigrations() {
   ensureIndex("idx_jobs_assigned_user_id", "CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)");
   ensureIndex("idx_audit_type_time", "CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC)");
   ensureColumn("push_subscriptions", "language", "TEXT DEFAULT 'en'");
+  ensureColumn("push_subscriptions", "device_id", "TEXT");
+  ensureColumn("push_subscriptions", "last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP");
     ensureIndex("idx_notifications_event_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL");
   ensureIndex("idx_notifications_recipient_status", "CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC)");
   ensureIndex("idx_notifications_job", "CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id)");
   ensureIndex("idx_push_subscriptions_user", "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)");
+  ensureIndex("idx_notification_devices_user_status", "CREATE INDEX IF NOT EXISTS idx_notification_devices_user_status ON notification_devices(user_id,status)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
@@ -282,6 +285,16 @@ function runMigrations() {
   const insertAccount = db.prepare("INSERT OR IGNORE INTO accounts(code,name_en,name_hu,category,normal_side) VALUES(?,?,?,?,?)");
   db.transaction(() => accounts.forEach((account) => insertAccount.run(...account)))();
 
+
+  // Every existing user receives enabled notification preferences. This one-time backfill does not overwrite later user choices.
+  db.prepare(`INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message)
+    SELECT id,1,1,1,1,1,1,1 FROM users`).run();
+  const notificationBackfill = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='notification_preferences_v1_backfilled'").get();
+  if (!notificationBackfill) {
+    db.prepare(`UPDATE notification_preferences SET push_enabled=1,job_assigned=1,job_transferred=1,job_updated=1,job_deleted=1,one_hour_reminder=1,direct_message=1,updated_at=CURRENT_TIMESTAMP`).run();
+    db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES('notification_preferences_v1_backfilled','1','SYSTEM')").run();
+    log('Enabled all notification preferences for existing users');
+  }
   // Intentionally no user, customer, piano, job, or other demo/business record is seeded.
   const users = db.prepare("SELECT id,email,is_superadmin,status FROM users ORDER BY created_at").all();
   const superadmins = users.filter((user) => Number(user.is_superadmin || 0) === 1 && user.status === "Active");
