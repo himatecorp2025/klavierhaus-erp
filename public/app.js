@@ -11,8 +11,8 @@ let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
 
 const navs={
- SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["settings","Settings / Beállítások"]],
- ADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["settings","Settings / Beállítások"]],
+ SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["audit_log","Audit Log / Módosítási napló"],["settings","Settings / Beállítások"]],
+ ADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["audit_log","Audit Log / Módosítási napló"],["settings","Settings / Beállítások"]],
  MANAGER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
  WORKER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]]
 };
@@ -41,13 +41,15 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
+let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png'};
+let viewHistory=[];
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
 function loadLanguage(){currentLang=localStorage.getItem(userLangKey())||"en"; if(!["en","hu"].includes(currentLang)) currentLang="en";}
 function setLanguage(lang){
@@ -63,7 +65,7 @@ function tr(key){return (staticTranslations[currentLang]&&staticTranslations[cur
 function navLabel(view){return tr(view)||view;}
 function renderNavigation(){
   if(!token || !user || !document.getElementById("nav")) return;
-  const nav=(navs[user.role]||navs.WORKER).filter(n=>n[0]==="settings" ? isAdmin() : (userPermissions.all || userPermissions.permissions.includes(`${n[0]}.view`)));
+  const nav=(navs[user.role]||navs.WORKER).filter(n=>(n[0]==="settings" ? isAdmin() : n[0]==="audit_log" ? (isAdmin()||userPermissions.all||userPermissions.permissions.includes("audit.view")) : (userPermissions.all || userPermissions.permissions.includes(`${n[0]}.view`))));
   const navEl=document.getElementById("nav");
   navEl.innerHTML=nav.map(n=>`<button class="nav-btn ${n[0]===currentView?"active":""}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
 }
@@ -125,6 +127,17 @@ function updateThemeButtons(){
   if(light) light.classList.toggle("active",currentTheme==="light");
 }
 
+async function loadBranding(){
+ try{branding=await fetch('/api/public/branding',{cache:'no-store'}).then(r=>r.json());}catch(e){}
+ applyBranding();
+}
+function applyBranding(){
+ document.querySelectorAll('[data-brand-name]').forEach(el=>el.textContent=branding.company_name||'Klavierhaus');
+ document.querySelectorAll('[data-brand-logo]').forEach(el=>{if(el.tagName==='IMG'){el.src=branding.logo_url||'/icons/icon-512.png';}else{el.innerHTML=`<img src="${branding.logo_url||'/icons/icon-512.png'}" alt="">`;}});
+ document.title=(branding.company_name||'Klavierhaus')+' Work Management';
+ const apple=document.querySelector('meta[name="apple-mobile-web-app-title"]'); if(apple) apple.content=branding.short_name||branding.company_name;
+}
+function isStandalonePWA(){return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;}
 const $=s=>document.querySelector(s);
 const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}}).then(async r=>{const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:text||"Non-JSON response"}}if(!r.ok)throw new Error(j.error||`API ${r.status}`);return j});
 
@@ -152,6 +165,7 @@ function updateCountdownDisplay(){
 }
 function resetInactivityTimer(){
   if(!token) return;
+  if(isStandalonePWA()){ if(inactivityTimer)clearTimeout(inactivityTimer); if(countdownInterval)clearInterval(countdownInterval); const el=document.getElementById("sessionCountdown"); if(el)el.style.display="none"; return; }
   logoutAt=Date.now()+INACTIVITY_LIMIT_MS;
   if(inactivityTimer) clearTimeout(inactivityTimer);
   if(countdownInterval) clearInterval(countdownInterval);
@@ -183,6 +197,7 @@ async function deleteEverything(){
 
 async function boot(){
  if(!token)return;
+ await loadBranding();
  loadLanguage();
  loadTheme();
  $("#login").classList.add("hidden");
@@ -327,7 +342,8 @@ function forceShowView(id){
  el.style.display="block";
  return el;
 }
-async function render(v){
+async function render(v,opts={}){
+ if(currentView && currentView!==v && !opts.noHistory) viewHistory.push(currentView);
  currentView=v;
  forceShowView(v);
  const pageTitle=document.getElementById("pageTitle");
@@ -340,6 +356,7 @@ async function render(v){
  else if(v==="finance") await renderFinance();
  else if(v==="inventory") await renderInventory();
  else if(v==="users") await renderUsers();
+ else if(v==="audit_log") await renderAuditLog();
  else if(v==="settings") await renderSettings();
  else if(v==="pianos") await renderPianos();
  else await renderTable(v);
@@ -347,6 +364,8 @@ async function render(v){
 }
 
 
+function goBackView(){const previous=viewHistory.pop();render(previous||'today',{noHistory:true});}
+function mobileBackHeader(title){return isMobileAppViewport()?`<div class="mobile-page-title"><button type="button" class="mobile-back-btn" onclick="goBackView()" aria-label="Back">‹</button><h2>${title}</h2></div>`:'';}
 function isMobileAppViewport(){ return window.matchMedia("(max-width: 900px)").matches; }
 function nyDateKey(date=new Date()){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date).reduce((a,p)=>{a[p.type]=p.value;return a},{});
@@ -367,7 +386,7 @@ function updateMobileNavigationActive(){
 function closeMobileMore(){ const sheet=document.getElementById("mobileMoreSheet"); if(sheet){sheet.classList.add("hidden");sheet.setAttribute("aria-hidden","true");document.body.classList.remove("mobile-sheet-open");} }
 function openMobileMore(){
   const sheet=document.getElementById("mobileMoreSheet"), items=document.getElementById("mobileMoreItems"); if(!sheet||!items)return;
-  const all=(navs[user?.role]||navs.WORKER).filter(n=>!['contacts','pianos'].includes(n[0]) && (n[0]==="settings"?isAdmin():(userPermissions.all||userPermissions.permissions.includes(`${n[0]}.view`))));
+  const all=(navs[user?.role]||navs.WORKER).filter(n=>!['contacts','pianos'].includes(n[0]) && (n[0]==="settings"?isAdmin():n[0]==="audit_log"?(isAdmin()||userPermissions.all||userPermissions.permissions.includes("audit.view")):(userPermissions.all||userPermissions.permissions.includes(`${n[0]}.view`))));
   const top=`<button type="button" class="mobile-more-item ${currentView==='scheduler'?'active':''}" data-more-view="scheduler"><span>📅</span><b>${tr('calendar')}</b></button>`;
   items.innerHTML=top+all.filter(n=>n[0]!=="scheduler").map(n=>`<button type="button" class="mobile-more-item ${currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
   sheet.classList.remove("hidden");sheet.setAttribute("aria-hidden","false");document.body.classList.add("mobile-sheet-open");
@@ -375,7 +394,7 @@ function openMobileMore(){
   const profile=document.getElementById("mobileProfileBtn"); if(profile) profile.onclick=()=>{closeMobileMore();openMyProfile();};
   const logout=document.getElementById("mobileLogoutBtn"); if(logout) logout.onclick=()=>logoutNow();
 }
-function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",users:"👤",settings:"⚙️",scheduler:"📅"})[view]||"•"; }
+function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",users:"👤",audit_log:"🧾",settings:"⚙️",scheduler:"📅"})[view]||"•"; }
 function initMobileAppShell(){
   const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
   nav.querySelectorAll("[data-mobile-view]").forEach(btn=>btn.onclick=()=>render(btn.dataset.mobileView));
@@ -388,22 +407,17 @@ function initMobileAppShell(){
 }
 async function renderToday(){
   const target=ensureView("today");
-  const jobs=await api("/api/jobs");
-  await loadSchedulerWorkers();
-  const today=nyDateKey();
-  const mine=jobs.filter(j=>String(j.start_time||"").slice(0,10)===today && (!user?.id || !j.assigned_user_id || String(j.assigned_user_id)===String(user.id))).sort((a,b)=>String(a.start_time).localeCompare(String(b.start_time)));
-  const next=mine.find(j=>String(j.end_time||"").slice(0,16)>=nyNowLocalString());
-  const cards=mine.map(j=>{
-    const map=mobileJobAddressLink(j.service_address);
-    return `<article class="today-job-card ${calendarEventClass(j)}" style="--job-accent:${workerColor(j.assigned_to)}" onclick='openJobDetails(${esc(j)})'>
-      <div class="today-job-time">${mobileTimeRange(j)}</div>
-      <div class="today-job-main"><h3>${j.title||bi("Untitled job","Névtelen munka")}</h3><p>${j.client_name||""}${j.piano_name?` · ${j.piano_name}`:""}</p><p class="today-job-address">${j.service_address||""}</p></div>
-      <div class="today-job-actions" onclick="event.stopPropagation()">${j.client_phone?`<a class="app-action" href="tel:${String(j.client_phone).replace(/[^+\d]/g,'')}">☎ ${bi("Call","Hívás")}</a>`:""}${map?`<a class="app-action" href="${map}" target="_blank" rel="noopener">⌖ ${bi("Map","Térkép")}</a>`:""}<button class="app-action" type="button" onclick='openJobDetails(${esc(j)})'>› ${bi("Details","Részletek")}</button></div>
-    </article>`;
-  }).join("");
-  target.innerHTML=`<div class="mobile-today-shell"><section class="today-hero"><div><span>${bi("Today in New York","Ma New Yorkban")}</span><h2>${new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",weekday:"long",month:"long",day:"numeric"}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><section class="today-summary"><div><b>${mine.length}</b><span>${bi("jobs today","mai munka")}</span></div><div><b>${next?String(next.start_time).slice(11,16):"—"}</b><span>${bi("next start","következő kezdés")}</span></div></section><section class="today-list"><div class="today-list-head"><h2>${bi("My jobs today","Mai munkáim")}</h2><button type="button" onclick="render('scheduler')">${bi("Full calendar","Teljes naptár")} →</button></div>${cards||`<div class="today-empty"><span>✓</span><h3>${bi("No jobs scheduled for today","Mára nincs ütemezett munka")}</h3><button type="button" onclick="openJob()">＋ ${tr('newJob')}</button></div>`}</section></div>`;
-  updateMobileNavigationActive();
+  const jobs=await api("/api/jobs"); await loadSchedulerWorkers();
+  const date=nyDateKey(), dayStart=7*60, dayEnd=22*60, total=dayEnd-dayStart;
+  const mine=jobs.filter(j=>String(j.start_time||"").slice(0,10)===date && (!user?.id || !j.assigned_user_id || String(j.assigned_user_id)===String(user.id)));
+  const layout=calendarLayout(mine,dayStart,dayEnd);
+  const quarter=Array.from({length:(dayEnd-dayStart)/15+1},(_,i)=>{const min=dayStart+i*15;return `<i class="${min%60===0?'hour':''}" style="top:${((min-dayStart)/total)*100}%"></i>`}).join('');
+  const times=Array.from({length:(dayEnd-dayStart)/60+1},(_,i)=>{const min=dayStart+i*60;return `<span style="top:${((min-dayStart)/total)*100}%">${String(Math.floor(min/60)).padStart(2,'0')}:00</span>`}).join('');
+  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;return `<button type="button" class="timeline-event ${calendarEventClass(j)}" ${calendarEventStyle(j)} style="${calendarEventStyle(j).replace(/^style=\"|\"$/g,'')};top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${j.title||''}</b><small>${j.client_name||''}</small><span class="event-status">${calendarEventClass(j)==='Completed'?'✓':'◷'}</span></button>`}).join('');
+  target.innerHTML=`<div class="mobile-today-shell">${mobileBackHeader(bi('Today','Ma'))}<section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
+  updateCurrentTimeLine(); clearInterval(currentTimeLineInterval); currentTimeLineInterval=setInterval(updateCurrentTimeLine,60000); updateMobileNavigationActive();
 }
+function handleDailySlotClick(event,date,dayStart,dayEnd){if(event.target.closest('.timeline-event'))return;const rect=event.currentTarget.getBoundingClientRect();const ratio=Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height));let mins=Math.round((dayStart+ratio*(dayEnd-dayStart))/15)*15;mins=Math.min(dayEnd-15,Math.max(dayStart,mins));const hh=String(Math.floor(mins/60)).padStart(2,'0'),mm=String(mins%60).padStart(2,'0');openJob();setTimeout(()=>{const form=document.querySelector('.modal form');if(!form)return;const start=form.querySelector('[name="start_time"]');if(start)start.value=`${date}T${hh}:${mm}`;},50);}
 
 function minutesFromTime(value){
  const m=String(value||"").slice(11,16).match(/^(\d{2}):(\d{2})$/);
@@ -1628,31 +1642,31 @@ function openUser(row=null, selfProfile=false){
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!confirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?")))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err.message)}}
 
 const friendlyErrors={
- en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced."},
- hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A superadmin jogosultságai nem csökkenthetők."}
+ en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced.",PWA_LOGO_REQUIREMENTS:"Use a square PNG logo at least 192×192 pixels. A 512×512 PNG is recommended."},
+ hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A superadmin jogosultságai nem csökkenthetők.",PWA_LOGO_REQUIREMENTS:"Legalább 192×192 képpontos, négyzet alakú PNG-logót használj. Az ajánlott méret 512×512."}
 };
 function showError(code){alert((friendlyErrors[currentLang]||friendlyErrors.en)[code]||code||bi("An unexpected error occurred.","Váratlan hiba történt."));}
 async function renderSettings(){
  if(!isAdmin()) return showError('PERMISSION_DENIED');
- const box=$("#settings");
- const p=await api('/api/settings/permissions');
- const auditRows=await api('/api/audit-log?limit=500');
- const labels={
- 'scheduler.view':bi('View scheduler','Naptár megtekintése'),'planned_jobs.view':bi('View planned jobs','Tervezett munkák megtekintése'),'contacts.view':bi('View clients','Ügyfelek megtekintése'),'pianos.view':bi('View pianos','Zongorák megtekintése'),'closed_jobs.view':bi('View closed jobs','Lezárt munkák megtekintése'),'knowledge_base.view':bi('View invoices','Számlák megtekintése'),'finance.view':bi('View finance','Pénzügy megtekintése'),'income_statement.view':bi('View income statement','Eredménykimutatás megtekintése'),'inventory.view':bi('View inventory','Leltár megtekintése'),
- 'users.view':bi('View users','Felhasználók megtekintése'),'users.create':bi('Add employees','Munkavállaló hozzáadása'),'users.roles':bi('Assign or remove roles','Szerepkör adása vagy elvétele'),'permissions.manage':bi('Manage role permissions','Szerepkör-jogosultságok kezelése'),'audit.view':bi('View audit log','Módosítási napló megtekintése')};
+ const box=$("#settings"), p=await api('/api/settings/permissions'), b=await api('/api/settings/branding');
+ const labels={'scheduler.view':bi('View scheduler','Naptár megtekintése'),'planned_jobs.view':bi('View planned jobs','Tervezett munkák megtekintése'),'contacts.view':bi('View clients','Ügyfelek megtekintése'),'pianos.view':bi('View pianos','Zongorák megtekintése'),'closed_jobs.view':bi('View closed jobs','Lezárt munkák megtekintése'),'knowledge_base.view':bi('View invoices','Számlák megtekintése'),'finance.view':bi('View finance','Pénzügy megtekintése'),'income_statement.view':bi('View income statement','Eredménykimutatás megtekintése'),'inventory.view':bi('View inventory','Leltár megtekintése'),'users.view':bi('View users','Felhasználók megtekintése'),'users.create':bi('Add employees','Munkavállaló hozzáadása'),'users.roles':bi('Assign or remove roles','Szerepkör adása vagy elvétele'),'permissions.manage':bi('Manage role permissions','Szerepkör-jogosultságok kezelése'),'audit.view':bi('View audit log','Módosítási napló megtekintése')};
  const matrix=p.roles.filter(r=>r!=='SUPERADMIN').map(role=>`<div class="permission-card"><h4>${role}</h4>${p.permissions.map(pm=>{const row=p.rows.find(x=>x.role===role&&x.permission===pm);return `<label class="permission-row"><input type="checkbox" ${row?.enabled?'checked':''} onchange="setRolePermission('${role}','${pm}',this.checked)"><span>${labels[pm]||pm}</span></label>`}).join('')}</div>`).join('');
- const auditTable=`<div class="panel"><div class="toolbar"><h3>${bi('Audit Log','Módosítási napló')}</h3><div>${isSuperadmin()?`<button class="small" onclick="downloadAuditLog()">${bi('Export','Exportálás')}</button><button class="small danger-btn" onclick="clearAuditLog()">${bi('Delete log','Napló törlése')}</button>`:''}</div></div><div class="table-wrap"><table><thead><tr><th>${bi('Time','Idő')}</th><th>${bi('User','Felhasználó')}</th><th>${bi('Role','Szerepkör')}</th><th>${bi('Action','Művelet')}</th><th>${bi('Module','Modul')}</th><th>ID</th><th>${bi('Details','Részletek')}</th></tr></thead><tbody>${auditRows.map(x=>`<tr><td>${x.event_time||''}</td><td>${x.user_name||''}</td><td>${x.user_role||''}</td><td>${x.action||''}</td><td>${x.module||''}</td><td>${x.record_id||''}</td><td>${x.details||''}</td></tr>`).join('')}</tbody></table></div></div>`;
- let backups=''; if(isSuperadmin()){const b=await api('/api/backups');backups=`<div class="panel"><div class="toolbar"><h3>${bi('Backups','Biztonsági mentések')}</h3><button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button></div><div class="table-wrap"><table><thead><tr><th>${bi('Created','Létrehozva')}</th><th>${bi('File','Fájl')}</th><th>${bi('Size','Méret')}</th><th>Status</th><th>${bi('Actions','Műveletek')}</th></tr></thead><tbody>${b.map(x=>`<tr><td>${x.created_at||''}</td><td>${x.file_name}</td><td>${Math.round((x.file_size||0)/1024)} KB</td><td>${x.status}</td><td><button class="small" onclick="downloadBackup('${x.id}')">${bi('Download','Letöltés')}</button><button class="small danger-btn" onclick="restoreBackup('${x.id}')">${bi('Restore','Visszaállítás')}</button></td></tr>`).join('')}</tbody></table></div></div>`}
- box.innerHTML=`<div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${auditTable}${backups}`;
+ let backups='';if(isSuperadmin()){const rows=await api('/api/backups');backups=`<div class="panel"><div class="toolbar"><h3>${bi('Backups','Biztonsági mentések')}</h3><button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button></div><div class="table-wrap"><table><tbody>${rows.map(x=>`<tr><td>${x.created_at||''}</td><td>${x.file_name}</td><td><button class="small" onclick="downloadBackup('${x.id}')">${bi('Download','Letöltés')}</button><button class="small danger-btn" onclick="restoreBackup('${x.id}')">${bi('Restore','Visszaállítás')}</button></td></tr>`).join('')}</tbody></table></div></div>`}
+ box.innerHTML=`${mobileBackHeader(bi('Settings','Beállítások'))}<div class="panel branding-panel"><h3>${bi('Branding','Arculat')}</h3><div class="branding-preview"><img src="${b.logo_url}" alt="logo"><div><b>${b.company_name}</b><small>${b.short_name}</small></div></div><form onsubmit="saveBranding(event)" class="form-grid"><label>${bi('Company name','Cégnév')}<input name="company_name" value="${String(b.company_name||'').replaceAll('"','&quot;')}" required></label><label>${bi('Short app name','Rövid alkalmazásnév')}<input name="short_name" value="${String(b.short_name||'').replaceAll('"','&quot;')}" required></label><div class="actions"><button type="submit">${bi('Save identity','Arculat mentése')}</button></div></form><form onsubmit="uploadBrandLogo(event)" class="branding-logo-form"><input type="file" name="logo" accept="image/png" required><button type="submit">${bi('Upload logo and PWA icon','Logó és PWA-ikon feltöltése')}</button><button type="button" class="small" onclick="resetBrandLogo()">${bi('Restore KH logo','KH-logó visszaállítása')}</button></form></div><div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${backups}`;
 }
+async function saveBranding(e){e.preventDefault();const body=Object.fromEntries(new FormData(e.target));branding=await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(body)});applyBranding();alert(bi('Branding saved.','Arculat elmentve.'));renderSettings();}
+async function uploadBrandLogo(e){e.preventDefault();const fd=new FormData(e.target);branding=await api('/api/settings/branding/logo',{method:'POST',body:fd});applyBranding();alert(bi('Logo updated. Reinstall the PWA to refresh the home-screen icon.','A logó frissült. A kezdőképernyős ikon frissítéséhez telepítsd újra a PWA-t.'));renderSettings();}
+async function resetBrandLogo(){branding=await api('/api/settings/branding/reset-logo',{method:'POST'});applyBranding();renderSettings();}
+async function renderAuditLog(){if(!isAdmin()&&!userPermissions.permissions.includes('audit.view')&&!userPermissions.all)return showError('PERMISSION_DENIED');const rows=await api('/api/audit-log?limit=1000');const box=$('#audit_log');box.innerHTML=`${mobileBackHeader(bi('Audit Log','Módosítási napló'))}<div class="panel"><div class="toolbar"><h3>${bi('Audit Log','Módosítási napló')}</h3><div>${isSuperadmin()?`<button class="small" onclick="downloadAuditLog()">${bi('Export CSV','CSV export')}</button><button class="small danger-btn" onclick="clearAuditLog()">${bi('Delete log','Napló törlése')}</button>`:''}</div></div><div class="table-wrap"><table><thead><tr><th>${bi('Time','Idő')}</th><th>${bi('User','Felhasználó')}</th><th>${bi('Role','Szerepkör')}</th><th>${bi('Action','Művelet')}</th><th>${bi('Module','Modul')}</th><th>ID</th><th>${bi('Old value','Régi érték')}</th><th>${bi('New value','Új érték')}</th><th>${bi('Details','Részletek')}</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.event_time||''}</td><td>${x.user_name||''}</td><td>${x.user_role||''}</td><td>${x.action||''}</td><td>${x.module||''}</td><td>${x.record_id||''}</td><td>${x.old_value||''}</td><td>${x.new_value||''}</td><td>${x.details||''}</td></tr>`).join('')}</tbody></table></div></div>`;}
+
 async function setRolePermission(role,permission,enabled){try{await api('/api/settings/permissions',{method:'PUT',body:JSON.stringify({role,permission,enabled})});}catch(e){showError(e.message);renderSettings();}}
-async function downloadAuditLog(){const r=await fetch('/api/audit-log/export',{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='audit-log.json';a.click();URL.revokeObjectURL(a.href);}
+async function downloadAuditLog(){const r=await fetch('/api/audit-log/export',{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='audit-log.csv';a.click();URL.revokeObjectURL(a.href);}
 async function clearAuditLog(){if(!isSuperadmin())return;if(confirm(bi('Delete the complete audit log?','Töröljük a teljes módosítási naplót?'))){await api('/api/audit-log',{method:'DELETE'});renderSettings();}}
 async function createBackupNow(){try{await api('/api/backups',{method:'POST'});alert(bi('Backup created successfully.','A biztonsági mentés elkészült.'));renderSettings();}catch(e){showError(e.message)}}
 async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=r.headers.get('content-disposition')?.match(/filename="?([^";]+)/)?.[1]||'backup.sqlite';a.click();URL.revokeObjectURL(a.href);}
 async function restoreBackup(id){const confirmation=prompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'));if(confirmation!=='RESTORE BACKUP')return;const password=prompt(bi('Enter your password.','Add meg a jelszavad.'));try{const r=await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});alert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'));logoutNow();}catch(e){showError(e.message)}}
 
-if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();applyLanguageToDOM();}
+if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();loadBranding().then(applyLanguageToDOM);}
 
 
 
