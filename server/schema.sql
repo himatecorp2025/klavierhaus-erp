@@ -6,8 +6,12 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
+  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER','VIEWER')),
   status TEXT DEFAULT 'Active',
+  phone TEXT,
+  address TEXT,
+  hidden_user INTEGER DEFAULT 0,
+  is_superadmin INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -254,3 +258,120 @@ CREATE TABLE IF NOT EXISTS audit_log (
   audit_type TEXT DEFAULT 'TECHNICAL'
 );
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
+
+
+CREATE TABLE IF NOT EXISTS financial_items (
+  id TEXT PRIMARY KEY,
+  item_date TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  amount REAL NOT NULL DEFAULT 0,
+  main_type TEXT NOT NULL,
+  category TEXT,
+  recurrence TEXT NOT NULL DEFAULT 'ONE_TIME',
+  payment_method TEXT,
+  balance_account TEXT,
+  job_id TEXT,
+  client_id TEXT,
+  piano_id TEXT,
+  source_type TEXT,
+  source_id TEXT,
+  created_by TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id TEXT PRIMARY KEY,
+  inventory_id TEXT,
+  item_name TEXT NOT NULL,
+  main_category TEXT,
+  piano_part_category TEXT,
+  item_type TEXT,
+  acquisition_type TEXT,
+  supplier TEXT,
+  manufacturer TEXT,
+  purchase_price REAL DEFAULT 0,
+  manufacturing_cost REAL DEFAULT 0,
+  quantity REAL DEFAULT 1,
+  unit TEXT,
+  condition_status TEXT,
+  location TEXT,
+  linked_piano_id TEXT,
+  linked_client_id TEXT,
+  status TEXT DEFAULT 'In Stock',
+  notes TEXT,
+  deleted_at TEXT,
+  deleted_by TEXT,
+  created_by TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inventory_checks (
+  id TEXT PRIMARY KEY,
+  check_date TEXT NOT NULL,
+  completed_by TEXT,
+  item_count INTEGER DEFAULT 0,
+  total_value REAL DEFAULT 0,
+  snapshot_json TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS planned_jobs (
+  id TEXT PRIMARY KEY,
+  planned_key TEXT,
+  planned_type TEXT,
+  title TEXT NOT NULL,
+  client_id TEXT,
+  client_name TEXT,
+  client_phone TEXT,
+  piano_id TEXT,
+  piano_name TEXT,
+  service_address TEXT,
+  preferred_assigned_to TEXT,
+  preferred_assigned_user_id TEXT,
+  priority TEXT DEFAULT 'Medium',
+  expected_revenue REAL DEFAULT 0,
+  probability TEXT DEFAULT '100% - Biztos',
+  estimated_hours REAL DEFAULT 0,
+  target_date TEXT,
+  status TEXT,
+  block_reason TEXT,
+  next_step TEXT,
+  notes TEXT,
+  converted_job_id TEXT,
+  created_by TEXT,
+  created_by_user_id TEXT,
+  archived_at TEXT,
+  archived_by TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  updated_by TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(role,permission)
+);
+
+CREATE TABLE IF NOT EXISTS backup_log (
+  id TEXT PRIMARY KEY,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  file_size INTEGER DEFAULT 0,
+  status TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  restored_at TEXT,
+  restored_by TEXT
+);
