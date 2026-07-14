@@ -30,11 +30,23 @@ function ensureRuntimeMigrations(){
     if(!jobCols.includes("assigned_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN assigned_user_id TEXT").run();
     if(!jobCols.includes("created_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN created_by_user_id TEXT").run();
     if(!jobCols.includes("last_reassigned_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN last_reassigned_by_user_id TEXT").run();
+    if(!jobCols.includes("workflow_root_id")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_root_id TEXT").run();
+    if(!jobCols.includes("workflow_step_no")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_step_no INTEGER DEFAULT 1").run();
+    if(!jobCols.includes("workflow_status")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_status TEXT DEFAULT 'ACTIVE'").run();
+    if(!jobCols.includes("finalized_at")) db.prepare("ALTER TABLE jobs ADD COLUMN finalized_at TEXT").run();
 
     const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
     if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
     if(!pianoCols.includes("display_name")) db.prepare("ALTER TABLE pianos ADD COLUMN display_name TEXT").run();
     if(!pianoCols.includes("asset_recorded")) db.prepare("ALTER TABLE pianos ADD COLUMN asset_recorded INTEGER DEFAULT 0").run();
+
+    db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''), id), workflow_step_no=COALESCE(workflow_step_no,1), workflow_status=COALESCE(NULLIF(workflow_status,''), CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
+    // Rebuild existing parent-child chains without any maximum number of steps.
+    for(let pass=0;pass<100;pass++){
+      const changed=db.prepare(`UPDATE jobs SET workflow_root_id=(SELECT COALESCE(NULLIF(p.workflow_root_id,''),p.id) FROM jobs p WHERE p.id=jobs.parent_job_id), workflow_step_no=(SELECT COALESCE(p.workflow_step_no,1)+1 FROM jobs p WHERE p.id=jobs.parent_job_id) WHERE parent_job_id IS NOT NULL AND EXISTS(SELECT 1 FROM jobs p WHERE p.id=jobs.parent_job_id AND (jobs.workflow_root_id<>COALESCE(NULLIF(p.workflow_root_id,''),p.id) OR COALESCE(jobs.workflow_step_no,1)<>COALESCE(p.workflow_step_no,1)+1))`).run().changes;
+      if(!changed) break;
+    }
+    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)").run(); } catch(e) {}
 
     const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
     const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
@@ -1088,7 +1100,10 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
   const id=req.body.id || rid("J");
   const data={...req.body,assigned_user_id:assigned.id,assigned_to:assigned.name,created_by_user_id:req.user.id,created_by:req.user.name};
-  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
+  data.workflow_root_id=data.workflow_root_id||id;
+  data.workflow_step_no=Number(data.workflow_step_no||1);
+  data.workflow_status=data.workflow_status||"ACTIVE";
+  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
   res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(id));
@@ -1168,71 +1183,80 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   res.json({ok:true,deleted_job_id:job.id,deleted_logs:logs.length});
 });
 
-app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  if(req.file && !validMagic(req.file.path)){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
-  const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
-  const job=getJobByAnyId(jobId, req.body);
-  if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
-
-  if(!(isSuperadminUser(req.user) || req.user.role==="ADMIN" || isAssignedToUser(job,req.user))){
-    return res.status(403).json({
-      error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. Take it back to yourself in Edit Job first. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős. Előbb vedd vissza magadra a Munka szerkesztése ablakban.`
-    });
-  }
-
-  const closeType=req.body.close_type;
-  if(!["Partial","Full","Failed"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial, Full or Failed"});
-
-  const billed=Number(req.body.billed_amount);
-  if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
-
-  const desc=(req.body.close_description||"").trim();
-  if(!desc) return res.status(400).json({error:"Close description is required"});
-
-  const payment=req.body.payment_method || "";
-  if(billed > 0 && !payment) return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});
-
-  if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
-  const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
-
-  let nextJobId=null;
-  if(closeType==="Partial"){
-    const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
-    for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
-
-    const nextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
-    if(!nextAssigned) return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});
-    nextJobId=rid("J");
-    db.prepare(`INSERT INTO jobs(
-      id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
-      assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
-      planned_hours,travel_minutes,service_address,instructions
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",
-        job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
-        nextAssigned.id,nextAssigned.name,req.user.id,req.user.name,req.body.next_priority||job.priority,"Open",
-        req.body.next_start_time,req.body.next_end_time,"America/New_York",
-        Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",
-        Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),
-        req.body.next_service_address||job.service_address,req.body.next_instructions||""
-      );
-  }
-
-  db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
-
-  const logId=rid("LOG");
-  db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
-
-  db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
-
-  const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
-  res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
+app.get("/api/jobs/:id/workflow", auth, (req,res)=>{
+  const job=getJobByAnyId(req.params.id,req.query||{});
+  if(!job) return res.status(404).json({error:"Job not found"});
+  const rootId=job.workflow_root_id||job.id;
+  const steps=db.prepare(jobsSelectSql("WHERE j.id=? OR j.workflow_root_id=? ORDER BY COALESCE(j.workflow_step_no,1), j.start_time, j.created_at")).all(rootId,rootId);
+  res.json({workflow_root_id:rootId,steps});
 });
 
+app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
+  if(req.file && !validMagic(req.file.path)){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
+  const jobId=req.params.id || req.body.id || req.body.job_id || req.body.job_key;
+  const job=getJobByAnyId(jobId,req.body);
+  if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
+  if(!canCloseJob(req.user,job)) return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});
+
+  const closeType=String(req.body.close_type||"");
+  if(!["Partial","Full","Failed"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial, Full or Failed"});
+  const billed=Number(req.body.billed_amount);
+  if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
+  const desc=String(req.body.close_description||"").trim();
+  if(!desc) return res.status(400).json({error:"Close description is required"});
+  const payment=req.body.payment_method||"";
+  if(billed>0&&!payment) return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});
+  if(billed>0&&!req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
+  const storedPath=req.file?"/uploads/"+path.basename(req.file.path):null;
+  const rootId=job.workflow_root_id||job.id;
+
+  try{
+    const result=db.transaction(()=>{
+      let nextJobId=null;
+      if(closeType==="Partial"){
+        const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
+        for(const r of required) if(!req.body[r]) throw new Error(`${r} is required for partial close`);
+        const nextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
+        if(!nextAssigned) throw new Error("A valid next responsible user is required / Érvényes következő felelős szükséges");
+        const maxStep=db.prepare("SELECT COALESCE(MAX(workflow_step_no),0) AS n FROM jobs WHERE workflow_root_id=? OR id=?").get(rootId,rootId)?.n||0;
+        nextJobId=rid("J");
+        db.prepare(`INSERT INTO jobs(
+          id,job_key,parent_job_id,workflow_root_id,workflow_step_no,workflow_status,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
+          assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+          planned_hours,travel_minutes,service_address,instructions
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          nextJobId,stableJobKey(),job.id,rootId,Number(maxStep)+1,"ACTIVE",req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
+          nextAssigned.id,nextAssigned.name,req.user.id,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",
+          Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),
+          req.body.next_service_address||job.service_address,req.body.next_instructions||""
+        );
+        db.prepare(`UPDATE jobs SET status='Partially completed', close_type='Partial', workflow_root_id=?, workflow_status='IN_PROGRESS', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+      } else if(closeType==="Full"){
+        const finalTime=nowISO();
+        db.prepare(`UPDATE jobs SET status='Completed', workflow_root_id=?, workflow_status='COMPLETED', finalized_at=?, completed_at=COALESCE(completed_at,?), updated_at=CURRENT_TIMESTAMP WHERE id=? OR workflow_root_id=?`)
+          .run(rootId,finalTime,finalTime,rootId,rootId);
+        db.prepare(`UPDATE jobs SET close_type='Full', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, finalized_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,finalTime,finalTime,job.id);
+      } else {
+        db.prepare(`UPDATE jobs SET status='Failed', close_type='Failed', workflow_root_id=?, workflow_status='FAILED', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+      }
+
+      const logId=rid("LOG");
+      db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+      db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
+      const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
+      return {nextJobId,financialItem};
+    })();
+    res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null,workflow_root_id:rootId});
+  }catch(err){
+    if(req.file){try{fs.unlinkSync(req.file.path)}catch(e){}}
+    res.status(400).json({error:err.message||"Close operation failed"});
+  }
+});
 
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
   res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));
