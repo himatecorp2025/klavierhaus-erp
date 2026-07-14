@@ -103,6 +103,19 @@ function sendPushForNotification(row){
     });
   });
 }
+async function sendActivationTestPush(subscriptionRow,token){
+  if(!PUSH_CONFIGURED) throw new Error('PUSH_NOT_CONFIGURED');
+  let parsed;try{parsed=JSON.parse(subscriptionRow.subscription_json)}catch(_e){throw new Error('INVALID_PUSH_SUBSCRIPTION');}
+  const payload=JSON.stringify({
+    activationTest:true,
+    activationToken:token,
+    title:'Notifications enabled',
+    body:'Klavierhaus ERP notifications are active on this device.',
+    unreadCount:db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(subscriptionRow.user_id).c,
+    url:'/?openNotifications=1'
+  });
+  await webpush.sendNotification(parsed,payload);
+}
 function createNotification({recipientUserId,senderUserId=null,type,job=null,titleEn,titleHu,bodyEn,bodyHu,customMessage='',metadata={},eventKey=null}){
   if(!recipientUserId)return null;
   const recipient=db.prepare("SELECT id,status FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return null;
@@ -680,28 +693,44 @@ app.post('/api/push/check',auth,(req,res)=>{
   const deviceId=normalizeDeviceId(req.body?.device_id);
   if(!deviceId)return res.status(400).json({error:'INVALID_DEVICE_ID'});
   const endpoint=String(req.body?.endpoint||'');
-  const subscription=endpoint?db.prepare('SELECT id FROM push_subscriptions WHERE user_id=? AND endpoint=?').get(req.user.id,endpoint):db.prepare('SELECT id FROM push_subscriptions WHERE user_id=? AND device_id=?').get(req.user.id,deviceId);
+  const subscription=endpoint?db.prepare('SELECT id,verified_at FROM push_subscriptions WHERE user_id=? AND endpoint=?').get(req.user.id,endpoint):db.prepare('SELECT id,verified_at FROM push_subscriptions WHERE user_id=? AND device_id=? ORDER BY updated_at DESC LIMIT 1').get(req.user.id,deviceId);
   const device=db.prepare('SELECT * FROM notification_devices WHERE user_id=? AND device_id=?').get(req.user.id,deviceId);
-  res.json({configured:PUSH_CONFIGURED,required:true,subscribed:Boolean(subscription),deviceStatus:device?.status||'NOT_CONFIGURED'});
+  res.json({configured:PUSH_CONFIGURED,required:true,subscribed:Boolean(subscription),verified:Boolean(subscription?.verified_at),deviceStatus:device?.status||'NOT_CONFIGURED'});
 });
 
 app.post('/api/push/subscribe',auth,(req,res)=>{
   const subscription=req.body?.subscription;
   const deviceId=normalizeDeviceId(req.body?.device_id);
   if(!subscription?.endpoint||!deviceId)return res.status(400).json({error:'INVALID_PUSH_SUBSCRIPTION'});
-  const existing=db.prepare('SELECT id FROM push_subscriptions WHERE endpoint=?').get(subscription.endpoint);const id=existing?.id||rid('PSH');
-  db.prepare(`INSERT INTO push_subscriptions(id,user_id,endpoint,subscription_json,user_agent,language,device_id,last_seen_at,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,user_agent=excluded.user_agent,language=excluded.language,device_id=excluded.device_id,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP`).run(id,req.user.id,subscription.endpoint,JSON.stringify(subscription),String(req.headers['user-agent']||''),req.body?.language==='hu'?'hu':'en',deviceId);
+  const existing=db.prepare('SELECT id,verified_at FROM push_subscriptions WHERE endpoint=?').get(subscription.endpoint);const id=existing?.id||rid('PSH');
+  db.prepare(`INSERT INTO push_subscriptions(id,user_id,endpoint,subscription_json,user_agent,language,device_id,last_seen_at,updated_at,verified_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,user_agent=excluded.user_agent,language=excluded.language,device_id=excluded.device_id,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP`).run(id,req.user.id,subscription.endpoint,JSON.stringify(subscription),String(req.headers['user-agent']||''),req.body?.language==='hu'?'hu':'en',deviceId,existing?.verified_at||null);
   db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled) VALUES(?,1)').run(req.user.id);
   db.prepare('UPDATE notification_preferences SET push_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').run(req.user.id);
   const device=upsertNotificationDevice(req.user.id,deviceId,{status:'ENABLED',platform:String(req.body?.platform||''),userAgent:String(req.headers['user-agent']||''),language:req.body?.language});
-  res.json({ok:true,configured:PUSH_CONFIGURED,device});
+  res.json({ok:true,configured:PUSH_CONFIGURED,verified:Boolean(existing?.verified_at),device});
 });
+
+app.post('/api/push/test',auth,async(req,res)=>{
+  const deviceId=normalizeDeviceId(req.body?.device_id);const endpoint=String(req.body?.endpoint||'');
+  if(!deviceId||!endpoint)return res.status(400).json({error:'INVALID_TEST_REQUEST'});
+  const sub=db.prepare('SELECT * FROM push_subscriptions WHERE user_id=? AND endpoint=?').get(req.user.id,endpoint);
+  if(!sub)return res.status(404).json({error:'SUBSCRIPTION_NOT_REGISTERED'});
+  if(sub.verified_at)return res.json({ok:true,verified:true});
+  const token=crypto.randomBytes(24).toString('hex');
+  db.prepare("DELETE FROM push_activation_tests WHERE user_id=? AND device_id=? AND status='PENDING'").run(req.user.id,deviceId);
+  db.prepare('INSERT INTO push_activation_tests(token,user_id,device_id,endpoint,status) VALUES(?,?,?,?,\'PENDING\')').run(token,req.user.id,deviceId,endpoint);
+  try{await sendActivationTestPush(sub,token);res.json({ok:true,verified:false,token});}
+  catch(error){db.prepare("UPDATE push_activation_tests SET status='FAILED' WHERE token=?").run(token);res.status(502).json({error:'TEST_PUSH_FAILED',detail:error.message});}
+});
+app.get('/api/push/test/:token',auth,(req,res)=>{const row=db.prepare('SELECT status,received_at FROM push_activation_tests WHERE token=? AND user_id=?').get(req.params.token,req.user.id);if(!row)return res.status(404).json({error:'TEST_NOT_FOUND'});res.json({status:row.status,verified:row.status==='RECEIVED',received_at:row.received_at||null});});
+app.post('/api/push/test-receipt',(req,res)=>{const token=String(req.body?.token||'');if(!/^[a-f0-9]{48}$/.test(token))return res.status(400).json({error:'INVALID_TOKEN'});const row=db.prepare("SELECT * FROM push_activation_tests WHERE token=? AND status='PENDING'").get(token);if(!row)return res.json({ok:true});db.transaction(()=>{db.prepare("UPDATE push_activation_tests SET status='RECEIVED',received_at=CURRENT_TIMESTAMP WHERE token=?").run(token);db.prepare('UPDATE push_subscriptions SET verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE endpoint=?').run(row.endpoint);upsertNotificationDevice(row.user_id,row.device_id,{status:'ENABLED'});})();res.json({ok:true});});
+
 app.delete('/api/push/subscribe',auth,(req,res)=>{const endpoint=String(req.body?.endpoint||'');const deviceId=normalizeDeviceId(req.body?.device_id);if(endpoint)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?').run(req.user.id,endpoint);else if(deviceId)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND device_id=?').run(req.user.id,deviceId);else db.prepare('DELETE FROM push_subscriptions WHERE user_id=?').run(req.user.id);if(deviceId)upsertNotificationDevice(req.user.id,deviceId,{status:'NOT_CONFIGURED',platform:String(req.body?.platform||''),userAgent:String(req.headers['user-agent']||''),language:req.body?.language});res.json({ok:true});});
 app.get('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
 app.put('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);const fields=['push_enabled','job_assigned','job_transferred','job_updated','job_deleted','one_hour_reminder','direct_message'];const cols=fields.filter(f=>req.body[f]!==undefined);if(cols.length)db.prepare(`UPDATE notification_preferences SET ${cols.map(f=>`${f}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).run(...cols.map(f=>Number(req.body[f])?1:0),req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
 app.get('/api/notifications',auth,(req,res)=>{const active=String(req.query.active??'1')!=='0';const rows=db.prepare(`SELECT n.*,su.name sender_name FROM notifications n LEFT JOIN users su ON su.id=n.sender_user_id WHERE n.recipient_user_id=? ${active?"AND n.status='ACTIVE'":''} ORDER BY n.created_at DESC LIMIT 500`).all(req.user.id);res.json(rows);});
 app.get('/api/notifications/count',auth,(req,res)=>res.json({count:db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(req.user.id).c}));
-app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prepare('SELECT * FROM notifications WHERE id=? AND recipient_user_id=?').get(req.params.id,req.user.id);if(!row)return res.status(404).json({error:'NOTIFICATION_NOT_FOUND'});db.prepare("UPDATE notifications SET status='ACKNOWLEDGED',acknowledged_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);res.json({ok:true});});
+app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prepare('SELECT * FROM notifications WHERE id=? AND recipient_user_id=?').get(req.params.id,req.user.id);if(!row)return res.status(404).json({error:'NOTIFICATION_NOT_FOUND'});db.prepare("UPDATE notifications SET status='ACKNOWLEDGED',acknowledged_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);const count=db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(req.user.id).c;res.json({ok:true,count,notificationId:row.id});});
 app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
 app.get("/api/planned-jobs", auth, (req,res)=>{
