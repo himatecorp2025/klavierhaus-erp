@@ -99,7 +99,8 @@ function applyLanguageToDOM(root=document.body){
     if(el.placeholder) el.placeholder=splitBilingualText(el.placeholder);
     if(el.title) el.title=splitBilingualText(el.title);
   });
-  const title=document.querySelector(".login-card h1"); if(title) title.innerHTML=`<span data-brand-name>${htmlText(branding.company_name||"Klavierhaus")}</span>`;
+  const loginBrandName=document.querySelector(".login-card [data-brand-name]");
+  if(loginBrandName) loginBrandName.textContent=branding.company_name||"Klavierhaus";
   const sub=document.querySelector(".login-card p"); if(sub) sub.textContent=tr("loginSubtitle");
   const passLabel=document.querySelector('label[for="password"], #loginForm label:nth-of-type(2)'); if(passLabel) passLabel.textContent=tr("password");
   const loginBtn=document.querySelector("#loginForm button"); if(loginBtn) loginBtn.textContent=tr("login");
@@ -139,7 +140,15 @@ function versionedBrandAsset(url){
 function applyBranding(){
  const logo=versionedBrandAsset(branding.logo_url||'/icons/icon-512.png');
  document.querySelectorAll('[data-brand-name]').forEach(el=>el.textContent=branding.company_name||'Klavierhaus');
- document.querySelectorAll('[data-brand-logo]').forEach(el=>{if(el.tagName==='IMG'){el.src=logo;}else{el.innerHTML=`<img src="${logo}" alt="">`;}});
+ document.querySelectorAll('[data-brand-logo]').forEach(el=>{
+  if(el.tagName==='IMG'){
+   if(el.src!==new URL(logo,location.href).href) el.src=logo;
+   return;
+  }
+  let img=el.querySelector('img');
+  if(!img){img=document.createElement('img');img.alt='';el.replaceChildren(img);}
+  if(img.src!==new URL(logo,location.href).href) img.src=logo;
+ });
  const login=document.querySelector('.login-page');
  if(login){const bg=versionedBrandAsset(branding.login_background_url||'');login.style.setProperty('--login-background',bg?`url("${bg}")`:'none');login.classList.toggle('has-brand-background',!!bg);}
  document.title=(branding.company_name||'Klavierhaus')+' Work Management';
@@ -188,7 +197,6 @@ function resetInactivityTimer(){
   updateCountdownDisplay();
 }
 document.addEventListener("click", resetInactivityTimer, true);
-document.addEventListener("click", ()=>setTimeout(()=>applyLanguageToDOM(),0), false);
 
 async function deleteEverything(){
   if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
@@ -1684,8 +1692,6 @@ async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/downlo
 async function restoreBackup(id){const confirmation=prompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'));if(confirmation!=='RESTORE BACKUP')return;const password=prompt(bi('Enter your password.','Add meg a jelszavad.'));try{const r=await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});alert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'));logoutNow();}catch(e){showError(e.message)}}
 
 
-const bilingualObserver=new MutationObserver(mutations=>{for(const m of mutations){for(const node of m.addedNodes){if(node.nodeType===1)applyLanguageToDOM(node);}}});
-bilingualObserver.observe(document.body,{childList:true,subtree:true});
 if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();loadBranding().then(applyLanguageToDOM);}
 
 
