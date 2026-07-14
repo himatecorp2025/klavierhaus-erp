@@ -176,6 +176,7 @@ function applyBranding(){
  const appleIcon=document.querySelector('link[rel="apple-touch-icon"]'); if(appleIcon) appleIcon.href=logo;
 }
 function isStandalonePWA(){return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;}
+function requiresMandatoryDeviceNotifications(){return isStandalonePWA() && window.matchMedia('(max-width: 900px)').matches;}
 const $=s=>document.querySelector(s);
 const api=(url,opt={})=>fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}}).then(async r=>{const text=await r.text();let j={};try{j=text?JSON.parse(text):{}}catch(e){j={error:text||"Non-JSON response"}}if(!r.ok)throw new Error(j.error||`API ${r.status}`);return j});
 
@@ -517,7 +518,9 @@ function notificationGateCopy(status){
   NOT_CONFIGURED:[hu?'Munkaértesítések engedélyezése':'Enable work notifications',hu?'Az értesítések kötelezők a munkák, időpontváltozások, belső üzenetek és emlékeztetők fogadásához.':'Notifications are required to receive job assignments, schedule changes, internal messages and reminders.'],
   BLOCKED:[hu?'Az értesítések le vannak tiltva':'Notifications are blocked',hu?'Engedélyezd a Klavierhaus ERP értesítéseit az eszköz vagy a böngésző beállításaiban, majd nyomd meg az Ellenőrzés gombot.':'Enable notifications for Klavierhaus ERP in your device or browser settings, then press Check again.'],
   UNSUPPORTED:[hu?'Az eszköz nem támogatja a kötelező értesítéseket':'Required notifications are not supported',hu?'Ezen az eszközön vagy böngészőben a Web Push nem érhető el. Használj támogatott Chrome, Edge vagy kezdőképernyőre telepített iOS PWA környezetet.':'Web Push is unavailable on this device or browser. Use a supported Chrome, Edge, or installed iOS Home Screen PWA environment.'],
-  SERVER_NOT_CONFIGURED:[hu?'A push szolgáltatás nincs beállítva':'Push service is not configured',hu?'A rendszergazdának be kell állítania a VAPID kulcsokat a szerveren.':'The administrator must configure the VAPID keys on the server.']
+  SERVER_NOT_CONFIGURED:[hu?'A push szolgáltatás nincs beállítva':'Push service is not configured',hu?'A rendszergazdának be kell állítania a VAPID kulcsokat a szerveren.':'The administrator must configure the VAPID keys on the server.'],
+  TESTING:[hu?'Értesítési kapcsolat ellenőrzése':'Testing notification connection',hu?'Tesztértesítést küldünk erre az eszközre.':'A test notification is being sent to this device.'],
+  SUCCESS:[hu?'Értesítések engedélyezve':'Notifications enabled',hu?'Ez az eszköz készen áll a munkaértesítések fogadására.':'This device is ready to receive work notifications.']
  };
  return base[status]||base.NOT_CONFIGURED;
 }
@@ -535,7 +538,7 @@ function showNotificationActivationGate(status,detail=''){
  document.getElementById('notificationGateText').textContent=text;
  document.getElementById('notificationGateStatus').textContent=detail||'';
  const enableButton=document.getElementById('notificationGateEnable'),checkButton=document.getElementById('notificationGateCheck'),helpButton=document.getElementById('notificationGateHelp'),logoutButton=document.getElementById('notificationGateLogout');
- if(enableButton){enableButton.textContent=bi('Enable notifications','Értesítések engedélyezése');enableButton.classList.toggle('hidden',status==='BLOCKED'||status==='UNSUPPORTED'||status==='SERVER_NOT_CONFIGURED');}
+ if(enableButton){enableButton.textContent=bi('Enable notifications','Értesítések engedélyezése');enableButton.classList.toggle('hidden',['BLOCKED','UNSUPPORTED','SERVER_NOT_CONFIGURED','TESTING','SUCCESS'].includes(status));}
  if(checkButton)checkButton.textContent=bi('Check again','Ellenőrzés újra');
  if(helpButton)helpButton.textContent=bi('How to enable notifications','Értesítések engedélyezésének lépései');
  if(logoutButton)logoutButton.textContent=bi('Log out','Kijelentkezés');
@@ -554,7 +557,32 @@ async function getCurrentPushSubscription(){
 async function reportPushStatus(status,subscription=null){
  try{return await api('/api/push/status',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),status,endpoint:subscription?.endpoint||'',platform:notificationPlatform(),language:currentLang})});}catch(_e){return null;}
 }
+async function ensureSubscriptionRegisteredForCurrentUser(subscription){
+ if(!subscription)return null;
+ return api('/api/push/subscribe',{method:'POST',body:JSON.stringify({subscription,language:currentLang,device_id:getNotificationDeviceId(),platform:notificationPlatform()})});
+}
+async function waitForActivationTest(token,timeoutMs=15000){
+ const started=Date.now();
+ while(Date.now()-started<timeoutMs){
+  const result=await api(`/api/push/test/${encodeURIComponent(token)}`).catch(()=>null);
+  if(result?.verified)return true;
+  if(result?.status==='FAILED')return false;
+  await new Promise(resolve=>setTimeout(resolve,750));
+ }
+ return false;
+}
+async function verifyPushDelivery(subscription){
+ const response=await api('/api/push/test',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),endpoint:subscription.endpoint})});
+ if(response.verified)return true;
+ if(!response.token)return false;
+ showNotificationActivationGate('TESTING');
+ return waitForActivationTest(response.token);
+}
 async function evaluateMandatoryNotificationGate({showGate=true}={}){
+ if(!requiresMandatoryDeviceNotifications()){
+  hideNotificationActivationGate();
+  return true;
+ }
  let config;
  try{config=await api('/api/notifications/config');}catch(error){if(showGate)showNotificationActivationGate('SERVER_NOT_CONFIGURED',error.message);return false;}
  if(!config.configured){if(showGate)showNotificationActivationGate('SERVER_NOT_CONFIGURED');return false;}
@@ -563,8 +591,13 @@ async function evaluateMandatoryNotificationGate({showGate=true}={}){
  const status=notificationStatusFromClient(subscription);
  await reportPushStatus(status,subscription);
  if(status==='ENABLED'){
-  const check=await api('/api/push/check',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),endpoint:subscription.endpoint})}).catch(()=>null);
-  if(check?.subscribed){hideNotificationActivationGate();return true;}
+  try{
+   let check=await api('/api/push/check',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),endpoint:subscription.endpoint})});
+   if(!check?.subscribed){await ensureSubscriptionRegisteredForCurrentUser(subscription);check=await api('/api/push/check',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),endpoint:subscription.endpoint})});}
+   if(check?.verified){hideNotificationActivationGate();return true;}
+   const verified=await verifyPushDelivery(subscription);
+   if(verified){showNotificationActivationGate('SUCCESS');await new Promise(resolve=>setTimeout(resolve,900));hideNotificationActivationGate();return true;}
+  }catch(error){if(showGate)showNotificationActivationGate('NOT_CONFIGURED',error.message);return false;}
  }
  if(showGate)showNotificationActivationGate(status);
  return false;
@@ -591,9 +624,10 @@ function initNotificationActivationGate(){
  if(check)check.onclick=async()=>{const ok=await evaluateMandatoryNotificationGate({showGate:true});if(ok){document.getElementById('app')?.classList.remove('hidden');render(isMobileAppViewport()?'today':'scheduler');}};
  if(help)help.onclick=()=>{panel.innerHTML=notificationHelpHtml();panel.classList.toggle('hidden');};
  if(logout)logout.onclick=logoutNow;
- const recheck=async()=>{if(!token||document.visibilityState==='hidden')return;const gate=document.getElementById('notificationActivationGate');const wasLocked=gate&&!gate.classList.contains('hidden');const ok=await evaluateMandatoryNotificationGate({showGate:true});const app=document.getElementById('app');if(!ok){app?.classList.add('hidden');return;}app?.classList.remove('hidden');if(wasLocked)render(currentView||(isMobileAppViewport()?'today':'scheduler'),{noHistory:true});};
+ const recheck=async()=>{if(!token||document.visibilityState==='hidden'||!requiresMandatoryDeviceNotifications())return;const gate=document.getElementById('notificationActivationGate');const wasLocked=gate&&!gate.classList.contains('hidden');const ok=await evaluateMandatoryNotificationGate({showGate:true});const app=document.getElementById('app');if(!ok){app?.classList.add('hidden');return;}app?.classList.remove('hidden');if(wasLocked)render(currentView||(isMobileAppViewport()?'today':'scheduler'),{noHistory:true});};
  document.addEventListener('visibilitychange',recheck);
  window.addEventListener('focus',recheck);
+ window.addEventListener('pageshow',recheck);
 }
 
 async function boot(){
@@ -2381,7 +2415,7 @@ async function openNotificationDetail(id){
  $('#form').innerHTML=`<div class="notification-detail"><button type="button" class="notification-detail-close" onclick="closeModal()" aria-label="${bi('Close','Bezárás')}">×</button><div class="notification-detail-meta"><span>${notificationIcon(row.notification_type)}</span><small>${htmlText(formatNotificationTime(row.created_at))}</small></div><p>${htmlText(notificationText(row,'body'))}</p>${row.sender_name?`<p class="muted"><strong>${bi('Sender','Feladó')}:</strong> ${htmlText(row.sender_name)}</p>`:''}${meta.client_name?`<p class="muted"><strong>${bi('Client','Ügyfél')}:</strong> ${htmlText(meta.client_name)}</p>`:''}<div class="actions">${jobButton}<button type="button" onclick="acknowledgeNotification('${row.id}')">${bi('Acknowledged','Tudomásul vettem')}</button></div></div>`;
 }
 async function acknowledgeNotification(id){
- try{await api(`/api/notifications/${encodeURIComponent(id)}/acknowledge`,{method:'POST'});closeModal();currentNotifications=currentNotifications.filter(n=>String(n.id)!==String(id));setNotificationBadges(currentNotifications.length);await renderNotifications();}catch(error){showError(error.message);}
+ try{const ack=await api(`/api/notifications/${encodeURIComponent(id)}/acknowledge`,{method:'POST'});if(navigator.serviceWorker?.ready){navigator.serviceWorker.ready.then(reg=>reg.active?.postMessage({type:'ACKNOWLEDGE_NOTIFICATION',notificationId:id,count:Number(ack.count||0)})).catch(()=>{});}closeModal();currentNotifications=currentNotifications.filter(n=>String(n.id)!==String(id));setNotificationBadges(Number(ack.count??currentNotifications.length));await renderNotifications();}catch(error){showError(error.message);}
 }
 async function openNotificationJob(jobId){
  try{const jobs=await api('/api/jobs');const job=jobs.find(j=>String(j.id)===String(jobId));if(!job)return showError(bi('The related job no longer exists.','A kapcsolódó munka már nem létezik.'));closeModal();openJobDetails(job);}catch(error){showError(error.message);}
