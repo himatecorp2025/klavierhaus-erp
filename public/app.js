@@ -22,6 +22,9 @@ let mobileFinanceFiltersOpen=false;
 let pianoOwnerContactsCache=[];
 let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
+let notificationPollTimer=null;
+let notificationUnreadCount=0;
+let currentNotifications=[];
 
 const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["audit_log","Audit Log / Módosítási napló"],["settings","Settings / Beállítások"]],
@@ -500,6 +503,7 @@ async function boot(){
  };
  initMobileAppShell();
  initCustomSelectSystem();
+ initNotificationCenter();
  render(isMobileAppViewport()?"today":"scheduler");
  applyLanguageToDOM();
 }
@@ -593,7 +597,7 @@ function calendarEventClass(j){
 function calendarStatusIcon(j){
  const cls=calendarEventClass(j);
  if(cls==="Completed") return "✓";
- if(cls==="Failed") return "!";
+ if(cls==="Failed") return "✕";
  return "◷";
 }
 function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="--event-color:${workerColor(j.assigned_to)}"` : ""; }
@@ -638,6 +642,7 @@ async function render(v,opts={}){
  else if(v==="audit_log") await renderAuditLog();
  else if(v==="settings") await renderSettings();
  else if(v==="pianos") await renderPianos();
+ else if(v==="notifications") await renderNotifications();
  else await renderTable(v);
  applyLanguageToDOM();
  enhanceCustomSelects(document.getElementById(v));
@@ -674,7 +679,7 @@ function openMobileMore(){
   const profile=document.getElementById("mobileProfileBtn"); if(profile) profile.onclick=()=>{closeMobileMore();openMyProfile();};
   const logout=document.getElementById("mobileLogoutBtn"); if(logout) logout.onclick=()=>logoutNow();
 }
-function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",users:"👤",audit_log:"🧾",settings:"⚙️",scheduler:"📅"})[view]||"•"; }
+function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",users:"👤",audit_log:"🧾",settings:"⚙️",notifications:"🔔",scheduler:"📅"})[view]||"•"; }
 function initMobileAppShell(){
   const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
   nav.querySelectorAll("[data-mobile-view]").forEach(btn=>btn.onclick=()=>render(btn.dataset.mobileView));
@@ -693,8 +698,8 @@ async function renderToday(){
   const layout=calendarLayout(mine,dayStart,dayEnd);
   const quarter=Array.from({length:(dayEnd-dayStart)/15+1},(_,i)=>{const min=dayStart+i*15;return `<i class="${min%60===0?'hour':''}" style="top:${((min-dayStart)/total)*100}%"></i>`}).join('');
   const times=Array.from({length:(dayEnd-dayStart)/60+1},(_,i)=>{const min=dayStart+i*60;return `<span style="top:${((min-dayStart)/total)*100}%">${String(Math.floor(min/60)).padStart(2,'0')}:00</span>`}).join('');
-  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;return `<button type="button" class="timeline-event ${calendarEventClass(j)}" ${calendarEventStyle(j)} style="${calendarEventStyle(j).replace(/^style=\"|\"$/g,'')};top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${j.title||''}</b><small>${j.client_name||''}</small><span class="event-status">${calendarEventClass(j)==='Completed'?'✓':'◷'}</span></button>`}).join('');
-  target.innerHTML=`<div class="mobile-today-shell">${mobileBackHeader(bi('Today','Ma'))}<section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
+  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;return `<button type="button" class="timeline-event ${calendarEventClass(j)}" ${calendarEventStyle(j)} style="${calendarEventStyle(j).replace(/^style=\"|\"$/g,'')};top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${j.title||''}</b><small>${j.client_name||''}</small><span class="event-status">${calendarStatusIcon(j)}</span></button>`}).join('');
+  target.innerHTML=`<div class="mobile-today-shell"><div class="today-page-header"><h2>${bi('Today','Ma')}</h2>${notificationBellMarkup('mobileTodayNotificationBell')}</div><section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
   updateCurrentTimeLine(); clearInterval(currentTimeLineInterval); currentTimeLineInterval=setInterval(updateCurrentTimeLine,60000); updateMobileNavigationActive();
 }
 function handleDailySlotClick(event,date,dayStart,dayEnd){if(event.target.closest('.timeline-event'))return;const rect=event.currentTarget.getBoundingClientRect();const ratio=Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height));let mins=Math.round((dayStart+ratio*(dayEnd-dayStart))/15)*15;mins=Math.min(dayEnd-15,Math.max(dayStart,mins));const hh=String(Math.floor(mins/60)).padStart(2,'0'),mm=String(mins%60).padStart(2,'0');openJob();setTimeout(()=>{const form=document.querySelector('.modal form');if(!form)return;const start=form.querySelector('[name="start_time"]');if(start)start.value=`${date}T${hh}:${mm}`;},50);}
@@ -765,7 +770,7 @@ async function renderScheduler(){
    }
    html+=`</div>`;
  }
- html+=`</div></div><div class="scheduler-legend"><span class="legend-active">◷ ${bi("Scheduled / active","Ütemezett / aktív")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-failed">! ${bi("Failed / overdue","Sikertelen / lejárt")}</span></div></div>`;
+ html+=`</div></div><div class="scheduler-legend"><span class="legend-active">◷ ${bi("Scheduled / active","Ütemezett / aktív")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-failed">✕ ${bi("Failed / overdue","Sikertelen / lejárt")}</span></div></div>`;
  $("#scheduler").innerHTML=html;
  updateNYClock(); updateCurrentTimeLine();
  clearInterval(window.__khTimelineTimer); window.__khTimelineTimer=setInterval(()=>{updateNYClock();updateCurrentTimeLine()},60000);
@@ -2175,6 +2180,76 @@ async function exportInventoryPDF(){
  win.document.close();
 }
 
+
+function notificationBellMarkup(id='notificationBell'){
+ return `<button id="${id}" class="notification-bell" type="button" aria-label="${bi('Notifications','Értesítések')}" title="${bi('Notifications','Értesítések')}" onclick="openNotifications()">🔔<span class="notification-badge ${notificationUnreadCount>0?'':'hidden'}">${notificationUnreadCount||0}</span></button>`;
+}
+function notificationText(row,field){
+ const languageField=currentLang==='hu'?`${field}_hu`:`${field}_en`;
+ return row?.custom_message || row?.[languageField] || row?.[`${field}_en`] || row?.[`${field}_hu`] || '';
+}
+function notificationIcon(type){
+ return ({DIRECT_MESSAGE:'✎',JOB_ASSIGNED:'＋',JOB_TRANSFERRED:'⇄',SUBTASK_TRANSFERRED:'↳',JOB_UPDATED:'✦',JOB_DELETED:'✕',JOB_STARTING_IN_ONE_HOUR:'◷'})[type]||'🔔';
+}
+function formatNotificationTime(value){
+ if(!value)return '';
+ const d=new Date(String(value).replace(' ','T')+'Z');
+ if(Number.isNaN(d.getTime()))return String(value);
+ return new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{dateStyle:'medium',timeStyle:'short',timeZone:'America/New_York'}).format(d);
+}
+function setNotificationBadges(count){
+ notificationUnreadCount=Math.max(0,Number(count||0));
+ document.querySelectorAll('.notification-badge').forEach(b=>{b.textContent=notificationUnreadCount;b.classList.toggle('hidden',notificationUnreadCount===0);});
+ if('setAppBadge' in navigator){notificationUnreadCount?navigator.setAppBadge(notificationUnreadCount).catch(()=>{}):navigator.clearAppBadge?.().catch(()=>{});}
+ navigator.serviceWorker?.controller?.postMessage({type:'SET_BADGE',count:notificationUnreadCount});
+}
+async function refreshNotificationCount(){
+ if(!token)return;
+ try{const result=await api('/api/notifications/count');setNotificationBadges(result.count);}catch(error){console.warn('Notification count unavailable:',error.message);}
+}
+function openNotifications(){closeMobileMore();render('notifications');}
+function initNotificationCenter(){
+ const desktop=document.getElementById('desktopNotificationBell');if(desktop)desktop.onclick=openNotifications;
+ if(notificationPollTimer)clearInterval(notificationPollTimer);
+ refreshNotificationCount();notificationPollTimer=setInterval(refreshNotificationCount,30000);
+ navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='OPEN_NOTIFICATIONS')openNotifications();if(event.data?.type==='NOTIFICATION_COUNT')setNotificationBadges(event.data.count);});
+ if(new URLSearchParams(location.search).get('openNotifications')==='1')setTimeout(openNotifications,100);
+}
+async function renderNotifications(){
+ const box=ensureView('notifications');
+ try{currentNotifications=await api('/api/notifications');setNotificationBadges(currentNotifications.length);}catch(error){box.innerHTML=`<div class="panel"><p>${htmlText(error.message)}</p></div>`;return;}
+ const pushButton=`<button type="button" class="small" onclick="enablePushNotifications()">${bi('Enable push notifications','Push értesítések engedélyezése')}</button>`;
+ const cards=currentNotifications.map(row=>`<button type="button" class="notification-card" onclick="openNotificationDetail('${row.id}')"><span class="notification-card-icon">${notificationIcon(row.notification_type)}</span><span><strong>${htmlText(notificationText(row,'title'))}</strong><p>${htmlText(notificationText(row,'body'))}</p><small>${htmlText(formatNotificationTime(row.created_at))}</small></span></button>`).join('');
+ box.innerHTML=`${mobileBackHeader(bi('Notifications','Értesítések'))}<div class="panel notification-center"><div class="toolbar"><h3>${bi('Notifications','Értesítések')}</h3>${pushButton}</div>${cards||`<div class="empty-notifications"><div class="empty-notifications-icon">🔔</div><h3>${bi('No notifications','Nincsenek értesítések')}</h3><p>${bi('You currently have no active notifications.','Jelenleg nincs aktív értesítésed.')}</p></div>`}</div>`;
+}
+function parseNotificationMetadata(row){try{return JSON.parse(row?.metadata_json||'{}')}catch(_e){return {}}}
+async function openNotificationDetail(id){
+ const row=currentNotifications.find(n=>String(n.id)===String(id));if(!row)return;
+ const meta=parseNotificationMetadata(row);
+ $('#modal').classList.remove('hidden');$('#modalTitle').textContent=notificationText(row,'title')||bi('Notification','Értesítés');
+ const jobButton=row.related_job_id?`<button type="button" class="ghost-btn" onclick="openNotificationJob('${row.related_job_id}')">${bi('Open related job','Kapcsolódó munka megnyitása')}</button>`:'';
+ $('#form').innerHTML=`<div class="notification-detail"><button type="button" class="notification-detail-close" onclick="closeModal()" aria-label="${bi('Close','Bezárás')}">×</button><div class="notification-detail-meta"><span>${notificationIcon(row.notification_type)}</span><small>${htmlText(formatNotificationTime(row.created_at))}</small></div><p>${htmlText(notificationText(row,'body'))}</p>${row.sender_name?`<p class="muted"><strong>${bi('Sender','Feladó')}:</strong> ${htmlText(row.sender_name)}</p>`:''}${meta.client_name?`<p class="muted"><strong>${bi('Client','Ügyfél')}:</strong> ${htmlText(meta.client_name)}</p>`:''}<div class="actions">${jobButton}<button type="button" onclick="acknowledgeNotification('${row.id}')">${bi('Acknowledged','Tudomásul vettem')}</button></div></div>`;
+}
+async function acknowledgeNotification(id){
+ try{await api(`/api/notifications/${encodeURIComponent(id)}/acknowledge`,{method:'POST'});closeModal();currentNotifications=currentNotifications.filter(n=>String(n.id)!==String(id));setNotificationBadges(currentNotifications.length);await renderNotifications();}catch(error){showError(error.message);}
+}
+async function openNotificationJob(jobId){
+ try{const jobs=await api('/api/jobs');const job=jobs.find(j=>String(j.id)===String(jobId));if(!job)return showError(bi('The related job no longer exists.','A kapcsolódó munka már nem létezik.'));closeModal();openJobDetails(job);}catch(error){showError(error.message);}
+}
+async function openDirectMessage(selectedUser=null){
+ let users=[];try{users=await api('/api/users');}catch(error){return showError(error.message);}
+ const active=users.filter(u=>String(u.status||'Active')==='Active');
+ $('#modal').classList.remove('hidden');$('#modalTitle').textContent=bi('Send message','Üzenet küldése');
+ $('#form').innerHTML=`<div class="form-grid"><div class="field full"><label>${bi('Recipient','Címzett')}</label><select name="recipient_user_id" required>${active.map(u=>`<option value="${htmlText(u.id)}" ${String(selectedUser?.id||'')===String(u.id)?'selected':''}>${htmlText(u.name)} · ${htmlText(u.email||'')}</option>`).join('')}</select></div><div class="field full"><label>${bi('Message','Üzenet')}</label><textarea name="message" maxlength="250" rows="6" required oninput="updateMessageCounter(this)"></textarea><small id="messageCharacterCounter" class="character-counter">0 / 250</small></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Send','Küldés')}</button></div>`;
+ enhanceCustomSelects($('#form'));
+ $('#form').onsubmit=async event=>{event.preventDefault();const body=Object.fromEntries(new FormData(event.target));try{await api('/api/notifications/message',{method:'POST',body:JSON.stringify(body)});closeModal();showToast(bi('Message sent.','Az üzenet elküldve.'),'success');if(String(body.recipient_user_id)===String(user.id))await refreshNotificationCount();}catch(error){showError(error.message);}};
+}
+function updateMessageCounter(textarea){const counter=document.getElementById('messageCharacterCounter');if(counter)counter.textContent=`${textarea.value.length} / 250`;}
+function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64String.length%4)%4);const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));}
+async function enablePushNotifications(){
+ if(!('serviceWorker'in navigator)||!('PushManager'in window)||!('Notification'in window))return showError(bi('Push notifications are not supported on this device.','A push értesítések nem támogatottak ezen az eszközön.'));
+ try{const key=await api('/api/push/public-key');if(!key.configured||!key.publicKey)return showError(bi('Push notifications are not configured on the server.','A push értesítések nincsenek beállítva a szerveren.'));const permission=await Notification.requestPermission();if(permission!=='granted')return showError(bi('Notification permission was not granted.','Az értesítési engedély nem lett megadva.'));const registration=await navigator.serviceWorker.ready;let subscription=await registration.pushManager.getSubscription();if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(key.publicKey)});await api('/api/push/subscribe',{method:'POST',body:JSON.stringify({subscription,language:currentLang})});showToast(bi('Push notifications enabled.','A push értesítések engedélyezve.'),'success');}catch(error){showError(error.message);}
+}
 async function renderUsers(){
  let u=await api("/api/users");
  const canAdd=isAdmin();
@@ -2182,8 +2257,9 @@ async function renderUsers(){
    const isMe=x.id===user.id;
    const profileBtn=isMe?`<button class="small" onclick='openUser(${esc(x)},true)'>${tr("myProfile")}</button>`:"";
    const editBtn=isAdmin()?` <button class="small" onclick='openUser(${esc(x)},false)'>${tr("editUser")}</button>`:"";
+   const messageBtn=` <button class="small icon-message-btn" title="${bi("Send message","Üzenet küldése")}" aria-label="${bi("Send message","Üzenet küldése")}" onclick='openDirectMessage(${esc(x)})'>✎</button>`;
    const deleteBtn=isSuperadmin()?` <button class="small danger-btn" onclick="deleteUser('${x.id}')">${bi("Delete","Törlés")}</button>`:"";
-   return `<tr><td>${x.name||""}</td><td>${x.email||""}</td><td>${x.role||""}</td><td>${x.phone||""}</td><td>${x.address||""}</td><td>${x.status||""}</td><td>${profileBtn}${editBtn}${deleteBtn}</td></tr>`;
+   return `<tr><td>${x.name||""}</td><td>${x.email||""}</td><td>${x.role||""}</td><td>${x.phone||""}</td><td>${x.address||""}</td><td>${x.status||""}</td><td>${profileBtn}${editBtn}${messageBtn}${deleteBtn}</td></tr>`;
  }).join("");
  $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>Status</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
  applyLanguageToDOM(document.getElementById("users"));
@@ -2210,6 +2286,10 @@ const friendlyErrors={
  en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced.",PWA_LOGO_REQUIREMENTS:"Use a PNG, JPG, or JPEG image at least 192×192 pixels. Non-square images are automatically centered on a square canvas for the PWA icon."},
  hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A superadmin jogosultságai nem csökkenthetők.",PWA_LOGO_REQUIREMENTS:"Legalább 192×192 képpontos PNG-, JPG- vagy JPEG-képet használj. A nem négyzetes képet a rendszer automatikusan négyzetes PWA-ikonba igazítja."}
 };
+function showToast(message,type="info"){
+ let host=document.querySelector('.toast-host');if(!host){host=document.createElement('div');host.className='toast-host';document.body.appendChild(host);}
+ const toast=document.createElement('div');toast.className=`app-toast ${type}`;toast.innerHTML=`<span>${type==='error'?'!':type==='success'?'✓':'i'}</span><p>${htmlText(message)}</p>`;host.appendChild(toast);requestAnimationFrame(()=>toast.classList.add('show'));setTimeout(()=>{toast.classList.remove('show');setTimeout(()=>toast.remove(),250)},3200);
+}
 function showError(code){alert((friendlyErrors[currentLang]||friendlyErrors.en)[code]||code||bi("An unexpected error occurred.","Váratlan hiba történt."));}
 async function renderSettings(){
  if(!isAdmin()) return showError('PERMISSION_DENIED');
