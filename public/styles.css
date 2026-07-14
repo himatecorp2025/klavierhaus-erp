@@ -210,3 +210,25 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
   #form>.actions,.modal-box .actions{position:sticky!important;bottom:0!important;z-index:7;background:var(--panel)!important;margin:12px -2px 0;padding:12px 2px calc(12px + env(safe-area-inset-bottom))!important;border-top:1px solid var(--line)}
   .mobile-bottom-nav{z-index:140}.modal{z-index:220}.mobile-more-sheet{z-index:210}
 }
+
+
+/* Branding logo visibility and upload preview corrections */
+.brand-badge,
+.branding-preview img{
+  background:#ffffff;
+  box-sizing:border-box;
+}
+.brand-badge img{
+  object-fit:contain!important;
+  padding:4px;
+}
+.branding-preview img{
+  object-fit:contain!important;
+  padding:6px;
+  border:1px solid rgba(255,255,255,.18);
+}
+.branding-upload-help{
+  flex-basis:100%;
+  color:var(--muted);
+  line-height:1.4;
+}
