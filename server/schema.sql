@@ -191,4 +191,23 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
  ('company_name','Klavierhaus','SYSTEM'),
  ('short_name','KH ERP','SYSTEM'),
- ('logo_url','/icons/icon-512.png','SYSTEM');
+ ('logo_url','/icons/icon-512.png','SYSTEM'),
+ ('login_background_url','','SYSTEM'),
+ ('branding_version','1','SYSTEM');
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  event_time TEXT DEFAULT CURRENT_TIMESTAMP,
+  user_id TEXT,
+  user_name TEXT,
+  user_role TEXT,
+  action TEXT NOT NULL,
+  module TEXT,
+  record_id TEXT,
+  old_value TEXT,
+  new_value TEXT,
+  success INTEGER DEFAULT 1,
+  details TEXT,
+  audit_type TEXT DEFAULT 'TECHNICAL'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
