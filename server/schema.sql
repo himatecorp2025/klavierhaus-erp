@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS contacts (
   last_contact TEXT,
   next_step TEXT,
   notes TEXT,
+  has_piano INTEGER DEFAULT 0,
+  interested_buying INTEGER DEFAULT 0,
+  interest_brand TEXT,
+  interest_model TEXT,
+  interest_budget REAL DEFAULT 0,
+  interest_timeline TEXT,
+  interest_notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,6 +55,14 @@ CREATE TABLE IF NOT EXISTS pianos (
   estimated_value REAL DEFAULT 0,
   status TEXT,
   notes TEXT,
+  ownership_type TEXT DEFAULT 'Customer owned',
+  display_name TEXT,
+  asset_recorded INTEGER DEFAULT 0,
+  external_reference TEXT,
+  import_source TEXT,
+  import_batch_id TEXT,
+  original_description TEXT,
+  owner_resolution TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(owner_contact_id) REFERENCES contacts(id) ON DELETE SET NULL
@@ -208,6 +223,10 @@ CREATE TABLE IF NOT EXISTS import_batches (
   total_rows INTEGER DEFAULT 0,
   importable_rows INTEGER DEFAULT 0,
   imported_clients INTEGER DEFAULT 0,
+  imported_pianos INTEGER DEFAULT 0,
+  updated_clients INTEGER DEFAULT 0,
+  unidentified_owner_pianos INTEGER DEFAULT 0,
+  client_not_found INTEGER DEFAULT 0,
   skipped_duplicates INTEGER DEFAULT 0,
   missing_data_clients INTEGER DEFAULT 0,
   failed_rows INTEGER DEFAULT 0,
@@ -224,6 +243,12 @@ CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
 CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source
 ON import_batches(import_source, file_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_import_reference
+ON pianos(import_source, external_reference)
+WHERE import_source IS NOT NULL AND external_reference IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id);
+CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution);
+CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
