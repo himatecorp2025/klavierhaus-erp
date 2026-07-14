@@ -7,6 +7,9 @@ let currentLang="en";
 let currentTheme="dark";
 let currentSchedulerWorker=null;
 let currentClientStatusFilter="ALL";
+let currentClientPage=1;
+let showOnlyMissingClientData=false;
+const CLIENTS_PER_PAGE=25;
 let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
 
@@ -815,21 +818,87 @@ function customerStatusOptions(){
  ];
  return opts.map(o=>`<option value="${o[0]}" ${currentClientStatusFilter===o[0]?"selected":""}>${o[1]}</option>`).join("");
 }
+function splitPhoneSegments(value){
+ const raw=String(value||"").replace(/\r/g,"\n").trim();
+ if(!raw) return [];
+ return raw
+  .replace(/\s+(?=(?:phone|mobile|cell(?:\s*#)?|fax|home|work|office)\s*[:#]?)/gi,"\n")
+  .split(/\n|;|\|/)
+  .map(x=>x.trim())
+  .filter(Boolean);
+}
+function normalizeUsPhone(candidate){
+ let digits=String(candidate||"").replace(/\D/g,"");
+ if(digits.length===11 && digits.startsWith("1")) digits=digits.slice(1);
+ if(digits.length!==10) return null;
+ return {digits,display:`(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`,dial:`+1${digits}`};
+}
+function parseClientPhones(value){
+ const segments=splitPhoneSegments(value);
+ const mobile=[],phone=[],fax=[],seen=new Set();
+ const numberPattern=/(?:\+?1[\s().-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}/g;
+ segments.forEach(segment=>{
+  const lower=segment.toLowerCase();
+  const type=/fax/.test(lower)?"fax":/(mobile|cell)/.test(lower)?"mobile":"phone";
+  const matches=segment.match(numberPattern)||[];
+  matches.forEach(match=>{
+   const parsed=normalizeUsPhone(match);
+   if(!parsed || seen.has(parsed.digits)) return;
+   seen.add(parsed.digits);
+   ({mobile,phone,fax})[type].push(parsed);
+  });
+ });
+ const callable=[...mobile,...phone];
+ return {mobile,phone,fax,callable,primary:callable[0]||null,additionalCount:Math.max(0,callable.length-1),raw:String(value||"").trim()};
+}
+function clientHasMissingCoreData(client){
+ const phones=parseClientPhones(client.phone);
+ return (!phones.primary && !String(client.email||"").trim()) || !String(client.address||"").trim();
+}
+function setClientPage(page){currentClientPage=Math.max(1,Number(page)||1);render("contacts");}
+function toggleMissingClientData(){showOnlyMissingClientData=!showOnlyMissingClientData;currentClientPage=1;render("contacts");}
+function clientPaginationHtml(page,totalPages,totalItems){
+ if(totalPages<=1) return `<div class="client-pagination single"><span>${bi("Showing","Megjelenítve")} ${totalItems}</span></div>`;
+ const pages=new Set([1,totalPages,page-2,page-1,page,page+1,page+2]);
+ const valid=[...pages].filter(x=>x>=1&&x<=totalPages).sort((a,b)=>a-b);
+ let last=0,buttons="";
+ valid.forEach(p=>{if(last && p-last>1)buttons+=`<span class="page-gap">…</span>`;buttons+=`<button type="button" class="page-btn ${p===page?"active":""}" onclick="setClientPage(${p})">${p}</button>`;last=p;});
+ return `<div class="client-pagination"><button type="button" class="page-btn" ${page<=1?"disabled":""} onclick="setClientPage(${page-1})">‹</button>${buttons}<button type="button" class="page-btn" ${page>=totalPages?"disabled":""} onclick="setClientPage(${page+1})">›</button><span class="page-summary">${bi("Page","Oldal")} ${page}/${totalPages} · ${totalItems} ${bi("clients","ügyfél")}</span></div>`;
+}
+function setupContactTableScroll(){
+ const top=document.getElementById("contactsScrollTop"),bottom=document.getElementById("contactsTableWrap"),spacer=top?.querySelector(".table-scroll-spacer"),table=bottom?.querySelector("table");
+ if(!top||!bottom||!spacer||!table) return;
+ const syncWidth=()=>{spacer.style.width=`${table.scrollWidth}px`;top.classList.toggle("hidden-scroll",table.scrollWidth<=bottom.clientWidth+1);};
+ let syncing=false;
+ top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;bottom.scrollLeft=top.scrollLeft;syncing=false;});
+ bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;top.scrollLeft=bottom.scrollLeft;syncing=false;});
+ syncWidth();
+ if(window.ResizeObserver){const ro=new ResizeObserver(syncWidth);ro.observe(table);ro.observe(bottom);}
+}
 
 async function renderContactsTable(data){
  const pianos=await api("/api/pianos").catch(()=>[]);
- const q=(document.getElementById("clientSearchInput")?.value||"").trim().toLowerCase();
+ const previousSearch=document.getElementById("clientSearchInput")?.value||"";
+ const q=previousSearch.trim().toLowerCase();
  const enriched=data.map(c=>({...c,_ownedPianoCount:pianos.filter(p=>p.owner_contact_id===c.id).length}));
+ const missingCount=enriched.filter(clientHasMissingCoreData).length;
  const filtered=enriched.filter(c=>{
+   if(showOnlyMissingClientData && !clientHasMissingCoreData(c)) return false;
    if(currentClientStatusFilter!=="ALL" && customerStatusCode(c)!==currentClientStatusFilter) return false;
    if(q.length<3) return true;
    const owned=pianos.filter(p=>p.owner_contact_id===c.id);
    const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
    return hay.includes(q);
  });
+ const totalPages=Math.max(1,Math.ceil(filtered.length/CLIENTS_PER_PAGE));
+ currentClientPage=Math.min(Math.max(1,currentClientPage),totalPages);
+ const start=(currentClientPage-1)*CLIENTS_PER_PAGE;
+ const pageRows=filtered.slice(start,start+CLIENTS_PER_PAGE);
+ const pagination=clientPaginationHtml(currentClientPage,totalPages,filtered.length);
  const s=schemas.contacts;
- $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div>${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search client-search-grid"><label>${tr("searchClients")}<input id="clientSearchInput" value="${(document.getElementById("clientSearchInput")?.value||"").replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p><div class="table-wrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${filtered.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div></div>`;
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search client-search-grid"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="currentClientPage=1;render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
  const input=document.getElementById("clientSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
+ requestAnimationFrame(setupContactTableScroll);
 }
 async function deleteGenericResource(key,id){
  if(!isSuperadmin()) return alert(bi("Superadmin only","Csak szuperadmin"));
@@ -838,7 +907,22 @@ async function deleteGenericResource(key,id){
  try{await api(`/api/${s.api}/${encodeURIComponent(id)}`,{method:"DELETE"}); await render(key);}catch(err){alert(err.message)}
 }
 function htmlText(value){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));}
-function phoneLink(value){const raw=String(value||"").trim();if(!raw)return "";const dial=raw.replace(/[^0-9+*#,;]/g,"");return `<a class="contact-link phone-link" href="tel:${encodeURIComponent(dial)}">${htmlText(raw)}</a>`;}
+function phoneLink(value){
+ const parsed=parseClientPhones(value);
+ if(!parsed.primary) return "";
+ const extra=parsed.additionalCount?`<span class="phone-more" title="${bi("Additional phone numbers are available in the client profile","További telefonszámok az ügyfél adatlapon találhatók")}">+${parsed.additionalCount}</span>`:"";
+ return `<span class="phone-summary"><a class="contact-link phone-link" href="tel:${parsed.primary.dial}">${htmlText(parsed.primary.display)}</a>${extra}</span>`;
+}
+function phoneProfileHtml(value){
+ const parsed=parseClientPhones(value);
+ const lines=[];
+ if(parsed.primary) lines.push(`<p><b>${bi("Primary phone","Elsődleges telefonszám")}:</b> <a class="contact-link phone-link" href="tel:${parsed.primary.dial}">${htmlText(parsed.primary.display)}</a></p>`);
+ parsed.mobile.slice(parsed.primary&&parsed.mobile[0]?.digits===parsed.primary.digits?1:0).forEach(x=>lines.push(`<p><b>${bi("Mobile","Mobil")}:</b> <a class="contact-link phone-link" href="tel:${x.dial}">${htmlText(x.display)}</a></p>`));
+ parsed.phone.filter(x=>!parsed.primary||x.digits!==parsed.primary.digits).forEach(x=>lines.push(`<p><b>${bi("Additional phone","További telefonszám")}:</b> <a class="contact-link phone-link" href="tel:${x.dial}">${htmlText(x.display)}</a></p>`));
+ parsed.fax.forEach(x=>lines.push(`<p><b>${bi("Fax","Fax")}:</b> ${htmlText(x.display)}</p>`));
+ if(parsed.raw) lines.push(`<details class="original-phone-data"><summary>${bi("Original imported phone data","Eredeti importált telefonadat")}</summary><pre>${htmlText(parsed.raw)}</pre></details>`);
+ return lines.join("")||`<p><b>${bi("Phone","Telefon")}:</b> —</p>`;
+}
 function emailLink(value){const raw=String(value||"").trim();if(!raw)return "";return `<a class="contact-link email-link" href="mailto:${encodeURIComponent(raw)}">${htmlText(raw)}</a>`;}
 function mapLink(value){const raw=String(value||"").trim();if(!raw)return "";return `<a class="contact-link map-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}" target="_blank" rel="noopener noreferrer">${htmlText(raw)}</a>`;}
 function cellValue(key,c,r){
@@ -855,7 +939,7 @@ async function clientProfile(id){
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent=bi("Client profile","Ügyfélprofil");
  const interest=boolVal(p.client.interested_buying) ? `<h3>${bi("Purchase Interest","Vásárlási érdeklődés")}</h3><p><b>${bi("Brand","Márka")}:</b> ${p.client.interest_brand||""}</p><p><b>${bi("Model","Típus")}:</b> ${p.client.interest_model||""}</p><p><b>${bi("Budget","Keretösszeg")}:</b> ${money(p.client.interest_budget||0)}</p><p><b>${bi("Timeline","Időzítés")}:</b> ${p.client.interest_timeline||""}</p><p><b>${bi("Notes","Megjegyzés")}:</b> ${p.client.interest_notes||""}</p>` : "";
- $("#form").innerHTML=`<div class="work-card"><h4><span class="customer-status-icon">${customerStatusIcon({...p.client,_ownedPianoCount:p.pianos.length})}</span> ${p.client.name} · ${p.client.id}</h4><p><b>${bi("Phone","Telefon")}:</b> ${phoneLink(p.client.phone)}</p><p><b>${bi("Email","E-mail")}:</b> ${emailLink(p.client.email)}</p><p><b>${bi("Address","Cím")}:</b> ${mapLink(p.client.address)}</p><p><b>${bi("Billing address","Számlázási cím")}:</b> ${p.client.billing_address||"—"}</p><p><b>${bi("Last visit","Utolsó látogatás")}:</b> ${p.lastVisit||""}</p><p><b>${bi("Last job","Legutóbbi munka")}:</b> ${p.lastJob||""}</p>${interest}<h3>${bi("Pianos","Zongorák")}</h3>${p.pianos.map(x=>`<p>${x.display_name||`${x.brand||""} ${x.model||""}`} · ${x.serial_no||""} · ${x.ownership_type||x.ownership||"Customer owned"}</p>`).join("")||`<p>${bi("No pianos linked","Nincs kapcsolt zongora")}</p>`}<div id="clientPianoProfileTools"></div><h3>${bi("Jobs","Munkák")}</h3>${p.jobs.map(x=>`<p>${x.start_time} · ${x.title} · ${x.assigned_to} · ${x.status}</p>`).join("")||`<p>${bi("No jobs","Nincs munka")}</p>`}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button></div>`;
+ $("#form").innerHTML=`<div class="work-card"><h4><span class="customer-status-icon">${customerStatusIcon({...p.client,_ownedPianoCount:p.pianos.length})}</span> ${p.client.name} · ${p.client.id}</h4>${phoneProfileHtml(p.client.phone)}<p><b>${bi("Email","E-mail")}:</b> ${emailLink(p.client.email)}</p><p><b>${bi("Address","Cím")}:</b> ${mapLink(p.client.address)}</p><p><b>${bi("Billing address","Számlázási cím")}:</b> ${p.client.billing_address||"—"}</p><p><b>${bi("Last visit","Utolsó látogatás")}:</b> ${p.lastVisit||""}</p><p><b>${bi("Last job","Legutóbbi munka")}:</b> ${p.lastJob||""}</p>${interest}<h3>${bi("Pianos","Zongorák")}</h3>${p.pianos.map(x=>`<p>${x.display_name||`${x.brand||""} ${x.model||""}`} · ${x.serial_no||""} · ${x.ownership_type||x.ownership||"Customer owned"}</p>`).join("")||`<p>${bi("No pianos linked","Nincs kapcsolt zongora")}</p>`}<div id="clientPianoProfileTools"></div><h3>${bi("Jobs","Munkák")}</h3>${p.jobs.map(x=>`<p>${x.start_time} · ${x.title} · ${x.assigned_to} · ${x.status}</p>`).join("")||`<p>${bi("No jobs","Nincs munka")}</p>`}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button></div>`;
  $("#form").onsubmit=e=>e.preventDefault();
  renderClientPianoProfileTools(p.client.id);
 }
