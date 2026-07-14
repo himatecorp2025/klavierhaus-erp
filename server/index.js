@@ -9,10 +9,18 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Database = require("better-sqlite3");
+let webpush=null;
+try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable:",error.message);}
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3030;
+const VAPID_PUBLIC_KEY=process.env.VAPID_PUBLIC_KEY||"";
+const VAPID_PRIVATE_KEY=process.env.VAPID_PRIVATE_KEY||"";
+const VAPID_SUBJECT=process.env.VAPID_SUBJECT||"mailto:admin@klavierhaus.com";
+const PUSH_CONFIGURED=Boolean(webpush&&VAPID_PUBLIC_KEY&&VAPID_PRIVATE_KEY);
+if(PUSH_CONFIGURED) webpush.setVapidDetails(VAPID_SUBJECT,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY);
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if(!JWT_SECRET || JWT_SECRET.length < 32){
   throw new Error("JWT_SECRET is required and must be at least 32 characters long");
@@ -52,6 +60,61 @@ function audit(req, action, module, recordId, oldValue=null, newValue=null, succ
 function workAudit(req, action, recordId, oldValue=null, newValue=null, success=1, details=''){
   audit(req,action,'jobs',recordId,oldValue,newValue,success,details,'WORK');
 }
+
+function notificationPreferenceColumn(type){
+  return ({JOB_ASSIGNED:'job_assigned',JOB_TRANSFERRED:'job_transferred',SUBTASK_TRANSFERRED:'job_transferred',JOB_UPDATED:'job_updated',JOB_DELETED:'job_deleted',JOB_STARTING_IN_ONE_HOUR:'one_hour_reminder',DIRECT_MESSAGE:'direct_message'})[type]||null;
+}
+function notificationPreferenceEnabled(userId,type){
+  const column=notificationPreferenceColumn(type); if(!column)return true;
+  const row=db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(userId);
+  return !row || Number(row[column]??1)===1;
+}
+function notificationPayloadForUser(row,userId){
+  const u=db.prepare('SELECT id,name FROM users WHERE id=?').get(userId)||{};
+  const unreadCount=db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(userId).c;
+  return {notificationId:row.id,unreadCount,type:row.notification_type,title_en:row.title_en,title_hu:row.title_hu,body_en:row.body_en,body_hu:row.body_hu,custom_message:row.custom_message||'',related_job_id:row.related_job_id||'',sender_name:row.sender_name||'',url:'/?openNotifications=1'};
+}
+function sendPushForNotification(row){
+  if(!PUSH_CONFIGURED || !notificationPreferenceEnabled(row.recipient_user_id,row.notification_type))return;
+  const pref=db.prepare('SELECT push_enabled FROM notification_preferences WHERE user_id=?').get(row.recipient_user_id);
+  if(pref && Number(pref.push_enabled)===0)return;
+  const subscriptions=db.prepare('SELECT id,subscription_json,language FROM push_subscriptions WHERE user_id=?').all(row.recipient_user_id);
+  subscriptions.forEach(sub=>{
+    const base=notificationPayloadForUser(row,row.recipient_user_id);const lang=sub.language==='hu'?'hu':'en';const payload=JSON.stringify({...base,language:lang,title:lang==='hu'?row.title_hu:row.title_en,body:row.custom_message||(lang==='hu'?row.body_hu:row.body_en)});
+    let parsed;try{parsed=JSON.parse(sub.subscription_json)}catch(_e){return;}
+    webpush.sendNotification(parsed,payload).catch(error=>{
+      if(error.statusCode===404||error.statusCode===410) db.prepare('DELETE FROM push_subscriptions WHERE id=?').run(sub.id);
+      else console.warn('push send failed:',error.message);
+    });
+  });
+}
+function createNotification({recipientUserId,senderUserId=null,type,job=null,titleEn,titleHu,bodyEn,bodyHu,customMessage='',metadata={},eventKey=null}){
+  if(!recipientUserId)return null;
+  const recipient=db.prepare("SELECT id,status FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return null;
+  if(eventKey){const existing=db.prepare('SELECT * FROM notifications WHERE event_key=?').get(eventKey);if(existing)return existing;}
+  const id=rid('NTF');
+  try{db.prepare(`INSERT INTO notifications(id,recipient_user_id,sender_user_id,notification_type,related_job_id,title_en,title_hu,body_en,body_hu,custom_message,metadata_json,event_key,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE')`).run(id,recipientUserId,senderUserId,type,job?.id||null,titleEn,titleHu,bodyEn,bodyHu,customMessage||null,JSON.stringify(metadata||{}),eventKey||null);}catch(error){if(String(error.message).includes('UNIQUE'))return eventKey?db.prepare('SELECT * FROM notifications WHERE event_key=?').get(eventKey):null;throw error;}
+  const row=db.prepare(`SELECT n.*,su.name sender_name FROM notifications n LEFT JOIN users su ON su.id=n.sender_user_id WHERE n.id=?`).get(id);
+  sendPushForNotification(row);return row;
+}
+function jobDescription(job){return `${job.title||'Job'}${job.client_name?` · ${job.client_name}`:''}${job.start_time?` · ${job.start_time.replace('T',' ')}`:''}`;}
+function notifyAssigned(job,sender,type='JOB_ASSIGNED'){
+  if(!job?.assigned_user_id || String(job.assigned_user_id)===String(sender?.id||''))return;
+  const subtask=String(job.job_type||'')==='Part-work'; const finalType=subtask?'SUBTASK_TRANSFERRED':type;
+  createNotification({recipientUserId:job.assigned_user_id,senderUserId:sender?.id,type:finalType,job,eventKey:`${finalType}:${job.id}:${job.assigned_user_id}:${job.updated_at||job.created_at||Date.now()}`,titleEn:subtask?'Part-work assigned to you':'New job assigned to you',titleHu:subtask?'Részmunka került hozzád':'Új munkát rendeltek hozzád',bodyEn:jobDescription(job),bodyHu:jobDescription(job),metadata:{job_id:job.id}});
+}
+function nyLocalDateTime(date){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'}).formatToParts(date).reduce((a,p)=>(a[p.type]=p.value,a),{});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+function generateOneHourReminders(){
+  try{
+    const from=nyLocalDateTime(new Date(Date.now()+55*60000)),to=nyLocalDateTime(new Date(Date.now()+65*60000));
+    const rows=db.prepare(jobsSelectSql("WHERE j.status NOT IN ('Completed','Failed') AND j.start_time>=? AND j.start_time<=? AND j.assigned_user_id IS NOT NULL")).all(from,to);
+    rows.forEach(job=>createNotification({recipientUserId:job.assigned_user_id,type:'JOB_STARTING_IN_ONE_HOUR',job,eventKey:`ONE_HOUR:${job.id}:${job.start_time}`,titleEn:'Job starts in one hour',titleHu:'A munkád egy órán belül kezdődik',bodyEn:jobDescription(job),bodyHu:jobDescription(job),metadata:{job_id:job.id,start_time:job.start_time}}));
+  }catch(error){console.warn('one-hour reminder scan failed:',error.message);}
+}
+
 function hasPermission(user, permission){
   if(isSuperadminUser(user)) return true;
   if(!user) return false;
@@ -573,6 +636,29 @@ app.get("/api/schedule-workers", auth, (req,res)=>{
 });
 
 
+
+
+
+app.post('/api/cron/notifications',(req,res)=>{
+  const secret=String(process.env.CRON_SECRET||'');
+  if(!secret || String(req.headers['x-cron-secret']||'')!==secret)return res.status(403).json({error:'CRON_FORBIDDEN'});
+  generateOneHourReminders();res.json({ok:true,checked_at:new Date().toISOString()});
+});
+
+app.get('/api/push/public-key',auth,(req,res)=>res.json({configured:PUSH_CONFIGURED,publicKey:VAPID_PUBLIC_KEY||''}));
+app.post('/api/push/subscribe',auth,(req,res)=>{
+  const subscription=req.body?.subscription;if(!subscription?.endpoint)return res.status(400).json({error:'INVALID_PUSH_SUBSCRIPTION'});
+  const existing=db.prepare('SELECT id FROM push_subscriptions WHERE endpoint=?').get(subscription.endpoint);const id=existing?.id||rid('PSH');
+  db.prepare(`INSERT INTO push_subscriptions(id,user_id,endpoint,subscription_json,user_agent,language,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,user_agent=excluded.user_agent,language=excluded.language,updated_at=CURRENT_TIMESTAMP`).run(id,req.user.id,subscription.endpoint,JSON.stringify(subscription),String(req.headers['user-agent']||''),req.body?.language==='hu'?'hu':'en');
+  db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);res.json({ok:true,configured:PUSH_CONFIGURED});
+});
+app.delete('/api/push/subscribe',auth,(req,res)=>{const endpoint=String(req.body?.endpoint||'');if(endpoint)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?').run(req.user.id,endpoint);else db.prepare('DELETE FROM push_subscriptions WHERE user_id=?').run(req.user.id);res.json({ok:true});});
+app.get('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
+app.put('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);const fields=['push_enabled','job_assigned','job_transferred','job_updated','job_deleted','one_hour_reminder','direct_message'];const cols=fields.filter(f=>req.body[f]!==undefined);if(cols.length)db.prepare(`UPDATE notification_preferences SET ${cols.map(f=>`${f}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).run(...cols.map(f=>Number(req.body[f])?1:0),req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
+app.get('/api/notifications',auth,(req,res)=>{const active=String(req.query.active??'1')!=='0';const rows=db.prepare(`SELECT n.*,su.name sender_name FROM notifications n LEFT JOIN users su ON su.id=n.sender_user_id WHERE n.recipient_user_id=? ${active?"AND n.status='ACTIVE'":''} ORDER BY n.created_at DESC LIMIT 500`).all(req.user.id);res.json(rows);});
+app.get('/api/notifications/count',auth,(req,res)=>res.json({count:db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(req.user.id).c}));
+app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prepare('SELECT * FROM notifications WHERE id=? AND recipient_user_id=?').get(req.params.id,req.user.id);if(!row)return res.status(404).json({error:'NOTIFICATION_NOT_FOUND'});db.prepare("UPDATE notifications SET status='ACKNOWLEDGED',acknowledged_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);res.json({ok:true});});
+app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
 app.get("/api/planned-jobs", auth, (req,res)=>{
   const includeAll=req.query.include_all==="1" || req.user.role==="SUPERADMIN";
@@ -1323,6 +1409,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
   const created=db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
   workAudit(req,'CREATE',id,null,created,1,`retroactive=${new Date(created.start_time).getTime()<Date.now()}`);
+  notifyAssigned(created,req.user,'JOB_ASSIGNED');
   res.json(created);
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
@@ -1368,6 +1455,17 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
 
   const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
   workAudit(req,'UPDATE',job.id,job,updated,1,`retroactive=${new Date(updated.start_time).getTime()<Date.now()}; closed_before=${['Completed','Partially completed','Failed'].includes(String(job.status||''))}`);
+  const assigneeChanged=String(job.assigned_user_id||'')!==String(updated.assigned_user_id||'');
+  if(assigneeChanged) notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
+  else {
+    const changes=[];
+    if(job.start_time!==updated.start_time||job.end_time!==updated.end_time)changes.push('time');
+    if(job.client_id!==updated.client_id||job.client_name!==updated.client_name)changes.push('client');
+    if(job.service_address!==updated.service_address)changes.push('location');
+    if(job.priority!==updated.priority)changes.push('priority');
+    if(job.title!==updated.title||job.instructions!==updated.instructions)changes.push('details');
+    if(changes.length && updated.assigned_user_id && String(updated.assigned_user_id)!==String(req.user.id)) createNotification({recipientUserId:updated.assigned_user_id,senderUserId:req.user.id,type:'JOB_UPDATED',job:updated,eventKey:`JOB_UPDATED:${updated.id}:${updated.updated_at}:${changes.join('-')}`,titleEn:'Your assigned job was updated',titleHu:'Módosították a hozzád rendelt munkát',bodyEn:`${jobDescription(updated)} · Changed: ${changes.join(', ')}`,bodyHu:`${jobDescription(updated)} · Módosult: ${changes.join(', ')}`,metadata:{changes}});
+  }
   res.json(updated);
 });
 
@@ -1389,6 +1487,7 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
 
   const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
   workAudit(req,'REASSIGN',job.id,job,updated,1,`from=${job.assigned_to||''}; to=${updated.assigned_to||''}`);
+  notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
   res.json(updated);
 });
 
@@ -1401,6 +1500,7 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
+  if(job.assigned_user_id && String(job.assigned_user_id)!==String(req.user.id)) createNotification({recipientUserId:job.assigned_user_id,senderUserId:req.user.id,type:'JOB_DELETED',titleEn:'An assigned job was deleted',titleHu:'Töröltek egy hozzád rendelt munkát',bodyEn:jobDescription(job),bodyHu:jobDescription(job),metadata:{deleted_job_id:job.id}});
   res.json({ok:true,deleted_job_id:job.id,deleted_logs:logs.length});
 });
 
@@ -1693,7 +1793,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "audit_log",
       "backup_log",
       "role_permissions",
-      "app_settings"
+      "app_settings",
+      "notifications",
+      "push_subscriptions",
+      "notification_preferences"
     ].forEach(clear);
 
     if(exists("users")){
@@ -1748,4 +1851,6 @@ app.use((err,req,res,next)=>{
   if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.message||"UPLOAD_ERROR"); return res.status(400).json({error:code}); }
   next();
 });
-app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
+generateOneHourReminders();
+setInterval(generateOneHourReminders,5*60*1000).unref();
+app.listen(PORT,()=>console.log(`Klavierhaus v6.4 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
