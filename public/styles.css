@@ -259,3 +259,9 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 .phone-summary{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.phone-more{display:inline-grid;place-items:center;min-width:25px;height:22px;padding:0 6px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--blue);font-size:11px;font-weight:900}
 .original-phone-data{margin-top:8px}.original-phone-data summary{cursor:pointer;color:var(--blue);font-weight:800}.original-phone-data pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2);padding:10px;border-radius:10px;border:1px solid var(--line)}
 @media(max-width:900px){.toolbar-actions{width:100%;justify-content:flex-start}.client-pagination{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px}.page-summary{white-space:nowrap}.table-scroll-top{height:14px}}
+
+
+/* Piano import summary and linked import states */
+.import-stat.newMatched strong,.import-stat.clientsReceivingPianos strong,.import-stat.clientsChangingToOwner strong{color:var(--green)}
+.import-stat.newUnidentifiedOwner strong,.import-stat.clientNotFound strong{color:var(--orange)}
+.piano-owner-unidentified{color:var(--orange);font-weight:800}
