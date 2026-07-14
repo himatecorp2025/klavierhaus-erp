@@ -24,6 +24,8 @@ let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
 let notificationPollTimer=null;
 let notificationUnreadCount=0;
+let notificationGateResolved=false;
+let notificationGateBusy=false;
 let currentNotifications=[];
 
 const navs={
@@ -490,13 +492,117 @@ function formatFinanceDate(value){
 }
 function openMyProfile(){openUser(user,true);}
 
+function getNotificationDeviceId(){
+ let value=localStorage.getItem('kh_notification_device_id');
+ if(!value){value=`dev-${crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2)}`;localStorage.setItem('kh_notification_device_id',value);}
+ return value;
+}
+function notificationPlatform(){
+ const ua=navigator.userAgent||'';
+ if(/iPhone|iPad|iPod/i.test(ua))return 'ios';
+ if(/Android/i.test(ua))return 'android';
+ if(/Windows/i.test(ua))return 'windows';
+ if(/Macintosh|Mac OS X/i.test(ua))return 'macos';
+ return 'other';
+}
+function notificationStatusFromClient(subscription){
+ if(!('Notification'in window)||!('serviceWorker'in navigator)||!('PushManager'in window))return 'UNSUPPORTED';
+ if(Notification.permission==='denied')return 'BLOCKED';
+ if(Notification.permission==='granted'&&subscription)return 'ENABLED';
+ return 'NOT_CONFIGURED';
+}
+function notificationGateCopy(status){
+ const hu=currentLang==='hu';
+ const base={
+  NOT_CONFIGURED:[hu?'Munkaértesítések engedélyezése':'Enable work notifications',hu?'Az értesítések kötelezők a munkák, időpontváltozások, belső üzenetek és emlékeztetők fogadásához.':'Notifications are required to receive job assignments, schedule changes, internal messages and reminders.'],
+  BLOCKED:[hu?'Az értesítések le vannak tiltva':'Notifications are blocked',hu?'Engedélyezd a Klavierhaus ERP értesítéseit az eszköz vagy a böngésző beállításaiban, majd nyomd meg az Ellenőrzés gombot.':'Enable notifications for Klavierhaus ERP in your device or browser settings, then press Check again.'],
+  UNSUPPORTED:[hu?'Az eszköz nem támogatja a kötelező értesítéseket':'Required notifications are not supported',hu?'Ezen az eszközön vagy böngészőben a Web Push nem érhető el. Használj támogatott Chrome, Edge vagy kezdőképernyőre telepített iOS PWA környezetet.':'Web Push is unavailable on this device or browser. Use a supported Chrome, Edge, or installed iOS Home Screen PWA environment.'],
+  SERVER_NOT_CONFIGURED:[hu?'A push szolgáltatás nincs beállítva':'Push service is not configured',hu?'A rendszergazdának be kell állítania a VAPID kulcsokat a szerveren.':'The administrator must configure the VAPID keys on the server.']
+ };
+ return base[status]||base.NOT_CONFIGURED;
+}
+function notificationHelpHtml(){
+ const platform=notificationPlatform(),hu=currentLang==='hu';
+ if(platform==='android')return `<h3>${hu?'Android / Chrome':'Android / Chrome'}</h3><ol><li>${hu?'Nyisd meg a böngésző webhelybeállításait.':'Open the browser site settings.'}</li><li>${hu?'Válaszd az Értesítések lehetőséget.':'Choose Notifications.'}</li><li>${hu?'Állítsd Engedélyezve állapotra, majd térj vissza és ellenőrizd újra.':'Set it to Allow, return here, and check again.'}</li></ol>`;
+ if(platform==='ios')return `<h3>iPhone / iPad</h3><ol><li>${hu?'Telepítsd az ERP-t a kezdőképernyőre a Megosztás → Főképernyőhöz adás funkcióval.':'Install the ERP to the Home Screen using Share → Add to Home Screen.'}</li><li>${hu?'Nyisd meg a telepített alkalmazást.':'Open the installed app.'}</li><li>${hu?'Az iOS beállításaiban engedélyezd az értesítéseket a Klavierhaus számára.':'Enable Klavierhaus notifications in iOS Settings.'}</li></ol>`;
+ return `<h3>${hu?'Asztali böngésző':'Desktop browser'}</h3><ol><li>${hu?'Nyisd meg a webhely információs ikonját a címsorban.':'Open the site information icon in the address bar.'}</li><li>${hu?'Az Értesítések beállítást állítsd Engedélyezve értékre.':'Set Notifications to Allow.'}</li><li>${hu?'Térj vissza, majd kattints az Ellenőrzés gombra.':'Return and click Check again.'}</li></ol>`;
+}
+function showNotificationActivationGate(status,detail=''){
+ const gate=document.getElementById('notificationActivationGate'),app=document.getElementById('app');
+ if(!gate)return;
+ const [title,text]=notificationGateCopy(status);
+ document.getElementById('notificationGateTitle').textContent=title;
+ document.getElementById('notificationGateText').textContent=text;
+ document.getElementById('notificationGateStatus').textContent=detail||'';
+ const enableButton=document.getElementById('notificationGateEnable'),checkButton=document.getElementById('notificationGateCheck'),helpButton=document.getElementById('notificationGateHelp'),logoutButton=document.getElementById('notificationGateLogout');
+ if(enableButton){enableButton.textContent=bi('Enable notifications','Értesítések engedélyezése');enableButton.classList.toggle('hidden',status==='BLOCKED'||status==='UNSUPPORTED'||status==='SERVER_NOT_CONFIGURED');}
+ if(checkButton)checkButton.textContent=bi('Check again','Ellenőrzés újra');
+ if(helpButton)helpButton.textContent=bi('How to enable notifications','Értesítések engedélyezésének lépései');
+ if(logoutButton)logoutButton.textContent=bi('Log out','Kijelentkezés');
+ gate.classList.remove('hidden');app?.classList.add('hidden');document.body.classList.add('notification-gate-open');
+}
+function hideNotificationActivationGate(){
+ document.getElementById('notificationActivationGate')?.classList.add('hidden');
+ document.body.classList.remove('notification-gate-open');
+ notificationGateResolved=true;
+}
+async function getCurrentPushSubscription(){
+ if(!('serviceWorker'in navigator)||!('PushManager'in window))return null;
+ const registration=await navigator.serviceWorker.ready;
+ return registration.pushManager.getSubscription();
+}
+async function reportPushStatus(status,subscription=null){
+ try{return await api('/api/push/status',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),status,endpoint:subscription?.endpoint||'',platform:notificationPlatform(),language:currentLang})});}catch(_e){return null;}
+}
+async function evaluateMandatoryNotificationGate({showGate=true}={}){
+ let config;
+ try{config=await api('/api/notifications/config');}catch(error){if(showGate)showNotificationActivationGate('SERVER_NOT_CONFIGURED',error.message);return false;}
+ if(!config.configured){if(showGate)showNotificationActivationGate('SERVER_NOT_CONFIGURED');return false;}
+ let subscription=null;
+ try{subscription=await getCurrentPushSubscription();}catch(_e){}
+ const status=notificationStatusFromClient(subscription);
+ await reportPushStatus(status,subscription);
+ if(status==='ENABLED'){
+  const check=await api('/api/push/check',{method:'POST',body:JSON.stringify({device_id:getNotificationDeviceId(),endpoint:subscription.endpoint})}).catch(()=>null);
+  if(check?.subscribed){hideNotificationActivationGate();return true;}
+ }
+ if(showGate)showNotificationActivationGate(status);
+ return false;
+}
+async function enableMandatoryNotifications(){
+ if(notificationGateBusy)return;notificationGateBusy=true;
+ try{
+  const key=await api('/api/push/public-key');
+  if(!key.configured||!key.publicKey){showNotificationActivationGate('SERVER_NOT_CONFIGURED');return;}
+  if(!('Notification'in window)||!('serviceWorker'in navigator)||!('PushManager'in window)){showNotificationActivationGate('UNSUPPORTED');return;}
+  const permission=await Notification.requestPermission();
+  if(permission!=='granted'){await reportPushStatus(permission==='denied'?'BLOCKED':'NOT_CONFIGURED');showNotificationActivationGate(permission==='denied'?'BLOCKED':'NOT_CONFIGURED');return;}
+  const registration=await navigator.serviceWorker.ready;
+  let subscription=await registration.pushManager.getSubscription();
+  if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(key.publicKey)});
+  await api('/api/push/subscribe',{method:'POST',body:JSON.stringify({subscription,language:currentLang,device_id:getNotificationDeviceId(),platform:notificationPlatform()})});
+  const ok=await evaluateMandatoryNotificationGate({showGate:true});
+  if(ok){document.getElementById('app')?.classList.remove('hidden');render(isMobileAppViewport()?'today':'scheduler');showToast(bi('Notifications enabled successfully.','Az értesítések sikeresen engedélyezve.'),'success');}
+ }catch(error){showNotificationActivationGate(Notification.permission==='denied'?'BLOCKED':'NOT_CONFIGURED',error.message);}finally{notificationGateBusy=false;}
+}
+function initNotificationActivationGate(){
+ const enable=document.getElementById('notificationGateEnable'),check=document.getElementById('notificationGateCheck'),help=document.getElementById('notificationGateHelp'),logout=document.getElementById('notificationGateLogout'),panel=document.getElementById('notificationGateHelpPanel');
+ if(enable)enable.onclick=enableMandatoryNotifications;
+ if(check)check.onclick=async()=>{const ok=await evaluateMandatoryNotificationGate({showGate:true});if(ok){document.getElementById('app')?.classList.remove('hidden');render(isMobileAppViewport()?'today':'scheduler');}};
+ if(help)help.onclick=()=>{panel.innerHTML=notificationHelpHtml();panel.classList.toggle('hidden');};
+ if(logout)logout.onclick=logoutNow;
+ const recheck=async()=>{if(!token||document.visibilityState==='hidden')return;const gate=document.getElementById('notificationActivationGate');const wasLocked=gate&&!gate.classList.contains('hidden');const ok=await evaluateMandatoryNotificationGate({showGate:true});const app=document.getElementById('app');if(!ok){app?.classList.add('hidden');return;}app?.classList.remove('hidden');if(wasLocked)render(currentView||(isMobileAppViewport()?'today':'scheduler'),{noHistory:true});};
+ document.addEventListener('visibilitychange',recheck);
+ window.addEventListener('focus',recheck);
+}
+
 async function boot(){
  if(!token)return;
  await loadBranding();
  loadLanguage();
  loadTheme();
  $("#login").classList.add("hidden");
- $("#app").classList.remove("hidden");
+ // Application visibility is controlled by the mandatory notification gate.
  document.body.classList.add("sidebar-collapsed");
  const sb=document.getElementById("sidebarToggle");
  if(sb) sb.onclick=toggleSidebar;
@@ -518,7 +624,12 @@ async function boot(){
  initMobileAppShell();
  initCustomSelectSystem();
  initNotificationCenter();
- render(isMobileAppViewport()?"today":"scheduler");
+ initNotificationActivationGate();
+ const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
+ if(notificationsReady){
+   document.getElementById('app')?.classList.remove('hidden');
+   render(isMobileAppViewport()?"today":"scheduler");
+ }
  applyLanguageToDOM();
 }
 function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
@@ -2285,10 +2396,7 @@ async function openDirectMessage(selectedUser=null){
 }
 function updateMessageCounter(textarea){const counter=document.getElementById('messageCharacterCounter');if(counter)counter.textContent=`${textarea.value.length} / 250`;}
 function urlBase64ToUint8Array(base64String){const padding='='.repeat((4-base64String.length%4)%4);const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(base64);return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));}
-async function enablePushNotifications(){
- if(!('serviceWorker'in navigator)||!('PushManager'in window)||!('Notification'in window))return showError(bi('Push notifications are not supported on this device.','A push értesítések nem támogatottak ezen az eszközön.'));
- try{const key=await api('/api/push/public-key');if(!key.configured||!key.publicKey)return showError(bi('Push notifications are not configured on the server.','A push értesítések nincsenek beállítva a szerveren.'));const permission=await Notification.requestPermission();if(permission!=='granted')return showError(bi('Notification permission was not granted.','Az értesítési engedély nem lett megadva.'));const registration=await navigator.serviceWorker.ready;let subscription=await registration.pushManager.getSubscription();if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(key.publicKey)});await api('/api/push/subscribe',{method:'POST',body:JSON.stringify({subscription,language:currentLang})});showToast(bi('Push notifications enabled.','A push értesítések engedélyezve.'),'success');}catch(error){showError(error.message);}
-}
+async function enablePushNotifications(){return enableMandatoryNotifications();}
 async function renderUsers(){
  let u=await api("/api/users");
  const canAdd=isAdmin();
