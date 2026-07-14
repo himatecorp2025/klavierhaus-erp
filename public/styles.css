@@ -135,3 +135,5 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 :root[data-theme="light"] .logout-btn{background:#221522!important;color:#ffffff!important}
 :root[data-theme="light"] .logout-btn:hover{background:#4b2348!important;color:#ffffff!important}
 @media(max-width:720px){.client-search-grid{grid-template-columns:1fr}.customer-status-icon{font-size:19px;min-width:30px}}
+
+.permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px}.permission-card{border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--panel-2)}.permission-row{display:flex;gap:10px;align-items:center;padding:8px 0}.permission-row input{width:auto}.settings-note{color:var(--muted)}
