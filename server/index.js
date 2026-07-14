@@ -479,7 +479,7 @@ app.use('/api',(req,res,next)=>{
   if(!['POST','PUT','DELETE'].includes(req.method) || req.path==='/login') return next();
   const started=Date.now();
   res.on('finish',()=>{
-    if(req.path.startsWith('/audit-log') || isSuperadminUser(req.user)) return;
+    if(req.skipAutoAudit || req.path.startsWith('/audit-log') || isSuperadminUser(req.user)) return;
     const safeBody={...(req.body||{})}; if(safeBody.password) safeBody.password='[REDACTED]';
     const isWork=req.path==='/jobs'||req.path.startsWith('/jobs/');
     audit(req,req.method,isWork?'jobs':(req.path.split('/')[1]||'api'),req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`,isWork?'WORK':'TECHNICAL');
@@ -1258,7 +1258,7 @@ app.post('/api/imports/clients/analyze',auth,permit('ADMIN'),clientImportUpload.
     const existingBatch=db.prepare('SELECT * FROM import_batches WHERE import_source=? AND file_hash=?').get(analysis.source,fileHash);
     if(existingBatch?.status==='COMPLETED')return res.status(409).json({error:'FILE_ALREADY_IMPORTED',batchId:existingBatch.id});
     const batchId=existingBatch?.id||`IMP-${Date.now()}-${Math.floor(Math.random()*100000)}`;
-    const summaryJson=JSON.stringify(analysis.summary);
+    const summaryJson=JSON.stringify({summary:analysis.summary,records:analysis.records,source:analysis.source});
     if(existingBatch){
       db.prepare(`UPDATE import_batches SET original_filename=?,status='PREVIEW',total_rows=?,importable_rows=?,skipped_duplicates=?,missing_data_clients=?,failed_rows=?,imported_by_user_id=?,summary_json=? WHERE id=?`).run(req.file.originalname,analysis.summary.totalRows,analysis.summary.newClients,analysis.summary.alreadyImported+analysis.summary.possibleDuplicates,analysis.summary.missingDataClients,analysis.summary.invalidRows,req.user.id,summaryJson,batchId);
     }else{
@@ -1271,6 +1271,103 @@ app.post('/api/imports/clients/analyze',auth,permit('ADMIN'),clientImportUpload.
     const known=['INVALID_XLSX_STRUCTURE','IMPORT_READY_SHEET_MISSING','IMPORT_READY_EMPTY','MISSING_COLUMNS'];
     const code=known.includes(err.message)?err.message:'IMPORT_ANALYSIS_FAILED';
     res.status(400).json({error:code,missingColumns:err.missingColumns||[]});
+  }
+});
+
+
+app.post('/api/imports/clients/:batchId/commit',auth,permit('ADMIN'),(req,res)=>{
+  const batchId=String(req.params.batchId||'').trim();
+  const batch=db.prepare('SELECT * FROM import_batches WHERE id=?').get(batchId);
+  if(!batch)return res.status(404).json({error:'IMPORT_BATCH_NOT_FOUND'});
+  if(batch.status==='COMPLETED')return res.status(409).json({error:'IMPORT_BATCH_ALREADY_COMPLETED'});
+  if(batch.status!=='PREVIEW')return res.status(409).json({error:'IMPORT_BATCH_NOT_READY'});
+  if(!isSuperadminUser(req.user) && String(batch.imported_by_user_id||'')!==String(req.user.id||''))return res.status(403).json({error:'IMPORT_BATCH_OWNER_MISMATCH'});
+
+  let stored;
+  try{stored=JSON.parse(batch.summary_json||'{}');}catch(_e){stored={};}
+  const records=Array.isArray(stored.records)?stored.records:[];
+  const source=String(stored.source||batch.import_source||'NEW_YORK_CUSTOMER_LIST_2024');
+  if(!records.length)return res.status(409).json({error:'IMPORT_PREVIEW_DATA_MISSING'});
+
+  const commitImport=db.transaction(()=>{
+    const existing=db.prepare('SELECT id,name,email,phone,address,external_reference,import_source FROM contacts').all();
+    const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
+    const existingEmails=new Map(); const existingPhones=new Map(); const existingNameAddress=new Map();
+    for(const c of existing){
+      for(const e of normalizeEmailList(c.email))if(!existingEmails.has(e))existingEmails.set(e,c);
+      for(const p of normalizePhones(c.phone))if(!existingPhones.has(p))existingPhones.set(p,c);
+      const key=`${normalizeText(c.name)}::${normalizeText(c.address)}`;
+      if(normalizeText(c.name)&&normalizeText(c.address)&&!existingNameAddress.has(key))existingNameAddress.set(key,c);
+    }
+
+    const idRows=db.prepare("SELECT id FROM contacts WHERE id LIKE 'C-%'").all();
+    let maxId=0;
+    for(const row of idRows){const m=String(row.id||'').match(/^C-(\d{1,5})$/);if(m)maxId=Math.max(maxId,Number(m[1]));}
+    const nextImportContactId=()=>{maxId+=1;if(maxId>99999)throw new Error('CONTACT_ID_LIMIT_REACHED');return `C-${String(maxId).padStart(5,'0')}`;};
+
+    const insert=db.prepare(`INSERT INTO contacts(
+      id,name,company,type,email,phone,address,billing_address,priority,status,owner,relationship_holder,loss_risk,last_contact,next_step,notes,
+      has_piano,interested_buying,external_reference,import_source,import_batch_id
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+
+    let importedClients=0, skippedDuplicates=0, missingDataClients=0, failedRows=0;
+    const skipped=[];
+    for(const rec of records){
+      if(rec.category!=='NEW'){skippedDuplicates+=1;continue;}
+      if(!String(rec.name||'').trim() || !String(rec.externalReference||'').trim()){failedRows+=1;continue;}
+      const refKey=`${source}::${rec.externalReference}`;
+      let match=exactRefs.get(refKey);
+      let reason=match?'EXTERNAL_REFERENCE_MATCH':'';
+      if(!match){
+        match=normalizeEmailList(rec.email).map(e=>existingEmails.get(e)).find(Boolean);
+        if(match)reason='EMAIL_MATCH';
+      }
+      if(!match){
+        match=normalizePhones(rec.phone).map(p=>existingPhones.get(p)).find(Boolean);
+        if(match)reason='PHONE_MATCH';
+      }
+      if(!match){
+        match=existingNameAddress.get(`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`);
+        if(match)reason='NAME_ADDRESS_MATCH';
+      }
+      if(match){skippedDuplicates+=1;skipped.push({externalReference:rec.externalReference,name:rec.name,reason,matchId:match.id});continue;}
+
+      const id=nextImportContactId();
+      const status='Active';
+      insert.run(
+        id,String(rec.name||'').trim(),'','General',String(rec.email||'').trim(),String(rec.phone||'').trim(),String(rec.serviceAddress||'').trim(),String(rec.billingAddress||'').trim(),
+        'Medium',status,'',String(rec.contactFullName||'').trim(),'Unknown',rec.lastContact||null,String(rec.nextStep||'').trim(),String(rec.notes||'').trim(),
+        0,0,String(rec.externalReference||'').trim(),source,batchId
+      );
+      const added={id,name:rec.name,email:rec.email,phone:rec.phone,address:rec.serviceAddress,external_reference:rec.externalReference,import_source:source};
+      exactRefs.set(refKey,added);
+      for(const e of normalizeEmailList(rec.email))if(!existingEmails.has(e))existingEmails.set(e,added);
+      for(const p of normalizePhones(rec.phone))if(!existingPhones.has(p))existingPhones.set(p,added);
+      const nameAddressKey=`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`;
+      if(normalizeText(rec.name)&&normalizeText(rec.serviceAddress)&&!existingNameAddress.has(nameAddressKey))existingNameAddress.set(nameAddressKey,added);
+      importedClients+=1;
+      if(rec.hasMissingData)missingDataClients+=1;
+    }
+
+    const result={
+      batchId,source,filename:batch.original_filename,totalRows:records.length,importedClients,missingDataClients,skippedDuplicates,failedRows,skipped
+    };
+    db.prepare(`UPDATE import_batches SET status='COMPLETED',imported_clients=?,skipped_duplicates=?,missing_data_clients=?,failed_rows=?,completed_at=CURRENT_TIMESTAMP,summary_json=? WHERE id=? AND status='PREVIEW'`)
+      .run(importedClients,skippedDuplicates,missingDataClients,failedRows,JSON.stringify(result),batchId);
+    return result;
+  });
+
+  try{
+    const result=commitImport();
+    req.skipAutoAudit=true;
+    audit(req,'CLIENT_IMPORT_COMPLETED','imports',batchId,null,result,1,`Imported ${result.importedClients} clients; skipped ${result.skippedDuplicates}; missing data ${result.missingDataClients}; failed ${result.failedRows}`,'TECHNICAL');
+    res.json({ok:true,...result});
+  }catch(err){
+    console.error('client import commit failed:',err);
+    try{db.prepare(`UPDATE import_batches SET status='FAILED',failed_rows=COALESCE(failed_rows,0)+1,summary_json=? WHERE id=? AND status='PREVIEW'`).run(JSON.stringify({error:err.message}),batchId);}catch(_e){}
+    req.skipAutoAudit=true;
+    audit(req,'CLIENT_IMPORT_FAILED','imports',batchId,null,null,0,err.message,'TECHNICAL');
+    res.status(500).json({error:err.message==='CONTACT_ID_LIMIT_REACHED'?err.message:'CLIENT_IMPORT_FAILED'});
   }
 });
 
