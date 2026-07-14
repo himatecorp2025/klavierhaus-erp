@@ -5,6 +5,7 @@
 
 
 
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -32,6 +33,23 @@
         <div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button id="toggleLoginPassword" class="password-toggle" type="button" aria-label="Show password" title="Show password" aria-pressed="false"><span aria-hidden="true">◉</span></button></div>
         <button id="loginSubmitButton" type="submit">Login</button>
       </form>
+    </div>
+  </section>
+
+
+  <section id="notificationActivationGate" class="notification-activation-gate hidden" aria-live="polite">
+    <div class="notification-activation-card">
+      <div class="notification-activation-icon">🔔</div>
+      <h1 id="notificationGateTitle">Enable work notifications</h1>
+      <p id="notificationGateText">Notifications are required to receive job assignments, schedule changes, internal messages and reminders.</p>
+      <div id="notificationGateStatus" class="notification-gate-status"></div>
+      <div class="notification-activation-actions">
+        <button id="notificationGateEnable" type="button">Enable notifications</button>
+        <button id="notificationGateCheck" type="button" class="secondary">Check again</button>
+        <button id="notificationGateHelp" type="button" class="secondary">How to enable notifications</button>
+        <button id="notificationGateLogout" type="button" class="danger">Log out</button>
+      </div>
+      <div id="notificationGateHelpPanel" class="notification-gate-help hidden"></div>
     </div>
   </section>
 
