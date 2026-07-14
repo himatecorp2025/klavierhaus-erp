@@ -54,7 +54,7 @@ function ensureRuntimeMigrations(){
       updated_by TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`).run();
-    const defaultSettings=[['company_name','Klavierhaus'],['short_name','KH ERP'],['logo_url','/icons/icon-512.png']];
+    const defaultSettings=[['company_name','Klavierhaus'],['short_name','KH ERP'],['logo_url','/icons/icon-512.png'],['login_background_url',''],['branding_version','1']];
     const putSetting=db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)`);
     defaultSettings.forEach(x=>putSetting.run(x[0],x[1],'SYSTEM'));
 
@@ -292,6 +292,9 @@ function ensureManagementTables(){
     success INTEGER DEFAULT 1,
     details TEXT
   )`).run();
+  const auditCols=db.prepare("PRAGMA table_info(audit_log)").all().map(c=>c.name);
+  if(!auditCols.includes('audit_type')) db.prepare("ALTER TABLE audit_log ADD COLUMN audit_type TEXT DEFAULT 'TECHNICAL'").run();
+  try{db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC)").run();}catch(e){}
   db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (
     id TEXT PRIMARY KEY,
     file_name TEXT NOT NULL,
@@ -318,9 +321,15 @@ ensureManagementTables();
 const BACKUP_DIR=process.env.BACKUP_DIR || path.join(__dirname,'backups');
 fs.mkdirSync(BACKUP_DIR,{recursive:true});
 const DB_PATH=process.env.DB_PATH || path.join(__dirname,'db','klavierhaus_v6.sqlite');
-function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details=''){
-  try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'');}catch(e){console.warn('audit log failed:',e.message)}
+function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details='', auditType='TECHNICAL'){
+  try{
+    if(isSuperadminUser(req?.user)) return;
+    db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details,audit_type)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'',auditType);
+  }catch(e){console.warn('audit log failed:',e.message)}
+}
+function workAudit(req, action, recordId, oldValue=null, newValue=null, success=1, details=''){
+  audit(req,action,'jobs',recordId,oldValue,newValue,success,details,'WORK');
 }
 function hasPermission(user, permission){
   if(isSuperadminUser(user)) return true;
@@ -386,17 +395,39 @@ const brandingUpload = multer({
     destination: (_req,_file,cb)=>cb(null,UPLOAD_DIR),
     filename: (_req,file,cb)=>cb(null,`branding-${Date.now()}${path.extname(file.originalname||'').toLowerCase()||'.png'}`)
   }),
-  limits:{fileSize:10*1024*1024},
-  fileFilter:(_req,file,cb)=>cb(null,file.mimetype==='image/png')
+  limits:{fileSize:15*1024*1024},
+  fileFilter:(_req,file,cb)=>cb(null,['image/png','image/jpeg'].includes(file.mimetype))
 });
+function imageDimensions(filePath){
+  const b=fs.readFileSync(filePath);
+  if(b.length>=24 && b.toString('hex',0,8)==='89504e470d0a1a0a') return {type:'image/png',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};
+  if(b.length>4 && b[0]===0xff && b[1]===0xd8){
+    let i=2;
+    while(i+9<b.length){
+      if(b[i]!==0xff){i++;continue;}
+      const marker=b[i+1]; i+=2;
+      if(marker===0xd8||marker===0xd9) continue;
+      const len=b.readUInt16BE(i); if(len<2||i+len>b.length) break;
+      if([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) return {type:'image/jpeg',height:b.readUInt16BE(i+3),width:b.readUInt16BE(i+5)};
+      i+=len;
+    }
+  }
+  return null;
+}
 function getBranding(){
-  const rows=db.prepare("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('company_name','short_name','logo_url')").all();
-  const out={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png'};
-  rows.forEach(r=>out[r.setting_key]=r.setting_value||out[r.setting_key]);
+  const rows=db.prepare("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('company_name','short_name','logo_url','login_background_url','branding_version')").all();
+  const out={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
+  rows.forEach(r=>out[r.setting_key]=r.setting_value??out[r.setting_key]);
   return out;
 }
+function setSetting(key,value,userName=''){
+  db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(key,value,userName);
+}
+function bumpBrandingVersion(userName=''){
+  setSetting('branding_version',String(Date.now()),userName);
+}
 app.get('/api/public/branding',(_req,res)=>res.json(getBranding()));
-app.get('/manifest.webmanifest',(_req,res)=>{const b=getBranding();res.type('application/manifest+json').send(JSON.stringify({name:b.company_name,short_name:b.short_name,start_url:'/',display:'standalone',background_color:'#07101d',theme_color:'#07101d',icons:[{src:b.logo_url,sizes:'192x192 512x512',type:b.logo_url.endsWith('.jpg')||b.logo_url.endsWith('.jpeg')?'image/jpeg':'image/png',purpose:'any maskable'}]},null,2));});
+app.get('/manifest.webmanifest',(_req,res)=>{const b=getBranding();res.type('application/manifest+json').send(JSON.stringify({name:b.company_name,short_name:b.short_name,start_url:'/',display:'standalone',background_color:'#07101d',theme_color:'#07101d',icons:[{src:`${b.logo_url}${b.logo_url.includes('?')?'&':'?'}v=${b.branding_version}`,sizes:'192x192 512x512',type:/\.jpe?g(?:$|\?)/i.test(b.logo_url)?'image/jpeg':'image/png',purpose:'any maskable'}]},null,2));});
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(path.join(__dirname, "..", "public")));
 // Global protection: only superadmin may call DELETE endpoints.
@@ -412,9 +443,10 @@ app.use('/api',(req,res,next)=>{
   if(!['POST','PUT','DELETE'].includes(req.method) || req.path==='/login') return next();
   const started=Date.now();
   res.on('finish',()=>{
-    if(req.path.startsWith('/audit-log')) return;
+    if(req.path.startsWith('/audit-log') || isSuperadminUser(req.user)) return;
     const safeBody={...(req.body||{})}; if(safeBody.password) safeBody.password='[REDACTED]';
-    audit(req,req.method,req.path.split('/')[1]||'api',req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`);
+    const isWork=req.path==='/jobs'||req.path.startsWith('/jobs/');
+    audit(req,req.method,isWork?'jobs':(req.path.split('/')[1]||'api'),req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`,isWork?'WORK':'TECHNICAL');
   });
   next();
 });
@@ -612,12 +644,19 @@ function getJobByAnyId(rawId, body={}){
 app.post("/api/login",(req,res)=>{
   const {email,password}=req.body;
   const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?) AND status='Active'").get(String(email||""));
-  if(!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({error:"Invalid login"});
+  const valid=!!u && bcrypt.compareSync(String(password||''), u.password_hash);
+  if(!valid){
+    if(!u || Number(u.is_superadmin||0)!==1) audit({user:u?{id:u.id,name:u.name,email:u.email,role:u.role,is_superadmin:0}:{id:'',name:'',email:String(email||''),role:'',is_superadmin:0}},'LOGIN_FAILED','authentication',u?.id||'',null,{email:String(email||'')},0,'Invalid login','TECHNICAL');
+    return res.status(401).json({error:"Invalid login"});
+  }
   const isSuper=Number(u.is_superadmin||0)===1;
   const effectiveRole=isSuper?"SUPERADMIN":u.role;
-  const token=jwt.sign({id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0}, JWT_SECRET, {expiresIn:"12h"});
-  res.json({token,user:{id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0}});
+  const loginUser={id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0};
+  const token=jwt.sign(loginUser, JWT_SECRET, {expiresIn:"30d"});
+  audit({user:loginUser},'LOGIN','authentication',u.id,null,{email:u.email},1,'Successful login','TECHNICAL');
+  res.json({token,user:loginUser});
 });
+app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.user.id,null,null,1,'User logout','TECHNICAL');res.json({ok:true});});
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 app.get("/api/schedule-workers", auth, (req,res)=>{
@@ -1132,7 +1171,9 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
-  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(id));
+  const created=db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
+  workAudit(req,'CREATE',id,null,created,1,`retroactive=${new Date(created.start_time).getTime()<Date.now()}`);
+  res.json(created);
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
@@ -1175,7 +1216,9 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     db.prepare(`UPDATE jobs SET ${setParts.join(",")} WHERE id=?`).run(...vals);
   }
 
-  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
+  const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  workAudit(req,'UPDATE',job.id,job,updated,1,`retroactive=${new Date(updated.start_time).getTime()<Date.now()}; closed_before=${['Completed','Partially completed','Failed'].includes(String(job.status||''))}`);
+  res.json(updated);
 });
 
 app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
@@ -1194,7 +1237,9 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   db.prepare("UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
     .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",job.id);
 
-  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
+  const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  workAudit(req,'REASSIGN',job.id,job,updated,1,`from=${job.assigned_to||''}; to=${updated.assigned_to||''}`);
+  res.json(updated);
 });
 
 app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
@@ -1277,6 +1322,8 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
       const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
       return {nextJobId,financialItem};
     })();
+    const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+    workAudit(req,closeType==='Partial'?'PARTIAL_CLOSE':(closeType==='Full'?'FULL_CLOSE':'FAILED_CLOSE'),job.id,job,updated,1,`workflow_root_id=${rootId}; next_job_id=${result.nextJobId||''}`);
     res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null,workflow_root_id:rootId});
   }catch(err){
     if(req.file){try{fs.unlinkSync(req.file.path)}catch(e){}}
@@ -1413,16 +1460,25 @@ app.get('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>res.json(getBra
 app.put('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>{
   const before=getBranding(); const company=String(req.body?.company_name||'').trim(); const short=String(req.body?.short_name||'').trim();
   if(!company||!short) return res.status(400).json({error:'REQUIRED_FIELDS'});
-  const stmt=db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`);
-  stmt.run('company_name',company,req.user.name||''); stmt.run('short_name',short,req.user.name||'');
+  setSetting('company_name',company,req.user.name||''); setSetting('short_name',short,req.user.name||''); bumpBrandingVersion(req.user.name||'');
   const after=getBranding(); audit(req,'UPDATE','branding','identity',before,after); res.json(after);
 });
 app.post('/api/settings/branding/logo',auth,permit('ADMIN'),brandingUpload.single('logo'),(req,res)=>{
-  if(!req.file) return res.status(400).json({error:'INVALID_FILE_TYPE'}); const buf=fs.readFileSync(req.file.path); const validPng=buf.length>24&&buf.toString('hex',0,8)==='89504e470d0a1a0a'; const width=validPng?buf.readUInt32BE(16):0, height=validPng?buf.readUInt32BE(20):0; if(!validPng||width!==height||width<192){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'PWA_LOGO_REQUIREMENTS'});} const before=getBranding(); const logoUrl='/uploads/'+path.basename(req.file.path);
-  db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('logo_url',?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(logoUrl,req.user.name||'');
+  if(!req.file) return res.status(400).json({error:'INVALID_FILE_TYPE'});
+  const dim=imageDimensions(req.file.path);
+  if(!dim||dim.width!==dim.height||dim.width<192){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'PWA_LOGO_REQUIREMENTS'});}
+  const before=getBranding(); const logoUrl='/uploads/'+path.basename(req.file.path);
+  setSetting('logo_url',logoUrl,req.user.name||''); bumpBrandingVersion(req.user.name||'');
   const after=getBranding(); audit(req,'UPDATE','branding','logo',before,after); res.json(after);
 });
-app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();db.prepare(`UPDATE app_settings SET setting_value='/icons/icon-512.png',updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE setting_key='logo_url'`).run(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','logo',before,after);res.json(after);});
+app.post('/api/settings/branding/background',auth,permit('ADMIN'),brandingUpload.single('background'),(req,res)=>{
+  if(!req.file) return res.status(400).json({error:'INVALID_FILE_TYPE'});
+  const dim=imageDimensions(req.file.path); if(!dim){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'INVALID_IMAGE'});}
+  const before=getBranding(); setSetting('login_background_url','/uploads/'+path.basename(req.file.path),req.user.name||''); bumpBrandingVersion(req.user.name||'');
+  const after=getBranding(); audit(req,'UPDATE','branding','login_background',before,after); res.json(after);
+});
+app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('logo_url','/icons/icon-512.png',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','logo',before,after);res.json(after);});
+app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
   const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
@@ -1440,14 +1496,15 @@ app.put('/api/settings/permissions',auth,requirePermission('permissions.manage')
   audit(req,'UPDATE','permissions',`${role}:${permission}`,old,now); res.json(now);
 });
 app.get('/api/audit-log',auth,requirePermission('audit.view'),(req,res)=>{
-  const limit=Math.min(Number(req.query.limit||500),2000);
-  res.json(db.prepare('SELECT * FROM audit_log ORDER BY event_time DESC LIMIT ?').all(limit));
+  const limit=Math.min(Number(req.query.limit||500),2000); const type=String(req.query.type||'WORK').toUpperCase()==='TECHNICAL'?'TECHNICAL':'WORK';
+  res.json(db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC LIMIT ?").all(type,limit));
 });
 app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
-  const rows=db.prepare('SELECT * FROM audit_log ORDER BY event_time DESC').all();
-  const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'\"'+String(v??'').replaceAll('\"','\"\"')+'\"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="audit-log.csv"');res.send('\ufeff'+csv);
+  const type=String(req.query.type||'WORK').toUpperCase()==='TECHNICAL'?'TECHNICAL':'WORK';
+  const rows=db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC").all(type);
+  const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'"'+String(v??'').replaceAll('"','""')+'"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${type==='WORK'?'work-audit':'technical-audit'}.csv"`);res.send('\ufeff'+csv);
 });
-app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{db.prepare('DELETE FROM audit_log').run();audit(req,'CLEAR','audit_log','ALL');res.json({ok:true});});
+app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{const type=String(req.query.type||'ALL').toUpperCase(); if(type==='WORK'||type==='TECHNICAL')db.prepare('DELETE FROM audit_log WHERE audit_type=?').run(type);else db.prepare('DELETE FROM audit_log').run();res.json({ok:true});});
 app.get('/api/backups',auth,requireSuperadmin,(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
 app.post('/api/backups',auth,requireSuperadmin,(req,res)=>{const b=createBackup(req.user.name||'SUPERADMIN');audit(req,'CREATE','backup',b.id,null,b);res.json(b);});
 app.get('/api/backups/:id/download',auth,requireSuperadmin,(req,res)=>{const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});res.download(b.file_path,b.file_name);});
