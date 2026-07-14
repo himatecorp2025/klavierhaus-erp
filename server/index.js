@@ -7,7 +7,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Database = require("better-sqlite3");
-const AdmZip = require("adm-zip");
 require("dotenv").config();
 
 const app = express();
@@ -19,8 +18,7 @@ if(!JWT_SECRET || JWT_SECRET.length < 32){
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
-const db = new Database(DB_PATH);
+const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 
 function ensureRuntimeMigrations(){
@@ -29,6 +27,9 @@ function ensureRuntimeMigrations(){
     if(!jobCols.includes("job_key")) db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
     if(!jobCols.includes("client_phone")) db.prepare("ALTER TABLE jobs ADD COLUMN client_phone TEXT").run();
     if(!jobCols.includes("planned_job_id")) db.prepare("ALTER TABLE jobs ADD COLUMN planned_job_id TEXT").run();
+    if(!jobCols.includes("assigned_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN assigned_user_id TEXT").run();
+    if(!jobCols.includes("created_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN created_by_user_id TEXT").run();
+    if(!jobCols.includes("last_reassigned_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN last_reassigned_by_user_id TEXT").run();
 
     const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
     if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
@@ -185,6 +186,7 @@ function ensureRuntimeMigrations(){
     addPlannedCol("piano_name", "TEXT");
     addPlannedCol("service_address", "TEXT");
     addPlannedCol("preferred_assigned_to", "TEXT");
+    addPlannedCol("preferred_assigned_user_id", "TEXT");
     addPlannedCol("priority", "TEXT");
     addPlannedCol("expected_revenue", "REAL DEFAULT 0");
     addPlannedCol("probability", "TEXT DEFAULT '100% - Biztos'");
@@ -196,6 +198,7 @@ function ensureRuntimeMigrations(){
     addPlannedCol("notes", "TEXT");
     addPlannedCol("converted_job_id", "TEXT");
     addPlannedCol("created_by", "TEXT");
+    addPlannedCol("created_by_user_id", "TEXT");
     addPlannedCol("archived_at", "TEXT");
     addPlannedCol("archived_by", "TEXT");
     try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_jobs_key ON planned_jobs(planned_key)").run(); } catch(e) {}
@@ -224,35 +227,75 @@ function ensureRuntimeMigrations(){
       console.warn("superadmin migration skipped:", e.message);
     }
 
+    // Stable user links: names remain display-only, ownership uses immutable user IDs.
+    try {
+      db.prepare(`UPDATE jobs SET assigned_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.assigned_to)) LIMIT 1) WHERE (assigned_user_id IS NULL OR assigned_user_id='') AND assigned_to IS NOT NULL`).run();
+      db.prepare(`UPDATE jobs SET created_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.created_by)) LIMIT 1) WHERE (created_by_user_id IS NULL OR created_by_user_id='') AND created_by IS NOT NULL`).run();
+      db.prepare(`UPDATE jobs SET last_reassigned_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.last_reassigned_by)) LIMIT 1) WHERE (last_reassigned_by_user_id IS NULL OR last_reassigned_by_user_id='') AND last_reassigned_by IS NOT NULL`).run();
+      db.prepare(`UPDATE planned_jobs SET preferred_assigned_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(planned_jobs.preferred_assigned_to)) LIMIT 1) WHERE (preferred_assigned_user_id IS NULL OR preferred_assigned_user_id='') AND preferred_assigned_to IS NOT NULL`).run();
+      db.prepare(`UPDATE planned_jobs SET created_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(planned_jobs.created_by)) LIMIT 1) WHERE (created_by_user_id IS NULL OR created_by_user_id='') AND created_by IS NOT NULL`).run();
+      db.prepare("CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)").run();
+    } catch(e) { console.warn("stable user link migration skipped:", e.message); }
+
   } catch(e) {
     console.warn("runtime migration skipped:", e.message);
   }
 }
 ensureRuntimeMigrations();
 
-function runMigration(id, fn){
-  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
-  if(db.prepare("SELECT id FROM schema_migrations WHERE id=?").get(id)) return;
-  db.transaction(()=>{fn();db.prepare("INSERT INTO schema_migrations(id) VALUES(?)").run(id);})();
-}
 function ensureManagementTables(){
-  runMigration('001_management_tables',()=>{
-    db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (role TEXT NOT NULL,permission TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,updated_by TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(role,permission))`).run();
-    db.prepare(`CREATE TABLE IF NOT EXISTS role_definitions (role TEXT PRIMARY KEY,active INTEGER NOT NULL DEFAULT 1,system_role INTEGER NOT NULL DEFAULT 0,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_by TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
-    db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY,event_time TEXT DEFAULT CURRENT_TIMESTAMP,user_id TEXT,user_name TEXT,user_role TEXT,action TEXT NOT NULL,module TEXT,record_id TEXT,old_value TEXT,new_value TEXT,success INTEGER DEFAULT 1,details TEXT)`).run();
-    db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (id TEXT PRIMARY KEY,file_name TEXT NOT NULL,file_path TEXT NOT NULL,file_size INTEGER DEFAULT 0,status TEXT NOT NULL,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,restored_at TEXT,restored_by TEXT)`).run();
-  });
-  runMigration('002_seed_roles',()=>{
-    const common=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
-    const defaults={ADMIN:[...common,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],MANAGER:[...common,'finance.view','income_statement.view'],WORKER:[...common],VIEWER:[...common]};
-    const ri=db.prepare('INSERT OR IGNORE INTO role_definitions(role,active,system_role,created_by) VALUES(?,1,1,?)');['ADMIN','MANAGER','WORKER','VIEWER'].forEach(r=>ri.run(r,'SYSTEM'));
-    const pi=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');Object.entries(defaults).forEach(([r,ps])=>ps.forEach(p=>pi.run(r,p,'SYSTEM')));
-  });
+  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (
+    role TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_by TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(role,permission)
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    event_time TEXT DEFAULT CURRENT_TIMESTAMP,
+    user_id TEXT,
+    user_name TEXT,
+    user_role TEXT,
+    action TEXT NOT NULL,
+    module TEXT,
+    record_id TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    success INTEGER DEFAULT 1,
+    details TEXT
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (
+    id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER DEFAULT 0,
+    status TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    restored_at TEXT,
+    restored_by TEXT
+  )`).run();
+  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+  const defaults={
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
+    MANAGER:[...commonView,'finance.view','income_statement.view'],
+    WORKER:[...commonView],
+    VIEWER:[...commonView]
+  };
+  const ins=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
+  Object.entries(defaults).forEach(([role,perms])=>perms.forEach(p=>ins.run(role,p,'SYSTEM')));
 }
 ensureManagementTables();
 
 const BACKUP_DIR=process.env.BACKUP_DIR || path.join(__dirname,'backups');
 fs.mkdirSync(BACKUP_DIR,{recursive:true});
+const DB_PATH=process.env.DB_PATH || path.join(__dirname,'db','klavierhaus_v6.sqlite');
 function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details=''){
   try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details)
     VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'');}catch(e){console.warn('audit log failed:',e.message)}
@@ -260,20 +303,18 @@ function audit(req, action, module, recordId, oldValue=null, newValue=null, succ
 function hasPermission(user, permission){
   if(isSuperadminUser(user)) return true;
   if(!user) return false;
-  const roleDef=db.prepare('SELECT active FROM role_definitions WHERE role=?').get(user.role);
-  if(roleDef && Number(roleDef.active)!==1) return false;
   const row=db.prepare('SELECT enabled FROM role_permissions WHERE role=? AND permission=?').get(user.role,permission);
   return !!(row && Number(row.enabled)===1);
 }
 function requirePermission(permission){return (req,res,next)=>hasPermission(req.user,permission)?next():res.status(403).json({error:'PERMISSION_DENIED'});}
 function createBackup(createdBy='SYSTEM'){
   const stamp=new Date().toISOString().replace(/[:.]/g,'-');
-  const name=`klavierhaus-backup-${stamp}.zip`; const target=path.join(BACKUP_DIR,name);
+  const name=`klavierhaus-backup-${stamp}.sqlite`;
+  const target=path.join(BACKUP_DIR,name);
   db.pragma('wal_checkpoint(FULL)');
-  const zip=new AdmZip(); zip.addLocalFile(DB_PATH,'database','klavierhaus_v6.sqlite');
-  if(fs.existsSync(UPLOAD_DIR)) zip.addLocalFolder(UPLOAD_DIR,'uploads');
-  zip.addFile('manifest.json',Buffer.from(JSON.stringify({createdAt:new Date().toISOString(),createdBy},null,2))); zip.writeZip(target);
-  const size=fs.statSync(target).size,id=rid('BKP');
+  fs.copyFileSync(DB_PATH,target);
+  const size=fs.statSync(target).size;
+  const id=rid('BKP');
   db.prepare('INSERT INTO backup_log(id,file_name,file_path,file_size,status,created_by) VALUES(?,?,?,?,?,?)').run(id,name,target,size,'SUCCESS',createdBy);
   return db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log WHERE id=?').get(id);
 }
@@ -285,7 +326,7 @@ function maybeWeeklyBackup(){
 maybeWeeklyBackup();
 setInterval(maybeWeeklyBackup,12*60*60*1000).unref();
 function validMagic(filePath){
-  const fd=fs.openSync(filePath,'r'),b=Buffer.alloc(8);const n=fs.readSync(fd,b,0,8,0);fs.closeSync(fd);if(!n)return false;
+  const b=fs.readFileSync(filePath); if(!b.length) return false;
   const pdf=b.slice(0,5).toString()==='%PDF-';
   const jpg=b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF;
   const png=b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;
@@ -311,7 +352,7 @@ const upload = multer({
   limits:{fileSize:20*1024*1024},
   fileFilter: (req,file,cb)=>{
     const ok = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname || "");
-    if(!ok){const err=new Error("INVALID_FILE_TYPE");err.code="INVALID_FILE_TYPE";return cb(err);}
+    if(!ok) return cb(new Error("Only PDF, JPG, JPEG or PNG files are allowed / Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel"));
     cb(null,true);
   }
 });
@@ -462,20 +503,29 @@ function auth(req,res,next){
 function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || Number(user.is_superadmin||0) === 1); }
 function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 function requireSuperadmin(req,res,next){ return isSuperadminUser(req.user) ? next() : res.status(403).json({error:"Superadmin only / Csak szuperadmin"}); }
+function resolveActiveUser(userId, userName){
+  if(userId){const byId=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(userId);if(byId)return byId;}
+  if(userName){return db.prepare("SELECT id,name FROM users WHERE lower(trim(name))=lower(trim(?)) AND status='Active' LIMIT 1").get(userName)||null;}
+  return null;
+}
+function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
+function jobsSelectSql(where=""){
+  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id ${where}`;
+}
 
 function canCloseJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
-  return job.assigned_to === user.name;
+  return isAssignedToUser(job,user);
 }
 function canEditJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
-  if(job.assigned_to === user.name) return true;
-  if(user.role === "MANAGER" && job.created_by === user.name) return true;
+  if(isAssignedToUser(job,user)) return true;
+  if(user.role === "MANAGER" && ((job.created_by_user_id&&job.created_by_user_id===user.id)||(!job.created_by_user_id&&job.created_by===user.name))) return true;
   return false;
 }
 function canReassignJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
-  if(job.assigned_to === user.name) return true;
+  if(isAssignedToUser(job,user)) return true;
   if(user.role === "MANAGER") return true;
   return false;
 }
@@ -556,8 +606,10 @@ app.post("/api/planned-jobs", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMI
   if(!b.client_name) return res.status(400).json({error:"Client is required / Ügyfél kötelező"});
   const id=b.id||rid("PLN");
   const plannedKey=b.planned_key||generatePlannedJobKey();
-  const cols=["id","planned_key","planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes","created_by"];
-  const vals=[id,plannedKey,b.planned_type||"Planned new / Tervezett, még nem lefixált",b.title||"",b.client_id||"",b.client_name||"",b.client_phone||"",b.piano_id||"",b.piano_name||"",b.service_address||"",b.preferred_assigned_to||"",b.priority||"Medium",Number(b.expected_revenue||0),b.probability||"100% - Biztos",Number(b.estimated_hours||0),b.target_date||"",b.status||"Waiting for client / Ügyfélre vár",b.block_reason||"",b.next_step||"",b.notes||"",req.user.name||""];
+  const preferredUser=resolveActiveUser(b.preferred_assigned_user_id,b.preferred_assigned_to);
+  if(b.preferred_assigned_user_id && !preferredUser) return res.status(400).json({error:"A valid preferred responsible user is required / Érvényes tervezett felelős szükséges"});
+  const cols=["id","planned_key","planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","preferred_assigned_user_id","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes","created_by","created_by_user_id"];
+  const vals=[id,plannedKey,b.planned_type||"Planned new / Tervezett, még nem lefixált",b.title||"",b.client_id||"",b.client_name||"",b.client_phone||"",b.piano_id||"",b.piano_name||"",b.service_address||"",preferredUser?.name||b.preferred_assigned_to||"",preferredUser?.id||null,b.priority||"Medium",Number(b.expected_revenue||0),b.probability||"100% - Biztos",Number(b.estimated_hours||0),b.target_date||"",b.status||"Waiting for client / Ügyfélre vár",b.block_reason||"",b.next_step||"",b.notes||"",req.user.name||"",req.user.id||null];
   db.prepare(`INSERT INTO planned_jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...vals);
   res.json(db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(id));
 });
@@ -566,8 +618,13 @@ app.put("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERA
   ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
-  const allowed=["planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes"];
+  const allowed=["planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","preferred_assigned_user_id","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes"];
   const body={...req.body};
+  if(body.preferred_assigned_user_id!==undefined || body.preferred_assigned_to!==undefined){
+    const preferredUser=resolveActiveUser(body.preferred_assigned_user_id,body.preferred_assigned_to);
+    if(!preferredUser) return res.status(400).json({error:"A valid preferred responsible user is required / Érvényes tervezett felelős szükséges"});
+    body.preferred_assigned_user_id=preferredUser.id; body.preferred_assigned_to=preferredUser.name;
+  }
   if(body.expected_revenue!==undefined) body.expected_revenue=Number(body.expected_revenue||0);
   if(body.estimated_hours!==undefined) body.estimated_hours=Number(body.estimated_hours||0);
   const cols=allowed.filter(c=>body[c]!==undefined);
@@ -590,7 +647,8 @@ app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER
   if(!planned) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
   if(!isActivePlannedStatus(planned.status)) return res.status(400).json({error:"This planned job is not active / Ez a tervezett munka már nem aktív"});
   const b=req.body||{};
-  const assigned=b.assigned_to || planned.preferred_assigned_to;
+  const assignedUser=resolveActiveUser(b.assigned_user_id||planned.preferred_assigned_user_id,b.assigned_to||planned.preferred_assigned_to);
+  const assigned=assignedUser?.name||b.assigned_to||planned.preferred_assigned_to;
   const title=b.title || planned.title;
   const start=b.start_time;
   const end=b.end_time;
@@ -604,15 +662,15 @@ app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER
   const jobId=rid("J");
   db.prepare(`INSERT INTO jobs(
     id,job_key,planned_job_id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
-    assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+    assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
     planned_hours,travel_minutes,service_address,instructions
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     jobId,stableJobKey(),planned.id,null,title,"Standalone",planned.client_id||"",planned.client_name||"",planned.client_phone||"",planned.piano_id||"",planned.piano_name||"",
-    assigned,req.user.name,planned.priority||"Medium","Open",start,end,"America/New_York",Number(b.planned_amount||planned.expected_revenue||0),b.pricing_basis||"Converted from planned job / Tervezett munkából áthelyezve",
+    assignedUser?.id||null,assigned,req.user.id,req.user.name,planned.priority||"Medium","Open",start,end,"America/New_York",Number(b.planned_amount||planned.expected_revenue||0),b.pricing_basis||"Converted from planned job / Tervezett munkából áthelyezve",
     Number(b.planned_hours||planned.estimated_hours||0),Number(b.travel_minutes||0),b.service_address||planned.service_address||"",b.instructions||planned.next_step||planned.notes||""
   );
   db.prepare("UPDATE planned_jobs SET status='Converted / Naptárba helyezve', converted_job_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(jobId, planned.id);
-  res.json({ok:true,planned:db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(planned.id),job:db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId)});
+  res.json({ok:true,planned:db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(planned.id),job:db.prepare(jobsSelectSql("WHERE j.id=?")).get(jobId)});
 });
 
 app.get("/api/inventory", auth, (req,res)=>{
@@ -630,8 +688,8 @@ app.post("/api/inventory", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN")
   if(!String(b.item_name||"").trim()) return res.status(400).json({error:"Item name is required / Tétel neve kötelező"});
   const id=rid("INVITEM");
   const inventoryId=generateInventoryId(b.main_category || "Other");
-  const cols=["id","inventory_id","item_name","main_category","piano_part_category","item_type","acquisition_type","supplier","manufacturer","purchase_price","manufacturing_cost","quantity","unit","condition_status","location","linked_piano_id","linked_client_id","status","notes","created_by"];
-  const vals=[id,inventoryId,b.item_name||"",b.main_category||"Other",b.piano_part_category||"",b.item_type||"",b.acquisition_type||"Existing stock",b.supplier||"",b.manufacturer||"",Number(b.purchase_price||0),Number(b.manufacturing_cost||0),Number(b.quantity||1),b.unit||"piece",b.condition_status||"Used",b.location||"",b.linked_piano_id||"",b.linked_client_id||"",b.status||"In Stock",b.notes||"",req.user.name||""];
+  const cols=["id","inventory_id","item_name","main_category","piano_part_category","item_type","acquisition_type","supplier","manufacturer","purchase_price","manufacturing_cost","quantity","unit","condition_status","location","linked_piano_id","linked_client_id","status","notes","created_by","created_by_user_id"];
+  const vals=[id,inventoryId,b.item_name||"",b.main_category||"Other",b.piano_part_category||"",b.item_type||"",b.acquisition_type||"Existing stock",b.supplier||"",b.manufacturer||"",Number(b.purchase_price||0),Number(b.manufacturing_cost||0),Number(b.quantity||1),b.unit||"piece",b.condition_status||"Used",b.location||"",b.linked_piano_id||"",b.linked_client_id||"",b.status||"In Stock",b.notes||"",req.user.name||"",req.user.id||null];
   db.prepare(`INSERT INTO inventory_items(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...vals);
   res.json(db.prepare("SELECT * FROM inventory_items WHERE id=?").get(id));
 });
@@ -893,8 +951,7 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   ensureRuntimeMigrations();
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
-  if(role==="SUPERADMIN") return res.status(403).json({error:"SUPERADMIN_CREATE_FORBIDDEN"});
-  const rd=db.prepare("SELECT active FROM role_definitions WHERE role=?").get(role);if(!rd||Number(rd.active)!==1)return res.status(400).json({error:"INVALID_OR_INACTIVE_ROLE"});
+  if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
   db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
@@ -917,12 +974,21 @@ app.put("/api/users/:id", auth, (req,res)=>{
 
   let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
-  if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"SUPERADMIN_CREATE_FORBIDDEN"});
-  if(req.body.role!==undefined){const rd=db.prepare("SELECT active FROM role_definitions WHERE role=?").get(req.body.role);if(!rd||Number(rd.active)!==1)return res.status(400).json({error:"INVALID_OR_INACTIVE_ROLE"});}
+  if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
-  if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
+  const updateUserTx=db.transaction(()=>{
+    if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
+    if(req.body.name!==undefined && String(req.body.name)!==String(target.name)){
+      db.prepare("UPDATE jobs SET assigned_to=? WHERE assigned_user_id=?").run(req.body.name,target.id);
+      db.prepare("UPDATE jobs SET created_by=? WHERE created_by_user_id=?").run(req.body.name,target.id);
+      db.prepare("UPDATE jobs SET last_reassigned_by=? WHERE last_reassigned_by_user_id=?").run(req.body.name,target.id);
+      db.prepare("UPDATE planned_jobs SET preferred_assigned_to=? WHERE preferred_assigned_user_id=?").run(req.body.name,target.id);
+      db.prepare("UPDATE planned_jobs SET created_by=? WHERE created_by_user_id=?").run(req.body.name,target.id);
+    }
+  });
+  updateUserTx();
   const u=db.prepare("SELECT id,name,email,role,status,phone,address FROM users WHERE id=?").get(req.params.id);
   audit(req,"UPDATE","users",req.params.id,target,u);
   res.json(u);
@@ -1008,22 +1074,24 @@ app.get("/api/client-profile/:id", auth, (req,res)=>{
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
   const pianos=db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY created_at DESC").all(req.params.id);
-  const jobs=db.prepare("SELECT * FROM jobs WHERE client_id=? OR client_name=? ORDER BY start_time DESC LIMIT 50").all(req.params.id, client.name);
+  const jobs=db.prepare(jobsSelectSql("WHERE j.client_id=? OR j.client_name=? ORDER BY j.start_time DESC LIMIT 50")).all(req.params.id, client.name);
   res.json({client,pianos,jobs,lastVisit:jobs[0]?.start_time || client.last_contact || "",lastJob:jobs[0]?.title || ""});
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
   ensureRuntimeMigrations();
-  res.json(db.prepare("SELECT * FROM jobs ORDER BY start_time").all());
+  res.json(db.prepare(jobsSelectSql("ORDER BY j.start_time")).all());
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  const required=["title","assigned_to","start_time","end_time"];
-  for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
+  for(const r of ["title","start_time","end_time"]) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
+  const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
+  if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
   const id=req.body.id || rid("J");
-  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_to","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
-    .filter(c=>c==="id" || c==="created_by" || req.body[c]!==undefined);
-  db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(req.body.job_key||stableJobKey()):(c==="created_by"?req.user.name:req.body[c]))));
-  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(id));
+  const data={...req.body,assigned_user_id:assigned.id,assigned_to:assigned.name,created_by_user_id:req.user.id,created_by:req.user.name};
+  const cols=["id","job_key","parent_job_id","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","travel_minutes","service_address","instructions","planned_job_id"]
+    .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
+  db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
+  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(id));
 });
 app.put("/api/jobs/:id", auth, (req,res)=>{
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
@@ -1035,7 +1103,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   // Operatív szabály: mindenki átadhatja / visszaveheti / továbbadhatja a munkát.
   const allowed=[
     "title","job_type","client_id","client_name","client_phone",
-    "piano_id","piano_name","assigned_to","priority","status",
+    "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
     "planned_hours","travel_minutes","service_address","instructions"
   ];
@@ -1044,15 +1112,21 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
   }
 
+  if(req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined){
+    const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
+    if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
+    req.body.assigned_user_id=assigned.id; req.body.assigned_to=assigned.name;
+  }
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length){
     const setParts=cols.map(c=>`${c}=?`);
     const vals=cols.map(c=>req.body[c]);
 
-    if(req.body.assigned_to!==undefined && req.body.assigned_to!==job.assigned_to){
+    if(req.body.assigned_user_id!==undefined && String(req.body.assigned_user_id)!==String(job.assigned_user_id||"")){
       setParts.push("last_reassigned_by=?");
+      setParts.push("last_reassigned_by_user_id=?");
       setParts.push("reassignment_note=?");
-      vals.push(req.user.name, req.body.reassignment_note || "Changed in edit / Szerkesztésben módosítva");
+      vals.push(req.user.name, req.user.id, req.body.reassignment_note || "Changed in edit / Szerkesztésben módosítva");
     }
 
     setParts.push("updated_at=CURRENT_TIMESTAMP");
@@ -1060,7 +1134,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     db.prepare(`UPDATE jobs SET ${setParts.join(",")} WHERE id=?`).run(...vals);
   }
 
-  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
+  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
 });
 
 app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
@@ -1068,18 +1142,18 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found: ${String(jobId||"").trim()}`});
 
-  const assignedTo=req.body.assigned_to;
-  if(!assignedTo) return res.status(400).json({error:"assigned_to is required"});
+  const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
+  if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
 
-  const isTakingBackToSelf = assignedTo === req.user.name;
+  const isTakingBackToSelf = String(assigned.id)===String(req.user.id);
   if(!canReassignJob(req.user, job) && !isTakingBackToSelf) {
     return res.status(403).json({error:"You cannot reassign this job"});
   }
 
-  db.prepare("UPDATE jobs SET assigned_to=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-    .run(assignedTo, req.user.name, req.body.reassignment_note||"", job.id);
+  db.prepare("UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",job.id);
 
-  res.json(db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id));
+  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
 });
 
 app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
@@ -1100,7 +1174,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
 
-  if(!(req.user.role==="ADMIN" || job.assigned_to===req.user.name)){
+  if(!(isSuperadminUser(req.user) || req.user.role==="ADMIN" || isAssignedToUser(job,req.user))){
     return res.status(403).json({
       error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. Take it back to yourself in Edit Job first. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős. Előbb vedd vissza magadra a Munka szerkesztése ablakban.`
     });
@@ -1121,24 +1195,42 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(billed > 0 && !req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file ? "/uploads/"+path.basename(req.file.path) : null;
 
-  const closeTx=db.transaction(()=>{
-    let nextJobId=null;
-    if(closeType==="Partial"){
-      const required=["next_title","next_assigned_to","next_start_time","next_end_time"];
-      for(const field of required) if(!req.body[field]){const err=new Error(`${field} is required for partial close`);err.code='REQUIRED_FIELDS';throw err;}
-      nextJobId=rid("J");
-      db.prepare(`INSERT INTO jobs(id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,assigned_to,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,planned_hours,travel_minutes,service_address,instructions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,req.body.next_assigned_to,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),req.body.next_service_address||job.service_address,req.body.next_instructions||"");
-    }
-    db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
-    const logId=rid("LOG");
-    db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
-    db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
-    const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
-    audit(req,'CLOSE','jobs',job.id,job,{closeType,billed,payment,nextJobId,logId,financialItemId:financialItem?.id||null});
-    return {nextJobId,financialItem};
-  });
-  try{const result=closeTx();res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null});}
-  catch(err){if(req.file){try{fs.unlinkSync(req.file.path)}catch(e){}}return res.status(400).json({error:err.code||err.message||'TRANSACTION_FAILED'});}
+  let nextJobId=null;
+  if(closeType==="Partial"){
+    const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
+    for(const r of required) if(!req.body[r]) return res.status(400).json({error:`${r} is required for partial close`});
+
+    const nextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
+    if(!nextAssigned) return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});
+    nextJobId=rid("J");
+    db.prepare(`INSERT INTO jobs(
+      id,job_key,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
+      assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+      planned_hours,travel_minutes,service_address,instructions
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(
+        nextJobId,stableJobKey(),job.id,req.body.next_title,"Part-work",
+        job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
+        nextAssigned.id,nextAssigned.name,req.user.id,req.user.name,req.body.next_priority||job.priority,"Open",
+        req.body.next_start_time,req.body.next_end_time,"America/New_York",
+        Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",
+        Number(req.body.next_planned_hours||0),Number(req.body.next_travel_minutes||0),
+        req.body.next_service_address||job.service_address,req.body.next_instructions||""
+      );
+  }
+
+  db.prepare(`UPDATE jobs SET status=?, close_type=?, billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(closeType==="Full"?"Completed":(closeType==="Failed"?"Failed":"Partially completed"),closeType,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
+
+  const logId=rid("LOG");
+  db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+    .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+
+  db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
+
+  const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
+  res.json({ok:true,next_job_id:nextJobId,storedPath,financial_item_id:financialItem?.id||null});
 });
 
 
@@ -1267,12 +1359,8 @@ app.get('/api/my-permissions',auth,(req,res)=>{
   const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
   res.json({all:false,permissions});
 });
-app.get('/api/settings/roles',auth,requirePermission('users.roles'),(req,res)=>res.json(db.prepare('SELECT role,active,system_role FROM role_definitions ORDER BY system_role DESC,role').all()));
-app.post('/api/settings/roles',auth,requirePermission('permissions.manage'),(req,res)=>{const role=String(req.body?.role||'').trim().toUpperCase().replace(/[^A-Z0-9_]/g,'_');if(!role)return res.status(400).json({error:'REQUIRED_FIELDS'});if(db.prepare('SELECT role FROM role_definitions WHERE role=?').get(role))return res.status(409).json({error:'ROLE_ALREADY_EXISTS'});db.prepare('INSERT INTO role_definitions(role,active,system_role,created_by,updated_by) VALUES(?,1,0,?,?)').run(role,req.user.name||'',req.user.name||'');audit(req,'CREATE','roles',role,null,{role,active:1});res.json({role,active:1});});
-app.put('/api/settings/roles/:role',auth,requirePermission('permissions.manage'),(req,res)=>{const role=String(req.params.role||'').toUpperCase();if(role==='ADMIN')return res.status(403).json({error:'PROTECTED_ROLE'});const old=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);if(!old)return res.status(404).json({error:'ROLE_NOT_FOUND'});db.prepare('UPDATE role_definitions SET active=?,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE role=?').run(req.body.active?1:0,req.user.name||'',role);const now=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);audit(req,'UPDATE','roles',role,old,now);res.json(now);});
-app.delete('/api/settings/roles/:role',auth,requireSuperadmin,(req,res)=>{const role=String(req.params.role||'').toUpperCase();if(['ADMIN','MANAGER','WORKER','VIEWER'].includes(role))return res.status(403).json({error:'PROTECTED_ROLE'});if(db.prepare('SELECT COUNT(*) n FROM users WHERE role=?').get(role).n)return res.status(409).json({error:'ROLE_IN_USE'});const old=db.prepare('SELECT * FROM role_definitions WHERE role=?').get(role);if(!old)return res.status(404).json({error:'ROLE_NOT_FOUND'});db.transaction(()=>{db.prepare('DELETE FROM role_permissions WHERE role=?').run(role);db.prepare('DELETE FROM role_definitions WHERE role=?').run(role);})();audit(req,'MASTER_DELETE','roles',role,old,null);res.json({ok:true});});
 app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
-  const roles=db.prepare("SELECT role,active,system_role FROM role_definitions ORDER BY system_role DESC,role").all();
+  const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
   const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
@@ -1281,8 +1369,6 @@ app.put('/api/settings/permissions',auth,requirePermission('permissions.manage')
   const {role,permission,enabled}=req.body||{};
   if(!role||!permission) return res.status(400).json({error:'REQUIRED_FIELDS'});
   if(role==='SUPERADMIN') return res.status(403).json({error:'SUPERADMIN_PERMISSIONS_FIXED'});
-  const requiredAdmin=new Set(['users.view','users.create','users.roles','permissions.manage','audit.view']);
-  if(role==='ADMIN' && !enabled && requiredAdmin.has(permission)) return res.status(403).json({error:'PROTECTED_ADMIN_PERMISSION'});
   const old=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
   db.prepare(`INSERT INTO role_permissions(role,permission,enabled,updated_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(role,permission) DO UPDATE SET enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(role,permission,enabled?1:0,req.user.name||'');
@@ -1305,7 +1391,8 @@ app.post('/api/backups/:id/restore',auth,requireSuperadmin,(req,res)=>{
   const {password,confirmation}=req.body||{}; if(confirmation!=='RESTORE BACKUP')return res.status(400).json({error:'RESTORE_CONFIRMATION_REQUIRED'});
   const owner=db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);if(!owner||!bcrypt.compareSync(String(password||''),owner.password_hash))return res.status(401).json({error:'INVALID_PASSWORD'});
   const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});
-  const safety=createBackup('PRE_RESTORE');const zip=new AdmZip(b.file_path),entry=zip.getEntry('database/klavierhaus_v6.sqlite');if(!entry)return res.status(400).json({error:'BACKUP_INVALID'});const tmp=DB_PATH+'.restore';fs.writeFileSync(tmp,entry.getData());const files=zip.getEntries().filter(e=>!e.isDirectory&&e.entryName.startsWith('uploads/'));db.close();fs.copyFileSync(tmp,DB_PATH);fs.rmSync(tmp,{force:true});fs.rmSync(UPLOAD_DIR,{recursive:true,force:true});fs.mkdirSync(UPLOAD_DIR,{recursive:true});for(const e of files){const rel=e.entryName.slice(8);if(!rel)continue;const out=path.join(UPLOAD_DIR,rel);fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,e.getData());}return res.json({ok:true,restartRequired:true,safetyBackup:safety.file_name});
+  const safety=createBackup('PRE_RESTORE'); db.close(); fs.copyFileSync(b.file_path,DB_PATH);
+  return res.json({ok:true,restartRequired:true,safetyBackup:safety.file_name});
 });
 
 app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
@@ -1346,7 +1433,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.use((err,req,res,next)=>{
-  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.code==="INVALID_FILE_TYPE"?"INVALID_FILE_TYPE":(err.message||"UPLOAD_ERROR")); return res.status(400).json({error:code}); }
+  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.message||"UPLOAD_ERROR"); return res.status(400).json({error:code}); }
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
