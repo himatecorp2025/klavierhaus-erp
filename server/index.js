@@ -736,8 +736,15 @@ function auth(req,res,next){
   const h=req.headers.authorization||"";
   const token=h.startsWith("Bearer ")?h.slice(7):null;
   if(!token) return res.status(401).json({error:"Missing token"});
-  try{ req.user=jwt.verify(token, JWT_SECRET); next(); }
-  catch(e){ res.status(401).json({error:"Invalid token"}); }
+  try{
+    const tokenUser=jwt.verify(token, JWT_SECRET);
+    const currentUser=db.prepare("SELECT id,name,email,role,status,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
+    if(!currentUser) return res.status(401).json({error:"User no longer exists or is inactive"});
+    req.user={...tokenUser,...currentUser,role:Number(currentUser.is_superadmin||0)===1?'SUPERADMIN':currentUser.role};
+    next();
+  } catch(e){
+    res.status(401).json({error:"Invalid token"});
+  }
 }
 function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || Number(user.is_superadmin||0) === 1); }
 function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
@@ -1811,9 +1818,17 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   const confirmation=String(req.body?.confirmation||"");
   if(confirmation!=="DELETE EVERYTHING") return res.status(400).json({error:"Exact confirmation is required"});
   const exists=(table)=>!!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table);
-  const clear=(table, where="")=>{ if(exists(table)) db.prepare(`DELETE FROM ${table} ${where}`).run(); };
+  const clear=(table)=>{ if(exists(table)) db.prepare(`DELETE FROM ${table}`).run(); };
+  const superadminId=String(req.user.id||"");
+  if(!superadminId) return res.status(400).json({error:"Superadmin identity is missing"});
+
   const tx=db.transaction(()=>{
+    // Delete every business, import, audit, backup and configurable record.
+    // Only the currently authenticated hidden superadmin account survives.
     [
+      "journal_lines",
+      "journal_entries",
+      "accounts",
       "financial_items",
       "job_logs",
       "knowledge_base",
@@ -1822,26 +1837,60 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "inventory_checks",
       "inventory_items",
       "pianos",
-      "contacts"
-    ].forEach(t=>clear(t));
+      "contacts",
+      "import_batches",
+      "audit_log",
+      "backup_log",
+      "role_permissions",
+      "app_settings"
+    ].forEach(clear);
+
     if(exists("users")){
-      db.prepare("DELETE FROM users WHERE COALESCE(hidden_user,0)=0 AND COALESCE(is_superadmin,0)=0").run();
-      db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1 WHERE lower(email)=lower(?)").run("simon.alex@klavierhaus.com");
+      db.prepare("DELETE FROM users WHERE id<>?").run(superadminId);
+      db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1, role='ADMIN' WHERE id=?").run(superadminId);
     }
-    if(exists("sqlite_sequence")){
-      db.prepare("DELETE FROM sqlite_sequence WHERE name NOT IN ('users')").run();
+
+    // Recreate only the minimum system defaults required for a usable clean installation.
+    if(exists("app_settings")){
+      const insertSetting=db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)");
+      [
+        ["company_name","Klavierhaus","SYSTEM"],
+        ["short_name","KH ERP","SYSTEM"],
+        ["logo_url","/icons/icon-512.png","SYSTEM"],
+        ["login_background_url","","SYSTEM"],
+        ["branding_version","1","SYSTEM"]
+      ].forEach(row=>insertSetting.run(...row));
     }
+
+    if(exists("role_permissions")){
+      const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+      const defaults={
+        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
+        MANAGER:[...commonView,'finance.view','income_statement.view'],
+        WORKER:[...commonView],
+        VIEWER:[...commonView]
+      };
+      const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
+      Object.entries(defaults).forEach(([role,permissions])=>permissions.forEach(permission=>insertPermission.run(role,permission)));
+    }
+
+    if(exists("sqlite_sequence")) db.prepare("DELETE FROM sqlite_sequence").run();
   });
+
   tx();
-  try{
-    if(fs.existsSync(UPLOAD_DIR)){
-      for(const name of fs.readdirSync(UPLOAD_DIR)){
-        const fp=path.join(UPLOAD_DIR,name);
-        try{ fs.rmSync(fp,{recursive:true,force:true}); }catch(e){}
+
+  // Remove every uploaded branding/document file and every physical backup file as part of the full reset.
+  for(const directory of [UPLOAD_DIR,BACKUP_DIR]){
+    try{
+      if(fs.existsSync(directory)){
+        for(const name of fs.readdirSync(directory)){
+          try{fs.rmSync(path.join(directory,name),{recursive:true,force:true});}catch(_e){}
+        }
       }
-    }
-  }catch(e){}
-  res.json({ok:true});
+    }catch(_e){}
+  }
+
+  res.json({ok:true,reset:true,preservedSuperadminId:superadminId});
 });
 
 app.use((err,req,res,next)=>{
@@ -1849,7 +1898,6 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
