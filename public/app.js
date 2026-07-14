@@ -16,6 +16,9 @@ let currentPianoSearch="";
 let currentPianoOwnershipFilter="ALL";
 let currentPianoMinValue="";
 let currentPianoMaxValue="";
+let mobileClientFiltersOpen=false;
+let mobilePianoFiltersOpen=false;
+let mobileFinanceFiltersOpen=false;
 let pianoOwnerContactsCache=[];
 let schedulerWorkersCache=null;
 let userPermissions={all:false,permissions:[]};
@@ -224,6 +227,25 @@ async function deleteEverything(){
   }catch(err){alert(err.message)}
 }
 
+function isCompactViewport(){return window.matchMedia("(max-width: 900px)").matches;}
+function toggleMobileFilterPanel(panelId,buttonId,stateName){
+  const panel=document.getElementById(panelId),button=document.getElementById(buttonId);
+  if(!panel)return;
+  const opening=!panel.classList.contains("open");
+  panel.classList.toggle("open",opening);
+  if(button){button.classList.toggle("active",opening);button.setAttribute("aria-expanded",String(opening));}
+  if(stateName==="contacts")mobileClientFiltersOpen=opening;
+  if(stateName==="pianos")mobilePianoFiltersOpen=opening;
+  if(stateName==="finance")mobileFinanceFiltersOpen=opening;
+}
+function formatFinanceDate(value){
+  if(!value)return "";
+  const d=new Date(String(value).length===10?`${value}T12:00:00`:value);
+  if(Number.isNaN(d.getTime()))return htmlText(value);
+  return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+}
+function openMyProfile(){openUser(user,true);}
+
 async function boot(){
  if(!token)return;
  await loadBranding();
@@ -268,7 +290,7 @@ function hhmm(s){let d=new Date(s);return d.toLocaleTimeString("en-US",{hour:"2-
 function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
 function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
-function req(t){return `${t} <span class="required">*</span>`}
+function req(t){return `${splitBilingualText(t)} <span class="required">*</span>`}
 function isSuperadmin(){return user && (user.role==="SUPERADMIN" || Number(user.is_superadmin||0)===1)}
 function isAdmin(){return user && (user.role==="ADMIN" || isSuperadmin())}
 function bi(en,hu){return currentLang==="hu"?hu:en}
@@ -812,8 +834,8 @@ function setupPianoTableScroll(){
  if(!top||!bottom||!spacer||!table)return;
  const syncWidth=()=>{spacer.style.width=`${table.scrollWidth}px`;top.classList.toggle("hidden-scroll",table.scrollWidth<=bottom.clientWidth+1);};
  let syncing=false;
- top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;bottom.scrollLeft=top.scrollLeft;syncing=false;});
- bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;top.scrollLeft=bottom.scrollLeft;syncing=false;});
+ top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;requestAnimationFrame(()=>{bottom.scrollLeft=top.scrollLeft;syncing=false;});},{passive:true});
+ bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;requestAnimationFrame(()=>{top.scrollLeft=bottom.scrollLeft;syncing=false;});},{passive:true});
  syncWidth();
  if(window.ResizeObserver){const ro=new ResizeObserver(syncWidth);ro.observe(table);ro.observe(bottom);}
 }
@@ -867,8 +889,8 @@ async function renderPianos(){
  ];
  const ownerOptionHtml=ownerOptions.map(([v,t])=>`<option value="${v}" ${currentPianoOwnershipFilter===v?"selected":""}>${t} (${Number(ownershipCounts[v]||0)})</option>`).join("");
  const resetButton=isSuperadmin()?`<button type="button" class="small danger-btn piano-reset-btn" onclick="deleteAllPianos()">${bi("Delete all pianos","Összes zongora törlése")}</button>`:"";
- $("#pianos").innerHTML=`<div class="panel piano-list-panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button>${resetButton}</div></div><div class="piano-filter-grid piano-filter-grid-no-status"><label>${bi("Search","Keresés")}<input id="pianoSearchInput" value="${htmlText(currentPianoSearch)}" placeholder="${bi("Client, piano, serial number or address","Ügyfél, zongora, gyári szám vagy cím")}" oninput="currentPianoSearch=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Ownership","Tulajdon")}<select onchange="currentPianoOwnershipFilter=this.value;currentPianoPage=1;renderPianos()">${ownerOptionHtml}</select></label><label>${bi("Minimum value (USD)","Minimum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMinValue)}" oninput="currentPianoMinValue=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Maximum value (USD)","Maximum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMaxValue)}" oninput="currentPianoMaxValue=this.value;currentPianoPage=1;renderPianos()"></label><div class="piano-filter-actions"><button type="button" class="small ghost-btn" onclick="clearPianoFilters()">${bi("Clear filters","Szűrők törlése")}</button></div></div>${pagination}<div class="table-scroll-top" id="pianosScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap pianos-table-wrap" id="pianosTableWrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
- const input=document.getElementById("pianoSearchInput");if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+ $("#pianos").innerHTML=`<div class="panel piano-list-panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button>${resetButton}</div></div><button id="pianoFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobilePianoFiltersOpen}" onclick="toggleMobileFilterPanel('pianoFilterPanel','pianoFilterToggle','pianos')">⌕ ${bi("Filters","Szűrők")}</button><div id="pianoFilterPanel" class="piano-filter-grid piano-filter-grid-no-status mobile-collapsible-filter ${mobilePianoFiltersOpen?"open":""}"><label>${bi("Search","Keresés")}<input id="pianoSearchInput" value="${htmlText(currentPianoSearch)}" placeholder="${bi("Client, piano, serial number or address","Ügyfél, zongora, gyári szám vagy cím")}" oninput="currentPianoSearch=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Ownership","Tulajdon")}<select onchange="currentPianoOwnershipFilter=this.value;currentPianoPage=1;renderPianos()">${ownerOptionHtml}</select></label><label>${bi("Minimum value (USD)","Minimum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMinValue)}" oninput="currentPianoMinValue=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Maximum value (USD)","Maximum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMaxValue)}" oninput="currentPianoMaxValue=this.value;currentPianoPage=1;renderPianos()"></label><div class="piano-filter-actions"><button type="button" class="small ghost-btn" onclick="clearPianoFilters()">${bi("Clear filters","Szűrők törlése")}</button></div></div>${pagination}<div class="table-scroll-top" id="pianosScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap pianos-table-wrap" id="pianosTableWrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
+ const input=document.getElementById("pianoSearchInput");if(input&&!isCompactViewport()){input.focus({preventScroll:true});input.setSelectionRange(input.value.length,input.value.length);}
  requestAnimationFrame(setupPianoTableScroll);
  applyLanguageToDOM();
 }
@@ -986,8 +1008,8 @@ function setupContactTableScroll(){
  if(!top||!bottom||!spacer||!table) return;
  const syncWidth=()=>{spacer.style.width=`${table.scrollWidth}px`;top.classList.toggle("hidden-scroll",table.scrollWidth<=bottom.clientWidth+1);};
  let syncing=false;
- top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;bottom.scrollLeft=top.scrollLeft;syncing=false;});
- bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;top.scrollLeft=bottom.scrollLeft;syncing=false;});
+ top.addEventListener("scroll",()=>{if(syncing)return;syncing=true;requestAnimationFrame(()=>{bottom.scrollLeft=top.scrollLeft;syncing=false;});},{passive:true});
+ bottom.addEventListener("scroll",()=>{if(syncing)return;syncing=true;requestAnimationFrame(()=>{top.scrollLeft=bottom.scrollLeft;syncing=false;});},{passive:true});
  syncWidth();
  if(window.ResizeObserver){const ro=new ResizeObserver(syncWidth);ro.observe(table);ro.observe(bottom);}
 }
@@ -1012,8 +1034,8 @@ async function renderContactsTable(data){
  const pageRows=filtered.slice(start,start+CLIENTS_PER_PAGE);
  const pagination=clientPaginationHtml(currentClientPage,totalPages,filtered.length);
  const s=schemas.contacts;
- $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><div class="client-search client-search-grid"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="currentClientPage=1;render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
- const input=document.getElementById("clientSearchInput"); if(input){ input.focus(); input.setSelectionRange(input.value.length,input.value.length); }
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="currentClientPage=1;render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
+ const input=document.getElementById("clientSearchInput"); if(input&&!isCompactViewport()){ input.focus({preventScroll:true}); input.setSelectionRange(input.value.length,input.value.length); }
  requestAnimationFrame(setupContactTableScroll);
 }
 async function deleteGenericResource(key,id){
@@ -1319,52 +1341,40 @@ function signedAmountHTML(item){
  return `<span class="${cls}">${sign} ${money(Math.abs(Number(item?.amount||0)))}</span>`;
 }
 function paymentOptions(selected=""){
- return ["","Cash","Check","Bank Transfer","Credit Card","Invoice","Other"].map(x=>`<option value="${x}" ${x===selected?"selected":""}>${x||"Select / Válassz"}</option>`).join("");
+ const labels={"":bi("Select","Válassz"),Cash:bi("Cash","Készpénz"),Check:bi("Check","Csekk"),"Bank Transfer":bi("Bank Transfer","Banki átutalás"),"Credit Card":bi("Credit Card","Bankkártya"),Invoice:bi("Invoice","Számla"),Other:bi("Other","Egyéb")};return ["","Cash","Check","Bank Transfer","Credit Card","Invoice","Other"].map(x=>`<option value="${x}" ${x===selected?"selected":""}>${labels[x]}</option>`).join("");
 }
 function optionsFrom(list,selected=""){
- return list.map(x=>`<option value="${x[0]}" ${x[0]===selected?"selected":""} ${String(x[0]).endsWith("_HEADER")?"disabled":""}>${x[1]}</option>`).join("");
+ return list.map(x=>`<option value="${x[0]}" ${x[0]===selected?"selected":""} ${String(x[0]).endsWith("_HEADER")?"disabled":""}>${splitBilingualText(x[1])}</option>`).join("");
 }
 async function renderFinance(){
  const currentMonth=currentMonthKey();
  let items=[];
  try{items=await api("/api/financial-items");}catch(e){items=[];}
- const totalIncome=items.filter(x=>x.main_type==="INCOME").reduce((s,x)=>s+Number(x.amount||0),0);
- const passiveIncome=items.filter(x=>x.main_type==="INCOME"&&x.recurrence==="MONTHLY").reduce((s,x)=>s+Number(x.amount||0),0);
- const totalExpenses=items.filter(x=>x.main_type==="EXPENSE").reduce((s,x)=>s+Number(x.amount||0),0);
- const assets=items.filter(x=>x.main_type==="ASSET").reduce((s,x)=>s+Number(x.amount||0),0);
- const sources=items.filter(x=>x.main_type==="LIABILITY"||x.main_type==="EQUITY").reduce((s,x)=>s+Number(x.amount||0),0);
  $("#finance").innerHTML=`<div class="panel finance-panel">
    <div class="toolbar">
-     <div>
-       <h3>Finance / Pénzügy</h3>
-       <p class="muted">Tételes pénzügyi napló. Innen számol az eredménykimutatás és a mérleg.</p>
-     </div>
-     <div><button class="small" onclick="exportFinancialItemsCSV()">Export CSV</button> <button onclick="openFinancialItem()">+ New Financial Item / Új pénzügyi tétel</button></div>
+     <div><h3>${bi("Finance","Pénzügy")}</h3><p class="muted">${bi("Detailed financial register used by the income statement and balance overview.","Tételes pénzügyi napló, amelyből az eredménykimutatás és a mérleg készül.")}</p></div>
+     <div><button class="small" onclick="exportFinancialItemsCSV()">${bi("Export CSV","CSV export")}</button> <button onclick="openFinancialItem()">+ ${bi("New financial item","Új pénzügyi tétel")}</button></div>
    </div>
-   <div class="finance-filters">
+   <button id="financeFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileFinanceFiltersOpen}" onclick="toggleMobileFilterPanel('financeFilterPanel','financeFilterToggle','finance')">⌕ ${bi("Filters","Szűrők")}</button>
+   <div id="financeFilterPanel" class="finance-filters mobile-collapsible-filter ${mobileFinanceFiltersOpen?"open":""}">
      <label>${bi("Month","Hónap")} <input id="finFilterMonth" type="month" value="${currentMonth}"></label>
-     <label>Type / Típus <select id="finFilterType"><option value="">All / Összes</option><option value="INCOME">Income / Bevétel</option><option value="EXPENSE">Expense / Kiadás</option><option value="ASSET">Asset / Eszköz</option><option value="LIABILITY">Liability / Kötelezettség</option><option value="EQUITY">Equity / Saját tőke</option></select></label>
-     <label>Recurrence / Ismétlődés <select id="finFilterRec"><option value="">All / Összes</option><option value="ONE_TIME">One-time / Egyszeri</option><option value="MONTHLY">Monthly / Havi</option></select></label>
-     <button class="small" onclick="applyFinanceFilters()">Filter / Szűrés</button>
-     <button class="small ghost-btn" onclick="clearFinanceFilters()">Clear / Törlés</button>
+     <label>${bi("Type","Típus")} <select id="finFilterType"><option value="">${bi("All","Összes")}</option><option value="INCOME">${bi("Income","Bevétel")}</option><option value="EXPENSE">${bi("Expense","Kiadás")}</option><option value="ASSET">${bi("Asset","Eszköz")}</option><option value="LIABILITY">${bi("Liability","Kötelezettség")}</option><option value="EQUITY">${bi("Equity","Saját tőke")}</option></select></label>
+     <label>${bi("Recurrence","Ismétlődés")} <select id="finFilterRec"><option value="">${bi("All","Összes")}</option><option value="ONE_TIME">${bi("One-time","Egyszeri")}</option><option value="MONTHLY">${bi("Monthly","Havi")}</option></select></label>
+     <button class="small" onclick="applyFinanceFilters()">${bi("Filter","Szűrés")}</button>
+     <button class="small ghost-btn" onclick="clearFinanceFilters()">${bi("Clear","Törlés")}</button>
    </div>
    <div id="financeTableBox">${financeTableHTML(items)}</div>
  </div>`;
 }
 function financeTableHTML(items){
- return `<div class="table-wrap"><table><thead><tr>
-   <th>Date / Dátum</th><th>Title / Megnevezés</th><th>Type / Típus</th><th>Category / Kategória</th><th>Recurrence / Ismétlődés</th><th>Payment / Fizetés</th><th>Balance impact / Mérleghatás</th><th>Amount / Összeg</th><th>Actions / Műveletek</th>
+ return `<div class="table-wrap finance-table-wrap"><table><thead><tr>
+   <th>${bi("Date","Dátum")}</th><th>${bi("Title","Megnevezés")}</th><th>${bi("Type","Típus")}</th><th>${bi("Category","Kategória")}</th><th>${bi("Recurrence","Ismétlődés")}</th><th>${bi("Payment","Fizetés")}</th><th>${bi("Balance impact","Mérleghatás")}</th><th>${bi("Amount","Összeg")}</th><th>${bi("Actions","Műveletek")}</th>
  </tr></thead><tbody>${items.map(x=>`<tr>
-   <td>${x.item_date||""}</td>
-   <td><b>${x.title||""}</b><br><small>${x.description||""}</small></td>
-   <td>${mainTypeLabel(x.main_type)}</td>
-   <td>${finLabel(x.category)}</td>
-   <td>${recurrenceLabel(x.recurrence)}</td>
-   <td>${x.payment_method||""}</td>
-   <td>${finLabel(x.balance_account)}</td>
-   <td>${signedAmountHTML(x)}</td>
-   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>Edit / Szerkesztés</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">Delete / Törlés</button>`:""}</td>
- </tr>`).join("") || `<tr><td colspan="9" class="muted">No financial items yet / Még nincs pénzügyi tétel.</td></tr>`}</tbody></table></div>`;
+   <td class="finance-date-cell">${formatFinanceDate(x.item_date)}</td>
+   <td><b>${htmlText(x.title||"")}</b><br><small>${htmlText(x.description||"")}</small></td>
+   <td>${mainTypeLabel(x.main_type)}</td><td>${finLabel(x.category)}</td><td>${recurrenceLabel(x.recurrence)}</td><td>${htmlText(x.payment_method||"")}</td><td>${finLabel(x.balance_account)}</td><td>${signedAmountHTML(x)}</td>
+   <td><button class="small" onclick='openFinancialItem(${esc(x)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteFinancialItem('${x.id}')">${bi("Delete","Törlés")}</button>`:""}</td>
+ </tr>`).join("") || `<tr><td colspan="9" class="muted">${bi("No financial items yet.","Még nincs pénzügyi tétel.")}</td></tr>`}</tbody></table></div>`;
 }
 function exportFinancialItemsCSV(){
  api("/api/financial-items").then(data=>{if(!data.length){alert(bi("No data","Nincs adat"));return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="financial_items.csv";a.click()})
@@ -1400,7 +1410,7 @@ function openFinancialItem(row=null){
      <option value="LIABILITY" ${selectedType==="LIABILITY"?"selected":""}>Liability / Kötelezettség</option>
      <option value="EQUITY" ${selectedType==="EQUITY"?"selected":""}>Equity / Saját tőke</option>
    </select></div>
-   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${row?.title||""}" required placeholder="Piano sale, tuning, rent..."></div>
+   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${row?.title||""}" required placeholder="${bi("Piano sale, tuning, rent...","Zongoraeladás, hangolás, bérleti díj...")}"></div>
    <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" min="0" step="0.01" value="${row?.amount||0}" required></div>
    <div class="field"><label>${req("Category / Kategória")}</label><select name="category" id="financialCategory">${optionsFrom(categoryList,row?.category||"")}</select></div>
    <div class="field"><label>${req("Recurrence / Ismétlődés")}</label><select name="recurrence"><option value="ONE_TIME" ${row?.recurrence!=="MONTHLY"?"selected":""}>One-time / Egyszeri</option><option value="MONTHLY" ${row?.recurrence==="MONTHLY"?"selected":""}>Monthly / Havi</option></select></div>
@@ -1409,7 +1419,7 @@ function openFinancialItem(row=null){
    <div class="field"><label>Job ID / Munka ID</label><input name="job_id" value="${row?.job_id||""}"></div>
    <div class="field"><label>Client ID / Ügyfél ID</label><input name="client_id" value="${row?.client_id||""}"></div>
    <div class="field"><label>Piano ID / Zongora ID</label><input name="piano_id" value="${row?.piano_id||""}"></div>
-   <div class="field full"><label>Description / Leírás</label><textarea name="description" placeholder="Rövid magyarázat, hogy később is egyértelmű legyen.">${row?.description||""}</textarea></div>
+   <div class="field full"><label>Description / Leírás</label><textarea name="description" placeholder="${bi("Short explanation for future reference.","Rövid magyarázat, hogy később is egyértelmű legyen.")}">${row?.description||""}</textarea></div>
  </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>${isEdit?"Save changes / Módosítás mentése":"Create item / Tétel létrehozása"}</button></div>`;
  $("#form").onsubmit=async e=>{
    e.preventDefault();
@@ -1959,9 +1969,10 @@ function openUser(row=null, selfProfile=false){
  $("#modalTitle").textContent=isEdit?(selfProfile?tr("myProfile"):tr("editUser")):tr("addUser");
  let roleOptions=["ADMIN","MANAGER","WORKER","VIEWER"];
  const roleField = canFullEdit || !isEdit ? `<div class="field"><label>${bi("Role","Szerepkör")}</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div>` : "";
- const statusField = canFullEdit ? `<div class="field"><label>Status</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
- $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target));if(isEdit&&!body.password)delete body.password;let saved;if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});if(isEdit&&row.id===user.id){user={...user,...saved};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;}schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();renderUsers();}catch(err){showError(err.message)}};
+ const statusField = canFullEdit ? `<div class="field"><label>${bi("Status","Állapot")}</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
+ const preferenceFields=selfProfile?`<div class="field profile-preferences"><label>${bi("Language","Nyelv")}</label><select name="profile_language"><option value="en" ${currentLang==="en"?"selected":""}>American English</option><option value="hu" ${currentLang==="hu"?"selected":""}>Magyar</option></select></div><div class="field profile-preferences"><label>${bi("Appearance","Megjelenés")}</label><select name="profile_theme"><option value="dark" ${currentTheme==="dark"?"selected":""}>${bi("Dark","Sötét")}</option><option value="light" ${currentTheme==="light"?"selected":""}>${bi("Light","Világos")}</option></select></div><div class="field full profile-role-info"><label>${bi("Role","Szerepkör")}</label><input value="${htmlText(row?.role||user?.role||"")}" disabled></div>`:"";
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target));const selectedLanguage=body.profile_language;const selectedTheme=body.profile_theme;delete body.profile_language;delete body.profile_theme;if(isEdit&&!body.password)delete body.password;let saved;if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});if(isEdit&&row.id===user.id){user={...user,...saved};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}}schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();if(currentView==="users"&&isAdmin())renderUsers();}catch(err){showError(err.message)}};
 }
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!confirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?")))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err.message)}}
 
