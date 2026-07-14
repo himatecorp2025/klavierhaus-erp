@@ -289,20 +289,8 @@ function updateNYClock(){ const el=document.getElementById("currentNYClock"); if
 setInterval(updateNYClock,30000);
 function isClosedJobStatus(status){ return ["Completed","Partially completed","Failed"].includes(String(status||"")); }
 function isOverdueJob(j){ return !isClosedJobStatus(j.status) && String(j.end_time||"") && String(j.end_time).slice(0,16) < nyNowLocalString(); }
-function calendarEventClass(j){
- const status=String(j.status||"");
- if(status==="Failed" || isOverdueJob(j)) return "Failed";
- if(status==="Completed" || String(j.workflow_status||"")==="COMPLETED") return "Completed";
- if(status==="Partially completed" || String(j.workflow_status||"")==="IN_PROGRESS") return "PartiallyCompleted";
- return "WorkerColor";
-}
-function calendarStatusIcon(j){
- const cls=calendarEventClass(j);
- if(cls==="Completed") return "✓";
- if(cls==="Failed") return "!";
- return "◷";
-}
-function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="--event-color:${workerColor(j.assigned_to)}"` : ""; }
+function calendarEventClass(j){ if(String(j.status)==="Failed" || isOverdueJob(j)) return "Failed"; if(["Completed","Partially completed"].includes(String(j.status||""))) return "Completed"; return "WorkerColor"; }
+function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="background:${workerColor(j.assigned_to)};color:#07101d"` : ""; }
 
 function ensureView(id){
  let el=document.getElementById(id);
@@ -405,76 +393,45 @@ async function renderToday(){
   updateMobileNavigationActive();
 }
 
-function minutesFromTime(value){
- const m=String(value||"").slice(11,16).match(/^(\d{2}):(\d{2})$/);
- return m?Number(m[1])*60+Number(m[2]):0;
-}
-function calendarLayout(events,dayStart,dayEnd){
- const sorted=[...events].sort((a,b)=>minutesFromTime(a.start_time)-minutesFromTime(b.start_time)||minutesFromTime(a.end_time)-minutesFromTime(b.end_time));
- const active=[]; const placed=[];
- for(const event of sorted){
-   const start=Math.max(dayStart,minutesFromTime(event.start_time));
-   const end=Math.min(dayEnd,Math.max(start+15,minutesFromTime(event.end_time)));
-   for(let i=active.length-1;i>=0;i--) if(active[i].end<=start) active.splice(i,1);
-   const used=new Set(active.map(x=>x.lane)); let lane=0; while(used.has(lane)) lane++;
-   const item={event,start,end,lane}; active.push(item); placed.push(item);
- }
- for(const item of placed){
-   const overlaps=placed.filter(x=>x.start<item.end && x.end>item.start);
-   item.lanes=Math.max(1,...overlaps.map(x=>x.lane+1));
- }
- return placed;
-}
-function nyDateParts(date=new Date()){
- const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"}).formatToParts(date).reduce((a,p)=>{a[p.type]=p.value;return a},{});
- return {date:`${parts.year}-${parts.month}-${parts.day}`,minutes:Number(parts.hour)*60+Number(parts.minute),label:`${parts.hour}:${parts.minute}`};
-}
-function updateCurrentTimeLine(){
- const now=nyDateParts();
- document.querySelectorAll(".current-time-line").forEach(line=>{
-   if(line.dataset.date!==now.date){line.classList.add("hidden");return;}
-   const start=Number(line.dataset.dayStart||420), end=Number(line.dataset.dayEnd||1320);
-   if(now.minutes<start||now.minutes>end){line.classList.add("hidden");return;}
-   line.classList.remove("hidden");
-   line.style.top=`${((now.minutes-start)/(end-start))*100}%`;
-   const label=line.querySelector("span"); if(label) label.textContent=now.label;
- });
-}
 async function renderScheduler(){
  const jobs=await api("/api/jobs");
  const workers=await loadSchedulerWorkers();
  const visibleJobs=jobs.filter(j=>{
    if(currentSchedulerWorker==="ALL") return true;
-   if(currentSchedulerWorker==="COMPLETED") return String(j.status||"")==="Completed";
+   if(currentSchedulerWorker==="COMPLETED") return ["Completed","Partially completed"].includes(String(j.status||""));
    if(currentSchedulerWorker==="FAILED") return String(j.status||"")==="Failed" || isOverdueJob(j);
    if(String(currentSchedulerWorker).startsWith("worker:")) return String(j.assigned_user_id||"")===String(currentSchedulerWorker).slice(7);
    return String(j.assigned_to||"")===currentSchedulerWorker;
  });
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
+ const hours=Array.from({length:15},(_,i)=>i+7);
  const weekDates=week.map(d=>fmtDate(d));
- const dayStart=7*60, dayEnd=22*60, totalMinutes=dayEnd-dayStart;
  const baseOptions=["ALL","COMPLETED","FAILED"].map(v=>`<option value="${v}" ${currentSchedulerWorker===v?"selected":""}>${workerFilterLabel(v,workers)}</option>`).join("");
  const workerOptions=workers.map(w=>{const val=`worker:${String(w.id).replaceAll('"','&quot;')}`;return `<option value="${val}" ${currentSchedulerWorker===val?"selected":""}>${workerFilterLabel(val,workers)}</option>`}).join("");
- let html=`<div class="panel scheduler-panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${baseOptions}${workerOptions}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div>
- <div class="timeline-scroll"><div class="timeline-calendar"><div class="timeline-corner">${bi("Time","Idő")}</div>${week.map(d=>`<div class="timeline-day-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short"})}</b><span>${fmtDate(d)}</span></div>`).join("")}
- <div class="timeline-times">${Array.from({length:16},(_,i)=>`<span style="top:${(i*60/totalMinutes)*100}%">${String(i+7).padStart(2,"0")}:00</span>`).join("")}</div>`;
- for(const day of week){
-   const dayStr=fmtDate(day); const events=visibleJobs.filter(j=>String(j.start_time||"").slice(0,10)===dayStr);
-   const placed=calendarLayout(events,dayStart,dayEnd);
-   html+=`<div class="timeline-day" data-date="${dayStr}" onclick="if(event.target===this){const r=this.getBoundingClientRect();const mins=${dayStart}+Math.round(((event.clientY-r.top)/r.height)*${totalMinutes}/15)*15;openJob('${dayStr}T'+String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'))}">
-    <div class="quarter-grid">${Array.from({length:60},(_,i)=>`<i style="top:${(i/60)*100}%" class="${i%4===0?'hour':''}"></i>`).join("")}</div>
-    <div class="current-time-line" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>`;
-   for(const item of placed){
-     const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
-     const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><span class="event-status">${calendarStatusIcon(j)}</span><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><b>${htmlText(j.title||"")}</b><small>${htmlText(j.assigned_to||"")}</small></button>`;
+
+ let html=`<div class="panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${baseOptions}${workerOptions}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div><div class="calendar-wrap"><div class="calendar-grid"><div class="cal-head time-head">${bi("Time","Idő")}</div>`;
+ html+=week.map(d=>`<div class="cal-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short"})}</b><br><span>${fmtDate(d)}</span></div>`).join("");
+
+ for(const h of hours){
+   html+=`<div class="cal-time">${String(h).padStart(2,"0")}:00</div>`;
+   for(const day of week){
+     const dayStr=fmtDate(day);
+     const pf=`${dayStr}T${String(h).padStart(2,"0")}:00`;
+     html+=`<div class="cal-cell" onclick="openJob('${pf}')">`;
+     html+=visibleJobs
+       .filter(j=>{
+          const datePart=String(j.start_time||"").slice(0,10);
+          const hourPart=Number(String(j.start_time||"").slice(11,13));
+          return datePart===dayStr && hourPart===h;
+       })
+       .map(j=>`<div class="cal-event ${calendarEventClass(j)}" ${calendarEventStyle(j)} onclick='event.stopPropagation();openJobDetails(${esc(j)})'><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><br>${j.assigned_to} · ${j.title}<br><small>${j.job_type||""} · ${money(j.planned_amount)} · ${j.status}${isOverdueJob(j)?" · "+bi("Overdue","Lejárt határidő"):""}</small></div>`)
+       .join("");
+     html+=`</div>`;
    }
-   html+=`</div>`;
  }
- html+=`</div></div><div class="scheduler-legend"><span class="legend-active">◷ ${bi("Scheduled / active","Ütemezett / aktív")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-failed">! ${bi("Failed / overdue","Sikertelen / lejárt")}</span></div></div>`;
+ html+=`</div></div></div>`;
  $("#scheduler").innerHTML=html;
- updateNYClock(); updateCurrentTimeLine();
- clearInterval(window.__khTimelineTimer); window.__khTimelineTimer=setInterval(()=>{updateNYClock();updateCurrentTimeLine()},60000);
+ updateNYClock();
  applyLanguageToDOM();
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
@@ -644,7 +601,6 @@ function openJobDetails(j){
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
  const closed=isClosedJobStatus(j.status) || String(j.status||"")==="Cancelled";
  const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
- actionButtons.push(`<button type="button" class="ghost-btn" onclick="openWorkflowHistory('${jobRef(j)}')">${bi("Workflow history","Munkafolyamat")}</button>`);
  if(!closed){
    actionButtons.push(`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`);
    actionButtons.push(`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`);
@@ -666,14 +622,6 @@ function openJobDetails(j){
  </div>
  <div class="actions">${actionButtons.join("")}</div>`;
  $("#form").onsubmit=e=>e.preventDefault()
-}
-async function openWorkflowHistory(id){
- try{
-   const data=await api(`/api/jobs/${encodeURIComponent(id)}/workflow`);
-   $("#modal").classList.remove("hidden"); $("#modalTitle").textContent=bi("Workflow history","Munkafolyamat története");
-   $("#form").innerHTML=`<div class="workflow-history">${data.steps.map((j,i)=>`<article class="workflow-step ${calendarEventClass(j)}"><div class="workflow-step-index">${i+1}</div><div><h4>${calendarStatusIcon(j)} ${htmlText(j.title||"")}</h4><p><b>${htmlText(j.assigned_to||"")}</b> · ${String(j.start_time||"").replace("T"," ")} – ${String(j.end_time||"").replace("T"," ")}</p><p class="muted">${bi("Status","Státusz")}: ${htmlText(j.status||"")} · ${bi("Step","Lépés")}: ${j.workflow_step_no||i+1}</p>${j.close_notes?`<p>${htmlText(j.close_notes)}</p>`:""}</div></article>`).join("")}</div><div class="actions"><button type="button" onclick="closeModal()">${bi("Close","Bezárás")}</button></div>`;
-   $("#form").onsubmit=e=>e.preventDefault();
- }catch(err){alert(err.message)}
 }
 async function deleteJob(id){
  if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
@@ -715,7 +663,6 @@ $("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);l
 if(file && file.name && !isAllowedInvoiceFile(file.name)){alert("Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel. / Only PDF, JPG, JPEG or PNG files are allowed.");return}
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
 fd.append("id",j.id||""); fd.append("job_id",j.id||""); fd.append("job_key",j.job_key||""); fd.append("client_id",j.client_id||""); fd.append("client_name",j.client_name||""); fd.append("piano_name",j.piano_name||""); fd.append("title",j.title||"");
-if(fd.get("close_type")==="Full"&&!confirm(bi("Close the entire workflow? Every earlier linked part-work will also become fully completed.","Lezárod a teljes munkafolyamatot? Minden korábbi kapcsolódó részmunka is teljesen lezárttá válik."))) return;
 try{await api(`/api/jobs/${encodeURIComponent(jobRef(j))}/close`,{method:"POST",body:fd});closeModal();renderScheduler()}catch(err){alert(err.message)}}}
 function isAllowedInvoiceFile(name){return /\.(pdf|jpg|jpeg|png)$/i.test(name||"")}
 function toggleNextJob(){document.getElementById("nextJobFields").classList.toggle("hidden",document.getElementById("closeType").value!=="Partial")}
