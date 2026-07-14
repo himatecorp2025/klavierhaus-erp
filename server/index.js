@@ -23,332 +23,10 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 
-function ensureRuntimeMigrations(){
-  try {
-    const jobCols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
-    if(!jobCols.includes("job_key")) db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
-    if(!jobCols.includes("client_phone")) db.prepare("ALTER TABLE jobs ADD COLUMN client_phone TEXT").run();
-    if(!jobCols.includes("planned_job_id")) db.prepare("ALTER TABLE jobs ADD COLUMN planned_job_id TEXT").run();
-    if(!jobCols.includes("assigned_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN assigned_user_id TEXT").run();
-    if(!jobCols.includes("created_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN created_by_user_id TEXT").run();
-    if(!jobCols.includes("last_reassigned_by_user_id")) db.prepare("ALTER TABLE jobs ADD COLUMN last_reassigned_by_user_id TEXT").run();
-    if(!jobCols.includes("workflow_root_id")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_root_id TEXT").run();
-    if(!jobCols.includes("workflow_step_no")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_step_no INTEGER DEFAULT 1").run();
-    if(!jobCols.includes("workflow_status")) db.prepare("ALTER TABLE jobs ADD COLUMN workflow_status TEXT DEFAULT 'ACTIVE'").run();
-    if(!jobCols.includes("finalized_at")) db.prepare("ALTER TABLE jobs ADD COLUMN finalized_at TEXT").run();
+// Database schema and migrations are executed exclusively by server/init-db.js.
+// The application process does not create users, demo data, tables, columns, or indexes.
 
-    const pianoCols = db.prepare("PRAGMA table_info(pianos)").all().map(c=>c.name);
-    if(!pianoCols.includes("ownership_type")) db.prepare("ALTER TABLE pianos ADD COLUMN ownership_type TEXT DEFAULT 'Customer owned'").run();
-    if(!pianoCols.includes("display_name")) db.prepare("ALTER TABLE pianos ADD COLUMN display_name TEXT").run();
-    if(!pianoCols.includes("asset_recorded")) db.prepare("ALTER TABLE pianos ADD COLUMN asset_recorded INTEGER DEFAULT 0").run();
-    if(!pianoCols.includes("external_reference")) db.prepare("ALTER TABLE pianos ADD COLUMN external_reference TEXT").run();
-    if(!pianoCols.includes("import_source")) db.prepare("ALTER TABLE pianos ADD COLUMN import_source TEXT").run();
-    if(!pianoCols.includes("import_batch_id")) db.prepare("ALTER TABLE pianos ADD COLUMN import_batch_id TEXT").run();
-    if(!pianoCols.includes("original_description")) db.prepare("ALTER TABLE pianos ADD COLUMN original_description TEXT").run();
-    if(!pianoCols.includes("owner_resolution")) db.prepare("ALTER TABLE pianos ADD COLUMN owner_resolution TEXT").run();
-    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_import_reference ON pianos(import_source,external_reference) WHERE import_source IS NOT NULL AND external_reference IS NOT NULL").run(); } catch(e) {}
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id)").run(); } catch(e) {}
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution)").run(); } catch(e) {}
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)").run(); } catch(e) {}
-
-    db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''), id), workflow_step_no=COALESCE(workflow_step_no,1), workflow_status=COALESCE(NULLIF(workflow_status,''), CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
-    // Rebuild existing parent-child chains without any maximum number of steps.
-    for(let pass=0;pass<100;pass++){
-      const changed=db.prepare(`UPDATE jobs SET workflow_root_id=(SELECT COALESCE(NULLIF(p.workflow_root_id,''),p.id) FROM jobs p WHERE p.id=jobs.parent_job_id), workflow_step_no=(SELECT COALESCE(p.workflow_step_no,1)+1 FROM jobs p WHERE p.id=jobs.parent_job_id) WHERE parent_job_id IS NOT NULL AND EXISTS(SELECT 1 FROM jobs p WHERE p.id=jobs.parent_job_id AND (jobs.workflow_root_id<>COALESCE(NULLIF(p.workflow_root_id,''),p.id) OR COALESCE(jobs.workflow_step_no,1)<>COALESCE(p.workflow_step_no,1)+1))`).run().changes;
-      if(!changed) break;
-    }
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)").run(); } catch(e) {}
-
-    db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
-      setting_key TEXT PRIMARY KEY,
-      setting_value TEXT,
-      updated_by TEXT,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`).run();
-    const defaultSettings=[['company_name','Klavierhaus'],['short_name','KH ERP'],['logo_url','/icons/icon-512.png'],['login_background_url',''],['branding_version','1']];
-    const putSetting=db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)`);
-    defaultSettings.forEach(x=>putSetting.run(x[0],x[1],'SYSTEM'));
-
-    const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
-    const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
-    missing.forEach(r => upd.run(`JK-${r.id}`, r.id));
-
-    db.prepare("UPDATE pianos SET ownership_type=COALESCE(ownership_type, ownership, 'Customer owned')").run();
-    db.prepare("UPDATE pianos SET display_name=trim(COALESCE(brand,'') || ' ' || COALESCE(model,'')) WHERE display_name IS NULL OR display_name=''").run();
-
-    // Customer status and purchase-interest fields / Ügyfélállapot és vásárlási érdeklődés mezők
-    try {
-      const contactCols = db.prepare("PRAGMA table_info(contacts)").all().map(c=>c.name);
-      const addContactCol = (name, ddl) => { if(!contactCols.includes(name)) db.prepare(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`).run(); };
-      addContactCol("has_piano", "INTEGER DEFAULT 0");
-      addContactCol("interested_buying", "INTEGER DEFAULT 0");
-      addContactCol("interest_brand", "TEXT");
-      addContactCol("interest_model", "TEXT");
-      addContactCol("interest_budget", "REAL DEFAULT 0");
-      addContactCol("interest_timeline", "TEXT");
-      addContactCol("interest_notes", "TEXT");
-      addContactCol("billing_address", "TEXT");
-      addContactCol("external_reference", "TEXT");
-      addContactCol("import_source", "TEXT");
-      addContactCol("import_batch_id", "TEXT");
-      db.prepare(`CREATE TABLE IF NOT EXISTS import_batches (
-        id TEXT PRIMARY KEY,
-        import_source TEXT NOT NULL,
-        original_filename TEXT NOT NULL,
-        file_hash TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'PREVIEW',
-        total_rows INTEGER DEFAULT 0,
-        importable_rows INTEGER DEFAULT 0,
-        imported_clients INTEGER DEFAULT 0,
-        skipped_duplicates INTEGER DEFAULT 0,
-        missing_data_clients INTEGER DEFAULT 0,
-        failed_rows INTEGER DEFAULT 0,
-        imported_by_user_id TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        completed_at TEXT,
-        summary_json TEXT
-      )`).run();
-      const importCols = db.prepare("PRAGMA table_info(import_batches)").all().map(c=>c.name);
-      const addImportCol = (name, ddl) => { if(!importCols.includes(name)) db.prepare(`ALTER TABLE import_batches ADD COLUMN ${name} ${ddl}`).run(); };
-      addImportCol("imported_pianos", "INTEGER DEFAULT 0");
-      addImportCol("updated_clients", "INTEGER DEFAULT 0");
-      addImportCol("unidentified_owner_pianos", "INTEGER DEFAULT 0");
-      addImportCol("client_not_found", "INTEGER DEFAULT 0");
-      db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference ON contacts(import_source, external_reference) WHERE import_source IS NOT NULL AND external_reference IS NOT NULL`).run();
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)`).run();
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)`).run();
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id)`).run();
-      db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source ON import_batches(import_source, file_hash)`).run();
-    } catch(e) { console.warn("contact/import migration skipped:", e.message); }
-
-    db.prepare(`CREATE TABLE IF NOT EXISTS financial_items (
-      id TEXT PRIMARY KEY,
-      item_date TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      amount REAL NOT NULL DEFAULT 0,
-      main_type TEXT NOT NULL,
-      category TEXT,
-      recurrence TEXT NOT NULL DEFAULT 'ONE_TIME',
-      payment_method TEXT,
-      balance_account TEXT,
-      job_id TEXT,
-      client_id TEXT,
-      piano_id TEXT,
-      source_type TEXT,
-      source_id TEXT,
-      created_by TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`).run();
-
-    const financialCols = db.prepare("PRAGMA table_info(financial_items)").all().map(c=>c.name);
-    if(!financialCols.includes("source_type")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_type TEXT").run();
-    if(!financialCols.includes("source_id")) db.prepare("ALTER TABLE financial_items ADD COLUMN source_id TEXT").run();
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_financial_items_source ON financial_items(source_type, source_id)").run(); } catch(e) {}
-
-    db.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (
-      id TEXT PRIMARY KEY,
-      inventory_id TEXT UNIQUE,
-      item_name TEXT NOT NULL,
-      main_category TEXT,
-      piano_part_category TEXT,
-      item_type TEXT,
-      acquisition_type TEXT,
-      supplier TEXT,
-      manufacturer TEXT,
-      purchase_price REAL DEFAULT 0,
-      manufacturing_cost REAL DEFAULT 0,
-      quantity REAL DEFAULT 1,
-      unit TEXT,
-      condition_status TEXT,
-      location TEXT,
-      linked_piano_id TEXT,
-      linked_client_id TEXT,
-      status TEXT DEFAULT 'In Stock',
-      notes TEXT,
-      deleted_at TEXT,
-      deleted_by TEXT,
-      created_by TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`).run();
-
-    db.prepare(`CREATE TABLE IF NOT EXISTS inventory_checks (
-      id TEXT PRIMARY KEY,
-      check_date TEXT NOT NULL,
-      completed_by TEXT,
-      item_count INTEGER DEFAULT 0,
-      total_value REAL DEFAULT 0,
-      snapshot_json TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`).run();
-
-    const inventoryCols = db.prepare("PRAGMA table_info(inventory_items)").all().map(c=>c.name);
-    const addInvCol = (name, ddl) => { if(!inventoryCols.includes(name)) db.prepare(`ALTER TABLE inventory_items ADD COLUMN ${name} ${ddl}`).run(); };
-    addInvCol("inventory_id", "TEXT");
-    addInvCol("item_name", "TEXT");
-    addInvCol("main_category", "TEXT");
-    addInvCol("piano_part_category", "TEXT");
-    addInvCol("item_type", "TEXT");
-    addInvCol("acquisition_type", "TEXT");
-    addInvCol("supplier", "TEXT");
-    addInvCol("manufacturer", "TEXT");
-    addInvCol("purchase_price", "REAL DEFAULT 0");
-    addInvCol("manufacturing_cost", "REAL DEFAULT 0");
-    addInvCol("quantity", "REAL DEFAULT 1");
-    addInvCol("unit", "TEXT");
-    addInvCol("condition_status", "TEXT");
-    addInvCol("location", "TEXT");
-    addInvCol("linked_piano_id", "TEXT");
-    addInvCol("linked_client_id", "TEXT");
-    addInvCol("status", "TEXT DEFAULT 'In Stock'");
-    addInvCol("notes", "TEXT");
-    addInvCol("deleted_at", "TEXT");
-    addInvCol("deleted_by", "TEXT");
-    addInvCol("created_by", "TEXT");
-    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id)").run(); } catch(e) {}
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)").run(); } catch(e) {}
-
-    db.prepare(`CREATE TABLE IF NOT EXISTS planned_jobs (
-      id TEXT PRIMARY KEY,
-      planned_key TEXT UNIQUE,
-      planned_type TEXT,
-      title TEXT NOT NULL,
-      client_id TEXT,
-      client_name TEXT,
-      client_phone TEXT,
-      piano_id TEXT,
-      piano_name TEXT,
-      service_address TEXT,
-      preferred_assigned_to TEXT,
-      priority TEXT DEFAULT 'Medium',
-      expected_revenue REAL DEFAULT 0,
-      probability TEXT DEFAULT '100% - Biztos',
-      estimated_hours REAL DEFAULT 0,
-      target_date TEXT,
-      status TEXT,
-      block_reason TEXT,
-      next_step TEXT,
-      notes TEXT,
-      converted_job_id TEXT,
-      created_by TEXT,
-      archived_at TEXT,
-      archived_by TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`).run();
-
-    const plannedCols = db.prepare("PRAGMA table_info(planned_jobs)").all().map(c=>c.name);
-    const addPlannedCol = (name, ddl) => { if(!plannedCols.includes(name)) db.prepare(`ALTER TABLE planned_jobs ADD COLUMN ${name} ${ddl}`).run(); };
-    addPlannedCol("planned_key", "TEXT");
-    addPlannedCol("planned_type", "TEXT");
-    addPlannedCol("title", "TEXT");
-    addPlannedCol("client_id", "TEXT");
-    addPlannedCol("client_name", "TEXT");
-    addPlannedCol("client_phone", "TEXT");
-    addPlannedCol("piano_id", "TEXT");
-    addPlannedCol("piano_name", "TEXT");
-    addPlannedCol("service_address", "TEXT");
-    addPlannedCol("preferred_assigned_to", "TEXT");
-    addPlannedCol("preferred_assigned_user_id", "TEXT");
-    addPlannedCol("priority", "TEXT");
-    addPlannedCol("expected_revenue", "REAL DEFAULT 0");
-    addPlannedCol("probability", "TEXT DEFAULT '100% - Biztos'");
-    addPlannedCol("estimated_hours", "REAL DEFAULT 0");
-    addPlannedCol("target_date", "TEXT");
-    addPlannedCol("status", "TEXT");
-    addPlannedCol("block_reason", "TEXT");
-    addPlannedCol("next_step", "TEXT");
-    addPlannedCol("notes", "TEXT");
-    addPlannedCol("converted_job_id", "TEXT");
-    addPlannedCol("created_by", "TEXT");
-    addPlannedCol("created_by_user_id", "TEXT");
-    addPlannedCol("archived_at", "TEXT");
-    addPlannedCol("archived_by", "TEXT");
-    try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_jobs_key ON planned_jobs(planned_key)").run(); } catch(e) {}
-    try { db.prepare("CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)").run(); } catch(e) {}
-
-
-    // Superadmin runtime migration / Rejtett rendszertulajdonos létrehozása
-    try {
-      const userCols = db.prepare("PRAGMA table_info(users)").all().map(c=>c.name);
-      if(!userCols.includes("phone")) db.prepare("ALTER TABLE users ADD COLUMN phone TEXT").run();
-      if(!userCols.includes("address")) db.prepare("ALTER TABLE users ADD COLUMN address TEXT").run();
-      if(!userCols.includes("hidden_user")) db.prepare("ALTER TABLE users ADD COLUMN hidden_user INTEGER DEFAULT 0").run();
-      if(!userCols.includes("is_superadmin")) db.prepare("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0").run();
-      const superEmail = "simon.alex@klavierhaus.com";
-      const existingSuper = db.prepare("SELECT * FROM users WHERE lower(email)=lower(?)").get(superEmail);
-      const hash = bcrypt.hashSync("simonalex123",10);
-      if(!existingSuper){
-        db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?)")
-          .run("U-SUPERADMIN-SIMON-ALEX","Simon Alex",superEmail,hash,"ADMIN","Active",1,1);
-      } else {
-        db.prepare("UPDATE users SET name=?, role='ADMIN', status='Active', hidden_user=1, is_superadmin=1 WHERE id=?")
-          .run("Simon Alex", existingSuper.id);
-      }
-      db.prepare("UPDATE users SET hidden_user=COALESCE(hidden_user,0), is_superadmin=COALESCE(is_superadmin,0)").run();
-    } catch(e) {
-      console.warn("superadmin migration skipped:", e.message);
-    }
-
-    // Stable user links: names remain display-only, ownership uses immutable user IDs.
-    try {
-      db.prepare(`UPDATE jobs SET assigned_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.assigned_to)) LIMIT 1) WHERE (assigned_user_id IS NULL OR assigned_user_id='') AND assigned_to IS NOT NULL`).run();
-      db.prepare(`UPDATE jobs SET created_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.created_by)) LIMIT 1) WHERE (created_by_user_id IS NULL OR created_by_user_id='') AND created_by IS NOT NULL`).run();
-      db.prepare(`UPDATE jobs SET last_reassigned_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(jobs.last_reassigned_by)) LIMIT 1) WHERE (last_reassigned_by_user_id IS NULL OR last_reassigned_by_user_id='') AND last_reassigned_by IS NOT NULL`).run();
-      db.prepare(`UPDATE planned_jobs SET preferred_assigned_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(planned_jobs.preferred_assigned_to)) LIMIT 1) WHERE (preferred_assigned_user_id IS NULL OR preferred_assigned_user_id='') AND preferred_assigned_to IS NOT NULL`).run();
-      db.prepare(`UPDATE planned_jobs SET created_by_user_id=(SELECT u.id FROM users u WHERE lower(trim(u.name))=lower(trim(planned_jobs.created_by)) LIMIT 1) WHERE (created_by_user_id IS NULL OR created_by_user_id='') AND created_by IS NOT NULL`).run();
-      db.prepare("CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)").run();
-    } catch(e) { console.warn("stable user link migration skipped:", e.message); }
-
-  } catch(e) {
-    console.warn("runtime migration skipped:", e.message);
-  }
-}
-ensureRuntimeMigrations();
-
-function ensureManagementTables(){
-  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    id TEXT PRIMARY KEY,
-    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (
-    role TEXT NOT NULL,
-    permission TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    updated_by TEXT,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(role,permission)
-  )`).run();
-  db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
-    id TEXT PRIMARY KEY,
-    event_time TEXT DEFAULT CURRENT_TIMESTAMP,
-    user_id TEXT,
-    user_name TEXT,
-    user_role TEXT,
-    action TEXT NOT NULL,
-    module TEXT,
-    record_id TEXT,
-    old_value TEXT,
-    new_value TEXT,
-    success INTEGER DEFAULT 1,
-    details TEXT
-  )`).run();
-  const auditCols=db.prepare("PRAGMA table_info(audit_log)").all().map(c=>c.name);
-  if(!auditCols.includes('audit_type')) db.prepare("ALTER TABLE audit_log ADD COLUMN audit_type TEXT DEFAULT 'TECHNICAL'").run();
-  try{db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC)").run();}catch(e){}
-  db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (
-    id TEXT PRIMARY KEY,
-    file_name TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size INTEGER DEFAULT 0,
-    status TEXT NOT NULL,
-    created_by TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    restored_at TEXT,
-    restored_by TEXT
-  )`).run();
+function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
   const defaults={
     ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
@@ -356,10 +34,10 @@ function ensureManagementTables(){
     WORKER:[...commonView],
     VIEWER:[...commonView]
   };
-  const ins=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
-  Object.entries(defaults).forEach(([role,perms])=>perms.forEach(p=>ins.run(role,p,'SYSTEM')));
+  const insert=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
+  Object.entries(defaults).forEach(([role,permissions])=>permissions.forEach(permission=>insert.run(role,permission,'SYSTEM')));
 }
-ensureManagementTables();
+seedDefaultPermissions();
 
 const BACKUP_DIR=process.env.BACKUP_DIR || path.join(__dirname,'backups');
 fs.mkdirSync(BACKUP_DIR,{recursive:true});
@@ -406,21 +84,6 @@ function validMagic(filePath){
   const png=b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;
   return pdf||jpg||png;
 }
-function ensureJobKeyColumn(){
-  try {
-    const cols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
-    if(!cols.includes("job_key")){
-      db.prepare("ALTER TABLE jobs ADD COLUMN job_key TEXT").run();
-    }
-    const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
-    const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
-    missing.forEach(r => upd.run(`JK-${r.id}`, r.id));
-  } catch(e) {
-    console.warn("job_key migration skipped:", e.message);
-  }
-}
-ensureRuntimeMigrations();
-
 const upload = multer({
   dest: UPLOAD_DIR,
   limits:{fileSize:20*1024*1024},
@@ -528,7 +191,6 @@ function balanceAccountFromPaymentMethod(payment){
 }
 
 function generatePlannedJobKey(){
-  ensureRuntimeMigrations();
   const year=new Date().getFullYear();
   const rows=db.prepare("SELECT planned_key FROM planned_jobs WHERE planned_key LIKE ?").all(`PLN-${year}-%`);
   let max=0;
@@ -574,7 +236,6 @@ function addMonthsToDate(dateStr, months){
   return d.toISOString().slice(0,10);
 }
 function generateInventoryId(mainCategory){
-  ensureRuntimeMigrations();
   const year=nyYear();
   const code=inventoryCategoryCode(mainCategory);
   const rows=db.prepare("SELECT inventory_id FROM inventory_items WHERE inventory_id LIKE ?").all(`INV-${year}-%`);
@@ -594,7 +255,6 @@ function inventoryRowsActive(){
 }
 
 function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
-  ensureRuntimeMigrations();
   const amount=Number(billed||0);
   if(!amount || amount<=0) return null;
   const existing=db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get("closed_job", job.id);
@@ -908,7 +568,6 @@ app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 app.get("/api/schedule-workers", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 ORDER BY name").all();
   res.json(rows);
 });
@@ -916,7 +575,6 @@ app.get("/api/schedule-workers", auth, (req,res)=>{
 
 
 app.get("/api/planned-jobs", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const includeAll=req.query.include_all==="1" || req.user.role==="SUPERADMIN";
   const rows=includeAll
     ? db.prepare("SELECT * FROM planned_jobs ORDER BY created_at DESC").all()
@@ -925,7 +583,6 @@ app.get("/api/planned-jobs", auth, (req,res)=>{
 });
 
 app.post("/api/planned-jobs", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const b=req.body||{};
   if(!b.title) return res.status(400).json({error:"Title is required / Munka neve kötelező"});
   if(!b.client_name) return res.status(400).json({error:"Client is required / Ügyfél kötelező"});
@@ -940,7 +597,6 @@ app.post("/api/planned-jobs", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMI
 });
 
 app.put("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
   const allowed=["planned_type","title","client_id","client_name","client_phone","piano_id","piano_name","service_address","preferred_assigned_to","preferred_assigned_user_id","priority","expected_revenue","probability","estimated_hours","target_date","status","block_reason","next_step","notes"];
@@ -958,7 +614,6 @@ app.put("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERA
 });
 
 app.delete("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
   if(isSuperadminUser(req.user)) db.prepare("DELETE FROM planned_jobs WHERE id=?").run(req.params.id);
@@ -967,7 +622,6 @@ app.delete("/api/planned-jobs/:id", auth, permit("ADMIN","MANAGER","WORKER","SUP
 });
 
 app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const planned=db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(req.params.id);
   if(!planned) return res.status(404).json({error:"Planned job not found / Tervezett munka nem található"});
   if(!isActivePlannedStatus(planned.status)) return res.status(400).json({error:"This planned job is not active / Ez a tervezett munka már nem aktív"});
@@ -999,7 +653,6 @@ app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER
 });
 
 app.get("/api/inventory", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const includeDeleted = req.query.include_deleted === "1" && (req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin||0)===1);
   const rows = includeDeleted
     ? db.prepare("SELECT * FROM inventory_items ORDER BY created_at DESC").all()
@@ -1008,7 +661,6 @@ app.get("/api/inventory", auth, (req,res)=>{
 });
 
 app.post("/api/inventory", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const b=req.body || {};
   if(!String(b.item_name||"").trim()) return res.status(400).json({error:"Item name is required / Tétel neve kötelező"});
   const id=rid("INVITEM");
@@ -1020,7 +672,6 @@ app.post("/api/inventory", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN")
 });
 
 app.put("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
   const allowed=["item_name","main_category","piano_part_category","item_type","acquisition_type","supplier","manufacturer","purchase_price","manufacturing_cost","quantity","unit","condition_status","location","linked_piano_id","linked_client_id","status","notes"];
@@ -1032,7 +683,6 @@ app.put("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMI
 });
 
 app.delete("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
   if(isSuperadminUser(req.user)) db.prepare("DELETE FROM inventory_items WHERE id=?").run(req.params.id);
@@ -1041,7 +691,6 @@ app.delete("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERA
 });
 
 app.get("/api/inventory/check-status", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const last=db.prepare("SELECT * FROM inventory_checks ORDER BY check_date DESC, created_at DESC LIMIT 1").get();
   const todayStr=nyToday();
   const nextDue=last ? addMonthsToDate(last.check_date, 3) : todayStr;
@@ -1056,7 +705,6 @@ app.get("/api/inventory/check-status", auth, (req,res)=>{
 });
 
 app.post("/api/inventory/complete", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
-  ensureRuntimeMigrations();
   const rows=inventoryRowsActive();
   const totalValue=rows.reduce((s,r)=>s+inventoryItemValue(r),0);
   const checkDate=nyToday();
@@ -1067,13 +715,11 @@ app.post("/api/inventory/complete", auth, permit("ADMIN","MANAGER","WORKER","SUP
 });
 
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const rows=db.prepare("SELECT * FROM financial_items ORDER BY item_date DESC, created_at DESC").all();
   res.json(rows.map(r=>({...r,lines:[]})));
 });
 
 app.get("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const where=[];
   const params=[];
   const {month, main_type, recurrence, category}=req.query;
@@ -1093,7 +739,6 @@ app.get("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
 });
 
 app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const id=req.body.id || rid("FI");
   const item_date=req.body.item_date || today();
   const title=(req.body.title||"").trim();
@@ -1113,7 +758,6 @@ app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
 });
 
 app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const existing=db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
   const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id","source_type","source_id"];
@@ -1127,7 +771,6 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
 });
 
 app.delete("/api/financial-items/:id", auth, requireSuperadmin, (req,res)=>{
-  ensureRuntimeMigrations();
   db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
   res.json({ok:true});
 });
@@ -1147,7 +790,6 @@ function financialItemsForMonth(month){
 }
 
 function incomeStatementPayload(month){
-  ensureRuntimeMigrations();
   if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Month must be YYYY-MM");
   const {monthStart,monthEnd,rows}=financialItemsForMonth(month);
   const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,monthEnd);
@@ -1268,12 +910,10 @@ app.get("/api/income-statement", auth, (req,res)=>{
 
 app.get("/api/users", auth, (req,res)=> {
   // Hidden superadmin is never listed. Everyone may see the visible team list.
-  ensureRuntimeMigrations();
   res.json(db.prepare("SELECT id,name,email,role,status,phone,address,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
 
 app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
-  ensureRuntimeMigrations();
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
@@ -1287,7 +927,6 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
 });
 
 app.put("/api/users/:id", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if(!target) return res.status(404).json({error:"User not found"});
   if(Number(target.hidden_user||0)===1 && !isSuperadminUser(req.user)) return res.status(403).json({error:"Hidden system owner cannot be edited"});
@@ -1558,7 +1197,6 @@ function createResourceRoutes(key, table, prefix, write, roles){
 createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","billing_address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/pianos", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   const rows=db.prepare(`
     SELECT p.*,
            c.name AS owner_name,
@@ -1572,7 +1210,6 @@ app.get("/api/pianos", auth, (req,res)=>{
 });
 
 app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const id=req.body.id || rid("P");
   const brand=req.body.brand || "";
   const model=req.body.model || "";
@@ -1587,7 +1224,6 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
 });
 
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const allowed=["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
@@ -1617,7 +1253,6 @@ app.get("/api/client-profile/:id", auth, (req,res)=>{
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
-  ensureRuntimeMigrations();
   res.json(db.prepare(jobsSelectSql("ORDER BY j.start_time")).all());
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -1809,7 +1444,6 @@ app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"
 });
 
 app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  ensureRuntimeMigrations();
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
   const id=req.body.id || rid("P");
@@ -2061,6 +1695,5 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
