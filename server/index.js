@@ -1209,36 +1209,60 @@ app.get("/api/pianos", auth, (req,res)=>{
   res.json(rows);
 });
 
+function pianoOwnerResolution(ownerContactId,ownershipType){
+  if(ownerContactId) return "MATCHED_CLIENT";
+  const value=String(ownershipType||"").toLowerCase();
+  if(value.includes("company")) return "COMPANY_OWNED";
+  if(value.includes("consign")) return "COMPANY_REVIEW";
+  if(value.includes("rental")) return "RENTAL";
+  return "UNIDENTIFIED_OWNER";
+}
+function refreshClientHasPiano(clientId){
+  if(!clientId)return;
+  const count=db.prepare("SELECT COUNT(*) AS c FROM pianos WHERE owner_contact_id=?").get(clientId).c;
+  db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(count>0?1:0,clientId);
+}
 app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const id=req.body.id || rid("P");
   const brand=req.body.brand || "";
   const model=req.body.model || "";
-  const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
-  const ownershipType=req.body.ownership_type || req.body.ownership || "Customer owned";
+  const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.original_description || req.body.piano_name || "Unknown piano";
+  const ownerContactId=req.body.owner_contact_id||null;
+  const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
   const estimated=Number(req.body.estimated_value||0);
+  const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,ownershipType,ownershipType,display,req.body.owner_contact_id||null,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,req.body.owner_resolution||null);
+    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
 });
 
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const before=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
+  if(!before)return res.status(404).json({error:"Piano not found"});
   const allowed=["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
-  if(req.body.owner_contact_id!==undefined){
-    if(req.body.owner_contact_id) db.prepare("UPDATE pianos SET owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned' WHERE id=?").run(req.params.id);
-    else db.prepare("UPDATE pianos SET owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown' WHERE id=?").run(req.params.id);
+  if(req.body.owner_contact_id!==undefined || req.body.ownership_type!==undefined){
+    const ownerContactId=req.body.owner_contact_id!==undefined?(req.body.owner_contact_id||null):(before.owner_contact_id||null);
+    const requestedOwnership=req.body.ownership_type!==undefined?req.body.ownership_type:(before.ownership_type||before.ownership||"Unknown");
+    const ownershipType=ownerContactId?"Customer owned":requestedOwnership;
+    const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
+    db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution=?,ownership=?,ownership_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(ownerContactId,resolution,ownershipType,ownershipType,req.params.id);
+    refreshClientHasPiano(before.owner_contact_id);
+    refreshClientHasPiano(ownerContactId);
   }
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
-  if(!piano) return res.status(404).json({error:"Piano not found"});
   res.json(piano);
 });
 
 
 app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
+  const piano=db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(req.params.id);
   db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
+  refreshClientHasPiano(piano?.owner_contact_id);
   res.json({ok:true});
 });
 
@@ -1695,5 +1719,4 @@ app.use((err,req,res,next)=>{
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
