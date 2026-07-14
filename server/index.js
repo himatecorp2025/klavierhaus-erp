@@ -11,7 +11,10 @@ require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3030;
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET;
+if(!JWT_SECRET || JWT_SECRET.length < 32){
+  throw new Error("JWT_SECRET is required and must be at least 32 characters long");
+}
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 
@@ -225,9 +228,95 @@ function ensureRuntimeMigrations(){
 }
 ensureRuntimeMigrations();
 
+function ensureManagementTables(){
+  db.prepare(`CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS role_permissions (
+    role TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_by TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(role,permission)
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    event_time TEXT DEFAULT CURRENT_TIMESTAMP,
+    user_id TEXT,
+    user_name TEXT,
+    user_role TEXT,
+    action TEXT NOT NULL,
+    module TEXT,
+    record_id TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    success INTEGER DEFAULT 1,
+    details TEXT
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS backup_log (
+    id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER DEFAULT 0,
+    status TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    restored_at TEXT,
+    restored_by TEXT
+  )`).run();
+  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+  const defaults={
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
+    MANAGER:[...commonView,'finance.view','income_statement.view'],
+    WORKER:[...commonView],
+    VIEWER:[...commonView]
+  };
+  const ins=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
+  Object.entries(defaults).forEach(([role,perms])=>perms.forEach(p=>ins.run(role,p,'SYSTEM')));
+}
+ensureManagementTables();
 
-
-
+const BACKUP_DIR=process.env.BACKUP_DIR || path.join(__dirname,'backups');
+fs.mkdirSync(BACKUP_DIR,{recursive:true});
+const DB_PATH=process.env.DB_PATH || path.join(__dirname,'db','klavierhaus_v6.sqlite');
+function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details=''){
+  try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'');}catch(e){console.warn('audit log failed:',e.message)}
+}
+function hasPermission(user, permission){
+  if(isSuperadminUser(user)) return true;
+  if(!user) return false;
+  const row=db.prepare('SELECT enabled FROM role_permissions WHERE role=? AND permission=?').get(user.role,permission);
+  return !!(row && Number(row.enabled)===1);
+}
+function requirePermission(permission){return (req,res,next)=>hasPermission(req.user,permission)?next():res.status(403).json({error:'PERMISSION_DENIED'});}
+function createBackup(createdBy='SYSTEM'){
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+  const name=`klavierhaus-backup-${stamp}.sqlite`;
+  const target=path.join(BACKUP_DIR,name);
+  db.pragma('wal_checkpoint(FULL)');
+  fs.copyFileSync(DB_PATH,target);
+  const size=fs.statSync(target).size;
+  const id=rid('BKP');
+  db.prepare('INSERT INTO backup_log(id,file_name,file_path,file_size,status,created_by) VALUES(?,?,?,?,?,?)').run(id,name,target,size,'SUCCESS',createdBy);
+  return db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log WHERE id=?').get(id);
+}
+function maybeWeeklyBackup(){
+  try{const last=db.prepare("SELECT created_at FROM backup_log WHERE status='SUCCESS' ORDER BY created_at DESC LIMIT 1").get();
+    if(!last || Date.now()-new Date(last.created_at+'Z').getTime()>=7*24*60*60*1000) createBackup('SYSTEM');
+  }catch(e){console.warn('weekly backup failed:',e.message)}
+}
+maybeWeeklyBackup();
+setInterval(maybeWeeklyBackup,12*60*60*1000).unref();
+function validMagic(filePath){
+  const b=fs.readFileSync(filePath); if(!b.length) return false;
+  const pdf=b.slice(0,5).toString()==='%PDF-';
+  const jpg=b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF;
+  const png=b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;
+  return pdf||jpg||png;
+}
 function ensureJobKeyColumn(){
   try {
     const cols = db.prepare("PRAGMA table_info(jobs)").all().map(c=>c.name);
@@ -245,6 +334,7 @@ ensureRuntimeMigrations();
 
 const upload = multer({
   dest: UPLOAD_DIR,
+  limits:{fileSize:20*1024*1024},
   fileFilter: (req,file,cb)=>{
     const ok = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname || "");
     if(!ok) return cb(new Error("Only PDF, JPG, JPEG or PNG files are allowed / Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel"));
@@ -256,6 +346,25 @@ app.use(cors());
 app.use(express.json({limit:"10mb"}));
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(path.join(__dirname, "..", "public")));
+// Global protection: only superadmin may call DELETE endpoints.
+app.use('/api',(req,res,next)=>{
+  if(req.method!=='DELETE') return next();
+  const h=req.headers.authorization||'';
+  try{req.user=req.user||jwt.verify(h.startsWith('Bearer ')?h.slice(7):'',JWT_SECRET);}catch(e){return res.status(401).json({error:'AUTH_REQUIRED'});}
+  if(!isSuperadminUser(req.user)) return res.status(403).json({error:'PERMISSION_DENIED'});
+  next();
+});
+// Automatic audit trail for all business-changing API requests.
+app.use('/api',(req,res,next)=>{
+  if(!['POST','PUT','DELETE'].includes(req.method) || req.path==='/login') return next();
+  const started=Date.now();
+  res.on('finish',()=>{
+    if(req.path.startsWith('/audit-log')) return;
+    const safeBody={...(req.body||{})}; if(safeBody.password) safeBody.password='[REDACTED]';
+    audit(req,req.method,req.path.split('/')[1]||'api',req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`);
+  });
+  next();
+});
 
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function nextContactId(){
@@ -806,17 +915,18 @@ app.get("/api/users", auth, (req,res)=> {
   res.json(db.prepare("SELECT id,name,email,role,status,phone,address,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
 
-app.post("/api/users", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   ensureRuntimeMigrations();
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
-  if(req.user.role==="MANAGER" && role==="ADMIN") return res.status(403).json({error:"Managers cannot create admins"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
   db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
     .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",0,0);
-  res.json({id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||""});
+  const created={id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||""};
+  audit(req,"CREATE","users",id,null,created);
+  res.json(created);
 });
 
 app.put("/api/users/:id", auth, (req,res)=>{
@@ -827,16 +937,18 @@ app.put("/api/users/:id", auth, (req,res)=>{
 
   const selfEdit = req.user.id === target.id;
   const superEdit = isSuperadminUser(req.user);
-  if(!selfEdit && !superEdit) return res.status(403).json({error:"You can edit only your own profile / Csak a saját profilodat szerkesztheted"});
+  const roleAdmin = hasPermission(req.user,"users.roles");
+  if(!selfEdit && !superEdit && !roleAdmin) return res.status(403).json({error:"PERMISSION_DENIED"});
 
-  let allowed = selfEdit && !superEdit ? ["name","email","phone","address"] : ["name","email","role","status","phone","address"];
-  if(!superEdit && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"Only superadmin can change role or status"});
+  let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
+  if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
   if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
   const u=db.prepare("SELECT id,name,email,role,status,phone,address FROM users WHERE id=?").get(req.params.id);
+  audit(req,"UPDATE","users",req.params.id,target,u);
   res.json(u);
 });
 
@@ -845,6 +957,7 @@ app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
   if(!target) return res.status(404).json({error:"User not found"});
   if(Number(target.hidden_user||0)===1) return res.status(403).json({error:"Hidden system owner cannot be deleted"});
   db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
+  audit(req,"MASTER_DELETE","users",req.params.id,target,null);
   res.json({ok:true});
 });
 
@@ -1006,6 +1119,7 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
+  if(req.file && !validMagic(req.file.path)){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
@@ -1188,6 +1302,47 @@ app.delete("/api/inventory-checks/:id", auth, requireSuperadmin, (req,res)=>{
 });
 
 
+app.get('/api/my-permissions',auth,(req,res)=>{
+  if(isSuperadminUser(req.user)) return res.json({all:true,permissions:[]});
+  const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
+  res.json({all:false,permissions});
+});
+app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
+  const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
+  const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
+  res.json({roles,permissions,rows});
+});
+app.put('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
+  const {role,permission,enabled}=req.body||{};
+  if(!role||!permission) return res.status(400).json({error:'REQUIRED_FIELDS'});
+  if(role==='SUPERADMIN') return res.status(403).json({error:'SUPERADMIN_PERMISSIONS_FIXED'});
+  const old=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
+  db.prepare(`INSERT INTO role_permissions(role,permission,enabled,updated_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(role,permission) DO UPDATE SET enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(role,permission,enabled?1:0,req.user.name||'');
+  const now=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
+  audit(req,'UPDATE','permissions',`${role}:${permission}`,old,now); res.json(now);
+});
+app.get('/api/audit-log',auth,requirePermission('audit.view'),(req,res)=>{
+  const limit=Math.min(Number(req.query.limit||500),2000);
+  res.json(db.prepare('SELECT * FROM audit_log ORDER BY event_time DESC LIMIT ?').all(limit));
+});
+app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
+  const rows=db.prepare('SELECT * FROM audit_log ORDER BY event_time DESC').all();
+  res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="audit-log.json"');res.send(JSON.stringify(rows,null,2));
+});
+app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{db.prepare('DELETE FROM audit_log').run();audit(req,'CLEAR','audit_log','ALL');res.json({ok:true});});
+app.get('/api/backups',auth,requireSuperadmin,(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
+app.post('/api/backups',auth,requireSuperadmin,(req,res)=>{const b=createBackup(req.user.name||'SUPERADMIN');audit(req,'CREATE','backup',b.id,null,b);res.json(b);});
+app.get('/api/backups/:id/download',auth,requireSuperadmin,(req,res)=>{const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});res.download(b.file_path,b.file_name);});
+app.post('/api/backups/:id/restore',auth,requireSuperadmin,(req,res)=>{
+  const {password,confirmation}=req.body||{}; if(confirmation!=='RESTORE BACKUP')return res.status(400).json({error:'RESTORE_CONFIRMATION_REQUIRED'});
+  const owner=db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);if(!owner||!bcrypt.compareSync(String(password||''),owner.password_hash))return res.status(401).json({error:'INVALID_PASSWORD'});
+  const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});
+  const safety=createBackup('PRE_RESTORE'); db.close(); fs.copyFileSync(b.file_path,DB_PATH);
+  return res.json({ok:true,restartRequired:true,safetyBackup:safety.file_name});
+});
+
 app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   const confirmation=String(req.body?.confirmation||"");
   if(confirmation!=="DELETE EVERYTHING") return res.status(400).json({error:"Exact confirmation is required"});
@@ -1226,11 +1381,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.use((err,req,res,next)=>{
-  if(err) return res.status(400).json({error:err.message || "Upload error"});
+  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.message||"UPLOAD_ERROR"); return res.status(400).json({error:code}); }
   next();
 });
 app.listen(PORT,()=>console.log(`Klavierhaus v6.3 running on http://localhost:${PORT}`));
-
 
 
 
