@@ -8,10 +8,11 @@ let currentTheme="dark";
 let currentSchedulerWorker="ALL";
 let currentClientStatusFilter="ALL";
 let schedulerWorkersCache=null;
+let userPermissions={all:false,permissions:[]};
 
 const navs={
- SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
- ADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
+ SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["settings","Settings / Beállítások"]],
+ ADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["settings","Settings / Beállítások"]],
  MANAGER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]],
  WORKER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]]
 };
@@ -163,7 +164,7 @@ async function deleteEverything(){
   }catch(err){alert(err.message)}
 }
 
-function boot(){
+async function boot(){
  if(!token)return;
  loadLanguage();
  loadTheme();
@@ -173,7 +174,8 @@ function boot(){
  const sb=document.getElementById("sidebarToggle");
  if(sb) sb.onclick=toggleSidebar;
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
- let nav=navs[user.role]||navs.WORKER;
+ try{userPermissions=await api("/api/my-permissions");}catch(e){userPermissions={all:isSuperadmin(),permissions:[]};}
+ let nav=(navs[user.role]||navs.WORKER).filter(n=>n[0]==="settings" ? isAdmin() : (userPermissions.all || userPermissions.permissions.includes(`${n[0]}.view`)));
  $("#nav").innerHTML=nav.map((n,i)=>`<button class="nav-btn ${i?'':'active'}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
  const danger=document.getElementById("deleteEverythingBtn");
  if(danger) danger.classList.toggle("hidden", !isSuperadmin());
@@ -206,6 +208,7 @@ function esc(o){return JSON.stringify(o).replaceAll("'","&#39;")}
 function jobRef(j){return j?.job_key || j?.id || j?.job_id || ""}
 function req(t){return `${t} <span class="required">*</span>`}
 function isSuperadmin(){return user && (user.role==="SUPERADMIN" || Number(user.is_superadmin||0)===1)}
+function isAdmin(){return user && (user.role==="ADMIN" || isSuperadmin())}
 function bi(en,hu){return currentLang==="hu"?hu:en}
 function parenLabel(str){ const m=String(str||"").match(/^\s*(.*?)\s*\((.*?)\)\s*$/); return m ? (currentLang==="hu"?m[2]:m[1]) : String(str||""); }
 async function loadSchedulerWorkers(){
@@ -294,6 +297,7 @@ async function render(v){
  else if(v==="finance") await renderFinance();
  else if(v==="inventory") await renderInventory();
  else if(v==="users") await renderUsers();
+ else if(v==="settings") await renderSettings();
  else if(v==="pianos") await renderPianos();
  else await renderTable(v);
  applyLanguageToDOM();
@@ -1442,57 +1446,57 @@ async function exportInventoryPDF(){
 
 async function renderUsers(){
  let u=await api("/api/users");
- const canAdd=user.role==="ADMIN" || user.role==="MANAGER" || isSuperadmin();
+ const canAdd=isAdmin();
  const rows=u.map(x=>{
    const isMe=x.id===user.id;
    const profileBtn=isMe?`<button class="small" onclick='openUser(${esc(x)},true)'>${tr("myProfile")}</button>`:"";
-   const superBtns=isSuperadmin()?` <button class="small" onclick='openUser(${esc(x)},false)'>${tr("editUser")}</button> <button class="small danger-btn" onclick="deleteUser('${x.id}')">Delete</button>`:"";
-   return `<tr><td>${x.name||""}</td><td>${x.email||""}</td><td>${x.role||""}</td><td>${x.phone||""}</td><td>${x.address||""}</td><td>${x.status||""}</td><td>${profileBtn}${superBtns}</td></tr>`;
+   const editBtn=isAdmin()?` <button class="small" onclick='openUser(${esc(x)},false)'>${tr("editUser")}</button>`:"";
+   const deleteBtn=isSuperadmin()?` <button class="small danger-btn" onclick="deleteUser('${x.id}')">${bi("Delete","Törlés")}</button>`:"";
+   return `<tr><td>${x.name||""}</td><td>${x.email||""}</td><td>${x.role||""}</td><td>${x.phone||""}</td><td>${x.address||""}</td><td>${x.status||""}</td><td>${profileBtn}${editBtn}${deleteBtn}</td></tr>`;
  }).join("");
  $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>Status</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
  applyLanguageToDOM(document.getElementById("users"));
 }
 function openUser(row=null, selfProfile=false){
  const isEdit=!!row;
- const canFullEdit=isSuperadmin() && isEdit && !selfProfile;
- const canCreate=!isEdit && (user.role==="ADMIN" || user.role==="MANAGER" || isSuperadmin());
- if(!isEdit && !canCreate) return alert("Forbidden");
- if(isEdit && !canFullEdit && row.id!==user.id) return alert("You can edit only your own profile / Csak a saját profilodat szerkesztheted");
+ const canFullEdit=isAdmin() && isEdit && !selfProfile;
+ const canCreate=!isEdit && isAdmin();
+ if(!isEdit && !canCreate) return showError("PERMISSION_DENIED");
+ if(isEdit && !canFullEdit && row.id!==user.id) return showError("PERMISSION_DENIED");
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent=isEdit?(selfProfile?tr("myProfile"):tr("editUser")):tr("addUser");
- let roleOptions=["ADMIN","MANAGER","WORKER"];
- const roleField = canFullEdit || !isEdit ? `<div class="field"><label>Role</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div>` : "";
+ let roleOptions=["ADMIN","MANAGER","WORKER","VIEWER"];
+ const roleField = canFullEdit || !isEdit ? `<div class="field"><label>${bi("Role","Szerepkör")}</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div>` : "";
  const statusField = canFullEdit ? `<div class="field"><label>Status</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
- $("#form").innerHTML=`<div class="form-grid">
- <div class="field"><label>Name</label><input name="name" value="${row?.name||""}" required></div>
- <div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div>
- <div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"} placeholder="${isEdit?tr("leaveEmpty"):""}"></div>
- <div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div>
- <div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>
- ${roleField}${statusField}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
- $("#form").onsubmit=async e=>{
-   e.preventDefault();
-   try{
-     let body=Object.fromEntries(new FormData(e.target));
-     if(isEdit && !body.password) delete body.password;
-     if(isEdit) await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
-     else await api("/api/users",{method:"POST",body:JSON.stringify(body)});
-     closeModal();
-     if(row && row.id===user.id){
-       user={...user,name:body.name||user.name,email:body.email||user.email};
-       localStorage.setItem("kh_user",JSON.stringify(user));
-       const info=document.getElementById("userInfo"); if(info) info.textContent=`${user.name} · ${user.role}`;
-     }
-     renderUsers();
-   }catch(err){alert(err.message)}
- }
- applyLanguageToDOM(document.getElementById("modal"));
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>Name</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target));if(isEdit&&!body.password)delete body.password;if(isEdit)await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else await api("/api/users",{method:"POST",body:JSON.stringify(body)});closeModal();renderUsers();}catch(err){showError(err.message)}};
 }
-async function deleteUser(id){
- if(!isSuperadmin()) return alert("Superadmin only / Csak szuperadmin");
- if(!confirm("Delete this user? / Töröljük ezt a felhasználót?")) return;
- try{await api(`/api/users/${id}`,{method:"DELETE"}); await renderUsers();}catch(err){alert(err.message)}
+async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!confirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?")))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err.message)}}
+
+const friendlyErrors={
+ en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced."},
+ hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A superadmin jogosultságai nem csökkenthetők."}
+};
+function showError(code){alert((friendlyErrors[currentLang]||friendlyErrors.en)[code]||code||bi("An unexpected error occurred.","Váratlan hiba történt."));}
+async function renderSettings(){
+ if(!isAdmin()) return showError('PERMISSION_DENIED');
+ const box=$("#settings");
+ const p=await api('/api/settings/permissions');
+ const auditRows=await api('/api/audit-log?limit=500');
+ const labels={
+ 'scheduler.view':bi('View scheduler','Naptár megtekintése'),'planned_jobs.view':bi('View planned jobs','Tervezett munkák megtekintése'),'contacts.view':bi('View clients','Ügyfelek megtekintése'),'pianos.view':bi('View pianos','Zongorák megtekintése'),'closed_jobs.view':bi('View closed jobs','Lezárt munkák megtekintése'),'knowledge_base.view':bi('View invoices','Számlák megtekintése'),'finance.view':bi('View finance','Pénzügy megtekintése'),'income_statement.view':bi('View income statement','Eredménykimutatás megtekintése'),'inventory.view':bi('View inventory','Leltár megtekintése'),
+ 'users.view':bi('View users','Felhasználók megtekintése'),'users.create':bi('Add employees','Munkavállaló hozzáadása'),'users.roles':bi('Assign or remove roles','Szerepkör adása vagy elvétele'),'permissions.manage':bi('Manage role permissions','Szerepkör-jogosultságok kezelése'),'audit.view':bi('View audit log','Módosítási napló megtekintése')};
+ const matrix=p.roles.filter(r=>r!=='SUPERADMIN').map(role=>`<div class="permission-card"><h4>${role}</h4>${p.permissions.map(pm=>{const row=p.rows.find(x=>x.role===role&&x.permission===pm);return `<label class="permission-row"><input type="checkbox" ${row?.enabled?'checked':''} onchange="setRolePermission('${role}','${pm}',this.checked)"><span>${labels[pm]||pm}</span></label>`}).join('')}</div>`).join('');
+ const auditTable=`<div class="panel"><div class="toolbar"><h3>${bi('Audit Log','Módosítási napló')}</h3><div>${isSuperadmin()?`<button class="small" onclick="downloadAuditLog()">${bi('Export','Exportálás')}</button><button class="small danger-btn" onclick="clearAuditLog()">${bi('Delete log','Napló törlése')}</button>`:''}</div></div><div class="table-wrap"><table><thead><tr><th>${bi('Time','Idő')}</th><th>${bi('User','Felhasználó')}</th><th>${bi('Role','Szerepkör')}</th><th>${bi('Action','Művelet')}</th><th>${bi('Module','Modul')}</th><th>ID</th><th>${bi('Details','Részletek')}</th></tr></thead><tbody>${auditRows.map(x=>`<tr><td>${x.event_time||''}</td><td>${x.user_name||''}</td><td>${x.user_role||''}</td><td>${x.action||''}</td><td>${x.module||''}</td><td>${x.record_id||''}</td><td>${x.details||''}</td></tr>`).join('')}</tbody></table></div></div>`;
+ let backups=''; if(isSuperadmin()){const b=await api('/api/backups');backups=`<div class="panel"><div class="toolbar"><h3>${bi('Backups','Biztonsági mentések')}</h3><button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button></div><div class="table-wrap"><table><thead><tr><th>${bi('Created','Létrehozva')}</th><th>${bi('File','Fájl')}</th><th>${bi('Size','Méret')}</th><th>Status</th><th>${bi('Actions','Műveletek')}</th></tr></thead><tbody>${b.map(x=>`<tr><td>${x.created_at||''}</td><td>${x.file_name}</td><td>${Math.round((x.file_size||0)/1024)} KB</td><td>${x.status}</td><td><button class="small" onclick="downloadBackup('${x.id}')">${bi('Download','Letöltés')}</button><button class="small danger-btn" onclick="restoreBackup('${x.id}')">${bi('Restore','Visszaállítás')}</button></td></tr>`).join('')}</tbody></table></div></div>`}
+ box.innerHTML=`<div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${auditTable}${backups}`;
 }
+async function setRolePermission(role,permission,enabled){try{await api('/api/settings/permissions',{method:'PUT',body:JSON.stringify({role,permission,enabled})});}catch(e){showError(e.message);renderSettings();}}
+async function downloadAuditLog(){const r=await fetch('/api/audit-log/export',{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='audit-log.json';a.click();URL.revokeObjectURL(a.href);}
+async function clearAuditLog(){if(!isSuperadmin())return;if(confirm(bi('Delete the complete audit log?','Töröljük a teljes módosítási naplót?'))){await api('/api/audit-log',{method:'DELETE'});renderSettings();}}
+async function createBackupNow(){try{await api('/api/backups',{method:'POST'});alert(bi('Backup created successfully.','A biztonsági mentés elkészült.'));renderSettings();}catch(e){showError(e.message)}}
+async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=r.headers.get('content-disposition')?.match(/filename="?([^";]+)/)?.[1]||'backup.sqlite';a.click();URL.revokeObjectURL(a.href);}
+async function restoreBackup(id){const confirmation=prompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'));if(confirmation!=='RESTORE BACKUP')return;const password=prompt(bi('Enter your password.','Add meg a jelszavad.'));try{const r=await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});alert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'));logoutNow();}catch(e){showError(e.message)}}
 
 if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();applyLanguageToDOM();}
 
