@@ -375,3 +375,56 @@ CREATE TABLE IF NOT EXISTS backup_log (
   restored_at TEXT,
   restored_by TEXT
 );
+
+
+-- Notification and PWA push infrastructure
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  recipient_user_id TEXT NOT NULL,
+  sender_user_id TEXT,
+  notification_type TEXT NOT NULL,
+  related_job_id TEXT,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  body_en TEXT NOT NULL,
+  body_hu TEXT NOT NULL,
+  custom_message TEXT,
+  metadata_json TEXT,
+  event_key TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','ACKNOWLEDGED')),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at TEXT,
+  FOREIGN KEY(recipient_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(sender_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(related_job_id) REFERENCES jobs(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  subscription_json TEXT NOT NULL,
+  user_agent TEXT,
+  language TEXT DEFAULT 'en',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id TEXT PRIMARY KEY,
+  push_enabled INTEGER DEFAULT 1,
+  job_assigned INTEGER DEFAULT 1,
+  job_transferred INTEGER DEFAULT 1,
+  job_updated INTEGER DEFAULT 1,
+  job_deleted INTEGER DEFAULT 1,
+  one_hour_reminder INTEGER DEFAULT 1,
+  direct_message INTEGER DEFAULT 1,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
