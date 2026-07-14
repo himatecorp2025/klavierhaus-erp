@@ -1,6 +1,8 @@
 
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
+const AdmZip = require("adm-zip");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
@@ -424,6 +426,14 @@ const brandingUpload = multer({
   limits:{fileSize:15*1024*1024},
   fileFilter:(_req,file,cb)=>{const ok=['image/png','image/jpeg','image/jpg'].includes(String(file.mimetype||'').toLowerCase())||/\.(png|jpe?g)$/i.test(file.originalname||'');cb(ok?null:new Error('INVALID_FILE_TYPE'),ok)}
 });
+const clientImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:{fileSize:25*1024*1024},
+  fileFilter:(_req,file,cb)=>{
+    const ok=/\.xlsx$/i.test(file.originalname||'') || String(file.mimetype||'').toLowerCase()==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    cb(ok?null:new Error('INVALID_EXCEL_FILE'),ok);
+  }
+});
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
   if(b.length>=24 && b.toString('hex',0,8)==='89504e470d0a1a0a') return {type:'image/png',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};
@@ -587,6 +597,139 @@ function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
     id,nyToday(),title,description,amount,"INCOME","SERVICE_REVENUE","ONE_TIME",payment||"",balanceAccountFromPaymentMethod(payment),job.id,job.client_id||null,job.piano_id||null,"closed_job",job.id,userName||"System"
   );
   return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
+}
+
+
+function xmlDecode(value){
+  return String(value??'')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+    .replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+}
+function excelColumnIndex(ref){
+  const letters=String(ref||'').match(/[A-Z]+/i)?.[0]?.toUpperCase()||'';
+  let n=0; for(const ch of letters)n=n*26+(ch.charCodeAt(0)-64); return Math.max(0,n-1);
+}
+function parseSharedStrings(xml){
+  if(!xml)return [];
+  const out=[];
+  for(const match of xml.matchAll(/<(?:[A-Za-z0-9_]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?si>/g)){
+    const parts=[...match[1].matchAll(/<(?:[A-Za-z0-9_]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?t>/g)].map(x=>xmlDecode(x[1]));
+    out.push(parts.join(''));
+  }
+  return out;
+}
+function parseXlsxSheet(buffer,sheetName){
+  const zip=new AdmZip(buffer);
+  const read=name=>zip.getEntry(name)?.getData().toString('utf8')||'';
+  const workbook=read('xl/workbook.xml');
+  const rels=read('xl/_rels/workbook.xml.rels');
+  if(!workbook||!rels)throw new Error('INVALID_XLSX_STRUCTURE');
+  let relId='';
+  for(const m of workbook.matchAll(/<(?:[A-Za-z0-9_]+:)?sheet\b([^>]*)\/?>(?:<\/(?:[A-Za-z0-9_]+:)?sheet>)?/g)){
+    const attrs=m[1];
+    const name=xmlDecode(attrs.match(/\bname="([^"]*)"/)?.[1]||'');
+    if(name===sheetName){relId=attrs.match(/\br:id="([^"]+)"/)?.[1]||'';break;}
+  }
+  if(!relId)throw new Error('IMPORT_READY_SHEET_MISSING');
+  let target='';
+  for(const m of rels.matchAll(/<Relationship\b([^>]*)\/?>(?:<\/Relationship>)?/g)){
+    const attrs=m[1];
+    if((attrs.match(/\bId="([^"]+)"/)?.[1]||'')===relId){target=attrs.match(/\bTarget="([^"]+)"/)?.[1]||'';break;}
+  }
+  if(!target)throw new Error('IMPORT_READY_SHEET_MISSING');
+  target=target.replace(/^\//,'');
+  if(!target.startsWith('xl/'))target='xl/'+target.replace(/^\.\//,'');
+  const sheetXml=read(target);
+  if(!sheetXml)throw new Error('IMPORT_READY_SHEET_MISSING');
+  const shared=parseSharedStrings(read('xl/sharedStrings.xml'));
+  const rows=[];
+  for(const rowMatch of sheetXml.matchAll(/<(?:[A-Za-z0-9_]+:)?row\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?row>/g)){
+    const row=[];
+    for(const cMatch of rowMatch[1].matchAll(/<(?:[A-Za-z0-9_]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?c>)/g)){
+      const attrs=cMatch[1], body=cMatch[2]||'';
+      const ref=attrs.match(/\br="([^"]+)"/)?.[1]||'';
+      const type=attrs.match(/\bt="([^"]+)"/)?.[1]||'';
+      const col=excelColumnIndex(ref);
+      let value='';
+      if(type==='inlineStr'){
+        value=[...body.matchAll(/<(?:[A-Za-z0-9_]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?t>/g)].map(x=>xmlDecode(x[1])).join('');
+      }else{
+        const raw=xmlDecode(body.match(/<(?:[A-Za-z0-9_]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?v>/)?.[1]||'');
+        value=type==='s' ? (shared[Number(raw)]??'') : raw;
+      }
+      row[col]=value;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function normalizeText(value){return String(value??'').trim().toLowerCase().replace(/\s+/g,' ');}
+function normalizeEmailList(value){return String(value??'').split(/[;,\n]+/).map(x=>x.trim().toLowerCase()).filter(x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));}
+function normalizePhones(value){
+  const out=[];
+  for(const line of String(value??'').split(/\n+/)){
+    if(/fax/i.test(line))continue;
+    const digits=line.replace(/\D/g,'');
+    if(digits.length>=7)out.push(digits.length>10?digits.slice(-10):digits);
+  }
+  return [...new Set(out)];
+}
+function excelDateToIso(value){
+  if(value===null||value===undefined||String(value).trim()==='')return null;
+  const text=String(value).trim();
+  if(/^\d+(?:\.\d+)?$/.test(text)){
+    const n=Number(text);
+    if(n>=30000&&n<=60000)return new Date(Date.UTC(1899,11,30)+Math.round(n*86400000)).toISOString().slice(0,10);
+  }
+  const d=new Date(text); return Number.isNaN(d.getTime())?null:d.toISOString().slice(0,10);
+}
+function analyzeClientImportFile(buffer,originalFilename){
+  const rows=parseXlsxSheet(buffer,'Import Ready');
+  if(!rows.length)throw new Error('IMPORT_READY_EMPTY');
+  const headers=(rows[0]||[]).map(x=>String(x??'').trim());
+  const required=['External Reference','Client Name','Contact Full Name','Phone','Email','Billing Address','Service Address','Status','Last Contact','Next Step','Notes','Review Status'];
+  const missing=required.filter(h=>!headers.includes(h));
+  if(missing.length){const e=new Error('MISSING_COLUMNS');e.missingColumns=missing;throw e;}
+  const index=Object.fromEntries(headers.map((h,i)=>[h,i]));
+  const source='NEW_YORK_CUSTOMER_LIST_2024';
+  const existing=db.prepare('SELECT id,name,email,phone,address,external_reference,import_source FROM contacts').all();
+  const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
+  const existingEmails=new Map(); const existingPhones=new Map(); const existingNameAddress=new Map();
+  for(const c of existing){
+    for(const e of normalizeEmailList(c.email))if(!existingEmails.has(e))existingEmails.set(e,c);
+    for(const p of normalizePhones(c.phone))if(!existingPhones.has(p))existingPhones.set(p,c);
+    const key=`${normalizeText(c.name)}::${normalizeText(c.address)}`; if(normalizeText(c.name)&&normalizeText(c.address)&&!existingNameAddress.has(key))existingNameAddress.set(key,c);
+  }
+  const seenRefs=new Set(); const records=[];
+  for(let r=1;r<rows.length;r++){
+    const cells=rows[r]||[];
+    if(!cells.some(v=>String(v??'').trim()))continue;
+    const get=h=>String(cells[index[h]]??'').trim();
+    const rec={rowNumber:r+1,externalReference:get('External Reference'),name:get('Client Name'),contactFullName:get('Contact Full Name'),phone:get('Phone'),email:get('Email'),billingAddress:get('Billing Address'),serviceAddress:get('Service Address'),status:get('Status')||'General',lastContact:excelDateToIso(get('Last Contact')),nextStep:get('Next Step'),notes:get('Notes'),reviewStatus:get('Review Status')};
+    rec.missingFields=[]; if(!normalizeEmailList(rec.email).length&&!normalizePhones(rec.phone).length)rec.missingFields.push('Phone or Email'); if(!rec.serviceAddress)rec.missingFields.push('Address'); rec.hasMissingData=rec.missingFields.length>0;
+    let category='NEW',reason='';
+    if(!rec.name){category='INVALID';reason='MISSING_CLIENT_NAME';}
+    else if(normalizeText(rec.reviewStatus)!=='ready'){category='INVALID';reason='NOT_READY';}
+    else if(!rec.externalReference){category='INVALID';reason='MISSING_EXTERNAL_REFERENCE';}
+    else if(seenRefs.has(rec.externalReference)){category='INVALID';reason='DUPLICATE_REFERENCE_IN_FILE';}
+    else{
+      seenRefs.add(rec.externalReference);
+      const exact=exactRefs.get(`${source}::${rec.externalReference}`);
+      if(exact){category='ALREADY_IMPORTED';reason='EXTERNAL_REFERENCE_MATCH';rec.match=exact;}
+      else{
+        const emailMatch=normalizeEmailList(rec.email).map(e=>existingEmails.get(e)).find(Boolean);
+        const phoneMatch=normalizePhones(rec.phone).map(p=>existingPhones.get(p)).find(Boolean);
+        const nameAddressMatch=existingNameAddress.get(`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`);
+        const match=emailMatch||phoneMatch||nameAddressMatch;
+        if(match){category='POSSIBLE_DUPLICATE';reason=emailMatch?'EMAIL_MATCH':phoneMatch?'PHONE_MATCH':'NAME_ADDRESS_MATCH';rec.match=match;}
+      }
+    }
+    rec.category=category;rec.reason=reason;records.push(rec);
+  }
+  if(!records.length)throw new Error('IMPORT_READY_EMPTY');
+  const count=cat=>records.filter(x=>x.category===cat).length;
+  const summary={filename:originalFilename,totalRows:records.length,newClients:count('NEW'),alreadyImported:count('ALREADY_IMPORTED'),possibleDuplicates:count('POSSIBLE_DUPLICATE'),invalidRows:count('INVALID'),missingDataClients:records.filter(x=>x.category==='NEW'&&x.hasMissingData).length};
+  return {source,headers,summary,records};
 }
 
 function auth(req,res,next){
@@ -1104,6 +1247,31 @@ app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
   db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
   audit(req,"MASTER_DELETE","users",req.params.id,target,null);
   res.json({ok:true});
+});
+
+
+app.post('/api/imports/clients/analyze',auth,permit('ADMIN'),clientImportUpload.single('file'),(req,res)=>{
+  try{
+    if(!req.file?.buffer)return res.status(400).json({error:'EXCEL_FILE_REQUIRED'});
+    const analysis=analyzeClientImportFile(req.file.buffer,req.file.originalname||'import.xlsx');
+    const fileHash=crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const existingBatch=db.prepare('SELECT * FROM import_batches WHERE import_source=? AND file_hash=?').get(analysis.source,fileHash);
+    if(existingBatch?.status==='COMPLETED')return res.status(409).json({error:'FILE_ALREADY_IMPORTED',batchId:existingBatch.id});
+    const batchId=existingBatch?.id||`IMP-${Date.now()}-${Math.floor(Math.random()*100000)}`;
+    const summaryJson=JSON.stringify(analysis.summary);
+    if(existingBatch){
+      db.prepare(`UPDATE import_batches SET original_filename=?,status='PREVIEW',total_rows=?,importable_rows=?,skipped_duplicates=?,missing_data_clients=?,failed_rows=?,imported_by_user_id=?,summary_json=? WHERE id=?`).run(req.file.originalname,analysis.summary.totalRows,analysis.summary.newClients,analysis.summary.alreadyImported+analysis.summary.possibleDuplicates,analysis.summary.missingDataClients,analysis.summary.invalidRows,req.user.id,summaryJson,batchId);
+    }else{
+      db.prepare(`INSERT INTO import_batches(id,import_source,original_filename,file_hash,status,total_rows,importable_rows,skipped_duplicates,missing_data_clients,failed_rows,imported_by_user_id,summary_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId,analysis.source,req.file.originalname,fileHash,'PREVIEW',analysis.summary.totalRows,analysis.summary.newClients,analysis.summary.alreadyImported+analysis.summary.possibleDuplicates,analysis.summary.missingDataClients,analysis.summary.invalidRows,req.user.id,summaryJson);
+    }
+    const publicRecords=analysis.records.map(r=>({rowNumber:r.rowNumber,externalReference:r.externalReference,name:r.name,phone:r.phone,email:r.email,serviceAddress:r.serviceAddress,status:r.status,lastContact:r.lastContact,nextStep:r.nextStep,reviewStatus:r.reviewStatus,missingFields:r.missingFields,hasMissingData:r.hasMissingData,category:r.category,reason:r.reason,match:r.match?{id:r.match.id,name:r.match.name,email:r.match.email,phone:r.match.phone,address:r.match.address}:null}));
+    res.json({batchId,source:analysis.source,summary:analysis.summary,records:publicRecords});
+  }catch(err){
+    console.error('client import analyze failed:',err);
+    const known=['INVALID_XLSX_STRUCTURE','IMPORT_READY_SHEET_MISSING','IMPORT_READY_EMPTY','MISSING_COLUMNS'];
+    const code=known.includes(err.message)?err.message:'IMPORT_ANALYSIS_FAILED';
+    res.status(400).json({error:code,missingColumns:err.missingColumns||[]});
+  }
 });
 
 function createResourceRoutes(key, table, prefix, write, roles){
