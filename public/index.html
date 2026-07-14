@@ -19,8 +19,8 @@
 <body>
   <section id="login" class="login-page">
     <div class="login-card">
-      <div class="brand-badge">KH</div>
-      <h1>Klavierhaus Work Management</h1>
+      <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
+      <h1><span data-brand-name>Klavierhaus</span> Work Management</h1>
       <p>Calendar-first job management / Naptárközpontú munkakezelés</p>
       <form id="loginForm">
         <label>Email</label>
@@ -36,9 +36,9 @@
     <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle menu">☰</button>
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-badge">KH</div>
+        <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
         <div>
-          <h2>Klavierhaus</h2>
+          <h2 data-brand-name>Klavierhaus</h2>
           <small id="userInfo"></small>
         </div>
       </div>
@@ -78,6 +78,7 @@
       <section id="inventory" class="view"></section>
       <section id="accounts" class="view"></section>
       <section id="users" class="view"></section>
+      <section id="audit_log" class="view"></section>
       <section id="settings" class="view"></section>
     </main>
 
