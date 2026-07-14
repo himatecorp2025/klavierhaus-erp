@@ -184,3 +184,14 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 .workflow-history{display:grid;gap:12px}.workflow-step{display:grid;grid-template-columns:38px 1fr;gap:10px;padding:12px;border-radius:12px;border-left:5px solid #7dd3fc;background:rgba(148,163,184,.08)}.workflow-step.PartiallyCompleted{border-color:#f59e0b}.workflow-step.Completed{border-color:#22c55e}.workflow-step.Failed{border-color:#ef4444}.workflow-step-index{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(148,163,184,.2);font-weight:800}.workflow-step h4,.workflow-step p{margin:0 0 5px}
 @media(max-width:900px){.timeline-scroll{margin-inline:-10px;border-radius:0}.timeline-calendar{grid-template-columns:58px repeat(7,minmax(132px,1fr));min-width:982px;grid-template-rows:52px 960px}.scheduler-toolbar{align-items:flex-start}.scheduler-actions{width:100%}.worker-filter-select{max-width:210px}.timeline-event{padding:4px}.timeline-event small{display:none}}
 @media(prefers-color-scheme:light){.current-time-line,.current-time-line:before{background:#dc2626}.current-time-line span{background:#dc2626;color:#fff}}
+
+
+/* Phase C: branding, dedicated audit, mobile day calendar and navigation polish */
+.brand-badge{overflow:hidden}.brand-badge img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+.branding-preview{display:flex;align-items:center;gap:16px;padding:14px;background:var(--panel2);border:1px solid var(--line);border-radius:16px;margin-bottom:16px}.branding-preview img{width:76px;height:76px;object-fit:cover;border-radius:16px}.branding-preview b,.branding-preview small{display:block}.branding-preview b{font-size:20px}.branding-preview small{color:var(--muted);margin-top:4px}.branding-logo-form{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
+.mobile-page-title{display:none}.daily-calendar-scroll{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:18px;background:var(--panel)}.daily-calendar{display:grid;grid-template-columns:58px minmax(320px,1fr);height:960px;min-width:378px;position:relative}.daily-calendar .timeline-times{grid-column:1;grid-row:1}.daily-calendar .timeline-day{grid-column:2;grid-row:1}.daily-day{cursor:crosshair}
+@media(max-width:900px){
+  #sidebarToggle{display:none!important}
+  .mobile-page-title{display:flex;align-items:center;gap:8px;margin-bottom:10px}.mobile-page-title h2{margin:0;font-size:21px}.mobile-back-btn{min-width:44px;width:44px;height:44px;border-radius:50%;font-size:34px;line-height:1;padding:0;background:var(--panel2);color:var(--text)}
+  .daily-calendar-scroll{margin-inline:-4px}.daily-calendar{height:1050px}.branding-logo-form{flex-direction:column;align-items:stretch}.branding-logo-form>*{width:100%}
+}
