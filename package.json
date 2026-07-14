@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "init-db": "node server/init-db.js"
+    "init-db": "node server/init-db.js",
+    "generate-vapid": "web-push generate-vapid-keys"
   },
   "dependencies": {
     "adm-zip": "0.5.16",
@@ -20,6 +21,7 @@
     "dotenv": "16.4.7",
     "express": "4.21.2",
     "jsonwebtoken": "9.0.2",
-    "multer": "1.4.5-lts.1"
+    "multer": "1.4.5-lts.1",
+    "web-push": "3.6.7"
   }
 }
