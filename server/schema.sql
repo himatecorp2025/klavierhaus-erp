@@ -180,3 +180,15 @@ SELECT
 FROM accounts a
 LEFT JOIN journal_lines jl ON jl.account_code=a.code
 GROUP BY a.code;
+
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  setting_key TEXT PRIMARY KEY,
+  setting_value TEXT,
+  updated_by TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
+ ('company_name','Klavierhaus','SYSTEM'),
+ ('short_name','KH ERP','SYSTEM'),
+ ('logo_url','/icons/icon-512.png','SYSTEM');
