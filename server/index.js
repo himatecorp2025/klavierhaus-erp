@@ -48,6 +48,16 @@ function ensureRuntimeMigrations(){
     }
     try { db.prepare("CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)").run(); } catch(e) {}
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_by TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    const defaultSettings=[['company_name','Klavierhaus'],['short_name','KH ERP'],['logo_url','/icons/icon-512.png']];
+    const putSetting=db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)`);
+    defaultSettings.forEach(x=>putSetting.run(x[0],x[1],'SYSTEM'));
+
     const missing = db.prepare("SELECT id FROM jobs WHERE job_key IS NULL OR job_key=''").all();
     const upd = db.prepare("UPDATE jobs SET job_key=? WHERE id=?");
     missing.forEach(r => upd.run(`JK-${r.id}`, r.id));
@@ -371,6 +381,22 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({limit:"10mb"}));
+const brandingUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req,_file,cb)=>cb(null,UPLOAD_DIR),
+    filename: (_req,file,cb)=>cb(null,`branding-${Date.now()}${path.extname(file.originalname||'').toLowerCase()||'.png'}`)
+  }),
+  limits:{fileSize:10*1024*1024},
+  fileFilter:(_req,file,cb)=>cb(null,file.mimetype==='image/png')
+});
+function getBranding(){
+  const rows=db.prepare("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('company_name','short_name','logo_url')").all();
+  const out={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png'};
+  rows.forEach(r=>out[r.setting_key]=r.setting_value||out[r.setting_key]);
+  return out;
+}
+app.get('/api/public/branding',(_req,res)=>res.json(getBranding()));
+app.get('/manifest.webmanifest',(_req,res)=>{const b=getBranding();res.type('application/manifest+json').send(JSON.stringify({name:b.company_name,short_name:b.short_name,start_url:'/',display:'standalone',background_color:'#07101d',theme_color:'#07101d',icons:[{src:b.logo_url,sizes:'192x192 512x512',type:b.logo_url.endsWith('.jpg')||b.logo_url.endsWith('.jpeg')?'image/jpeg':'image/png',purpose:'any maskable'}]},null,2));});
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(path.join(__dirname, "..", "public")));
 // Global protection: only superadmin may call DELETE endpoints.
@@ -1383,6 +1409,20 @@ app.get('/api/my-permissions',auth,(req,res)=>{
   const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
   res.json({all:false,permissions});
 });
+app.get('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>res.json(getBranding()));
+app.put('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>{
+  const before=getBranding(); const company=String(req.body?.company_name||'').trim(); const short=String(req.body?.short_name||'').trim();
+  if(!company||!short) return res.status(400).json({error:'REQUIRED_FIELDS'});
+  const stmt=db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`);
+  stmt.run('company_name',company,req.user.name||''); stmt.run('short_name',short,req.user.name||'');
+  const after=getBranding(); audit(req,'UPDATE','branding','identity',before,after); res.json(after);
+});
+app.post('/api/settings/branding/logo',auth,permit('ADMIN'),brandingUpload.single('logo'),(req,res)=>{
+  if(!req.file) return res.status(400).json({error:'INVALID_FILE_TYPE'}); const buf=fs.readFileSync(req.file.path); const validPng=buf.length>24&&buf.toString('hex',0,8)==='89504e470d0a1a0a'; const width=validPng?buf.readUInt32BE(16):0, height=validPng?buf.readUInt32BE(20):0; if(!validPng||width!==height||width<192){try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:'PWA_LOGO_REQUIREMENTS'});} const before=getBranding(); const logoUrl='/uploads/'+path.basename(req.file.path);
+  db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('logo_url',?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(logoUrl,req.user.name||'');
+  const after=getBranding(); audit(req,'UPDATE','branding','logo',before,after); res.json(after);
+});
+app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();db.prepare(`UPDATE app_settings SET setting_value='/icons/icon-512.png',updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE setting_key='logo_url'`).run(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','logo',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
   const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
@@ -1405,7 +1445,7 @@ app.get('/api/audit-log',auth,requirePermission('audit.view'),(req,res)=>{
 });
 app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
   const rows=db.prepare('SELECT * FROM audit_log ORDER BY event_time DESC').all();
-  res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="audit-log.json"');res.send(JSON.stringify(rows,null,2));
+  const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'\"'+String(v??'').replaceAll('\"','\"\"')+'\"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="audit-log.csv"');res.send('\ufeff'+csv);
 });
 app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{db.prepare('DELETE FROM audit_log').run();audit(req,'CLEAR','audit_log','ALL');res.json({ok:true});});
 app.get('/api/backups',auth,requireSuperadmin,(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
