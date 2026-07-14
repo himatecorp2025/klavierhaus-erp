@@ -321,3 +321,38 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
     max-height:calc(100dvh - 250px - env(safe-area-inset-bottom));
   }
 }
+
+
+/* Mobile/PWA usability consolidation v16 */
+.mobile-filter-toggle{display:none;width:100%;margin:8px 0 10px;justify-content:center;align-items:center;gap:8px;background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.mobile-collapsible-filter{min-width:0}
+.table-wrap,.contacts-table-wrap,.pianos-table-wrap,.finance-table-wrap,.timeline-scroll,.daily-calendar-scroll{
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-inline:contain;
+  touch-action:pan-x pan-y;
+  scroll-behavior:auto;
+  scrollbar-color:var(--blue) color-mix(in srgb,var(--panel2) 88%,transparent);
+}
+.table-wrap{-webkit-transform:translateZ(0);transform:translateZ(0);will-change:scroll-position}
+.piano-actions{position:static!important;right:auto!important;background:transparent!important}
+.finance-date-cell{white-space:nowrap;min-width:116px}
+.finance-table-wrap table{min-width:1080px}
+.profile-preferences,.profile-role-info{border-top:1px solid var(--line);padding-top:10px}
+
+@media(max-width:900px){
+  .mobile-filter-toggle{display:flex}
+  .mobile-collapsible-filter{display:none!important;opacity:0;transform:translateY(-4px)}
+  .mobile-collapsible-filter.open{display:grid!important;opacity:1;transform:none;animation:filterReveal .16s ease-out}
+  .finance-filters.mobile-collapsible-filter.open{display:flex!important}
+  @keyframes filterReveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .table-scroll-top{display:none!important}
+  .table-wrap,.contacts-table-wrap,.pianos-table-wrap,.finance-table-wrap{overflow-x:auto!important;overflow-y:visible!important;scroll-snap-type:none!important;touch-action:pan-x pan-y!important}
+  .table-wrap table{min-width:max-content}
+  .contacts-table-wrap table{min-width:1180px}
+  .pianos-table-wrap table{min-width:1120px}
+  .finance-table-wrap table{min-width:1120px}
+  .actions,#form>.actions,.modal-box .actions{position:static!important;inset:auto!important;z-index:auto!important;margin:18px 0 0!important;padding:14px 0 calc(8px + env(safe-area-inset-bottom))!important;border-top:1px solid var(--line);background:transparent!important}
+  #form{padding-bottom:calc(28px + env(safe-area-inset-bottom))!important}
+  .modal-box{padding-bottom:calc(8px + env(safe-area-inset-bottom))!important}
+  .header-right{display:flex;align-items:center}.language-switcher,.theme-switcher{display:none!important}
+}
