@@ -275,3 +275,49 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 
 .piano-reset-btn{border-color:color-mix(in srgb,#ef4444 70%,var(--line));white-space:nowrap}.piano-filter-grid-no-status{grid-template-columns:minmax(240px,2fr) repeat(3,minmax(150px,1fr)) auto}.piano-owner-unidentified{color:#fbbf24}.toolbar-actions{flex-wrap:wrap}
 @media(max-width:700px){.piano-reset-btn{width:100%}.piano-filter-grid-no-status{grid-template-columns:1fr}}
+
+
+/* Calendar scrollbar and mobile Today viewport refinements */
+.timeline-scroll,
+.daily-calendar-scroll{
+  scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--blue) 72%,var(--green)) color-mix(in srgb,var(--panel2) 82%,#000);
+}
+.timeline-scroll::-webkit-scrollbar,
+.daily-calendar-scroll::-webkit-scrollbar{
+  width:11px;
+  height:11px;
+}
+.timeline-scroll::-webkit-scrollbar-track,
+.daily-calendar-scroll::-webkit-scrollbar-track{
+  background:color-mix(in srgb,var(--panel2) 82%,#000);
+  border-radius:999px;
+  border:2px solid var(--panel);
+}
+.timeline-scroll::-webkit-scrollbar-thumb,
+.daily-calendar-scroll::-webkit-scrollbar-thumb{
+  background:linear-gradient(90deg,var(--blue),var(--green));
+  border-radius:999px;
+  border:2px solid color-mix(in srgb,var(--panel) 88%,transparent);
+}
+.timeline-scroll::-webkit-scrollbar-thumb:hover,
+.daily-calendar-scroll::-webkit-scrollbar-thumb:hover{
+  filter:brightness(1.12);
+}
+
+/* The inner vertical breathing room keeps the first and last time labels visible
+   without changing event positioning or click-to-time calculations. */
+.daily-calendar-scroll{
+  padding-block:20px;
+  box-sizing:border-box;
+  scroll-padding-block:20px;
+}
+
+@media(max-width:900px){
+  .daily-calendar-scroll{
+    margin-inline:-4px;
+    padding-top:24px;
+    padding-bottom:24px;
+    max-height:calc(100dvh - 250px - env(safe-area-inset-bottom));
+  }
+}
