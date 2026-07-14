@@ -235,20 +235,8 @@ CREATE TABLE IF NOT EXISTS import_batches (
   completed_at TEXT,
   summary_json TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_import_reference
-ON contacts(import_source, external_reference)
-WHERE import_source IS NOT NULL AND external_reference IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
-CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
-CREATE INDEX IF NOT EXISTS idx_contacts_import_batch ON contacts(import_batch_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_file_hash_source
-ON import_batches(import_source, file_hash);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_import_reference
-ON pianos(import_source, external_reference)
-WHERE import_source IS NOT NULL AND external_reference IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id);
-CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution);
-CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id);
+-- Import-related indexes are created by server/init-db.js and server/index.js
+-- only after legacy databases have received all required columns.
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
