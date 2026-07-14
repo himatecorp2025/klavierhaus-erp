@@ -3,6 +3,9 @@
   "version": "6.1.0",
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
