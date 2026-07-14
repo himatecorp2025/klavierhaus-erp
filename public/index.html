@@ -1,11 +1,18 @@
 
 
 
+
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07101d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Klavierhaus">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <title>Klavierhaus Work Management</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -59,6 +66,7 @@
         </div>
       </header>
 
+      <section id="today" class="view"></section>
       <section id="scheduler" class="view active"></section>
       <section id="planned_jobs" class="view"></section>
       <section id="contacts" class="view"></section>
@@ -72,6 +80,22 @@
       <section id="users" class="view"></section>
       <section id="settings" class="view"></section>
     </main>
+
+    <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Mobile navigation">
+      <button type="button" class="mobile-nav-btn" data-mobile-view="today"><span class="mobile-nav-icon" aria-hidden="true">◷</span><span data-mobile-label="today">Today</span></button>
+      <button type="button" class="mobile-nav-btn" data-mobile-view="contacts"><span class="mobile-nav-icon" aria-hidden="true">👥</span><span data-mobile-label="contacts">Clients</span></button>
+      <button type="button" id="mobileAddJobBtn" class="mobile-nav-btn mobile-add-btn" aria-label="Add job"><span class="mobile-nav-icon" aria-hidden="true">＋</span><span data-mobile-label="newJob">New Job</span></button>
+      <button type="button" class="mobile-nav-btn" data-mobile-view="pianos"><span class="mobile-nav-icon" aria-hidden="true">🎹</span><span data-mobile-label="pianos">Pianos</span></button>
+      <button type="button" id="mobileMoreBtn" class="mobile-nav-btn"><span class="mobile-nav-icon" aria-hidden="true">⋯</span><span data-mobile-label="more">More</span></button>
+    </nav>
+    <div id="mobileMoreSheet" class="mobile-more-sheet hidden" aria-hidden="true">
+      <button class="mobile-sheet-backdrop" type="button" aria-label="Close"></button>
+      <div class="mobile-sheet-panel">
+        <div class="mobile-sheet-handle"></div>
+        <div class="mobile-sheet-head"><strong id="mobileMoreTitle">More</strong><button type="button" id="mobileMoreClose" class="mobile-sheet-close">×</button></div>
+        <div id="mobileMoreItems" class="mobile-more-items"></div>
+      </div>
+    </div>
   </section>
 
   <div id="modal" class="modal hidden">
@@ -85,5 +109,10 @@
   </div>
 
   <script src="/app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("/service-worker.js").catch(console.error));
+    }
+  </script>
 </body>
 </html>
