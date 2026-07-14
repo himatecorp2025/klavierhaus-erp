@@ -61,6 +61,21 @@ function workAudit(req, action, recordId, oldValue=null, newValue=null, success=
   audit(req,action,'jobs',recordId,oldValue,newValue,success,details,'WORK');
 }
 
+
+function normalizeDeviceId(value){
+  const id=String(value||'').trim();
+  return /^[A-Za-z0-9._:-]{8,160}$/.test(id)?id:'';
+}
+function upsertNotificationDevice(userId,deviceId,{status='NOT_CONFIGURED',platform='',userAgent='',language='en'}={}){
+  if(!userId||!deviceId)return null;
+  const rowId=`NDV-${crypto.createHash('sha256').update(`${userId}:${deviceId}`).digest('hex').slice(0,24)}`;
+  db.prepare(`INSERT INTO notification_devices(id,user_id,device_id,status,platform,user_agent,language,last_seen_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id,device_id) DO UPDATE SET status=excluded.status,platform=excluded.platform,user_agent=excluded.user_agent,language=excluded.language,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP`)
+    .run(rowId,userId,deviceId,status,platform,userAgent,language==='hu'?'hu':'en');
+  return db.prepare('SELECT * FROM notification_devices WHERE user_id=? AND device_id=?').get(userId,deviceId);
+}
+
 function notificationPreferenceColumn(type){
   return ({JOB_ASSIGNED:'job_assigned',JOB_TRANSFERRED:'job_transferred',SUBTASK_TRANSFERRED:'job_transferred',JOB_UPDATED:'job_updated',JOB_DELETED:'job_deleted',JOB_STARTING_IN_ONE_HOUR:'one_hour_reminder',DIRECT_MESSAGE:'direct_message'})[type]||null;
 }
@@ -646,13 +661,42 @@ app.post('/api/cron/notifications',(req,res)=>{
 });
 
 app.get('/api/push/public-key',auth,(req,res)=>res.json({configured:PUSH_CONFIGURED,publicKey:VAPID_PUBLIC_KEY||''}));
-app.post('/api/push/subscribe',auth,(req,res)=>{
-  const subscription=req.body?.subscription;if(!subscription?.endpoint)return res.status(400).json({error:'INVALID_PUSH_SUBSCRIPTION'});
-  const existing=db.prepare('SELECT id FROM push_subscriptions WHERE endpoint=?').get(subscription.endpoint);const id=existing?.id||rid('PSH');
-  db.prepare(`INSERT INTO push_subscriptions(id,user_id,endpoint,subscription_json,user_agent,language,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,user_agent=excluded.user_agent,language=excluded.language,updated_at=CURRENT_TIMESTAMP`).run(id,req.user.id,subscription.endpoint,JSON.stringify(subscription),String(req.headers['user-agent']||''),req.body?.language==='hu'?'hu':'en');
-  db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);res.json({ok:true,configured:PUSH_CONFIGURED});
+app.get('/api/notifications/config',auth,(req,res)=>{
+  db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)').run(req.user.id);
+  res.json({configured:PUSH_CONFIGURED,publicKey:VAPID_PUBLIC_KEY||'',required:true,preferences:db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id)});
 });
-app.delete('/api/push/subscribe',auth,(req,res)=>{const endpoint=String(req.body?.endpoint||'');if(endpoint)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?').run(req.user.id,endpoint);else db.prepare('DELETE FROM push_subscriptions WHERE user_id=?').run(req.user.id);res.json({ok:true});});
+app.post('/api/push/status',auth,(req,res)=>{
+  const deviceId=normalizeDeviceId(req.body?.device_id);
+  if(!deviceId)return res.status(400).json({error:'INVALID_DEVICE_ID'});
+  const endpoint=String(req.body?.endpoint||'');
+  const clientStatus=String(req.body?.status||'NOT_CONFIGURED').toUpperCase();
+  const status=['NOT_CONFIGURED','ENABLED','BLOCKED','UNSUPPORTED'].includes(clientStatus)?clientStatus:'NOT_CONFIGURED';
+  const subscription=endpoint?db.prepare('SELECT id,endpoint,updated_at FROM push_subscriptions WHERE user_id=? AND endpoint=?').get(req.user.id,endpoint):db.prepare('SELECT id,endpoint,updated_at FROM push_subscriptions WHERE user_id=? AND device_id=? ORDER BY updated_at DESC LIMIT 1').get(req.user.id,deviceId);
+  const effective=status==='ENABLED'&&subscription?'ENABLED':status==='ENABLED'?'NOT_CONFIGURED':status;
+  const device=upsertNotificationDevice(req.user.id,deviceId,{status:effective,platform:String(req.body?.platform||''),userAgent:String(req.headers['user-agent']||''),language:req.body?.language});
+  res.json({configured:PUSH_CONFIGURED,required:true,status:effective,subscribed:Boolean(subscription),device});
+});
+app.post('/api/push/check',auth,(req,res)=>{
+  const deviceId=normalizeDeviceId(req.body?.device_id);
+  if(!deviceId)return res.status(400).json({error:'INVALID_DEVICE_ID'});
+  const endpoint=String(req.body?.endpoint||'');
+  const subscription=endpoint?db.prepare('SELECT id FROM push_subscriptions WHERE user_id=? AND endpoint=?').get(req.user.id,endpoint):db.prepare('SELECT id FROM push_subscriptions WHERE user_id=? AND device_id=?').get(req.user.id,deviceId);
+  const device=db.prepare('SELECT * FROM notification_devices WHERE user_id=? AND device_id=?').get(req.user.id,deviceId);
+  res.json({configured:PUSH_CONFIGURED,required:true,subscribed:Boolean(subscription),deviceStatus:device?.status||'NOT_CONFIGURED'});
+});
+
+app.post('/api/push/subscribe',auth,(req,res)=>{
+  const subscription=req.body?.subscription;
+  const deviceId=normalizeDeviceId(req.body?.device_id);
+  if(!subscription?.endpoint||!deviceId)return res.status(400).json({error:'INVALID_PUSH_SUBSCRIPTION'});
+  const existing=db.prepare('SELECT id FROM push_subscriptions WHERE endpoint=?').get(subscription.endpoint);const id=existing?.id||rid('PSH');
+  db.prepare(`INSERT INTO push_subscriptions(id,user_id,endpoint,subscription_json,user_agent,language,device_id,last_seen_at,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,user_agent=excluded.user_agent,language=excluded.language,device_id=excluded.device_id,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP`).run(id,req.user.id,subscription.endpoint,JSON.stringify(subscription),String(req.headers['user-agent']||''),req.body?.language==='hu'?'hu':'en',deviceId);
+  db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled) VALUES(?,1)').run(req.user.id);
+  db.prepare('UPDATE notification_preferences SET push_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').run(req.user.id);
+  const device=upsertNotificationDevice(req.user.id,deviceId,{status:'ENABLED',platform:String(req.body?.platform||''),userAgent:String(req.headers['user-agent']||''),language:req.body?.language});
+  res.json({ok:true,configured:PUSH_CONFIGURED,device});
+});
+app.delete('/api/push/subscribe',auth,(req,res)=>{const endpoint=String(req.body?.endpoint||'');const deviceId=normalizeDeviceId(req.body?.device_id);if(endpoint)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?').run(req.user.id,endpoint);else if(deviceId)db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND device_id=?').run(req.user.id,deviceId);else db.prepare('DELETE FROM push_subscriptions WHERE user_id=?').run(req.user.id);if(deviceId)upsertNotificationDevice(req.user.id,deviceId,{status:'NOT_CONFIGURED',platform:String(req.body?.platform||''),userAgent:String(req.headers['user-agent']||''),language:req.body?.language});res.json({ok:true});});
 app.get('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
 app.put('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR IGNORE INTO notification_preferences(user_id) VALUES(?)').run(req.user.id);const fields=['push_enabled','job_assigned','job_transferred','job_updated','job_deleted','one_hour_reminder','direct_message'];const cols=fields.filter(f=>req.body[f]!==undefined);if(cols.length)db.prepare(`UPDATE notification_preferences SET ${cols.map(f=>`${f}=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).run(...cols.map(f=>Number(req.body[f])?1:0),req.user.id);res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id=?').get(req.user.id));});
 app.get('/api/notifications',auth,(req,res)=>{const active=String(req.query.active??'1')!=='0';const rows=db.prepare(`SELECT n.*,su.name sender_name FROM notifications n LEFT JOIN users su ON su.id=n.sender_user_id WHERE n.recipient_user_id=? ${active?"AND n.status='ACTIVE'":''} ORDER BY n.created_at DESC LIMIT 500`).all(req.user.id);res.json(rows);});
@@ -1008,6 +1052,7 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
     .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",0,0);
   const created={id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||""};
+  db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
   audit(req,"CREATE","users",id,null,created);
   res.json(created);
 });
@@ -1796,12 +1841,17 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "app_settings",
       "notifications",
       "push_subscriptions",
+      "notification_devices",
       "notification_preferences"
     ].forEach(clear);
 
     if(exists("users")){
       db.prepare("DELETE FROM users WHERE id<>?").run(superadminId);
       db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1, role='ADMIN' WHERE id=?").run(superadminId);
+    }
+
+    if(exists("notification_preferences")){
+      db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(superadminId);
     }
 
     // Recreate only the minimum system defaults required for a usable clean installation.
