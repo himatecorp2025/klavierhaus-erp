@@ -29,6 +29,7 @@ let notificationGateBusy=false;
 let currentNotifications=[];
 let currentTimeLineInterval=null;
 let calendarAutoRefreshBusy=false;
+let jobDetailsRequestSequence=0;
 
 const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["audit_log","Audit Log / Módosítási napló"],["settings","Settings / Beállítások"]],
@@ -111,6 +112,7 @@ function applyLanguageToDOM(root=document.body){
     if(!node.nodeValue || !node.nodeValue.includes(" / ")) return NodeFilter.FILTER_REJECT;
     const p=node.parentElement;
     if(!p || ["SCRIPT","STYLE","TEXTAREA"].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+    if(p.closest("[data-i18n-exempt]")) return NodeFilter.FILTER_REJECT;
     return NodeFilter.FILTER_ACCEPT;
   }});
   const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
@@ -889,9 +891,28 @@ function calendarIntegrationClass(j){
  if(j.calendar_source!=='GOOGLE')return '';
  if(Number(j.calendar_conflict_flag||0)===1 || ['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(String(j.calendar_review_status||'')))return ' GoogleAttention';
  if(String(j.calendar_review_status||'')==='NEEDS_REVIEW')return ' GoogleNeedsReview';
- return ' GoogleReviewed';
+ return '';
 }
 function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)}"` : ""; }
+function calendarCardAmount(j){
+ const billed=Number(j?.billed_amount||0),planned=Number(j?.planned_amount||0);
+ if(isClosedJobStatus(j?.status) && billed>0) return money(billed);
+ if(planned>0) return money(planned);
+ return "—";
+}
+function calendarEventDensityClass(j){
+ const start=new Date(j?.start_time||0).getTime(),end=new Date(j?.end_time||0).getTime();
+ const minutes=Number.isFinite(start)&&Number.isFinite(end)&&end>start?(end-start)/60000:0;
+ if(minutes<45) return " EventCompact";
+ if(minutes<90) return " EventMedium";
+ return " EventDetailed";
+}
+function calendarEventCardMarkup(j){
+ const time=`${String(j?.start_time||"").slice(11,16)}–${String(j?.end_time||"").slice(11,16)}`;
+ const client=String(j?.client_name||"—"),amount=calendarCardAmount(j);
+ const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—");
+ return `<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
+}
 
 function ensureView(id){
  let el=document.getElementById(id);
@@ -992,7 +1013,7 @@ async function renderToday(){
   const layout=calendarLayout(dailyJobs,dayStart,dayEnd);
   const quarter=Array.from({length:(dayEnd-dayStart)/15+1},(_,i)=>{const min=dayStart+i*15;return `<i class="${min%60===0?'hour':''}" style="top:${((min-dayStart)/total)*100}%"></i>`}).join('');
   const times=Array.from({length:(dayEnd-dayStart)/60+1},(_,i)=>{const min=dayStart+i*60;return `<span style="top:${((min-dayStart)/total)*100}%">${String(Math.floor(min/60)).padStart(2,'0')}:00</span>`}).join('');
-  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${htmlText(j.title||'')}</b><small>${htmlText(j.client_name||'')}</small><span class="event-status">${calendarStatusIcon(j)}</span></button>`}).join('');
+  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`}).join('');
   target.innerHTML=`<div class="mobile-today-shell"><div class="today-page-header"><h2>${bi('Today','Ma')}</h2>${notificationBellMarkup('mobileTodayNotificationBell')}</div><section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><div class="today-calendar-actions"><label class="today-worker-filter"><span>${tr('workerFilter')}</span><select class="worker-filter-select" aria-label="${tr('workerFilter')}" onchange="currentSchedulerWorker=this.value;renderToday()">${schedulerFilterOptions(workers)}</select></label><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
   updateCurrentTimeLine(); clearInterval(currentTimeLineInterval); currentTimeLineInterval=setInterval(updateCurrentTimeLine,60000); updateMobileNavigationActive();
 }
@@ -1053,7 +1074,7 @@ async function renderScheduler(){
    for(const item of placed){
      const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
      const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><span class="event-status">${calendarStatusIcon(j)}</span><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><b>${htmlText(j.title||"")}</b><small>${htmlText(j.assigned_to||"")}</small></button>`;
+     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`;
    }
    html+=`</div>`;
  }
@@ -1237,38 +1258,85 @@ function toggleInstructionsField(){
  const el=document.getElementById("instructionsField");
  if(el) el.classList.toggle("hidden", t!=="Part-work");
 }
-function openJobDetails(j){
- $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=bi("Job details","Munka részletei");
- const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
- const closed=isClosedJobStatus(j.status) || String(j.status||"")==="Cancelled";
+function googleImportDateTime(value){
+ const raw=String(value||'').trim();
+ if(!raw)return '—';
+ try{
+  if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(`${raw}T12:00:00Z`));
+  const parsed=new Date(raw);if(Number.isNaN(parsed.getTime()))return raw;
+  return new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{dateStyle:'medium',timeStyle:'short',timeZone:'America/New_York'}).format(parsed);
+ }catch(_error){return raw}
+}
+function googleImportDetailsMarkup(imported){
+ if(!imported)return '';
+ const attendees=Array.isArray(imported.attendees)?imported.attendees.filter(Boolean):[];
+ const row=(label,value,extraClass='')=>`<div class="google-import-row ${extraClass}"><dt>${label}</dt><dd data-i18n-exempt>${value||'—'}</dd></div>`;
+ return `<section class="google-import-details" aria-label="${bi('Imported Google event details','Importált Google-esemény adatai')}">
+  <h4>${bi('Imported Google event details','Importált Google-esemény adatai')}</h4>
+  <dl>
+   ${row(bi('Event title','Esemény címe'),htmlText(imported.title))}
+   ${row(bi('Description','Leírás'),htmlText(imported.description).replaceAll('\n','<br>'),'google-import-description')}
+   ${row(bi('Location','Helyszín'),htmlText(imported.location))}
+   ${row(bi('Start','Kezdés'),htmlText(googleImportDateTime(imported.start_time)))}
+   ${row(bi('End','Befejezés'),htmlText(googleImportDateTime(imported.end_time)))}
+   ${row(bi('Creator','Létrehozó'),htmlText(imported.creator))}
+   ${attendees.length?row(bi('Attendees','Résztvevők'),htmlText(attendees.join(', '))):''}
+  </dl>
+ </section>`;
+}
+function jobStatusLabel(status){
+ const labels={Open:bi('Open','Nyitott'),Completed:bi('Completed','Teljesen lezárt'),'Partially completed':bi('Partially completed','Részlegesen lezárt'),Failed:bi('Failed','Sikertelen'),Cancelled:bi('Cancelled','Törölt')};
+ return labels[String(status||'')]||String(status||'');
+}
+function renderJobDetails(j){
+ const phone=j.client_phone?`<a href="tel:${htmlText(String(j.client_phone).replace(/\s+/g,''))}" class="phone-link" data-i18n-exempt>${htmlText(j.client_phone)}</a>`:'—';
+ const closed=isClosedJobStatus(j.status)||String(j.status||'')==='Cancelled';
  const googleState=String(j.calendar_review_status||'');
  const googleStateLabel={NEEDS_REVIEW:bi('Needs review','Ellenőrzésre vár'),REVIEWED:bi('Reviewed','Ellenőrizve'),SOURCE_CHANGED:bi('Google source changed after review','A Google-forrás az ellenőrzés után megváltozott'),SOURCE_CANCELLED:bi('Google source event cancelled — ERP job kept','A Google-forrásesemény törölve — az ERP-munka megmaradt'),INVALID:bi('Invalid Google event','Hibás Google-esemény')}[googleState]||googleState;
- const googleBanner=j.calendar_source==='GOOGLE'?`<div class="google-calendar-banner ${Number(j.calendar_conflict_flag||0)===1||['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(googleState)?'attention':'review'}"><strong>${bi('Google Calendar import','Google Naptár-import')}</strong><span>${htmlText(googleStateLabel)}</span>${Number(j.calendar_conflict_flag||0)===1?`<small>! ${bi('Schedule conflict: choose another employee or time before review.','Időpontütközés: ellenőrzés előtt válassz másik munkatársat vagy időpontot.')}</small>`:''}<small>${bi('Creator','Létrehozó')}: ${htmlText(j.calendar_creator_email||bi('Unknown','Ismeretlen'))}</small></div>`:'';
- const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
- actionButtons.push(`<button type="button" class="ghost-btn" onclick="openWorkflowHistory('${jobRef(j)}')">${bi("Workflow history","Munkafolyamat")}</button>`);
+ const googleAttention=Number(j.calendar_conflict_flag||0)===1||['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(googleState);
+ const showGoogleBanner=j.calendar_source==='GOOGLE'&&(!j.calendar_reviewed_at||googleAttention);
+ const googleBanner=showGoogleBanner?`<div class="google-calendar-banner ${googleAttention?'attention':'review'}"><strong>${googleAttention?bi('Google Calendar warning','Google Naptár-figyelmeztetés'):bi('Google Calendar import','Google Naptár-import')}</strong><span>${htmlText(googleStateLabel)}</span>${Number(j.calendar_conflict_flag||0)===1?`<small>! ${bi('Schedule conflict: choose another employee or time before review.','Időpontütközés: ellenőrzés előtt válassz másik munkatársat vagy időpontot.')}</small>`:''}</div>`:'';
+ const actionJob={...j};delete actionJob.calendar_import;
+ const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">${bi('Close','Bezárás')}</button>`];
+ actionButtons.push(`<button type="button" class="ghost-btn" onclick="openWorkflowHistory('${jobRef(j)}')">${bi('Workflow history','Munkafolyamat')}</button>`);
  if(!closed){
-   actionButtons.push(`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`);
-   actionButtons.push(`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`);
+  actionButtons.push(`<button type="button" onclick='openJob("",${esc(actionJob)})'>${bi('Edit job','Munka szerkesztése')}</button>`);
+  actionButtons.push(`<button type="button" onclick='openCloseJob(${esc(actionJob)})'>${bi('Close job','Munka lezárása')}</button>`);
  }
- if(j.calendar_source==='GOOGLE'&&isAdmin()&&googleState!=='REVIEWED'&&googleState!=='SOURCE_CANCELLED') actionButtons.push(`<button type="button" onclick="reviewGoogleCalendarJob('${jobRef(j)}')">${bi('Mark as reviewed','Ellenőrzés befejezése')}</button>`);
- if(isSuperadmin()) actionButtons.push(`<button type="button" class="danger-btn" onclick="deleteJob('${jobRef(j)}')">Delete job / Munka törlése</button>`);
- $("#form").innerHTML=`${googleBanner}<div class="work-card">
- <h4>${badge(j.priority)} ${htmlText(j.title||'')}</h4>
- <p class="muted"><b>Job key / Munkaazonosító:</b> ${j.job_key||j.id||""}</p><p><b>Work category / Munkakategória:</b> ${j.job_type==="Part-work" ? "Part-work / Részmunka" : "Standalone / Önálló munka"}</p>
- <p><b>Assigned / Felelős:</b> ${htmlText(j.assigned_to||'')}</p>
- <p><b>Client / Ügyfél:</b> ${htmlText(j.client_name||j.client_id||"")}</p>
- <p><b>Phone / Telefon:</b> ${phone}</p>
- <p><b>Piano / Zongora:</b> ${htmlText(j.piano_name||j.piano_id||"")}</p>
- <p><b>Time / Idő:</b> ${j.start_time} → ${j.end_time}</p>
- <p><b>Address / Cím:</b> ${htmlText(j.service_address||"")}</p>
- <p><b>Estimated / Előzetes:</b> ${money(j.planned_amount)} · ${j.pricing_basis||""}</p>
- <p><b>Status / Státusz:</b> ${badge(j.status)}</p>
- ${closed?`<p class="muted"><b>View only / Csak megtekintés:</b> ez a munka már lezárt vagy részlezárt.</p>`:""}
- ${j.instructions?`<p><b>${j.calendar_source==='GOOGLE'?bi('Imported information and notes','Importált információk és megjegyzések'):bi('Instructions','Utasítások')}:</b><br>${htmlText(j.instructions).replaceAll('\n','<br>')}</p>`:""}
- </div>
- <div class="actions">${actionButtons.join("")}</div>`;
- $("#form").onsubmit=e=>e.preventDefault()
+ if(j.calendar_source==='GOOGLE'&&isAdmin()&&!j.calendar_reviewed_at&&googleState!=='REVIEWED'&&googleState!=='SOURCE_CANCELLED')actionButtons.push(`<button type="button" onclick="reviewGoogleCalendarJob('${jobRef(j)}')">${bi('Mark as reviewed','Ellenőrzés befejezése')}</button>`);
+ if(isSuperadmin())actionButtons.push(`<button type="button" class="danger-btn" onclick="deleteJob('${jobRef(j)}')">${bi('Delete job','Munka törlése')}</button>`);
+ const instructions=j.calendar_source!=='GOOGLE'&&j.instructions?`<p><b>${bi('Instructions','Utasítások')}:</b><br><span data-i18n-exempt>${htmlText(j.instructions).replaceAll('\n','<br>')}</span></p>`:'';
+ $("#form").innerHTML=`${googleBanner}${googleImportDetailsMarkup(j.calendar_import)}<div class="work-card">
+  <h4>${badge(j.priority)} <span data-i18n-exempt>${htmlText(j.title||'')}</span></h4>
+  <p class="muted"><b>${bi('Job key','Munkaazonosító')}:</b> <span data-i18n-exempt>${htmlText(j.job_key||j.id||'')}</span></p>
+  <p><b>${bi('Work category','Munkakategória')}:</b> ${j.job_type==='Part-work'?bi('Part-work','Részmunka'):bi('Standalone','Önálló munka')}</p>
+  <p><b>${bi('Assigned','Felelős')}:</b> <span data-i18n-exempt>${htmlText(j.assigned_to||'—')}</span></p>
+  <p><b>${bi('Client','Ügyfél')}:</b> <span data-i18n-exempt>${htmlText(j.client_name||j.client_id||'—')}</span></p>
+  <p><b>${bi('Phone','Telefon')}:</b> ${phone}</p>
+  <p><b>${bi('Piano','Zongora')}:</b> <span data-i18n-exempt>${htmlText(j.piano_name||j.piano_id||'—')}</span></p>
+  <p><b>${bi('Time','Idő')}:</b> <span data-i18n-exempt>${htmlText(j.start_time||'—')} → ${htmlText(j.end_time||'—')}</span></p>
+  <p><b>${bi('Address','Cím')}:</b> <span data-i18n-exempt>${htmlText(j.service_address||'—')}</span></p>
+  <p><b>${bi('Estimated','Előzetes összeg')}:</b> ${money(j.planned_amount)}${j.pricing_basis?` · <span data-i18n-exempt>${htmlText(splitBilingualText(j.pricing_basis))}</span>`:''}</p>
+  <p><b>${bi('Status','Státusz')}:</b> <span class="badge ${htmlText(String(j.status||'').split(' ')[0])}">${htmlText(jobStatusLabel(j.status))}</span></p>
+  ${closed?`<p class="muted"><b>${bi('View only','Csak megtekintés')}:</b> ${bi('This job has already been closed or partially closed.','Ez a munka már lezárt vagy részlegesen lezárt.')}</p>`:''}
+  ${instructions}
+ </div><div class="actions">${actionButtons.join('')}</div>`;
+ $("#form").onsubmit=e=>e.preventDefault();
+}
+async function openJobDetails(summary){
+ const requestId=++jobDetailsRequestSequence;
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent=bi('Job details','Munka részletei');
+ $("#form").innerHTML=`<div class="modal-loading" aria-live="polite">${bi('Loading job details…','Munkarészletek betöltése…')}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Close','Bezárás')}</button></div>`;
+ $("#form").onsubmit=e=>e.preventDefault();
+ try{
+  const detailed=await api(`/api/jobs/${encodeURIComponent(jobRef(summary))}`);
+  if(requestId!==jobDetailsRequestSequence)return;
+  renderJobDetails(detailed);
+ }catch(error){
+  if(requestId!==jobDetailsRequestSequence)return;
+  showError(error);
+ }
 }
 async function reviewGoogleCalendarJob(id){
  try{const reviewed=await api(`/api/jobs/${encodeURIComponent(id)}/calendar-review`,{method:'POST'});closeModal();await refreshCalendarAfterMutation(reviewed);showToast(bi('Google Calendar job reviewed.','A Google Naptár-munka ellenőrizve.'),'success');}catch(error){showError(error)}
