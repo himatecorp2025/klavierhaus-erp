@@ -44,3 +44,14 @@ test("PWA push handlers remain present and the shell cache uses version 6.5.0", 
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
   assert.match(serviceWorker, /ACKNOWLEDGE_NOTIFICATION/);
 });
+
+test("Google Calendar UI is bilingual, range-limited and preserves status-color priority", () => {
+  assert.match(appSource, /Google Calendar integration','Google Naptár-integráció/);
+  assert.match(appSource, /Google Calendar email","Google Naptár e-mail/);
+  assert.match(appSource, /Mark as reviewed','Ellenőrzés befejezése/);
+  assert.match(appSource, /jobsRangeUrl\(date,addDaysToDateKey\(date,1\)\)/);
+  assert.match(appSource, /jobsRangeUrl\(weekDates\[0\],addDaysToDateKey\(weekDates\[6\],1\)\)/);
+  assert.match(appSource, /calendarIntegrationClass\(j\)/);
+  assert.match(styles, /timeline-event\.GoogleAttention/);
+  assert.doesNotMatch(styles, /timeline-event\.GoogleAttention\{[^}]*background:/);
+});
