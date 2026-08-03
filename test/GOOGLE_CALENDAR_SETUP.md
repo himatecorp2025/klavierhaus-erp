@@ -9,7 +9,7 @@ ERP changes are never written back to Google. The existing PWA/Web Push keys are
 ## 1. Prepare the shared calendar
 
 1. Sign in to Google with `klavierhauswork@gmail.com`.
-2. Use the account's primary calendar and rename it to **Klavier House Work**, or create a separate calendar with this name.
+2. Use the account's primary calendar and rename it to **Klavierhaus Work**, or create a separate calendar with this name.
 3. Share the calendar with every employee's Google account and grant permission to add and edit events.
 4. If a separate calendar was created, open **Settings and sharing → Integrate calendar** and copy its Calendar ID. Use that value as `GOOGLE_CALENDAR_ID`. If the primary calendar is used, its ID is `klavierhauswork@gmail.com`.
 
@@ -71,6 +71,7 @@ Admins can see connection state and run a manual synchronization. Only the super
 
 ## Magyar telepítési összefoglaló
 
-Az integráció kizárólag egyirányú és csak olvasási Google-jogosultságot kér. A közös naptár neve **Klavier House Work**, a központi fiók `klavierhauswork@gmail.com`. A Google Cloudban engedélyezni kell a Google Calendar API-t, Web application típusú OAuth kliens szükséges, és a Render-domainhez tartozó callback URL-t pontosan fel kell venni. A titkok kizárólag Render környezeti változóba kerülhetnek.
+Az integráció kizárólag egyirányú és csak olvasási Google-jogosultságot kér. A közös naptár neve **Klavierhaus Work**, a központi fiók `klavierhauswork@gmail.com`. A Google Cloudban engedélyezni kell a Google Calendar API-t, Web application típusú OAuth kliens szükséges, és a Render-domainhez tartozó callback URL-t pontosan fel kell venni. A titkok kizárólag Render környezeti változóba kerülhetnek.
 
 A csatlakoztatást és leválasztást csak a szuperadmin végezheti. Az admin kézi szinkront indíthat és ellenőrizheti az importált munkákat. Minden munkatárshoz külön Google Naptár e-mail-cím tartozik a profilban; ez alapján történik a kezdeti kiosztás.
+****
