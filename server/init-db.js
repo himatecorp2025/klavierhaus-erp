@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
+const { backfillUserCalendarColors } = require("./calendar-colors");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -65,8 +66,9 @@ function migrationRequiresBackup() {
   const usersSql = tableExists("users")
     ? String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || "").toUpperCase()
     : "";
+  const usersMissingCalendarColor = tableExists("users") && !tableColumns("users").has("calendar_color");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
-  return usersSql.includes("'VIEWER'") || inventoryMissingCreator;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || inventoryMissingCreator;
 }
 
 function createPreMigrationBackup() {
@@ -102,6 +104,7 @@ function migrateUsersRoleConstraint() {
         status TEXT DEFAULT 'Active',
         phone TEXT,
         address TEXT,
+        calendar_color TEXT,
         hidden_user INTEGER DEFAULT 0,
         is_superadmin INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -110,13 +113,13 @@ function migrateUsersRoleConstraint() {
     `);
     db.exec(`
       INSERT INTO users_new(
-        id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin,created_at,updated_at
+        id,name,email,password_hash,role,status,phone,address,calendar_color,hidden_user,is_superadmin,created_at,updated_at
       )
       SELECT
         id,name,email,password_hash,
         CASE WHEN role IN ('ADMIN','MANAGER','WORKER') THEN role ELSE 'WORKER' END,
         CASE WHEN role='VIEWER' THEN 'Inactive' ELSE COALESCE(status,'Active') END,
-        phone,address,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
+        phone,address,calendar_color,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
       FROM users
     `);
     db.exec("DROP TABLE users");
@@ -202,6 +205,7 @@ function runMigrations() {
     // Users. No user account is created here.
     ensureColumn("users", "phone", "TEXT");
     ensureColumn("users", "address", "TEXT");
+    ensureColumn("users", "calendar_color", "TEXT");
     ensureColumn("users", "hidden_user", "INTEGER DEFAULT 0");
     ensureColumn("users", "is_superadmin", "INTEGER DEFAULT 0");
 
@@ -282,6 +286,7 @@ function runMigrations() {
 
   migrateColumns();
   migrateUsersRoleConstraint();
+  backfillUserCalendarColors(db, log);
 
   cleanupDuplicateImportBatches();
   neutralizeDuplicateImportReferences("contacts");
