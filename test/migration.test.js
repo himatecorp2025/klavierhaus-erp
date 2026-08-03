@@ -8,7 +8,7 @@ const Database = require("better-sqlite3");
 
 const projectRoot = path.join(__dirname, "..");
 
-test("v6.5.0 migration preserves business records and creates a backup before adding colors", () => {
+test("v6.5.0 migration preserves business records and creates a backup before calendar integration changes", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kh-migration-"));
   const dbPath = path.join(tempRoot, "existing.sqlite");
   const backupDir = path.join(tempRoot, "backups");
@@ -37,6 +37,10 @@ test("v6.5.0 migration preserves business records and creates a backup before ad
   const migrated = new Database(dbPath, { readonly: true });
   const columns = migrated.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
   assert.ok(columns.includes("calendar_color"));
+  assert.ok(columns.includes("google_calendar_email"));
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_integrations'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_calendar_events'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_jobs_time_range'").get());
   assert.deepEqual(
     migrated.prepare("SELECT name,calendar_color FROM users ORDER BY name").all(),
     [{ name: "Károly", calendar_color: "#2563EB" }, { name: "Misi", calendar_color: "#EA580C" }]
