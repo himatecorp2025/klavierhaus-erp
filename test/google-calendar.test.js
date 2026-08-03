@@ -61,6 +61,7 @@ function googleEvent(overrides = {}) {
     htmlLink: "https://calendar.google.com/event?eid=test",
     creator: { email: "worker.calendar@gmail.com" },
     organizer: { email: "klavierhauswork@gmail.com" },
+    attendees: [{ email: "second.worker@gmail.com" }],
     start: { dateTime: "2032-08-04T14:00:00-04:00" },
     end: { dateTime: "2032-08-04T16:00:00-04:00" },
     updated: "2032-08-01T12:00:00Z",
@@ -87,6 +88,10 @@ test("Google event imports, maps creator, notifies, protects reviewed ERP data a
   const imported = integration._test.processEvent(googleEvent());
   assert.equal(imported.imported, 1);
   const external = db.prepare("SELECT * FROM external_calendar_events WHERE external_event_id='event-1'").get();
+  const rawEvent = JSON.parse(external.raw_json);
+  assert.equal(rawEvent.htmlLink, "https://calendar.google.com/event?eid=test");
+  assert.equal(rawEvent.organizer.email, "klavierhauswork@gmail.com");
+  assert.deepEqual(rawEvent.attendees, [{ email: "second.worker@gmail.com" }]);
   const job = getJob(external.job_id);
   assert.equal(job.assigned_user_id, "U-W");
   assert.equal(job.assigned_to, "Worker");
@@ -98,10 +103,14 @@ test("Google event imports, maps creator, notifies, protects reviewed ERP data a
 
   integration.markReviewed(job.id, "U-A");
   assert.equal(getJob(job.id).calendar_review_status, "REVIEWED");
+  const reviewedExternal = db.prepare("SELECT reviewed_at,raw_json FROM external_calendar_events WHERE external_event_id='event-1'").get();
+  assert.ok(reviewedExternal.reviewed_at);
+  assert.equal(JSON.parse(reviewedExternal.raw_json).description, "Customer asked for concert preparation.");
 
   integration._test.processEvent(googleEvent({ etag: "\"v2\"", summary: "Google changed title", updated: "2032-08-02T12:00:00Z" }));
   assert.equal(getJob(job.id).title, "Tuning");
   assert.equal(getJob(job.id).calendar_review_status, "SOURCE_CHANGED");
+  assert.equal(db.prepare("SELECT reviewed_at FROM external_calendar_events WHERE external_event_id='event-1'").get().reviewed_at, reviewedExternal.reviewed_at);
   assert.ok(notifications.some((item) => item.type === "GOOGLE_EVENT_SOURCE_CHANGED"));
 
   integration._test.processEvent(googleEvent({ etag: "\"v3\"", status: "cancelled", updated: "2032-08-03T12:00:00Z" }));
