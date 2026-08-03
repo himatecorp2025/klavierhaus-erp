@@ -138,7 +138,7 @@ test("incremental synchronization reads the central calendar and stores a sync t
       });
     }
     if (String(url).endsWith("/calendars/klavierhauswork%40gmail.com")) {
-      return new Response(JSON.stringify({ summary: "Klavier House Work" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ summary: "Klavierhaus Work" }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     throw new Error(`unexpected request: ${url}`);
   };
@@ -148,7 +148,7 @@ test("incremental synchronization reads the central calendar and stores a sync t
   const result = await integration.syncNow("TEST");
   assert.equal(result.imported, 1);
   const row = db.prepare("SELECT calendar_summary,sync_token,last_error FROM calendar_integrations WHERE provider='GOOGLE'").get();
-  assert.equal(row.calendar_summary, "Klavier House Work");
+  assert.equal(row.calendar_summary, "Klavierhaus Work");
   assert.equal(row.sync_token, "sync-token-1");
   assert.equal(row.last_error, null);
   assert.ok(requests.some((url) => url.includes("timeMin=")));
