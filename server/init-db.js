@@ -43,12 +43,53 @@ function ensureIndex(name, sql) {
   log(`Index ready: ${name}`);
 }
 
+function preservedBusinessCounts() {
+  const tables = ["users", "contacts", "pianos", "jobs", "inventory_items"];
+  return Object.fromEntries(tables.map((tableName) => [
+    tableName,
+    tableExists(tableName) ? Number(db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get().count || 0) : 0
+  ]));
+}
+
+function assertPreservedBusinessCounts(before) {
+  const after = preservedBusinessCounts();
+  for (const [tableName, count] of Object.entries(before)) {
+    if (after[tableName] !== count) {
+      throw new Error(`Data-preservation check failed for ${tableName}: before=${count}, after=${after[tableName]}`);
+    }
+  }
+  log(`Data-preservation check passed: ${Object.entries(after).map(([name, count]) => `${name}=${count}`).join(", ")}`);
+}
+
+function migrationRequiresBackup() {
+  const usersSql = tableExists("users")
+    ? String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || "").toUpperCase()
+    : "";
+  const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
+  return usersSql.includes("'VIEWER'") || inventoryMissingCreator;
+}
+
+function createPreMigrationBackup() {
+  if (!migrationRequiresBackup() || !fs.existsSync(dbPath)) return null;
+  db.pragma("wal_checkpoint(FULL)");
+  const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
+  fs.mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(backupDir, `klavierhaus-pre-migration-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath, target);
+  log(`Pre-migration backup created: ${target}`);
+  return target;
+}
+
 function migrateUsersRoleConstraint() {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
   const createSql = String(row?.sql || "").toUpperCase();
-  if (createSql.includes("'VIEWER'")) return;
+  if (!createSql.includes("'VIEWER'")) {
+    if (tableExists("role_permissions")) db.prepare("DELETE FROM role_permissions WHERE role='VIEWER'").run();
+    return;
+  }
 
-  log("Upgrading users role constraint to support VIEWER");
+  log("Removing VIEWER from the users role constraint while preserving every user record");
   db.pragma("foreign_keys = OFF");
   const migrate = db.transaction(() => {
     db.exec(`
@@ -57,7 +98,7 @@ function migrateUsersRoleConstraint() {
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER','VIEWER')),
+        role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
         status TEXT DEFAULT 'Active',
         phone TEXT,
         address TEXT,
@@ -73,15 +114,20 @@ function migrateUsersRoleConstraint() {
       )
       SELECT
         id,name,email,password_hash,
-        CASE WHEN role IN ('ADMIN','MANAGER','WORKER','VIEWER') THEN role ELSE 'VIEWER' END,
-        COALESCE(status,'Active'),phone,address,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
+        CASE WHEN role IN ('ADMIN','MANAGER','WORKER') THEN role ELSE 'WORKER' END,
+        CASE WHEN role='VIEWER' THEN 'Inactive' ELSE COALESCE(status,'Active') END,
+        phone,address,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
       FROM users
     `);
     db.exec("DROP TABLE users");
     db.exec("ALTER TABLE users_new RENAME TO users");
   });
-  migrate();
-  db.pragma("foreign_keys = ON");
+  try {
+    migrate();
+    if (tableExists("role_permissions")) db.prepare("DELETE FROM role_permissions WHERE role='VIEWER'").run();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 function cleanupDuplicateImportBatches() {
@@ -148,6 +194,8 @@ function neutralizeDuplicateImportReferences(tableName) {
 }
 
 function runMigrations() {
+  const preservedCounts = preservedBusinessCounts();
+  createPreMigrationBackup();
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
   const migrateColumns = db.transaction(() => {
@@ -215,7 +263,7 @@ function runMigrations() {
       purchase_price: "REAL DEFAULT 0", manufacturing_cost: "REAL DEFAULT 0", quantity: "REAL DEFAULT 1",
       unit: "TEXT", condition_status: "TEXT", location: "TEXT", linked_piano_id: "TEXT",
       linked_client_id: "TEXT", status: "TEXT DEFAULT 'In Stock'", notes: "TEXT", deleted_at: "TEXT",
-      deleted_by: "TEXT", created_by: "TEXT"
+      deleted_by: "TEXT", created_by: "TEXT", created_by_user_id: "TEXT"
     };
     for (const [name, definition] of Object.entries(inventoryColumns)) ensureColumn("inventory_items", name, definition);
 
@@ -297,6 +345,14 @@ function runMigrations() {
     db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES('notification_preferences_v1_backfilled','1','SYSTEM')").run();
     log('Enabled all notification preferences for existing users');
   }
+  assertPreservedBusinessCounts(preservedCounts);
+  const foreignKeyErrors = db.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyErrors.length) throw new Error(`Foreign-key integrity check failed: ${JSON.stringify(foreignKeyErrors.slice(0, 10))}`);
+  const integrity = db.prepare("PRAGMA integrity_check").all();
+  if (integrity.some((row) => String(row.integrity_check || "").toLowerCase() !== "ok")) {
+    throw new Error(`SQLite integrity check failed: ${JSON.stringify(integrity)}`);
+  }
+  log("SQLite integrity and foreign-key checks passed");
   // Intentionally no user, customer, piano, job, or other demo/business record is seeded.
   const users = db.prepare("SELECT id,email,is_superadmin,status FROM users ORDER BY created_at").all();
   const superadmins = users.filter((user) => Number(user.is_superadmin || 0) === 1 && user.status === "Active");
