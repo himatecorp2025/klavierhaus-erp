@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT DEFAULT 'Active',
   phone TEXT,
   address TEXT,
+  calendar_color TEXT,
   hidden_user INTEGER DEFAULT 0,
   is_superadmin INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
