@@ -34,13 +34,14 @@ db.pragma("foreign_keys = ON");
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
 
+const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
+
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
   const defaults={
     ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
-    WORKER:[...commonView],
-    VIEWER:[...commonView]
+    WORKER:[...commonView]
   };
   const insert=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
   Object.entries(defaults).forEach(([role,permissions])=>permissions.forEach(permission=>insert.run(role,permission,'SYSTEM')));
@@ -294,16 +295,39 @@ function generatePlannedJobKey(){
 function isActivePlannedStatus(status){
   return !["Converted / Naptárba helyezve","Archived / Archivált","Cancelled / Törölve"].includes(String(status||""));
 }
-function findScheduleConflicts(assignedTo,startTime,endTime,excludeJobId=null){
-  if(!assignedTo || !startTime || !endTime) return [];
-  let sql=`SELECT id,job_key,title,assigned_to,start_time,end_time,status FROM jobs
-           WHERE assigned_to=?
-             AND COALESCE(status,'Open') NOT IN ('Completed','Cancelled')
+function isValidTimeRange(startTime,endTime){
+  const start=Date.parse(String(startTime||""));
+  const end=Date.parse(String(endTime||""));
+  return Number.isFinite(start) && Number.isFinite(end) && end>start;
+}
+function findScheduleConflicts(assignedUserId,assignedTo,startTime,endTime,excludeJobId=null){
+  if((!assignedUserId&&!assignedTo) || !startTime || !endTime) return [];
+  let sql=`SELECT id,job_key,title,assigned_user_id,assigned_to,start_time,end_time,status FROM jobs
+           WHERE (
+             (COALESCE(?, '')<>'' AND assigned_user_id=?)
+             OR ((assigned_user_id IS NULL OR assigned_user_id='') AND lower(trim(assigned_to))=lower(trim(?)))
+           )
+             AND COALESCE(status,'Open')<>'Cancelled'
              AND (? < end_time AND ? > start_time)`;
-  const params=[assignedTo,startTime,endTime];
+  const userId=String(assignedUserId||"");
+  const params=[userId,userId,String(assignedTo||""),startTime,endTime];
   if(excludeJobId){ sql += " AND id<>?"; params.push(excludeJobId); }
   sql += " ORDER BY start_time";
   return db.prepare(sql).all(...params);
+}
+function scheduleConflictPayload(req,assigned,conflicts){
+  const self=String(assigned?.id||"")===String(req.user?.id||"");
+  const conflict=conflicts[0]||{};
+  return {
+    error:self?'SELF_SCHEDULE_CONFLICT':'WORKER_SCHEDULE_CONFLICT',
+    assigned_user_id:assigned?.id||null,
+    assigned_name:assigned?.name||conflict.assigned_to||'',
+    conflict,
+    conflicts
+  };
+}
+function rejectScheduleConflict(req,res,assigned,conflicts){
+  return res.status(409).json(scheduleConflictPayload(req,assigned,conflicts));
 }
 function inventoryCategoryCode(category){
   const c=String(category||"").toLowerCase();
@@ -659,8 +683,20 @@ app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 app.get("/api/schedule-workers", auth, (req,res)=>{
-  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 ORDER BY name").all();
+  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
   res.json(rows);
+});
+
+app.get("/api/schedule-workers/availability", auth, (req,res)=>{
+  const start=String(req.query.start_time||"");
+  const end=String(req.query.end_time||"");
+  const excludeJobId=String(req.query.exclude_job_id||"")||null;
+  if(!isValidTimeRange(start,end)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
+  res.json(rows.map(worker=>{
+    const conflicts=findScheduleConflicts(worker.id,worker.name,start,end,excludeJobId);
+    return {...worker,available:conflicts.length===0,conflicts};
+  }));
 });
 
 
@@ -791,19 +827,17 @@ app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER
   const start=b.start_time;
   const end=b.end_time;
   if(!assigned || !title || !start || !end) return res.status(400).json({error:"Assigned to, title, start and end are required / Felelős, cím, kezdés és befejezés kötelező"});
-  if(new Date(end)<=new Date(start)) return res.status(400).json({error:"End must be after start / A befejezés később legyen, mint a kezdés"});
-  const conflicts=findScheduleConflicts(assigned,start,end);
-  if(conflicts.length){
-    const c=conflicts[0];
-    return res.status(409).json({error:`Schedule conflict / Időpontütközés: ${assigned} already has ${c.title||c.job_key||c.id} between ${c.start_time} and ${c.end_time}.` , conflicts});
-  }
+  if(!assignedUser) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
+  if(!isValidTimeRange(start,end)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  const conflicts=findScheduleConflicts(assignedUser.id,assignedUser.name,start,end);
+  if(conflicts.length) return rejectScheduleConflict(req,res,assignedUser,conflicts);
   const jobId=rid("J");
   db.prepare(`INSERT INTO jobs(
     id,job_key,planned_job_id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
     assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
     planned_hours,travel_minutes,service_address,instructions
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    jobId,stableJobKey(),planned.id,null,title,"Standalone",planned.client_id||"",planned.client_name||"",planned.client_phone||"",planned.piano_id||"",planned.piano_name||"",
+    jobId,stableJobKey(),planned.id,null,title,"Standalone",planned.client_id||null,planned.client_name||"",planned.client_phone||"",planned.piano_id||null,planned.piano_name||"",
     assignedUser?.id||null,assigned,req.user.id,req.user.name,planned.priority||"Medium","Open",start,end,"America/New_York",Number(b.planned_amount||planned.expected_revenue||0),b.pricing_basis||"Converted from planned job / Tervezett munkából áthelyezve",
     Number(b.planned_hours||planned.estimated_hours||0),Number(b.travel_minutes||0),b.service_address||planned.service_address||"",b.instructions||planned.next_step||planned.notes||""
   );
@@ -841,11 +875,10 @@ app.put("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMI
   res.json(db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id));
 });
 
-app.delete("/api/inventory/:id", auth, permit("ADMIN","MANAGER","WORKER","SUPERADMIN"), (req,res)=>{
+app.delete("/api/inventory/:id", auth, requireSuperadmin, (req,res)=>{
   const existing=db.prepare("SELECT * FROM inventory_items WHERE id=?").get(req.params.id);
   if(!existing) return res.status(404).json({error:"Inventory item not found / Leltári tétel nem található"});
-  if(isSuperadminUser(req.user)) db.prepare("DELETE FROM inventory_items WHERE id=?").run(req.params.id);
-  else db.prepare("UPDATE inventory_items SET status='Deleted', deleted_at=?, deleted_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nowISO(), req.user.name||"", req.params.id);
+  db.prepare("DELETE FROM inventory_items WHERE id=?").run(req.params.id);
   res.json({ok:true});
 });
 
@@ -1076,6 +1109,7 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   const {name,email,password,role}=req.body;
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
+  if(!VISIBLE_USER_ROLES.includes(role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
   db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
@@ -1099,6 +1133,7 @@ app.put("/api/users/:id", auth, (req,res)=>{
   let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
+  if(req.body.role!==undefined && !VISIBLE_USER_ROLES.includes(req.body.role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
@@ -1473,6 +1508,9 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   for(const r of ["title","start_time","end_time"]) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
   const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
   if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
+  if(!isValidTimeRange(req.body.start_time,req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  const conflicts=findScheduleConflicts(assigned.id,assigned.name,req.body.start_time,req.body.end_time);
+  if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
   const id=req.body.id || rid("J");
   const data={...req.body,assigned_user_id:assigned.id,assigned_to:assigned.name,created_by_user_id:req.user.id,created_by:req.user.name};
   data.workflow_root_id=data.workflow_root_id||id;
@@ -1505,10 +1543,20 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
   }
 
+  let effectiveAssigned={id:job.assigned_user_id||null,name:job.assigned_to||""};
   if(req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined){
     const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
     if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
     req.body.assigned_user_id=assigned.id; req.body.assigned_to=assigned.name;
+    effectiveAssigned=assigned;
+  }
+  const effectiveStart=req.body.start_time!==undefined?req.body.start_time:job.start_time;
+  const effectiveEnd=req.body.end_time!==undefined?req.body.end_time:job.end_time;
+  if(!isValidTimeRange(effectiveStart,effectiveEnd)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  const schedulingChanged=req.body.start_time!==undefined || req.body.end_time!==undefined || req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined;
+  if(schedulingChanged){
+    const conflicts=findScheduleConflicts(effectiveAssigned.id,effectiveAssigned.name,effectiveStart,effectiveEnd,job.id);
+    if(conflicts.length) return rejectScheduleConflict(req,res,effectiveAssigned,conflicts);
   }
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length){
@@ -1556,6 +1604,10 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
     return res.status(403).json({error:"You cannot reassign this job"});
   }
 
+  if(!isValidTimeRange(job.start_time,job.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  const conflicts=findScheduleConflicts(assigned.id,assigned.name,job.start_time,job.end_time,job.id);
+  if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
+
   db.prepare("UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
     .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",job.id);
 
@@ -1587,32 +1639,58 @@ app.get("/api/jobs/:id/workflow", auth, (req,res)=>{
 });
 
 app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  if(req.file && !validMagic(req.file.path)){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
+  const removeUploadedFile=()=>{if(req.file){try{fs.unlinkSync(req.file.path)}catch(_error){}}};
+  if(req.file && !validMagic(req.file.path)){ removeUploadedFile(); return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
   const jobId=req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId,req.body);
-  if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
-  if(!canCloseJob(req.user,job)) return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});
+  if(!job){removeUploadedFile();return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});}
+  if(!canCloseJob(req.user,job)){removeUploadedFile();return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});}
+
+  const rootId=job.workflow_root_id||job.id;
+  const rootJob=db.prepare("SELECT status,workflow_status,finalized_at FROM jobs WHERE id=?").get(rootId);
+  const existingCloseLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(job.id);
+  if(existingCloseLog || job.finalized_at || ['Completed','Partially completed','Failed'].includes(String(job.status||''))){
+    removeUploadedFile();
+    return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
+  }
+  if(rootJob && (rootJob.finalized_at || String(rootJob.workflow_status||'')==='COMPLETED')){
+    removeUploadedFile();
+    return res.status(409).json({error:"WORKFLOW_ALREADY_FINALIZED"});
+  }
 
   const closeType=String(req.body.close_type||"");
-  if(!["Partial","Full","Failed"].includes(closeType)) return res.status(400).json({error:"Close type must be Partial, Full or Failed"});
+  if(!["Partial","Full","Failed"].includes(closeType)){removeUploadedFile();return res.status(400).json({error:"Close type must be Partial, Full or Failed"});}
   const billed=Number(req.body.billed_amount);
-  if(Number.isNaN(billed)) return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});
+  if(Number.isNaN(billed)){removeUploadedFile();return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
   const desc=String(req.body.close_description||"").trim();
-  if(!desc) return res.status(400).json({error:"Close description is required"});
+  if(!desc){removeUploadedFile();return res.status(400).json({error:"Close description is required"});}
   const payment=req.body.payment_method||"";
-  if(billed>0&&!payment) return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});
+  if(billed>0&&!payment){removeUploadedFile();return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
   if(billed>0&&!req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
   const storedPath=req.file?"/uploads/"+path.basename(req.file.path):null;
-  const rootId=job.workflow_root_id||job.id;
+  let partialNextAssigned=null;
+  if(closeType==="Partial"){
+    const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
+    for(const field of required){
+      if(!req.body[field]){removeUploadedFile();return res.status(400).json({error:"PARTIAL_CLOSE_NEXT_JOB_REQUIRED",field});}
+    }
+    partialNextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
+    if(!partialNextAssigned){removeUploadedFile();return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});}
+    if(!isValidTimeRange(req.body.next_start_time,req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_RANGE"});}
+    const conflicts=findScheduleConflicts(partialNextAssigned.id,partialNextAssigned.name,req.body.next_start_time,req.body.next_end_time);
+    if(conflicts.length){removeUploadedFile();return rejectScheduleConflict(req,res,partialNextAssigned,conflicts);}
+  }
 
   try{
     const result=db.transaction(()=>{
+      const fresh=db.prepare("SELECT status,workflow_status,finalized_at FROM jobs WHERE id=?").get(job.id);
+      const freshLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(job.id);
+      const freshRoot=db.prepare("SELECT workflow_status,finalized_at FROM jobs WHERE id=?").get(rootId);
+      if(!fresh || freshLog || fresh.finalized_at || ['Completed','Partially completed','Failed'].includes(String(fresh.status||''))) throw new Error("JOB_ALREADY_CLOSED");
+      if(freshRoot && (freshRoot.finalized_at || String(freshRoot.workflow_status||'')==='COMPLETED')) throw new Error("WORKFLOW_ALREADY_FINALIZED");
       let nextJobId=null;
       if(closeType==="Partial"){
-        const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
-        for(const r of required) if(!req.body[r]) throw new Error(`${r} is required for partial close`);
-        const nextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
-        if(!nextAssigned) throw new Error("A valid next responsible user is required / Érvényes következő felelős szükséges");
+        const nextAssigned=partialNextAssigned;
         const maxStep=db.prepare("SELECT COALESCE(MAX(workflow_step_no),0) AS n FROM jobs WHERE workflow_root_id=? OR id=?").get(rootId,rootId)?.n||0;
         nextJobId=rid("J");
         db.prepare(`INSERT INTO jobs(
@@ -1650,8 +1728,9 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
     workAudit(req,closeType==='Partial'?'PARTIAL_CLOSE':(closeType==='Full'?'FULL_CLOSE':'FAILED_CLOSE'),job.id,job,updated,1,`workflow_root_id=${rootId}; next_job_id=${result.nextJobId||''}`);
     res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null,workflow_root_id:rootId});
   }catch(err){
-    if(req.file){try{fs.unlinkSync(req.file.path)}catch(e){}}
-    res.status(400).json({error:err.message||"Close operation failed"});
+    removeUploadedFile();
+    const code=err.message||"Close operation failed";
+    res.status(['JOB_ALREADY_CLOSED','WORKFLOW_ALREADY_FINALIZED'].includes(code)?409:400).json({error:code});
   }
 });
 
@@ -1688,21 +1767,11 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
 });
 
 
-app.get("/api/contacts/:id/pianos", auth, (req,res)=>{res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));});
 app.put("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const ids = Array.isArray(req.body.piano_ids) ? req.body.piano_ids : [];
   db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(req.params.id);
   const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?"); ids.forEach(id=>upd.run(req.params.id,id));
   res.json({ok:true,piano_ids:ids});
-});
-app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
-  if(!client) return res.status(404).json({error:"Client not found"});
-  const id=req.body.id || rid("P"), brand=req.body.brand || "", model=req.body.model || "", display=req.body.display_name || `${brand} ${model}`.trim() || "Unknown piano";
-  const ownershipType=req.body.ownership_type || "Customer owned", estimated=Number(req.body.estimated_value||0);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active","");
-  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
-  res.json(piano);
 });
 app.get("/api/closed-jobs", auth, (req,res)=>{
   const rows=db.prepare(`
@@ -1802,23 +1871,24 @@ app.post('/api/settings/branding/background',auth,permit('ADMIN'),brandingUpload
 });
 app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('logo_url','/icons/icon-512.png',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','logo',before,after);res.json(after);});
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
-app.get('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
-  const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 UNION SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(x=>x.role);
+app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
+  const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
   const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
-app.put('/api/settings/permissions',auth,requirePermission('permissions.manage'),(req,res)=>{
+app.put('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const {role,permission,enabled}=req.body||{};
   if(!role||!permission) return res.status(400).json({error:'REQUIRED_FIELDS'});
   if(role==='SUPERADMIN') return res.status(403).json({error:'SUPERADMIN_PERMISSIONS_FIXED'});
+  if(!VISIBLE_USER_ROLES.includes(role)) return res.status(400).json({error:'INVALID_USER_ROLE'});
   const old=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
   db.prepare(`INSERT INTO role_permissions(role,permission,enabled,updated_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(role,permission) DO UPDATE SET enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(role,permission,enabled?1:0,req.user.name||'');
   const now=db.prepare('SELECT * FROM role_permissions WHERE role=? AND permission=?').get(role,permission);
   audit(req,'UPDATE','permissions',`${role}:${permission}`,old,now); res.json(now);
 });
-app.get('/api/audit-log',auth,requirePermission('audit.view'),(req,res)=>{
+app.get('/api/audit-log',auth,permit('ADMIN'),(req,res)=>{
   const limit=Math.min(Number(req.query.limit||500),2000); const type=String(req.query.type||'WORK').toUpperCase()==='TECHNICAL'?'TECHNICAL':'WORK';
   res.json(db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC LIMIT ?").all(type,limit));
 });
@@ -1828,7 +1898,7 @@ app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
   const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'"'+String(v??'').replaceAll('"','""')+'"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${type==='WORK'?'work-audit':'technical-audit'}.csv"`);res.send('\ufeff'+csv);
 });
 app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{const type=String(req.query.type||'ALL').toUpperCase(); if(type==='WORK'||type==='TECHNICAL')db.prepare('DELETE FROM audit_log WHERE audit_type=?').run(type);else db.prepare('DELETE FROM audit_log').run();res.json({ok:true});});
-app.get('/api/backups',auth,requireSuperadmin,(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
+app.get('/api/backups',auth,permit('ADMIN'),(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
 app.post('/api/backups',auth,requireSuperadmin,(req,res)=>{const b=createBackup(req.user.name||'SUPERADMIN');audit(req,'CREATE','backup',b.id,null,b);res.json(b);});
 app.get('/api/backups/:id/download',auth,requireSuperadmin,(req,res)=>{const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});res.download(b.file_path,b.file_name);});
 app.post('/api/backups/:id/restore',auth,requireSuperadmin,(req,res)=>{
@@ -1900,8 +1970,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       const defaults={
         ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
-        WORKER:[...commonView],
-        VIEWER:[...commonView]
+        WORKER:[...commonView]
       };
       const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
       Object.entries(defaults).forEach(([role,permissions])=>permissions.forEach(permission=>insertPermission.run(role,permission)));
