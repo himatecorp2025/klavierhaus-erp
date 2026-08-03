@@ -478,3 +478,30 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 .notification-activation-actions #notificationGateLogout{background:transparent!important;color:var(--muted)!important;border:1px solid var(--line)!important;box-shadow:none!important}
 .notification-activation-card:has(#notificationGateTitle:not(:empty)) .notification-gate-status{white-space:pre-wrap}
 body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
+
+/* Branded in-app system messages and schedule availability v23 */
+.system-dialog-overlay{
+  padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
+}
+.system-dialog{position:relative;overflow:hidden;border-color:color-mix(in srgb,var(--blue) 38%,var(--line));}
+.system-dialog::before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(90deg,var(--blue),var(--green));}
+.system-dialog-heading{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.system-dialog-heading h3{margin:0;font-size:22px;line-height:1.25;}
+.system-dialog-icon{width:40px;height:40px;flex:0 0 40px;border-radius:13px;display:grid;place-items:center;font-size:21px;font-weight:900;background:color-mix(in srgb,var(--blue) 17%,var(--panel2));color:var(--blue);border:1px solid color-mix(in srgb,var(--blue) 36%,var(--line));}
+.system-dialog-message{margin:0;max-height:min(48dvh,360px);overflow:auto;overflow-wrap:anywhere;}
+.system-dialog-error .system-dialog::before,.system-dialog-warning .system-dialog::before{background:linear-gradient(90deg,#dc2626,#f59e0b);}
+.system-dialog-error .system-dialog-icon{background:rgba(220,38,38,.15);border-color:rgba(248,113,113,.35);color:#f87171;}
+.system-dialog-warning .system-dialog-icon{background:rgba(245,158,11,.15);border-color:rgba(251,191,36,.35);color:#fbbf24;}
+.system-dialog-success .system-dialog::before{background:linear-gradient(90deg,#059669,var(--green));}
+.system-dialog-success .system-dialog-icon{background:rgba(5,150,105,.15);border-color:rgba(52,211,153,.35);color:#34d399;}
+.system-dialog-input{min-height:48px;border-color:color-mix(in srgb,var(--blue) 42%,var(--line));}
+.system-dialog-input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent);}
+.system-dialog-actions .danger-btn{background:#991b1b!important;color:#fff!important;}
+.worker-availability-hint{display:block;min-height:18px;margin-top:6px;color:var(--green);font-size:13px;font-weight:750;line-height:1.35;}
+.worker-availability-hint.busy{color:#f59e0b;}
+@media(max-width:600px){
+  .system-dialog-overlay{align-items:end;padding:12px 12px calc(12px + env(safe-area-inset-bottom));}
+  .system-dialog{width:100%;border-radius:20px;padding:22px 18px;}
+  .system-dialog-heading h3{font-size:20px;}
+  .system-dialog-message{font-size:16px;line-height:1.55;}
+}
