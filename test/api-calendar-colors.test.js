@@ -103,6 +103,21 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   assert.equal(visibleUsers.status, 200);
   assert.ok(visibleUsers.payload.every((user) => user.id !== "U-SA"));
 
+  const googleStatus = await request(baseUrl, "/api/google-calendar/status", { token: adminToken });
+  assert.equal(googleStatus.status, 200);
+  assert.equal(googleStatus.payload.central_email, "klavierhauswork@gmail.com");
+  assert.equal(googleStatus.payload.direction, "GOOGLE_TO_ERP");
+  const workerGoogleStatus = await request(baseUrl, "/api/google-calendar/status", { token: workerToken });
+  assert.equal(workerGoogleStatus.status, 403);
+
+  const googleProfile = await request(baseUrl, "/api/users/U-W", {
+    token: adminToken,
+    method: "PUT",
+    body: { google_calendar_email: "worker.calendar@gmail.com" }
+  });
+  assert.equal(googleProfile.status, 200);
+  assert.equal(googleProfile.payload.google_calendar_email, "worker.calendar@gmail.com");
+
   const updatedColor = await request(baseUrl, "/api/users/U-W", {
     token: adminToken,
     method: "PUT",
@@ -138,6 +153,13 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   });
   assert.equal(createdJob.status, 200, JSON.stringify(createdJob.payload));
   assert.equal(createdJob.payload.assigned_calendar_color, "#0F766E");
+
+  const jobsInRange = await request(baseUrl, "/api/jobs?from=2031-01-15T00%3A00&to=2031-01-16T00%3A00", { token: adminToken });
+  assert.equal(jobsInRange.status, 200);
+  assert.equal(jobsInRange.payload.length, 1);
+  const jobsOutsideRange = await request(baseUrl, "/api/jobs?from=2031-01-16T00%3A00&to=2031-01-17T00%3A00", { token: adminToken });
+  assert.equal(jobsOutsideRange.status, 200);
+  assert.equal(jobsOutsideRange.payload.length, 0);
 
   const reassigned = await request(baseUrl, `/api/jobs/${encodeURIComponent(createdJob.payload.id)}/reassign`, {
     token: workerToken,
