@@ -9,6 +9,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Database = require("better-sqlite3");
+const { legacyCalendarColor, validateCalendarColor } = require("./calendar-colors");
 let webpush=null;
 try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable:",error.message);}
 require("dotenv").config();
@@ -594,6 +595,7 @@ function auth(req,res,next){
   }
 }
 function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || Number(user.is_superadmin||0) === 1); }
+function canManageCalendarColors(user){ return Boolean(user && (isSuperadminUser(user) || user.role === "ADMIN")); }
 function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 function requireSuperadmin(req,res,next){ return isSuperadminUser(req.user) ? next() : res.status(403).json({error:"Superadmin only / Csak szuperadmin"}); }
 function resolveActiveUser(userId, userName){
@@ -603,7 +605,7 @@ function resolveActiveUser(userId, userName){
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
 function jobsSelectSql(where=""){
-  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id ${where}`;
+  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id ${where}`;
 }
 
 function canCloseJob(user, job){
@@ -683,7 +685,7 @@ app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 app.get("/api/schedule-workers", auth, (req,res)=>{
-  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
+  const rows=db.prepare("SELECT id,name,email,role,calendar_color FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
   res.json(rows);
 });
 
@@ -692,7 +694,7 @@ app.get("/api/schedule-workers/availability", auth, (req,res)=>{
   const end=String(req.query.end_time||"");
   const excludeJobId=String(req.query.exclude_job_id||"")||null;
   if(!isValidTimeRange(start,end)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
-  const rows=db.prepare("SELECT id,name,email,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
+  const rows=db.prepare("SELECT id,name,email,role,calendar_color FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
   res.json(rows.map(worker=>{
     const conflicts=findScheduleConflicts(worker.id,worker.name,start,end,excludeJobId);
     return {...worker,available:conflicts.length===0,conflicts};
@@ -1102,7 +1104,7 @@ app.get("/api/income-statement", auth, (req,res)=>{
 
 app.get("/api/users", auth, (req,res)=> {
   // Hidden superadmin is never listed. Everyone may see the visible team list.
-  res.json(db.prepare("SELECT id,name,email,role,status,phone,address,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
+  res.json(db.prepare("SELECT id,name,email,role,status,phone,address,calendar_color,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
 
 app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
@@ -1110,11 +1112,17 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   if(!VISIBLE_USER_ROLES.includes(role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
+  if(!canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
+  const activeNames=db.prepare("SELECT name FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all().map(row=>row.name);
+  const orderedNames=[...activeNames,name].sort((a,b)=>String(a).localeCompare(String(b)));
+  const requestedColor=req.body.calendar_color===undefined?legacyCalendarColor(name,orderedNames):req.body.calendar_color;
+  const colorValidation=validateCalendarColor(requestedColor);
+  if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?)")
-    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",0,0);
-  const created={id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||""};
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,calendar_color,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,0,0);
+  const created={id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||"",calendar_color:colorValidation.color};
   db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
   audit(req,"CREATE","users",id,null,created);
   res.json(created);
@@ -1129,11 +1137,18 @@ app.put("/api/users/:id", auth, (req,res)=>{
   const superEdit = isSuperadminUser(req.user);
   const roleAdmin = hasPermission(req.user,"users.roles");
   if(!selfEdit && !superEdit && !roleAdmin) return res.status(403).json({error:"PERMISSION_DENIED"});
+  if(req.body.calendar_color!==undefined && !canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
 
   let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
+  if(canManageCalendarColors(req.user)) allowed.push("calendar_color");
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
   if(req.body.role!==undefined && !VISIBLE_USER_ROLES.includes(req.body.role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
+  if(req.body.calendar_color!==undefined){
+    const colorValidation=validateCalendarColor(req.body.calendar_color);
+    if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
+    req.body.calendar_color=colorValidation.color;
+  }
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
@@ -1148,7 +1163,7 @@ app.put("/api/users/:id", auth, (req,res)=>{
     }
   });
   updateUserTx();
-  const u=db.prepare("SELECT id,name,email,role,status,phone,address FROM users WHERE id=?").get(req.params.id);
+  const u=db.prepare("SELECT id,name,email,role,status,phone,address,calendar_color FROM users WHERE id=?").get(req.params.id);
   audit(req,"UPDATE","users",req.params.id,target,u);
   res.json(u);
 });
@@ -2001,4 +2016,4 @@ app.use((err,req,res,next)=>{
 });
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
-app.listen(PORT,()=>console.log(`Klavierhaus v6.4 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
+app.listen(PORT,()=>console.log(`Klavierhaus v6.5.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
