@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER','VIEWER')),
+  role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
   status TEXT DEFAULT 'Active',
   phone TEXT,
   address TEXT,
@@ -304,6 +304,7 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   deleted_at TEXT,
   deleted_by TEXT,
   created_by TEXT,
+  created_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
