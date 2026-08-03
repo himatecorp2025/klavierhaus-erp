@@ -38,8 +38,8 @@ test("calendar status colors and warning icons follow the approved priority", ()
   assert.match(styles, /--calendar-failed:#6b7280/);
 });
 
-test("PWA push handlers remain present and the shell cache uses version 6.5.0", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0/);
+test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui1/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
   assert.match(serviceWorker, /ACKNOWLEDGE_NOTIFICATION/);
@@ -54,4 +54,42 @@ test("Google Calendar UI is bilingual, range-limited and preserves status-color 
   assert.match(appSource, /calendarIntegrationClass\(j\)/);
   assert.match(styles, /timeline-event\.GoogleAttention/);
   assert.doesNotMatch(styles, /timeline-event\.GoogleAttention\{[^}]*background:/);
+});
+
+test("calendar cards expose the approved compact work summary responsively", () => {
+  const cardStart = appSource.indexOf("function calendarCardAmount(j)");
+  const cardEnd = appSource.indexOf("function ensureView", cardStart);
+  const cardSource = appSource.slice(cardStart, cardEnd);
+  assert.match(cardSource, /client_name/);
+  assert.match(cardSource, /calendarCardAmount/);
+  assert.match(cardSource, /assigned_to/);
+  assert.match(cardSource, /service_address/);
+  assert.match(cardSource, /EventCompact/);
+  assert.match(cardSource, /EventMedium/);
+  assert.match(styles, /EventCompact \.event-card-primary/);
+  assert.match(styles, /EventMedium \.event-card-secondary/);
+  assert.doesNotMatch(styles, /timeline-event small\{display:none\}/);
+});
+
+test("job details render one language immediately and expose only curated pending Google fields", () => {
+  const detailsStart = appSource.indexOf("function googleImportDateTime(value)");
+  const detailsEnd = appSource.indexOf("async function reviewGoogleCalendarJob", detailsStart);
+  const detailsSource = appSource.slice(detailsStart, detailsEnd);
+  assert.match(detailsSource, /async function openJobDetails\(summary\)/);
+  assert.match(detailsSource, /await api\(`\/api\/jobs\/\$\{encodeURIComponent\(jobRef\(summary\)\)\}`\)/);
+  assert.match(detailsSource, /bi\('Job details','Munka részletei'\)/);
+  assert.match(detailsSource, /calendar_import/);
+  assert.match(detailsSource, /showGoogleBanner=j\.calendar_source==='GOOGLE'&&\(!j\.calendar_reviewed_at\|\|googleAttention\)/);
+  assert.match(detailsSource, /Event title','Esemény címe/);
+  assert.match(detailsSource, /Description','Leírás/);
+  assert.match(detailsSource, /Location','Helyszín/);
+  assert.match(detailsSource, /Start','Kezdés/);
+  assert.match(detailsSource, /End','Befejezés/);
+  assert.match(detailsSource, /Creator','Létrehozó/);
+  assert.match(detailsSource, /Attendees','Résztvevők/);
+  assert.doesNotMatch(detailsSource, /Google link/);
+  assert.doesNotMatch(detailsSource, /External event/);
+  assert.doesNotMatch(detailsSource, />Close \/ Bezár</);
+  assert.doesNotMatch(detailsSource, />Edit job \/ Munka szerkesztése</);
+  assert.match(styles, /google-import-row dd\{[^}]*overflow-wrap:anywhere/);
 });
