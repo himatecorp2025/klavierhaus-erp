@@ -53,3 +53,6 @@ npm run check     # JavaScript syntax checks / JavaScript szintaktikai ellenőrz
 npm test          # automated tests / automatikus tesztek
 npm run dev       # development server (migration must already be applied)
 ```
+
+
+https://calendar.google.com/calendar/ical/ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513%40group.calendar.google.com/private-052f19a7e56f9910c4becf2c9d8a79c4/basic.ics
