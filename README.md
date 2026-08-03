@@ -1,69 +1,55 @@
-# Klavierhaus Cloud ERP + CRM + Scheduler + Knowledge Base v3
+# Klavierhaus ERP v6.5.0
 
-Ez a v3 verzió az előző webalkalmazás kibővített változata.
+Internal, bilingual (American English and Hungarian) work-management system for Klavierhaus.
 
-## Tartalom
+Belső, kétnyelvű (amerikai angol és magyar) Klavierhaus munkakezelő rendszer.
 
-- Login / belépési felület
-- JWT alapú authentikáció
-- szerepkörök:
-  - ADMIN: Károly, Alex
-  - MANAGER: Paul, Misi
-  - STAFF: Said
-  - VIEWER: külsős olvasó
-- CRM
-- Piano Registry / zongora-regiszter
-- Projects / projektek
-- Project Tasks / projektfeladatok
-- My Work Today / napi személyes munkalista
-- Scheduler / naptár
-- On-Site Service / helyszíni munka lezárása
-- kötelező munkalezárási mezők
-- automatikus pénzügyi journal entry létrehozás
-- debit-credit ellenőrzés
-- Finance & Trial Balance / pénzügy és főkönyvi kivonat
-- Documents / dokumentumtár
-- Knowledge Base / tudásbázis
-- sötét, reszponzív dashboard
+## Main modules / Fő modulok
 
-## Indítás
+- weekly and daily scheduler with employee-specific colors / heti és napi naptár munkavállalói színekkel;
+- planned jobs and multi-step part-work workflows / tervezett munkák és többlépcsős részmunkafolyamatok;
+- clients and piano registry / ügyfél- és zongoranyilvántartás;
+- inventory / leltár;
+- invoices and internal finance register / számlák és belső pénzügyi nyilvántartás;
+- knowledge base, notifications, audit log and backups / tudásbázis, értesítések, módosítási napló és biztonsági mentések;
+- responsive desktop, mobile and installed PWA interface / reszponzív asztali, mobil- és telepített PWA-felület.
+
+Roles / Szerepkörök: `ADMIN`, `MANAGER`, `WORKER`. The hidden superadmin is an existing protected account and is never created by the installer. / A rejtett szuperadmin meglévő, védett fiók; a telepítő nem hozza létre.
+
+## Installation and update / Telepítés és frissítés
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
-npm run init-db
 npm start
 ```
 
-Majd:
+`npm start` automatically runs the idempotent database migration before starting the server. Existing users, clients, pianos, jobs and inventory records are counted before and after migration, and SQLite integrity is checked. When a structural migration is needed, a pre-migration database backup is created first.
 
-```text
-http://localhost:3030
+Az `npm start` a szerver indítása előtt automatikusan lefuttatja az ismételhető adatbázis-migrációt. A migráció előtt és után ellenőrzi a felhasználók, ügyfelek, zongorák, munkák és leltártételek darabszámát, valamint az SQLite integritását. Szerkezeti migráció előtt automatikus adatbázis-mentés készül.
+
+Default local URL / Alapértelmezett helyi cím: `http://localhost:3030`
+
+No demo user is created. Existing production users and the hidden superadmin remain unchanged. / Demo felhasználó nem jön létre. A meglévő éles felhasználók és a rejtett szuperadmin változatlanok maradnak.
+
+## Deployment notes / Telepítési megjegyzések
+
+- Keep `DB_PATH`, `BACKUP_DIR` and `UPLOAD_DIR` on persistent storage. / A három útvonal tartós tárhelyre mutasson.
+- Preserve the currently working VAPID keys when updating. Changing them invalidates existing push subscriptions. / Frissítéskor a jelenleg működő VAPID-kulcsokat meg kell őrizni; cseréjük érvényteleníti a meglévő push-feliratkozásokat.
+- Use HTTPS outside local development. / Helyi fejlesztésen kívül HTTPS szükséges.
+- Run `npm test` and `npm run check` before deployment. / Telepítés előtt futtasd az `npm test` és `npm run check` parancsokat.
+
+## Finance scope / A pénzügyi modul hatóköre
+
+The finance module is a simple internal income, expense and management register. It does not implement guaranteed double-entry bookkeeping and does not replace an official accounting system or accountant.
+
+A pénzügyi modul egyszerű belső bevételi, kiadási és vezetői nyilvántartás. Nem garantált kettős könyvviteli rendszer, és nem helyettesít hivatalos könyvelőprogramot vagy könyvelőt.
+
+## Useful commands / Hasznos parancsok
+
+```bash
+npm run init-db   # manual idempotent migration / kézi, ismételhető migráció
+npm run check     # JavaScript syntax checks / JavaScript szintaktikai ellenőrzések
+npm test          # automated tests / automatikus tesztek
+npm run dev       # development server (migration must already be applied)
 ```
-
-## Demo belépések
-
-ADMIN:
-- karoly@klavierhaus.local / karoly123
-- alex@klavierhaus.local / alex123
-
-MANAGER:
-- paul@klavierhaus.local / paul123
-- misi@klavierhaus.local / misi123
-
-STAFF:
-- said@klavierhaus.local / said123
-
-VIEWER:
-- viewer@klavierhaus.local / viewer123
-
-## Fontos
-
-Ez működő MVP belső vállalatirányítási rendszer. Éles üzem előtt kell:
-- HTTPS
-- erős jelszavak
-- production DB, például PostgreSQL
-- automatikus backup
-- audit log bővítés
-- CPA/könyvelői validáció
-- jogi adatkezelési szabályzat
