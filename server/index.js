@@ -608,9 +608,38 @@ function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id
 function jobsSelectSql(where=""){
   return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by,
     ece.provider AS calendar_source,ece.review_status AS calendar_review_status,ece.conflict_flag AS calendar_conflict_flag,
-    ece.creator_email AS calendar_creator_email,ece.source_updated_at AS calendar_source_updated_at,ece.external_event_id AS calendar_external_event_id
+    ece.creator_email AS calendar_creator_email,ece.source_updated_at AS calendar_source_updated_at,ece.external_event_id AS calendar_external_event_id,
+    ece.reviewed_at AS calendar_reviewed_at
     FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id
     LEFT JOIN external_calendar_events ece ON ece.job_id=j.id AND ece.provider='GOOGLE' ${where}`;
+}
+
+function googleCalendarImportDetails(job){
+  if(!job) return null;
+  const rootId=job.workflow_root_id||job.id;
+  const sourceRow=db.prepare(`SELECT review_status,reviewed_at,raw_json
+    FROM external_calendar_events
+    WHERE provider='GOOGLE' AND (job_id=? OR job_id=?)
+    ORDER BY CASE WHEN job_id=? THEN 0 ELSE 1 END, imported_at DESC
+    LIMIT 1`).get(job.id,rootId,job.id);
+  if(!sourceRow || sourceRow.reviewed_at || sourceRow.review_status==='REVIEWED' || !sourceRow.raw_json) return null;
+  try{
+    const source=JSON.parse(sourceRow.raw_json);
+    const attendees=Array.isArray(source.attendees)
+      ? [...new Set(source.attendees.map(item=>String(item?.email||item?.displayName||'').trim()).filter(Boolean))]
+      : [];
+    return {
+      title:String(source.summary||''),
+      description:String(source.description||''),
+      location:String(source.location||''),
+      start_time:String(source.start?.dateTime||source.start?.date||''),
+      end_time:String(source.end?.dateTime||source.end?.date||''),
+      creator:String(source.creator?.email||source.creator?.displayName||''),
+      attendees
+    };
+  }catch(_error){
+    return null;
+  }
 }
 
 const googleCalendar=createGoogleCalendarIntegration({
@@ -1572,7 +1601,9 @@ app.get("/api/jobs", auth, (req,res)=>{
 app.get("/api/jobs/:id",auth,(req,res)=>{
   const job=getJobByAnyId(req.params.id,req.query||{});
   if(!job) return res.status(404).json({error:'JOB_NOT_FOUND'});
-  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
+  const detailed=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  detailed.calendar_import=googleCalendarImportDetails(detailed);
+  res.json(detailed);
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   for(const r of ["title","start_time","end_time"]) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
