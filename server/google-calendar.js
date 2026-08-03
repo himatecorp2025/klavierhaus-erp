@@ -83,7 +83,7 @@ function createGoogleCalendarIntegration(options) {
       status: row?.status || "DISCONNECTED",
       central_email: config.centralEmail,
       calendar_id: row?.calendar_id || config.calendarId,
-      calendar_summary: row?.calendar_summary || "Klavier House Work",
+      calendar_summary: row?.calendar_summary || "Klavierhaus Work",
       last_sync_at: row?.last_sync_at || null,
       last_error: row?.last_error || null,
       channel_expires_at: row?.channel_expires_at || null,
@@ -380,7 +380,7 @@ function createGoogleCalendarIntegration(options) {
     const encoded = encodeURIComponent(config.calendarId);
     const calendar = await googleRequest(`/calendars/${encoded}`);
     db.prepare("UPDATE calendar_integrations SET calendar_summary=?,updated_at=CURRENT_TIMESTAMP WHERE provider=?")
-      .run(calendar.summary || "Klavier House Work", PROVIDER);
+      .run(calendar.summary || "Klavierhaus Work", PROVIDER);
   }
 
   async function performSync(triggerType) {
