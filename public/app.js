@@ -28,6 +28,7 @@ let notificationGateResolved=false;
 let notificationGateBusy=false;
 let currentNotifications=[];
 let currentTimeLineInterval=null;
+let calendarAutoRefreshBusy=false;
 
 const navs={
  SUPERADMIN:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["finance","Finance / Pénzügy"],["income_statement","Income Statement / Eredménykimutatás"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"],["audit_log","Audit Log / Módosítási napló"],["settings","Settings / Beállítások"]],
@@ -725,6 +726,11 @@ async function boot(){
    document.getElementById('app')?.classList.remove('hidden');
    render(isMobileAppViewport()?"today":"scheduler");
  }
+ const googleResult=new URLSearchParams(location.search).get('googleCalendar');
+ if(googleResult){
+   setTimeout(()=>showToast(googleResult==='connected'?bi('Google Calendar connected. The first synchronization has started.','A Google Naptár csatlakoztatva. Az első szinkronizálás elindult.'):bi('Google Calendar could not be connected.','A Google Naptár csatlakoztatása nem sikerült.'),googleResult==='connected'?'success':'error'),300);
+   history.replaceState({},'',location.pathname);
+ }
  applyLanguageToDOM();
 }
 function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
@@ -733,6 +739,8 @@ function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge $
 function fmtDate(d){return d.toISOString().slice(0,10)}
 function startOfWeek(d){let x=new Date(d);let day=x.getDay();let diff=(day===0?-6:1-day);x.setDate(x.getDate()+diff);x.setHours(0,0,0,0);return x}
 function addDays(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
+function addDaysToDateKey(value,n){const d=new Date(`${value}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function jobsRangeUrl(fromDate,toDateExclusive){return `/api/jobs?from=${encodeURIComponent(`${fromDate}T00:00`)}&to=${encodeURIComponent(`${toDateExclusive}T00:00`)}`}
 function localDT(d){
  let x=new Date(d);
  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"}).formatToParts(x).reduce((a,p)=>{a[p.type]=p.value;return a},{});
@@ -873,7 +881,15 @@ function calendarStatusIcon(j){
  const cls=calendarEventClass(j);
  if(cls==="Completed") return "✓";
  if(cls==="Failed" || cls==="Overdue") return "!";
+ if(j.calendar_source==='GOOGLE' && (Number(j.calendar_conflict_flag||0)===1 || ['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(String(j.calendar_review_status||'')))) return "!";
+ if(j.calendar_source==='GOOGLE' && String(j.calendar_review_status||'')==='NEEDS_REVIEW') return "?";
  return "◷";
+}
+function calendarIntegrationClass(j){
+ if(j.calendar_source!=='GOOGLE')return '';
+ if(Number(j.calendar_conflict_flag||0)===1 || ['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(String(j.calendar_review_status||'')))return ' GoogleAttention';
+ if(String(j.calendar_review_status||'')==='NEEDS_REVIEW')return ' GoogleNeedsReview';
+ return ' GoogleReviewed';
 }
 function calendarEventStyle(j){ const cls=calendarEventClass(j); return cls==="WorkerColor" ? `style="--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)}"` : ""; }
 
@@ -969,13 +985,14 @@ function initMobileAppShell(){
 }
 async function renderToday(){
   const target=ensureView("today");
-  const jobs=await api("/api/jobs"); const workers=await loadSchedulerWorkers();
-  const date=nyDateKey(), dayStart=7*60, dayEnd=22*60, total=dayEnd-dayStart;
+  const date=nyDateKey();
+  const jobs=await api(jobsRangeUrl(date,addDaysToDateKey(date,1))); const workers=await loadSchedulerWorkers();
+  const dayStart=7*60, dayEnd=22*60, total=dayEnd-dayStart;
   const dailyJobs=filterJobsForScheduler(jobs).filter(j=>String(j.start_time||"").slice(0,10)===date);
   const layout=calendarLayout(dailyJobs,dayStart,dayEnd);
   const quarter=Array.from({length:(dayEnd-dayStart)/15+1},(_,i)=>{const min=dayStart+i*15;return `<i class="${min%60===0?'hour':''}" style="top:${((min-dayStart)/total)*100}%"></i>`}).join('');
   const times=Array.from({length:(dayEnd-dayStart)/60+1},(_,i)=>{const min=dayStart+i*60;return `<span style="top:${((min-dayStart)/total)*100}%">${String(Math.floor(min/60)).padStart(2,'0')}:00</span>`}).join('');
-  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${htmlText(j.title||'')}</b><small>${htmlText(j.client_name||'')}</small><span class="event-status">${calendarStatusIcon(j)}</span></button>`}).join('');
+  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'><strong>${String(j.start_time||'').slice(11,16)}–${String(j.end_time||'').slice(11,16)}</strong><b>${htmlText(j.title||'')}</b><small>${htmlText(j.client_name||'')}</small><span class="event-status">${calendarStatusIcon(j)}</span></button>`}).join('');
   target.innerHTML=`<div class="mobile-today-shell"><div class="today-page-header"><h2>${bi('Today','Ma')}</h2>${notificationBellMarkup('mobileTodayNotificationBell')}</div><section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><div class="today-calendar-actions"><label class="today-worker-filter"><span>${tr('workerFilter')}</span><select class="worker-filter-select" aria-label="${tr('workerFilter')}" onchange="currentSchedulerWorker=this.value;renderToday()">${schedulerFilterOptions(workers)}</select></label><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
   updateCurrentTimeLine(); clearInterval(currentTimeLineInterval); currentTimeLineInterval=setInterval(updateCurrentTimeLine,60000); updateMobileNavigationActive();
 }
@@ -1017,11 +1034,11 @@ function updateCurrentTimeLine(){
  });
 }
 async function renderScheduler(){
- const jobs=await api("/api/jobs");
- const workers=await loadSchedulerWorkers();
- const visibleJobs=filterJobsForScheduler(jobs);
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const weekDates=week.map(d=>fmtDate(d));
+ const jobs=await api(jobsRangeUrl(weekDates[0],addDaysToDateKey(weekDates[6],1)));
+ const workers=await loadSchedulerWorkers();
+ const visibleJobs=filterJobsForScheduler(jobs);
  const dayStart=7*60, dayEnd=22*60, totalMinutes=dayEnd-dayStart;
  let html=`<div class="panel scheduler-panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${schedulerFilterOptions(workers)}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div>
  <div class="scheduler-legend"><span class="legend-active">◷ ${bi("Active — employee color","Aktív — munkavállalói szín")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-overdue">! ${bi("Overdue, not closed","Lejárt, nincs lezárva")}</span><span class="legend-failed">! ${bi("Failed","Sikertelen")}</span></div>
@@ -1036,7 +1053,7 @@ async function renderScheduler(){
    for(const item of placed){
      const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
      const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><span class="event-status">${calendarStatusIcon(j)}</span><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><b>${htmlText(j.title||"")}</b><small>${htmlText(j.assigned_to||"")}</small></button>`;
+     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'><span class="event-status">${calendarStatusIcon(j)}</span><strong>${String(j.start_time||"").slice(11,16)}–${String(j.end_time||"").slice(11,16)}</strong><b>${htmlText(j.title||"")}</b><small>${htmlText(j.assigned_to||"")}</small></button>`;
    }
    html+=`</div>`;
  }
@@ -1053,6 +1070,11 @@ async function refreshCalendarAfterMutation(job=null){
  return null;
 }
 function moveWeek(n){currentWeekStart=addDays(currentWeekStart,7*n);renderScheduler()} function goThisWeek(){currentWeekStart=startOfWeek(new Date());renderScheduler()}
+setInterval(async()=>{
+ if(!token||document.visibilityState==='hidden'||calendarAutoRefreshBusy||!['today','scheduler'].includes(currentView))return;
+ calendarAutoRefreshBusy=true;
+ try{if(currentView==='today')await renderToday();else if(currentView==='scheduler')await renderScheduler();}catch(_error){}finally{calendarAutoRefreshBusy=false;}
+},15000);
 
 async function openJob(prefill="", row=null){
  const start=row?.start_time || prefill || localDT(new Date());
@@ -1220,29 +1242,36 @@ function openJobDetails(j){
  $("#modalTitle").textContent=bi("Job details","Munka részletei");
  const phone=j.client_phone ? `<a href="tel:${String(j.client_phone).replaceAll(" ","")}" class="phone-link">${j.client_phone}</a>` : "";
  const closed=isClosedJobStatus(j.status) || String(j.status||"")==="Cancelled";
+ const googleState=String(j.calendar_review_status||'');
+ const googleStateLabel={NEEDS_REVIEW:bi('Needs review','Ellenőrzésre vár'),REVIEWED:bi('Reviewed','Ellenőrizve'),SOURCE_CHANGED:bi('Google source changed after review','A Google-forrás az ellenőrzés után megváltozott'),SOURCE_CANCELLED:bi('Google source event cancelled — ERP job kept','A Google-forrásesemény törölve — az ERP-munka megmaradt'),INVALID:bi('Invalid Google event','Hibás Google-esemény')}[googleState]||googleState;
+ const googleBanner=j.calendar_source==='GOOGLE'?`<div class="google-calendar-banner ${Number(j.calendar_conflict_flag||0)===1||['SOURCE_CHANGED','SOURCE_CANCELLED','INVALID'].includes(googleState)?'attention':'review'}"><strong>${bi('Google Calendar import','Google Naptár-import')}</strong><span>${htmlText(googleStateLabel)}</span>${Number(j.calendar_conflict_flag||0)===1?`<small>! ${bi('Schedule conflict: choose another employee or time before review.','Időpontütközés: ellenőrzés előtt válassz másik munkatársat vagy időpontot.')}</small>`:''}<small>${bi('Creator','Létrehozó')}: ${htmlText(j.calendar_creator_email||bi('Unknown','Ismeretlen'))}</small></div>`:'';
  const actionButtons=[`<button type="button" class="ghost-btn" onclick="closeModal()">Close / Bezár</button>`];
  actionButtons.push(`<button type="button" class="ghost-btn" onclick="openWorkflowHistory('${jobRef(j)}')">${bi("Workflow history","Munkafolyamat")}</button>`);
  if(!closed){
    actionButtons.push(`<button type="button" onclick='openJob("",${esc(j)})'>Edit job / Munka szerkesztése</button>`);
    actionButtons.push(`<button type="button" onclick='openCloseJob(${esc(j)})'>Close job / Lezárás</button>`);
  }
+ if(j.calendar_source==='GOOGLE'&&isAdmin()&&googleState!=='REVIEWED'&&googleState!=='SOURCE_CANCELLED') actionButtons.push(`<button type="button" onclick="reviewGoogleCalendarJob('${jobRef(j)}')">${bi('Mark as reviewed','Ellenőrzés befejezése')}</button>`);
  if(isSuperadmin()) actionButtons.push(`<button type="button" class="danger-btn" onclick="deleteJob('${jobRef(j)}')">Delete job / Munka törlése</button>`);
- $("#form").innerHTML=`<div class="work-card">
- <h4>${badge(j.priority)} ${j.title}</h4>
+ $("#form").innerHTML=`${googleBanner}<div class="work-card">
+ <h4>${badge(j.priority)} ${htmlText(j.title||'')}</h4>
  <p class="muted"><b>Job key / Munkaazonosító:</b> ${j.job_key||j.id||""}</p><p><b>Work category / Munkakategória:</b> ${j.job_type==="Part-work" ? "Part-work / Részmunka" : "Standalone / Önálló munka"}</p>
- <p><b>Assigned / Felelős:</b> ${j.assigned_to}</p>
- <p><b>Client / Ügyfél:</b> ${j.client_name||j.client_id||""}</p>
+ <p><b>Assigned / Felelős:</b> ${htmlText(j.assigned_to||'')}</p>
+ <p><b>Client / Ügyfél:</b> ${htmlText(j.client_name||j.client_id||"")}</p>
  <p><b>Phone / Telefon:</b> ${phone}</p>
- <p><b>Piano / Zongora:</b> ${j.piano_name||j.piano_id||""}</p>
+ <p><b>Piano / Zongora:</b> ${htmlText(j.piano_name||j.piano_id||"")}</p>
  <p><b>Time / Idő:</b> ${j.start_time} → ${j.end_time}</p>
- <p><b>Address / Cím:</b> ${j.service_address||""}</p>
+ <p><b>Address / Cím:</b> ${htmlText(j.service_address||"")}</p>
  <p><b>Estimated / Előzetes:</b> ${money(j.planned_amount)} · ${j.pricing_basis||""}</p>
  <p><b>Status / Státusz:</b> ${badge(j.status)}</p>
  ${closed?`<p class="muted"><b>View only / Csak megtekintés:</b> ez a munka már lezárt vagy részlezárt.</p>`:""}
- ${j.job_type==="Part-work"?`<p><b>Remaining tasks / Hátralévő feladatok:</b><br>${j.instructions||""}</p>`:""}
+ ${j.instructions?`<p><b>${j.calendar_source==='GOOGLE'?bi('Imported information and notes','Importált információk és megjegyzések'):bi('Instructions','Utasítások')}:</b><br>${htmlText(j.instructions).replaceAll('\n','<br>')}</p>`:""}
  </div>
  <div class="actions">${actionButtons.join("")}</div>`;
  $("#form").onsubmit=e=>e.preventDefault()
+}
+async function reviewGoogleCalendarJob(id){
+ try{const reviewed=await api(`/api/jobs/${encodeURIComponent(id)}/calendar-review`,{method:'POST'});closeModal();await refreshCalendarAfterMutation(reviewed);showToast(bi('Google Calendar job reviewed.','A Google Naptár-munka ellenőrizve.'),'success');}catch(error){showError(error)}
 }
 async function openWorkflowHistory(id){
  try{
@@ -2545,7 +2574,7 @@ async function acknowledgeNotification(id){
  try{const ack=await api(`/api/notifications/${encodeURIComponent(id)}/acknowledge`,{method:'POST'});if(navigator.serviceWorker?.ready){navigator.serviceWorker.ready.then(reg=>reg.active?.postMessage({type:'ACKNOWLEDGE_NOTIFICATION',notificationId:id,count:Number(ack.count||0)})).catch(()=>{});}closeModal();currentNotifications=currentNotifications.filter(n=>String(n.id)!==String(id));setNotificationBadges(Number(ack.count??currentNotifications.length));await renderNotifications();}catch(error){showError(error);}
 }
 async function openNotificationJob(jobId){
- try{const jobs=await api('/api/jobs');const job=jobs.find(j=>String(j.id)===String(jobId));if(!job)return showError(bi('The related job no longer exists.','A kapcsolódó munka már nem létezik.'));closeModal();openJobDetails(job);}catch(error){showError(error);}
+ try{const job=await api(`/api/jobs/${encodeURIComponent(jobId)}`);closeModal();openJobDetails(job);}catch(error){showError(error);}
 }
 async function openDirectMessage(selectedUser=null){
  let users=[];try{users=await api('/api/users');}catch(error){return showError(error);}
@@ -2568,9 +2597,9 @@ async function renderUsers(){
    const messageBtn=` <button class="small icon-message-btn" title="${bi("Send message","Üzenet küldése")}" aria-label="${bi("Send message","Üzenet küldése")}" onclick='openDirectMessage(${esc(x)})'>✎</button>`;
    const deleteBtn=isSuperadmin()?` <button class="small danger-btn" onclick="deleteUser('${x.id}')">${bi("Delete","Törlés")}</button>`:"";
    const color=workerColor(x.name,x.calendar_color);
-   return `<tr><td>${htmlText(x.name||"")}</td><td>${htmlText(x.email||"")}</td><td>${htmlText(x.role||"")}</td><td><span class="user-color-cell"><i class="user-color-swatch" style="--user-color:${color}" aria-hidden="true"></i><span>${color}</span></span></td><td>${htmlText(x.phone||"")}</td><td>${htmlText(x.address||"")}</td><td>${htmlText(x.status||"")}</td><td>${profileBtn}${editBtn}${messageBtn}${deleteBtn}</td></tr>`;
+   return `<tr><td>${htmlText(x.name||"")}</td><td>${htmlText(x.email||"")}</td><td>${htmlText(x.google_calendar_email||"")}</td><td>${htmlText(x.role||"")}</td><td><span class="user-color-cell"><i class="user-color-swatch" style="--user-color:${color}" aria-hidden="true"></i><span>${color}</span></span></td><td>${htmlText(x.phone||"")}</td><td>${htmlText(x.address||"")}</td><td>${htmlText(x.status||"")}</td><td>${profileBtn}${editBtn}${messageBtn}${deleteBtn}</td></tr>`;
  }).join("");
- $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>${bi("Name","Név")}</th><th>${bi("Email","E-mail")}</th><th>${bi("Role","Szerepkör")}</th><th>${bi("Calendar color","Naptárszín")}</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>${bi("Status","Állapot")}</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+ $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>${bi("Name","Név")}</th><th>${bi("ERP email","ERP e-mail")}</th><th>${bi("Google Calendar email","Google Naptár e-mail")}</th><th>${bi("Role","Szerepkör")}</th><th>${bi("Calendar color","Naptárszín")}</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>${bi("Status","Állapot")}</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
  applyLanguageToDOM(document.getElementById("users"));
 }
 function openUser(row=null, selfProfile=false){
@@ -2586,7 +2615,7 @@ function openUser(row=null, selfProfile=false){
  const statusField = canFullEdit ? `<div class="field"><label>${bi("Status","Állapot")}</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
  const colorField = (canFullEdit || canCreate) ? `<div class="field calendar-color-field"><label>${bi("Calendar color","Naptárszín")}</label><input name="calendar_color" type="color" value="${workerColor(row?.name||"",row?.calendar_color||"#0891B2")}" required><small class="calendar-color-help">${bi("Reserved status colors cannot be selected: orange, green, red and gray.","A lefoglalt állapotszínek nem választhatók: narancssárga, zöld, piros és szürke.")}</small></div>` : "";
  const preferenceFields=selfProfile?`<div class="field profile-preferences"><label>${bi("Language","Nyelv")}</label><select name="profile_language"><option value="en" ${currentLang==="en"?"selected":""}>American English</option><option value="hu" ${currentLang==="hu"?"selected":""}>Magyar</option></select></div><div class="field profile-preferences"><label>${bi("Appearance","Megjelenés")}</label><select name="profile_theme"><option value="dark" ${currentTheme==="dark"?"selected":""}>${bi("Dark","Sötét")}</option><option value="light" ${currentTheme==="light"?"selected":""}>${bi("Light","Világos")}</option></select></div><div class="field full profile-role-info"><label>${bi("Role","Szerepkör")}</label><input value="${htmlText(row?.role||user?.role||"")}" disabled></div>`:"";
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>Email</label><input name="email" value="${row?.email||""}" required></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>${bi("ERP email","ERP e-mail")}</label><input name="email" type="email" value="${row?.email||""}" required></div><div class="field full"><label>${bi("Google Calendar email","Google Naptár e-mail")}</label><input name="google_calendar_email" type="email" value="${row?.google_calendar_email||""}" placeholder="${bi("Example: employee@gmail.com","Példa: munkatars@gmail.com")}"><small>${bi("Events created with this address in the shared Klavier House Work calendar are assigned to this employee.","A közös Klavier House Work naptárban ezzel a címmel létrehozott események ehhez a munkatárshoz kerülnek.")}</small></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
  $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target));const selectedLanguage=body.profile_language;const selectedTheme=body.profile_theme;delete body.profile_language;delete body.profile_theme;if(body.calendar_color){body.calendar_color=String(body.calendar_color).toUpperCase();if(reservedCalendarColors.includes(body.calendar_color)){showError("RESERVED_CALENDAR_COLOR");return;}}if(isEdit&&!body.password)delete body.password;let saved;if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});if(isEdit&&row.id===user.id){user={...user,...saved};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}}schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();if(currentView==="users"&&isAdmin())renderUsers();}catch(err){showError(err)}};
 }
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!await appConfirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?"),{type:"error",confirmText:bi("Delete permanently","Végleges törlés")}))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err)}}
@@ -2601,6 +2630,11 @@ function showToast(message,type="info"){
 }
 function localizedErrorMessage(error){
  const code=String(error?.message||error||"");const details=error?.details||{};
+ const googleErrors={
+  en:{INVALID_GOOGLE_CALENDAR_EMAIL:"Enter a valid Google Calendar email address.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"This Google Calendar email is already assigned to another employee.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Assign the imported event to an active employee before completing the review.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Resolve the schedule conflict before completing the review.",GOOGLE_SOURCE_EVENT_CANCELLED:"The Google source event was cancelled. Edit or delete the ERP job as appropriate.",GOOGLE_CALENDAR_NOT_CONFIGURED:"The Google Calendar server settings are incomplete.",GOOGLE_CALENDAR_NOT_CONNECTED:"Google Calendar is not connected."},
+  hu:{INVALID_GOOGLE_CALENDAR_EMAIL:"Adj meg érvényes Google Naptár e-mail-címet.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"Ez a Google Naptár e-mail-cím már egy másik munkatárshoz tartozik.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Az ellenőrzés befejezése előtt rendeld az importált eseményt aktív munkatárshoz.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Az ellenőrzés befejezése előtt oldd fel az időpontütközést.",GOOGLE_SOURCE_EVENT_CANCELLED:"A forrásként szolgáló Google-eseményt törölték. Szükség szerint módosítsd vagy töröld az ERP-munkát.",GOOGLE_CALENDAR_NOT_CONFIGURED:"A Google Naptár szerverbeállításai hiányosak.",GOOGLE_CALENDAR_NOT_CONNECTED:"A Google Naptár nincs csatlakoztatva."}
+ };
+ if(googleErrors[currentLang]?.[code])return googleErrors[currentLang][code];
  if(code==="SELF_SCHEDULE_CONFLICT"){
   const c=details.conflict||{};
   return bi(`You cannot take this job because you already have another job at this time${c.title?`: ${c.title}`:""}.`,`Ezt a munkát nem veheted fel, mert erre az időpontra már van másik munkád${c.title?`: ${c.title}`:""}.`);
@@ -2618,13 +2652,17 @@ function localizedErrorMessage(error){
 function showError(error){return appAlert(localizedErrorMessage(error),"error");}
 async function renderSettings(){
  if(!isAdmin()) return showError('PERMISSION_DENIED');
- const box=$("#settings"), p=await api('/api/settings/permissions'), b=await api('/api/settings/branding');
+ const box=$("#settings"), [p,b,g]=await Promise.all([api('/api/settings/permissions'),api('/api/settings/branding'),api('/api/google-calendar/status')]);
  const labels={'scheduler.view':bi('View scheduler','Naptár megtekintése'),'planned_jobs.view':bi('View planned jobs','Tervezett munkák megtekintése'),'contacts.view':bi('View clients','Ügyfelek megtekintése'),'pianos.view':bi('View pianos','Zongorák megtekintése'),'closed_jobs.view':bi('View closed jobs','Lezárt munkák megtekintése'),'knowledge_base.view':bi('View invoices','Számlák megtekintése'),'finance.view':bi('View finance','Pénzügy megtekintése'),'income_statement.view':bi('View income statement','Eredménykimutatás megtekintése'),'inventory.view':bi('View inventory','Leltár megtekintése'),'users.view':bi('View users','Felhasználók megtekintése'),'users.create':bi('Add employees','Munkavállaló hozzáadása'),'users.roles':bi('Assign or remove roles','Szerepkör adása vagy elvétele'),'permissions.manage':bi('Manage role permissions','Szerepkör-jogosultságok kezelése'),'audit.view':bi('View audit log','Módosítási napló megtekintése')};
  const matrix=p.roles.filter(r=>r!=='SUPERADMIN').map(role=>`<div class="permission-card"><h4>${role}</h4>${p.permissions.map(pm=>{const row=p.rows.find(x=>x.role===role&&x.permission===pm);return `<label class="permission-row"><input type="checkbox" ${row?.enabled?'checked':''} onchange="setRolePermission('${role}','${pm}',this.checked)"><span>${labels[pm]||pm}</span></label>`}).join('')}</div>`).join('');
  const backupRows=await api('/api/backups');
  const backups=`<div class="panel"><div class="toolbar"><h3>${bi('Backups','Biztonsági mentések')}</h3>${isSuperadmin()?`<button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button>`:''}</div><div class="table-wrap"><table><thead><tr><th>${bi('Created','Létrehozva')}</th><th>${bi('File','Fájl')}</th><th>${bi('Status','Állapot')}</th><th>${bi('Actions','Műveletek')}</th></tr></thead><tbody>${backupRows.map(x=>`<tr><td>${x.created_at||''}</td><td>${x.file_name}</td><td>${x.status||''}</td><td>${isSuperadmin()?`<button class="small" onclick="downloadBackup('${x.id}')">${bi('Download','Letöltés')}</button><button class="small danger-btn" onclick="restoreBackup('${x.id}')">${bi('Restore','Visszaállítás')}</button>`:`<span class="muted">${bi('View only','Csak megtekintés')}</span>`}</td></tr>`).join('')||`<tr><td colspan="4" class="muted">${bi('No backups yet.','Még nincs biztonsági mentés.')}</td></tr>`}</tbody></table></div></div>`;
- box.innerHTML=`${mobileBackHeader(bi('Settings','Beállítások'))}<div class="panel branding-panel"><h3>${bi('Branding','Arculat')}</h3><div class="branding-preview"><img src="${versionedBrandAsset(b.logo_url)}" alt="logo"><div><b>${b.company_name}</b><small>${b.short_name}</small></div></div><form onsubmit="saveBranding(event)" class="form-grid"><label>${bi('Company name','Cégnév')}<input name="company_name" value="${String(b.company_name||'').replaceAll('"','&quot;')}" required></label><label>${bi('Short app name','Rövid alkalmazásnév')}<input name="short_name" value="${String(b.short_name||'').replaceAll('"','&quot;')}" required></label><div class="actions"><button type="submit">${bi('Save identity','Arculat mentése')}</button></div></form><form onsubmit="uploadBrandLogo(event)" class="branding-logo-form"><input id="brandingLogoInput" type="file" name="logo" accept="image/png,image/jpeg,.jpg,.jpeg" onchange="previewBrandLogo(this)" required><small class="branding-upload-help">${bi('PNG, JPG, or JPEG; minimum 192×192 px. Non-square images are automatically padded to a square icon.','PNG, JPG vagy JPEG; minimum 192×192 px. A nem négyzetes képet a rendszer automatikusan négyzetes ikonba igazítja.')}</small><button type="submit">${bi('Upload logo and PWA icon','Logó és PWA-ikon feltöltése')}</button><button type="button" class="small" onclick="resetBrandLogo()">${bi('Restore KH logo','KH-logó visszaállítása')}</button></form><hr><h4>${bi('Login background','Bejelentkezési háttérkép')}</h4><div class="login-background-preview" style="${b.login_background_url?`background-image:linear-gradient(rgba(0,0,0,.25),rgba(0,0,0,.25)),url('${versionedBrandAsset(b.login_background_url)}')`:''}"></div><form onsubmit="uploadLoginBackground(event)" class="branding-logo-form"><input type="file" name="background" accept="image/png,image/jpeg,.jpg,.jpeg" required><button type="submit">${bi('Upload login background','Bejelentkezési háttérkép feltöltése')}</button><button type="button" class="small" onclick="resetLoginBackground()">${bi('Restore default background','Alapértelmezett háttér visszaállítása')}</button></form></div><div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${backups}`;
+ const googleCard=`<div class="panel google-calendar-settings"><div class="toolbar"><div><h3>${bi('Google Calendar integration','Google Naptár-integráció')}</h3><p class="muted">${bi('One-way: Google → ERP. ERP changes are never sent back to Google.','Egyirányú: Google → ERP. Az ERP-módosítások soha nem kerülnek vissza a Google-be.')}</p></div><span class="integration-status ${g.connected?'connected':'disconnected'}">${g.connected?bi('Connected','Csatlakoztatva'):bi('Disconnected','Nincs csatlakoztatva')}</span></div><div class="integration-details"><p><b>${bi('Shared calendar','Közös naptár')}:</b> ${htmlText(g.calendar_summary||'Klavier House Work')}</p><p><b>${bi('Central account','Központi fiók')}:</b> ${htmlText(g.central_email||'klavierhauswork@gmail.com')}</p><p><b>${bi('Last synchronization','Utolsó szinkronizálás')}:</b> ${htmlText(g.last_sync_at||bi('Not yet','Még nem történt'))}</p>${g.last_error?`<p class="integration-error"><b>${bi('Last error','Utolsó hiba')}:</b> ${htmlText(g.last_error)}</p>`:''}</div>${!g.configured?`<div class="settings-warning">${bi('Server setup is incomplete. Add the GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_TOKEN_ENCRYPTION_KEY and APP_BASE_URL environment variables, then restart Render.','A szerverbeállítás hiányos. Add hozzá a GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_TOKEN_ENCRYPTION_KEY és APP_BASE_URL környezeti változókat, majd indítsd újra a Render szolgáltatást.')}</div>`:''}<div class="actions">${isSuperadmin()&&g.configured&&!g.connected?`<button onclick="connectGoogleCalendar()">${bi('Connect Google Calendar','Google Naptár csatlakoztatása')}</button>`:''}${g.connected?`<button onclick="syncGoogleCalendarNow()">${bi('Synchronize now','Szinkronizálás most')}</button>`:''}${isSuperadmin()&&g.connected?`<button class="danger-btn" onclick="disconnectGoogleCalendar()">${bi('Disconnect','Leválasztás')}</button>`:''}</div><small>${bi('Employees must create work events in the shared Klavier House Work calendar. Their profile Google Calendar email determines the initial assignee.','A munkatársaknak a közös Klavier House Work naptárban kell létrehozniuk a munkaeseményeket. A profiljuk Google Naptár e-mail-címe határozza meg a kezdeti felelőst.')}</small></div>`;
+ box.innerHTML=`${mobileBackHeader(bi('Settings','Beállítások'))}${googleCard}<div class="panel branding-panel"><h3>${bi('Branding','Arculat')}</h3><div class="branding-preview"><img src="${versionedBrandAsset(b.logo_url)}" alt="logo"><div><b>${b.company_name}</b><small>${b.short_name}</small></div></div><form onsubmit="saveBranding(event)" class="form-grid"><label>${bi('Company name','Cégnév')}<input name="company_name" value="${String(b.company_name||'').replaceAll('"','&quot;')}" required></label><label>${bi('Short app name','Rövid alkalmazásnév')}<input name="short_name" value="${String(b.short_name||'').replaceAll('"','&quot;')}" required></label><div class="actions"><button type="submit">${bi('Save identity','Arculat mentése')}</button></div></form><form onsubmit="uploadBrandLogo(event)" class="branding-logo-form"><input id="brandingLogoInput" type="file" name="logo" accept="image/png,image/jpeg,.jpg,.jpeg" onchange="previewBrandLogo(this)" required><small class="branding-upload-help">${bi('PNG, JPG, or JPEG; minimum 192×192 px. Non-square images are automatically padded to a square icon.','PNG, JPG vagy JPEG; minimum 192×192 px. A nem négyzetes képet a rendszer automatikusan négyzetes ikonba igazítja.')}</small><button type="submit">${bi('Upload logo and PWA icon','Logó és PWA-ikon feltöltése')}</button><button type="button" class="small" onclick="resetBrandLogo()">${bi('Restore KH logo','KH-logó visszaállítása')}</button></form><hr><h4>${bi('Login background','Bejelentkezési háttérkép')}</h4><div class="login-background-preview" style="${b.login_background_url?`background-image:linear-gradient(rgba(0,0,0,.25),rgba(0,0,0,.25)),url('${versionedBrandAsset(b.login_background_url)}')`:''}"></div><form onsubmit="uploadLoginBackground(event)" class="branding-logo-form"><input type="file" name="background" accept="image/png,image/jpeg,.jpg,.jpeg" required><button type="submit">${bi('Upload login background','Bejelentkezési háttérkép feltöltése')}</button><button type="button" class="small" onclick="resetLoginBackground()">${bi('Restore default background','Alapértelmezett háttér visszaállítása')}</button></form></div><div class="panel"><h3>${bi('Roles and Permissions','Szerepkörök és jogosultságok')}</h3><div class="permission-grid">${matrix}</div></div>${backups}`;
 }
+async function connectGoogleCalendar(){try{const result=await api('/api/google-calendar/auth-url');location.href=result.url;}catch(error){showError(error)}}
+async function syncGoogleCalendarNow(){try{const result=await api('/api/google-calendar/sync',{method:'POST'});showToast(bi(`Synchronization complete: ${result.imported} imported, ${result.updated} updated, ${result.flagged} flagged.`,`Szinkronizálás kész: ${result.imported} importálva, ${result.updated} frissítve, ${result.flagged} megjelölve.`),'success');renderSettings();}catch(error){showError(error)}}
+async function disconnectGoogleCalendar(){if(!isSuperadmin())return;if(!await appConfirm(bi('Disconnect the central Google Calendar account? Imported ERP jobs will be kept.','Leválasztod a központi Google Naptár-fiókot? Az importált ERP-munkák megmaradnak.'),{type:'warning',confirmText:bi('Disconnect','Leválasztás')}))return;try{await api('/api/google-calendar/disconnect',{method:'DELETE'});showToast(bi('Google Calendar disconnected.','A Google Naptár leválasztva.'),'success');renderSettings();}catch(error){showError(error)}}
 async function saveBranding(e){e.preventDefault();const body=Object.fromEntries(new FormData(e.target));branding=await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(body)});applyBranding();showToast(bi('Branding saved.','Arculat elmentve.'),'success');renderSettings();}
 function readImageFile(file){
  return new Promise((resolve,reject)=>{
