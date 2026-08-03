@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Database = require("better-sqlite3");
 const { legacyCalendarColor, validateCalendarColor } = require("./calendar-colors");
+const { createGoogleCalendarIntegration } = require("./google-calendar");
 let webpush=null;
 try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable:",error.message);}
 require("dotenv").config();
@@ -586,7 +587,7 @@ function auth(req,res,next){
   if(!token) return res.status(401).json({error:"Missing token"});
   try{
     const tokenUser=jwt.verify(token, JWT_SECRET);
-    const currentUser=db.prepare("SELECT id,name,email,role,status,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
+    const currentUser=db.prepare("SELECT id,name,email,role,status,google_calendar_email,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
     if(!currentUser) return res.status(401).json({error:"User no longer exists or is inactive"});
     req.user={...tokenUser,...currentUser,role:Number(currentUser.is_superadmin||0)===1?'SUPERADMIN':currentUser.role};
     next();
@@ -605,8 +606,18 @@ function resolveActiveUser(userId, userName){
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
 function jobsSelectSql(where=""){
-  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id ${where}`;
+  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by,
+    ece.provider AS calendar_source,ece.review_status AS calendar_review_status,ece.conflict_flag AS calendar_conflict_flag,
+    ece.creator_email AS calendar_creator_email,ece.source_updated_at AS calendar_source_updated_at,ece.external_event_id AS calendar_external_event_id
+    FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id
+    LEFT JOIN external_calendar_events ece ON ece.job_id=j.id AND ece.provider='GOOGLE' ${where}`;
 }
+
+const googleCalendar=createGoogleCalendarIntegration({
+  db,rid,stableJobKey,nyLocalDateTime,findScheduleConflicts,
+  getJob:(id)=>db.prepare(jobsSelectSql("WHERE j.id=?")).get(id),
+  createNotification
+});
 
 function canCloseJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
@@ -676,13 +687,37 @@ app.post("/api/login",(req,res)=>{
   }
   const isSuper=Number(u.is_superadmin||0)===1;
   const effectiveRole=isSuper?"SUPERADMIN":u.role;
-  const loginUser={id:u.id,name:u.name,email:u.email,role:effectiveRole,is_superadmin:isSuper?1:0};
+  const loginUser={id:u.id,name:u.name,email:u.email,google_calendar_email:u.google_calendar_email||'',role:effectiveRole,is_superadmin:isSuper?1:0};
   const token=jwt.sign(loginUser, JWT_SECRET, {expiresIn:"30d"});
   audit({user:loginUser},'LOGIN','authentication',u.id,null,{email:u.email},1,'Successful login','TECHNICAL');
   res.json({token,user:loginUser});
 });
 app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.user.id,null,null,1,'User logout','TECHNICAL');res.json({ok:true});});
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
+
+app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
+app.get('/api/google-calendar/auth-url',auth,requireSuperadmin,(req,res)=>{
+  try{res.json({url:googleCalendar.createAuthUrl(req.user.id)});}catch(error){res.status(400).json({error:error.message});}
+});
+app.get('/api/google-calendar/oauth/callback',async(req,res)=>{
+  try{
+    await googleCalendar.handleOAuthCallback(String(req.query.code||''),String(req.query.state||''));
+    res.redirect('/?googleCalendar=connected');
+  }catch(error){
+    console.warn('Google OAuth callback failed:',error.message);
+    res.redirect(`/?googleCalendar=error&reason=${encodeURIComponent(error.message)}`);
+  }
+});
+app.post('/api/google-calendar/sync',auth,permit('ADMIN'),async(req,res)=>{
+  try{res.json(await googleCalendar.syncNow('MANUAL'));}catch(error){res.status(502).json({error:error.message});}
+});
+app.delete('/api/google-calendar/disconnect',auth,requireSuperadmin,async(req,res)=>{
+  try{res.json(await googleCalendar.disconnect());}catch(error){res.status(400).json({error:error.message});}
+});
+app.post('/api/google-calendar/webhook',(req,res)=>{
+  if(!googleCalendar.handleWebhook(req.headers)) return res.status(403).json({error:'INVALID_GOOGLE_CHANNEL'});
+  res.status(204).end();
+});
 
 app.get("/api/schedule-workers", auth, (req,res)=>{
   const rows=db.prepare("SELECT id,name,email,role,calendar_color FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all();
@@ -1104,7 +1139,7 @@ app.get("/api/income-statement", auth, (req,res)=>{
 
 app.get("/api/users", auth, (req,res)=> {
   // Hidden superadmin is never listed. Everyone may see the visible team list.
-  res.json(db.prepare("SELECT id,name,email,role,status,phone,address,calendar_color,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
+  res.json(db.prepare("SELECT id,name,email,google_calendar_email,role,status,phone,address,calendar_color,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
 });
 
 app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
@@ -1118,11 +1153,14 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   const requestedColor=req.body.calendar_color===undefined?legacyCalendarColor(name,orderedNames):req.body.calendar_color;
   const colorValidation=validateCalendarColor(requestedColor);
   if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
+  const googleCalendarEmail=String(req.body.google_calendar_email||'').trim().toLowerCase();
+  if(googleCalendarEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(googleCalendarEmail)) return res.status(400).json({error:'INVALID_GOOGLE_CALENDAR_EMAIL'});
+  if(googleCalendarEmail && db.prepare("SELECT id FROM users WHERE lower(trim(google_calendar_email))=?").get(googleCalendarEmail)) return res.status(409).json({error:'GOOGLE_CALENDAR_EMAIL_ALREADY_USED'});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,calendar_color,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,0,0);
-  const created={id,name,email,role,status:"Active",phone:req.body.phone||"",address:req.body.address||"",calendar_color:colorValidation.color};
+  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,googleCalendarEmail||null,0,0);
+  const created={id,name,email,google_calendar_email:googleCalendarEmail,role,status:"Active",phone:req.body.phone||"",address:req.body.address||"",calendar_color:colorValidation.color};
   db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
   audit(req,"CREATE","users",id,null,created);
   res.json(created);
@@ -1139,7 +1177,7 @@ app.put("/api/users/:id", auth, (req,res)=>{
   if(!selfEdit && !superEdit && !roleAdmin) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.calendar_color!==undefined && !canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
 
-  let allowed = (superEdit || roleAdmin) ? ["name","email","role","status","phone","address"] : ["name","email","phone","address"];
+  let allowed = (superEdit || roleAdmin) ? ["name","email","google_calendar_email","role","status","phone","address"] : ["name","email","google_calendar_email","phone","address"];
   if(canManageCalendarColors(req.user)) allowed.push("calendar_color");
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
@@ -1148,6 +1186,12 @@ app.put("/api/users/:id", auth, (req,res)=>{
     const colorValidation=validateCalendarColor(req.body.calendar_color);
     if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
     req.body.calendar_color=colorValidation.color;
+  }
+  if(req.body.google_calendar_email!==undefined){
+    req.body.google_calendar_email=String(req.body.google_calendar_email||'').trim().toLowerCase()||null;
+    if(req.body.google_calendar_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.google_calendar_email)) return res.status(400).json({error:'INVALID_GOOGLE_CALENDAR_EMAIL'});
+    const duplicate=req.body.google_calendar_email?db.prepare("SELECT id FROM users WHERE lower(trim(google_calendar_email))=? AND id<>?").get(req.body.google_calendar_email,target.id):null;
+    if(duplicate) return res.status(409).json({error:'GOOGLE_CALENDAR_EMAIL_ALREADY_USED'});
   }
 
   const cols=allowed.filter(c=>req.body[c]!==undefined);
@@ -1163,7 +1207,7 @@ app.put("/api/users/:id", auth, (req,res)=>{
     }
   });
   updateUserTx();
-  const u=db.prepare("SELECT id,name,email,role,status,phone,address,calendar_color FROM users WHERE id=?").get(req.params.id);
+  const u=db.prepare("SELECT id,name,email,google_calendar_email,role,status,phone,address,calendar_color FROM users WHERE id=?").get(req.params.id);
   audit(req,"UPDATE","users",req.params.id,target,u);
   res.json(u);
 });
@@ -1517,7 +1561,18 @@ app.get("/api/client-profile/:id", auth, (req,res)=>{
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
+  const from=String(req.query.from||'').trim(),to=String(req.query.to||'').trim();
+  if(Boolean(from)!==Boolean(to)) return res.status(400).json({error:'JOB_RANGE_REQUIRES_FROM_AND_TO'});
+  if(from&&to){
+    if(!isValidTimeRange(from,to)) return res.status(400).json({error:'INVALID_TIME_RANGE'});
+    return res.json(db.prepare(jobsSelectSql("WHERE j.start_time<? AND j.end_time>? ORDER BY j.start_time")).all(to,from));
+  }
   res.json(db.prepare(jobsSelectSql("ORDER BY j.start_time")).all());
+});
+app.get("/api/jobs/:id",auth,(req,res)=>{
+  const job=getJobByAnyId(req.params.id,req.query||{});
+  if(!job) return res.status(404).json({error:'JOB_NOT_FOUND'});
+  res.json(db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id));
 });
 app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   for(const r of ["title","start_time","end_time"]) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
@@ -1632,10 +1687,23 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   res.json(updated);
 });
 
+app.post("/api/jobs/:id/calendar-review",auth,permit("ADMIN"),(req,res)=>{
+  try{
+    const job=getJobByAnyId(req.params.id,req.body||{});
+    if(!job) return res.status(404).json({error:'JOB_NOT_FOUND'});
+    const reviewed=googleCalendar.markReviewed(job.id,req.user.id);
+    workAudit(req,'CALENDAR_REVIEW',job.id,job,reviewed,1,'Google Calendar import reviewed / Google Naptár-import ellenőrizve');
+    res.json(reviewed);
+  }catch(error){res.status(400).json({error:error.message});}
+});
+
 app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const job=getJobByAnyId(req.params.id, req.body||{});
   if(!job) return res.status(404).json({error:"Job not found"});
   const logs=db.prepare("SELECT id FROM job_logs WHERE job_id=?").all(job.id);
+  const childJobs=db.prepare("SELECT id FROM jobs WHERE parent_job_id=?").all(job.id);
+  googleCalendar.ignoreDeletedJob(job.id);
+  childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
   db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?)").run(job.id, job.id);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
@@ -1936,6 +2004,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     // Delete every business, import, audit, backup and configurable record.
     // Only the currently authenticated hidden superadmin account survives.
     [
+      "calendar_sync_log",
+      "calendar_oauth_states",
+      "external_calendar_events",
+      "calendar_integrations",
       "journal_lines",
       "journal_entries",
       "accounts",
@@ -1961,7 +2033,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 
     if(exists("users")){
       db.prepare("DELETE FROM users WHERE id<>?").run(superadminId);
-      db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1, role='ADMIN' WHERE id=?").run(superadminId);
+      db.prepare("UPDATE users SET status='Active', hidden_user=1, is_superadmin=1, role='ADMIN', google_calendar_email=NULL WHERE id=?").run(superadminId);
     }
 
     if(exists("notification_preferences")){
@@ -1995,6 +2067,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   });
 
   tx();
+  googleCalendar.stop();
 
   // Remove every uploaded branding/document file and every physical backup file as part of the full reset.
   for(const directory of [UPLOAD_DIR,BACKUP_DIR]){
