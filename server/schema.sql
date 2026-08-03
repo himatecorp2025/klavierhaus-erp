@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   phone TEXT,
   address TEXT,
   calendar_color TEXT,
+  google_calendar_email TEXT,
   hidden_user INTEGER DEFAULT 0,
   is_superadmin INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS pianos (
 
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
+  job_key TEXT,
   parent_job_id TEXT,
   workflow_root_id TEXT,
   workflow_step_no INTEGER DEFAULT 1,
@@ -105,6 +107,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   travel_minutes INTEGER DEFAULT 0,
   service_address TEXT,
   instructions TEXT,
+  planned_job_id TEXT,
   close_type TEXT,
   billed_amount REAL DEFAULT 0,
   payment_method TEXT,
@@ -211,6 +214,77 @@ CREATE TABLE IF NOT EXISTS app_settings (
   setting_value TEXT,
   updated_by TEXT,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One-way Google Calendar -> ERP integration. OAuth secrets are encrypted by the
+-- application before they are written to this table.
+CREATE TABLE IF NOT EXISTS calendar_integrations (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL UNIQUE,
+  central_email TEXT NOT NULL,
+  calendar_id TEXT NOT NULL,
+  calendar_summary TEXT,
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED',
+  access_token_encrypted TEXT,
+  refresh_token_encrypted TEXT,
+  token_expiry TEXT,
+  sync_token TEXT,
+  channel_id TEXT,
+  resource_id TEXT,
+  channel_token TEXT,
+  channel_expires_at TEXT,
+  last_sync_at TEXT,
+  last_error TEXT,
+  connected_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(connected_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS calendar_oauth_states (
+  state TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS external_calendar_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  calendar_id TEXT NOT NULL,
+  external_event_id TEXT NOT NULL,
+  external_recurring_event_id TEXT,
+  external_status TEXT,
+  event_etag TEXT,
+  creator_email TEXT,
+  organizer_email TEXT,
+  job_id TEXT,
+  review_status TEXT NOT NULL DEFAULT 'NEEDS_REVIEW' CHECK(review_status IN ('NEEDS_REVIEW','REVIEWED','SOURCE_CHANGED','SOURCE_CANCELLED','INVALID','IGNORED')),
+  conflict_flag INTEGER NOT NULL DEFAULT 0,
+  raw_json TEXT,
+  source_updated_at TEXT,
+  imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at TEXT,
+  reviewed_by_user_id TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(provider,calendar_id,external_event_id),
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS calendar_sync_log (
+  id TEXT PRIMARY KEY,
+  integration_id TEXT,
+  trigger_type TEXT,
+  status TEXT NOT NULL,
+  imported_count INTEGER DEFAULT 0,
+  updated_count INTEGER DEFAULT 0,
+  flagged_count INTEGER DEFAULT 0,
+  details TEXT,
+  started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  FOREIGN KEY(integration_id) REFERENCES calendar_integrations(id) ON DELETE CASCADE
 );
 INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
  ('company_name','Klavierhaus','SYSTEM'),
