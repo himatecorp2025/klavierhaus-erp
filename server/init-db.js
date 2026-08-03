@@ -67,8 +67,10 @@ function migrationRequiresBackup() {
     ? String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || "").toUpperCase()
     : "";
   const usersMissingCalendarColor = tableExists("users") && !tableColumns("users").has("calendar_color");
+  const usersMissingGoogleCalendarEmail = tableExists("users") && !tableColumns("users").has("google_calendar_email");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || inventoryMissingCreator;
+  const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || inventoryMissingCreator || googleIntegrationMissing;
 }
 
 function createPreMigrationBackup() {
@@ -105,6 +107,7 @@ function migrateUsersRoleConstraint() {
         phone TEXT,
         address TEXT,
         calendar_color TEXT,
+        google_calendar_email TEXT,
         hidden_user INTEGER DEFAULT 0,
         is_superadmin INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -113,13 +116,13 @@ function migrateUsersRoleConstraint() {
     `);
     db.exec(`
       INSERT INTO users_new(
-        id,name,email,password_hash,role,status,phone,address,calendar_color,hidden_user,is_superadmin,created_at,updated_at
+        id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin,created_at,updated_at
       )
       SELECT
         id,name,email,password_hash,
         CASE WHEN role IN ('ADMIN','MANAGER','WORKER') THEN role ELSE 'WORKER' END,
         CASE WHEN role='VIEWER' THEN 'Inactive' ELSE COALESCE(status,'Active') END,
-        phone,address,calendar_color,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
+        phone,address,calendar_color,google_calendar_email,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
       FROM users
     `);
     db.exec("DROP TABLE users");
@@ -206,6 +209,7 @@ function runMigrations() {
     ensureColumn("users", "phone", "TEXT");
     ensureColumn("users", "address", "TEXT");
     ensureColumn("users", "calendar_color", "TEXT");
+    ensureColumn("users", "google_calendar_email", "TEXT");
     ensureColumn("users", "hidden_user", "INTEGER DEFAULT 0");
     ensureColumn("users", "is_superadmin", "INTEGER DEFAULT 0");
 
@@ -308,6 +312,12 @@ function runMigrations() {
   ensureIndex("idx_planned_jobs_status", "CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)");
   ensureIndex("idx_jobs_workflow_root", "CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)");
   ensureIndex("idx_jobs_assigned_user_id", "CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)");
+  ensureIndex("idx_jobs_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_time_range ON jobs(start_time,end_time)");
+  ensureIndex("idx_jobs_assignee_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_assignee_time_range ON jobs(assigned_user_id,start_time,end_time)");
+  ensureIndex("idx_users_google_calendar_email", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_calendar_email ON users(lower(trim(google_calendar_email))) WHERE google_calendar_email IS NOT NULL AND trim(google_calendar_email)<>''");
+  ensureIndex("idx_external_calendar_events_job", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_job ON external_calendar_events(job_id)");
+  ensureIndex("idx_external_calendar_events_review", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_review ON external_calendar_events(review_status,updated_at DESC)");
+  ensureIndex("idx_calendar_sync_log_started", "CREATE INDEX IF NOT EXISTS idx_calendar_sync_log_started ON calendar_sync_log(started_at DESC)");
   ensureIndex("idx_audit_type_time", "CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC)");
   ensureColumn("push_subscriptions", "language", "TEXT DEFAULT 'en'");
   ensureColumn("push_subscriptions", "device_id", "TEXT");
