@@ -54,6 +54,19 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   const backupDir = path.join(tempRoot, "backups");
   const uploadDir = path.join(tempRoot, "uploads");
   const jwtSecret = "test-only-jwt-secret-that-is-longer-than-32-characters";
+  const googleDetailJobId = "J-GOOGLE-DETAIL";
+  const googleRawEvent = {
+    id: "google-api-detail-test",
+    summary: "Imported tuning",
+    description: "Imported multiline notes\nSecond line",
+    location: "123 Piano Street",
+    htmlLink: "https://calendar.google.com/calendar/event?eid=private-link",
+    creator: { email: "worker.calendar@gmail.com" },
+    organizer: { email: "klavierhauswork@gmail.com" },
+    attendees: [{ email: "attendee@example.com" }],
+    start: { dateTime: "2031-01-15T13:00:00-05:00" },
+    end: { dateTime: "2031-01-15T15:00:00-05:00" }
+  };
   const init = spawnSync(process.execPath, [path.join(projectRoot, "server", "init-db.js")], {
     cwd: projectRoot,
     env: { ...process.env, DB_PATH: dbPath, BACKUP_DIR: backupDir },
@@ -70,6 +83,15 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   insert.run("U-A", "Admin Test", "admin@example.com", hash, "ADMIN", "#2563EB", 0, 0);
   insert.run("U-W", "Worker Test", "worker@example.com", hash, "WORKER", "#0891B2", 0, 0);
   insert.run("U-M", "Manager Test", "manager@example.com", hash, "MANAGER", "#DB2777", 0, 0);
+  db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,title,job_type,assigned_user_id,assigned_to,created_by_user_id,created_by,status,start_time,end_time,timezone)
+    VALUES(?,?,?,1,'ACTIVE',?,'Standalone','U-W','Worker Test','U-A','Admin Test','Open','2031-01-15T13:00','2031-01-15T15:00','America/New_York')`)
+    .run(googleDetailJobId,"JK-GOOGLE-DETAIL",googleDetailJobId,googleRawEvent.summary);
+  db.prepare(`INSERT INTO external_calendar_events(
+    id,provider,calendar_id,external_event_id,external_status,event_etag,creator_email,organizer_email,job_id,review_status,conflict_flag,raw_json
+  ) VALUES(?,?,?,?,?,?,?,?,?,'NEEDS_REVIEW',0,?)`).run(
+    "ECE-DETAIL","GOOGLE","klavierhauswork@gmail.com",googleRawEvent.id,"confirmed","etag-1",
+    googleRawEvent.creator.email,googleRawEvent.organizer.email,googleDetailJobId,JSON.stringify(googleRawEvent)
+  );
   db.close();
 
   const port = await freePort();
@@ -154,9 +176,33 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   assert.equal(createdJob.status, 200, JSON.stringify(createdJob.payload));
   assert.equal(createdJob.payload.assigned_calendar_color, "#0F766E");
 
+  const pendingDetail = await request(baseUrl, `/api/jobs/${encodeURIComponent(googleDetailJobId)}`, { token: adminToken });
+  assert.equal(pendingDetail.status, 200, JSON.stringify(pendingDetail.payload));
+  assert.deepEqual(Object.keys(pendingDetail.payload.calendar_import).sort(), ["attendees","creator","description","end_time","location","start_time","title"]);
+  assert.equal(pendingDetail.payload.calendar_import.title, googleRawEvent.summary);
+  assert.equal(pendingDetail.payload.calendar_import.description, googleRawEvent.description);
+  assert.equal(pendingDetail.payload.calendar_import.location, googleRawEvent.location);
+  assert.equal(pendingDetail.payload.calendar_import.creator, googleRawEvent.creator.email);
+  assert.deepEqual(pendingDetail.payload.calendar_import.attendees, ["attendee@example.com"]);
+  assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "organizer"), false);
+  assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "htmlLink"), false);
+  assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "external_event_id"), false);
+
+  const rangeWithoutRawImport = await request(baseUrl, "/api/jobs?from=2031-01-15T00%3A00&to=2031-01-16T00%3A00", { token: adminToken });
+  assert.equal(rangeWithoutRawImport.status, 200);
+  const listedGoogleJob=rangeWithoutRawImport.payload.find((job)=>job.id===googleDetailJobId);
+  assert.ok(listedGoogleJob);
+  assert.equal(Object.hasOwn(listedGoogleJob, "calendar_import"), false);
+  assert.equal(Object.hasOwn(listedGoogleJob, "raw_json"), false);
+
+  const reviewedGoogleJob = await request(baseUrl, `/api/jobs/${encodeURIComponent(googleDetailJobId)}/calendar-review`, { token: adminToken, method: "POST" });
+  assert.equal(reviewedGoogleJob.status, 200, JSON.stringify(reviewedGoogleJob.payload));
+  const reviewedDetail = await request(baseUrl, `/api/jobs/${encodeURIComponent(googleDetailJobId)}`, { token: adminToken });
+  assert.equal(reviewedDetail.payload.calendar_import, null);
+
   const jobsInRange = await request(baseUrl, "/api/jobs?from=2031-01-15T00%3A00&to=2031-01-16T00%3A00", { token: adminToken });
   assert.equal(jobsInRange.status, 200);
-  assert.equal(jobsInRange.payload.length, 1);
+  assert.equal(jobsInRange.payload.length, 2);
   const jobsOutsideRange = await request(baseUrl, "/api/jobs?from=2031-01-16T00%3A00&to=2031-01-17T00%3A00", { token: adminToken });
   assert.equal(jobsOutsideRange.status, 200);
   assert.equal(jobsOutsideRange.payload.length, 0);
