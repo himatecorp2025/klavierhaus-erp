@@ -137,6 +137,23 @@ test("conflicting Google event is imported and cannot be reviewed until resolved
   db.close();
 });
 
+test("Google imports preserve exact source minutes without applying the manual five-minute rule", () => {
+  const { db, integration, getJob } = setup();
+  const result = integration._test.processEvent(googleEvent({
+    id: "event-exact-minutes",
+    start: { dateTime: "2032-08-04T14:02:00-04:00" },
+    end: { dateTime: "2032-08-04T15:07:00-04:00" }
+  }));
+  assert.equal(result.imported, 1);
+  const external = db.prepare("SELECT job_id FROM external_calendar_events WHERE external_event_id='event-exact-minutes'").get();
+  const job = getJob(external.job_id);
+  assert.equal(job.start_time, "2032-08-04T14:02");
+  assert.equal(job.end_time, "2032-08-04T15:07");
+  assert.equal(job.planned_minutes, 65);
+  integration.stop();
+  db.close();
+});
+
 test("incremental synchronization reads the central calendar and stores a sync token", async () => {
   const requests = [];
   const fetchImpl = async (url) => {
