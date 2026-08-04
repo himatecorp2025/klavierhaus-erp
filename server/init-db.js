@@ -10,6 +10,7 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.pragma("foreign_keys = ON");
 db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
 
 function log(message) {
   console.log(`[database] ${message}`);
@@ -69,8 +70,9 @@ function migrationRequiresBackup() {
   const usersMissingCalendarColor = tableExists("users") && !tableColumns("users").has("calendar_color");
   const usersMissingGoogleCalendarEmail = tableExists("users") && !tableColumns("users").has("google_calendar_email");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
+  const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || inventoryMissingCreator || googleIntegrationMissing;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing;
 }
 
 function createPreMigrationBackup() {
@@ -252,6 +254,7 @@ function runMigrations() {
     ensureColumn("jobs", "workflow_step_no", "INTEGER DEFAULT 1");
     ensureColumn("jobs", "workflow_status", "TEXT DEFAULT 'ACTIVE'");
     ensureColumn("jobs", "finalized_at", "TEXT");
+    ensureColumn("jobs", "planned_minutes", "INTEGER DEFAULT 0");
 
     // Import batches.
     ensureColumn("import_batches", "imported_pianos", "INTEGER DEFAULT 0");
@@ -332,6 +335,7 @@ function runMigrations() {
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
+  db.prepare("UPDATE jobs SET planned_minutes=CAST(ROUND(COALESCE(planned_hours,0)*60) AS INTEGER) WHERE COALESCE(planned_minutes,0)=0 AND COALESCE(planned_hours,0)>0").run();
   db.prepare("UPDATE pianos SET ownership_type=COALESCE(NULLIF(ownership_type,''),ownership,'Customer owned')").run();
   db.prepare("UPDATE pianos SET display_name=trim(COALESCE(NULLIF(original_description,''),COALESCE(brand,'')||' '||COALESCE(model,''))) WHERE display_name IS NULL OR display_name='' ").run();
 
