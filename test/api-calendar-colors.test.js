@@ -64,8 +64,8 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
     creator: { email: "worker.calendar@gmail.com" },
     organizer: { email: "klavierhauswork@gmail.com" },
     attendees: [{ email: "attendee@example.com" }],
-    start: { dateTime: "2031-01-15T13:00:00-05:00" },
-    end: { dateTime: "2031-01-15T15:00:00-05:00" }
+    start: { dateTime: "2031-01-15T13:02:00-05:00" },
+    end: { dateTime: "2031-01-15T15:07:00-05:00" }
   };
   const init = spawnSync(process.execPath, [path.join(projectRoot, "server", "init-db.js")], {
     cwd: projectRoot,
@@ -84,7 +84,7 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   insert.run("U-W", "Worker Test", "worker@example.com", hash, "WORKER", "#0891B2", 0, 0);
   insert.run("U-M", "Manager Test", "manager@example.com", hash, "MANAGER", "#DB2777", 0, 0);
   db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,title,job_type,assigned_user_id,assigned_to,created_by_user_id,created_by,status,start_time,end_time,timezone)
-    VALUES(?,?,?,1,'ACTIVE',?,'Standalone','U-W','Worker Test','U-A','Admin Test','Open','2031-01-15T13:00','2031-01-15T15:00','America/New_York')`)
+    VALUES(?,?,?,1,'ACTIVE',?,'Standalone','U-W','Worker Test','U-A','Admin Test','Open','2031-01-15T13:02','2031-01-15T15:07','America/New_York')`)
     .run(googleDetailJobId,"JK-GOOGLE-DETAIL",googleDetailJobId,googleRawEvent.summary);
   db.prepare(`INSERT INTO external_calendar_events(
     id,provider,calendar_id,external_event_id,external_status,event_etag,creator_email,organizer_email,job_id,review_status,conflict_flag,raw_json
@@ -112,6 +112,15 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
     throw new Error(`${error.message}\n${serverOutput}`);
   });
 
+  const staticResponse = await fetch(`${baseUrl}/app.js`, {
+    headers: { "Accept-Encoding": "gzip" }
+  });
+  assert.equal(staticResponse.status, 200);
+  assert.match(staticResponse.headers.get("cache-control") || "", /no-cache/);
+  assert.ok(staticResponse.headers.get("etag"));
+  assert.equal(staticResponse.headers.get("content-encoding"), "gzip");
+  await staticResponse.arrayBuffer();
+
   const login = async (email) => {
     const response = await request(baseUrl, "/api/login", { method: "POST", body: { email, password } });
     assert.equal(response.status, 200, JSON.stringify(response.payload));
@@ -120,6 +129,17 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   const superToken = await login("owner@example.com");
   const adminToken = await login("admin@example.com");
   const workerToken = await login("worker@example.com");
+
+  const createdContact = await request(baseUrl, "/api/contacts", { token: workerToken, method: "POST", body: { name: "Detail client" } });
+  assert.equal(createdContact.status, 200, JSON.stringify(createdContact.payload));
+  const contactDetail = await request(baseUrl, `/api/contacts/${encodeURIComponent(createdContact.payload.id)}`, { token: workerToken });
+  assert.equal(contactDetail.status, 200);
+  assert.equal(contactDetail.payload.name, "Detail client");
+  const createdPiano = await request(baseUrl, "/api/pianos", { token: workerToken, method: "POST", body: { display_name: "Detail piano", owner_contact_id: createdContact.payload.id } });
+  assert.equal(createdPiano.status, 200, JSON.stringify(createdPiano.payload));
+  const pianoDetail = await request(baseUrl, `/api/pianos/${encodeURIComponent(createdPiano.payload.id)}`, { token: workerToken });
+  assert.equal(pianoDetail.status, 200);
+  assert.equal(pianoDetail.payload.owner_name, "Detail client");
 
   const visibleUsers = await request(baseUrl, "/api/users", { token: adminToken });
   assert.equal(visibleUsers.status, 200);
@@ -175,6 +195,54 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   });
   assert.equal(createdJob.status, 200, JSON.stringify(createdJob.payload));
   assert.equal(createdJob.payload.assigned_calendar_color, "#0F766E");
+  assert.equal(createdJob.payload.planned_minutes, 120);
+
+  const retroactiveJob = await request(baseUrl, "/api/jobs", {
+    token: workerToken,
+    method: "POST",
+    body: {
+      title: "Retroactive valid job",
+      assigned_user_id: "U-W",
+      start_time: "2020-01-10T10:00",
+      end_time: "2020-01-10T13:05",
+      planned_minutes: 999
+    }
+  });
+  assert.equal(retroactiveJob.status, 200, JSON.stringify(retroactiveJob.payload));
+  assert.equal(retroactiveJob.payload.planned_minutes, 185);
+  assert.ok(Math.abs(Number(retroactiveJob.payload.planned_hours) - (185 / 60)) < 0.00001);
+
+  const reversedTime = await request(baseUrl, "/api/jobs", {
+    token: workerToken,
+    method: "POST",
+    body: { title: "Reversed", assigned_user_id: "U-W", start_time: "2020-02-01T18:00", end_time: "2020-02-01T15:00" }
+  });
+  assert.equal(reversedTime.status, 400);
+  assert.equal(reversedTime.payload.error, "INVALID_TIME_RANGE");
+
+  const invalidMinuteStep = await request(baseUrl, "/api/jobs", {
+    token: workerToken,
+    method: "POST",
+    body: { title: "Invalid minute", assigned_user_id: "U-W", start_time: "2020-02-01T10:02", end_time: "2020-02-01T11:00" }
+  });
+  assert.equal(invalidMinuteStep.status, 400);
+  assert.equal(invalidMinuteStep.payload.error, "INVALID_TIME_STEP");
+
+  const invalidPlannedDuration = await request(baseUrl, "/api/planned-jobs", {
+    token: workerToken,
+    method: "POST",
+    body: { title: "Bad planned duration", client_name: "Test client", estimated_hours: 3.02 }
+  });
+  assert.equal(invalidPlannedDuration.status, 400);
+  assert.equal(invalidPlannedDuration.payload.error, "INVALID_PLANNED_DURATION");
+
+  const validPlannedDuration = await request(baseUrl, "/api/planned-jobs", {
+    token: workerToken,
+    method: "POST",
+    body: { title: "Good planned duration", client_name: "Test client", estimated_hours: 185 / 60 }
+  });
+  assert.equal(validPlannedDuration.status, 200, JSON.stringify(validPlannedDuration.payload));
+  assert.ok(Math.abs(Number(validPlannedDuration.payload.estimated_hours) - (185 / 60)) < 0.00001);
 
   const pendingDetail = await request(baseUrl, `/api/jobs/${encodeURIComponent(googleDetailJobId)}`, { token: adminToken });
   assert.equal(pendingDetail.status, 200, JSON.stringify(pendingDetail.payload));
@@ -187,6 +255,24 @@ test("calendar-color API enforces roles, follows reassignment and keeps superadm
   assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "organizer"), false);
   assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "htmlLink"), false);
   assert.equal(Object.hasOwn(pendingDetail.payload.calendar_import, "external_event_id"), false);
+
+  const editedImportedJob = await request(baseUrl, `/api/jobs/${encodeURIComponent(googleDetailJobId)}`, {
+    token: adminToken,
+    method: "PUT",
+    body: {
+      title: googleRawEvent.summary,
+      job_type: "Standalone",
+      assigned_user_id: "U-W",
+      start_time: "2031-01-15T13:02",
+      end_time: "2031-01-15T15:07",
+      planned_minutes: 125,
+      planned_hours: 125 / 60
+    }
+  });
+  assert.equal(editedImportedJob.status, 200, JSON.stringify(editedImportedJob.payload));
+  assert.equal(editedImportedJob.payload.start_time, "2031-01-15T13:02");
+  assert.equal(editedImportedJob.payload.end_time, "2031-01-15T15:07");
+  assert.equal(editedImportedJob.payload.planned_minutes, 125);
 
   const rangeWithoutRawImport = await request(baseUrl, "/api/jobs?from=2031-01-15T00%3A00&to=2031-01-16T00%3A00", { token: adminToken });
   assert.equal(rangeWithoutRawImport.status, 200);
