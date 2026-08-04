@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   planned_amount REAL DEFAULT 0,
   pricing_basis TEXT,
   planned_hours REAL DEFAULT 0,
+  planned_minutes INTEGER DEFAULT 0,
   travel_minutes INTEGER DEFAULT 0,
   service_address TEXT,
   instructions TEXT,
