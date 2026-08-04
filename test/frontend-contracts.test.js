@@ -5,8 +5,10 @@ const path = require("node:path");
 
 const projectRoot = path.join(__dirname, "..");
 const appSource = fs.readFileSync(path.join(projectRoot, "public", "app.js"), "utf8");
+const indexSource = fs.readFileSync(path.join(projectRoot, "public", "index.html"), "utf8");
 const styles = fs.readFileSync(path.join(projectRoot, "public", "styles.css"), "utf8");
 const serviceWorker = fs.readFileSync(path.join(projectRoot, "public", "service-worker.js"), "utf8");
+const serverSource = fs.readFileSync(path.join(projectRoot, "server", "index.js"), "utf8");
 
 test("scheduler places the status legend before the calendar and has no employee legend markup", () => {
   const schedulerStart = appSource.indexOf("async function renderScheduler()");
@@ -39,7 +41,8 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui1/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui2/);
+  assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
   assert.match(serviceWorker, /ACKNOWLEDGE_NOTIFICATION/);
@@ -92,4 +95,59 @@ test("job details render one language immediately and expose only curated pendin
   assert.doesNotMatch(detailsSource, />Close \/ Bezár</);
   assert.doesNotMatch(detailsSource, />Edit job \/ Munka szerkesztése</);
   assert.match(styles, /google-import-row dd\{[^}]*overflow-wrap:anywhere/);
+});
+
+test("manual scheduling uses wall-clock arithmetic, five-minute steps and readable durations", () => {
+  assert.match(appSource, /function addWallClockMinutes/);
+  assert.match(appSource, /function wallClockDifferenceMinutes/);
+  assert.match(appSource, /function isFiveMinuteDateTime/);
+  assert.match(appSource, /function formatDurationLabel/);
+  assert.match(appSource, /preservesExistingExactTime/);
+  assert.match(appSource, /const timesUnchanged=Boolean/);
+  assert.ok((appSource.match(/step="300"/g) || []).length >= 4);
+  assert.match(appSource, /const dateTimeStep=preservesExistingExactTime\?"any":"300"/);
+  assert.match(appSource, /INVALID_TIME_STEP/);
+  assert.match(appSource, /INVALID_PLANNED_DURATION/);
+  assert.match(serverSource, /function localDateTimeValue/);
+  assert.match(serverSource, /function isFiveMinuteTime/);
+  assert.match(serverSource, /planned_minutes=timeRangeMinutes/);
+});
+
+test("login password visibility starts hidden and the eye icon reflects the real state", () => {
+  assert.match(indexSource, /id="loginPassword"[^>]*type="password"/);
+  assert.match(indexSource, /id="toggleLoginPassword"[\s\S]*?<path d="M3 3l18 18/);
+  assert.match(appSource, /password\.type="password"/);
+  assert.match(appSource, /toggle\.innerHTML=visible\?openEye:crossedEye/);
+  assert.match(appSource, /visible\?bi\("Hide password","Jelszó elrejtése"\):bi\("Show password","Jelszó megjelenítése"\)/);
+});
+
+test("views and modal content are localized before they become visible", () => {
+  assert.match(appSource, /function currentLanguageRoot/);
+  assert.match(appSource, /target\.classList\.add\("i18n-rendering"\)/);
+  assert.match(appSource, /applyLanguageToDOM\(target\)/);
+  assert.match(appSource, /function initLocalizedModalRendering/);
+  assert.match(appSource, /observer\.observe\(form,\{childList:true\}\)/);
+  assert.match(appSource, /function looksLikeBilingualUiText/);
+  assert.match(appSource, /Telefon\|Hely\|Zongora/);
+  assert.match(appSource, /!looksLikeBilingualUiText\(node\.nodeValue\)/);
+  assert.match(styles, /\.view\.i18n-rendering,\.modal\.i18n-rendering \.modal-box\{visibility:hidden\}/);
+});
+
+test("modal layouts cannot create horizontal scrolling on desktop, mobile or PWA", () => {
+  assert.match(styles, /\.modal-box\{overflow-x:hidden;overflow-y:auto/);
+  assert.match(styles, /#form\{width:100%;overflow-x:hidden\}/);
+  assert.match(styles, /overflow-wrap:anywhere/);
+  assert.match(styles, /#form :where\(table\)\{width:100%;max-width:100%;table-layout:fixed\}/);
+  assert.match(styles, /\.import-preview-table\{max-width:100%;overflow-x:hidden!important/);
+});
+
+test("large master lists are cached, coalesced and searched with debounce", () => {
+  assert.match(appSource, /CACHEABLE_MASTER_ENDPOINTS/);
+  assert.match(appSource, /apiResponseCache/);
+  assert.match(appSource, /function scheduleContactsRender/);
+  assert.match(appSource, /function schedulePianosRender/);
+  assert.match(appSource, /275/);
+  assert.match(appSource, /document\.visibilityState!=="hidden"/);
+  assert.match(serverSource, /compression\(\{threshold:1024\}\)/);
+  assert.match(serverSource, /busy_timeout = 5000/);
 });
