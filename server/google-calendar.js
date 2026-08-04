@@ -43,6 +43,15 @@ function createGoogleCalendarIntegration(options) {
   let pollTimer = null;
   let watchTimer = null;
 
+  function wallClockMinutes(startTime,endTime){
+    const toValue=(value)=>{
+      const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      return match?Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]),Number(match[4]),Number(match[5])):NaN;
+    };
+    const start=toValue(startTime),end=toValue(endTime);
+    return Number.isFinite(start)&&Number.isFinite(end)&&end>start?Math.round((end-start)/60000):0;
+  }
+
   function encrypt(value) {
     if (!value) return null;
     if (!encryptionKey) throw new Error("GOOGLE_TOKEN_ENCRYPTION_KEY_REQUIRED");
@@ -336,10 +345,12 @@ function createGoogleCalendarIntegration(options) {
 
       const effectiveAssignee = job.assigned_user_id ? { id: job.assigned_user_id, name: job.assigned_to } : assignee;
       const conflicts = effectiveAssignee ? findScheduleConflicts(effectiveAssignee.id, effectiveAssignee.name, startTime, endTime, job.id) : [];
-      db.prepare(`UPDATE jobs SET title=?,start_time=?,end_time=?,instructions=?,
+      const plannedMinutes=wallClockMinutes(startTime,endTime);
+      db.prepare(`UPDATE jobs SET title=?,start_time=?,end_time=?,instructions=?,planned_minutes=?,planned_hours=?,
         assigned_user_id=?,assigned_to=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(
           String(event.summary || "Google Calendar event / Google Naptár-esemény").trim(), startTime, endTime, importedInstructions(event),
+          plannedMinutes,plannedMinutes/60,
           effectiveAssignee?.id || null, effectiveAssignee?.name || "Unassigned / Nincs hozzárendelve", job.id
         );
       const updated = getJob(job.id);
@@ -352,12 +363,12 @@ function createGoogleCalendarIntegration(options) {
     const jobId = rid("J");
     db.prepare(`INSERT INTO jobs(
       id,job_key,workflow_root_id,workflow_step_no,workflow_status,title,job_type,assigned_user_id,assigned_to,created_by,
-      priority,status,start_time,end_time,timezone,planned_amount,planned_hours,travel_minutes,service_address,instructions
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         jobId, stableJobKey(), jobId, 1, "ACTIVE", String(event.summary || "Google Calendar event / Google Naptár-esemény").trim(),
         "Standalone", assignee?.id || null, assignee?.name || "Unassigned / Nincs hozzárendelve", "Google Calendar",
-        "Medium", "Open", startTime, endTime, "America/New_York", 0, 0, 0, "", importedInstructions(event)
+        "Medium", "Open", startTime, endTime, "America/New_York", 0, wallClockMinutes(startTime,endTime)/60, wallClockMinutes(startTime,endTime), 0, "", importedInstructions(event)
       );
     const job = getJob(jobId);
     upsertExternalEvent(event, { jobId, reviewStatus: "NEEDS_REVIEW", conflictFlag: conflicts.length > 0 });
