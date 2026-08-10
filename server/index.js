@@ -8,10 +8,16 @@ const compression = require("compression");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const multer = require("multer");
 const Database = require("better-sqlite3");
 const { legacyCalendarColor, validateCalendarColor } = require("./calendar-colors");
 const { createGoogleCalendarIntegration } = require("./google-calendar");
+const {
+  createDocumentUpload,
+  createBrandingUpload,
+  createClientImportUpload,
+  createPianoImportUpload,
+  uploadErrorHandler
+} = require("./upload-middleware");
 let webpush=null;
 try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable:",error.message);}
 require("dotenv").config();
@@ -180,35 +186,13 @@ function validMagic(filePath){
   const png=b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47;
   return pdf||jpg||png;
 }
-const upload = multer({
-  dest: UPLOAD_DIR,
-  limits:{fileSize:20*1024*1024},
-  fileFilter: (req,file,cb)=>{
-    const ok = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname || "");
-    if(!ok) return cb(new Error("Only PDF, JPG, JPEG or PNG files are allowed / Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel"));
-    cb(null,true);
-  }
-});
+const upload=createDocumentUpload(UPLOAD_DIR);
 
 app.use(cors());
 app.use(compression({threshold:1024}));
 app.use(express.json({limit:"10mb"}));
-const brandingUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req,_file,cb)=>cb(null,UPLOAD_DIR),
-    filename: (_req,file,cb)=>cb(null,`branding-${Date.now()}${path.extname(file.originalname||'').toLowerCase()||'.png'}`)
-  }),
-  limits:{fileSize:15*1024*1024},
-  fileFilter:(_req,file,cb)=>{const ok=['image/png','image/jpeg','image/jpg'].includes(String(file.mimetype||'').toLowerCase())||/\.(png|jpe?g)$/i.test(file.originalname||'');cb(ok?null:new Error('INVALID_FILE_TYPE'),ok)}
-});
-const clientImportUpload = multer({
-  storage: multer.memoryStorage(),
-  limits:{fileSize:25*1024*1024},
-  fileFilter:(_req,file,cb)=>{
-    const ok=/\.xlsx$/i.test(file.originalname||'') || String(file.mimetype||'').toLowerCase()==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    cb(ok?null:new Error('INVALID_EXCEL_FILE'),ok);
-  }
-});
+const brandingUpload=createBrandingUpload(UPLOAD_DIR);
+const clientImportUpload=createClientImportUpload();
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
   if(b.length>=24 && b.toString('hex',0,8)==='89504e470d0a1a0a') return {type:'image/png',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};
@@ -1409,7 +1393,7 @@ app.post('/api/imports/clients/:batchId/commit',auth,permit('ADMIN'),(req,res)=>
   }
 });
 
-const pianoImportUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:15*1024*1024},fileFilter:(req,file,cb)=>cb(null,/\.xlsx$/i.test(file.originalname||''))});
+const pianoImportUpload=createPianoImportUpload();
 app.post('/api/imports/pianos/analyze',auth,permit('ADMIN'),pianoImportUpload.single('file'),(req,res)=>{
   if(!req.file)return res.status(400).json({error:'INVALID_EXCEL_FILE'});
   try{
@@ -2177,10 +2161,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   res.json({ok:true,reset:true,preservedSuperadminId:superadminId});
 });
 
-app.use((err,req,res,next)=>{
-  if(err){ const code=err.code==="LIMIT_FILE_SIZE"?"FILE_TOO_LARGE":(err.message||"UPLOAD_ERROR"); return res.status(400).json({error:code}); }
-  next();
-});
+app.use(uploadErrorHandler);
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
 app.listen(PORT,()=>console.log(`Klavierhaus v6.5.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
