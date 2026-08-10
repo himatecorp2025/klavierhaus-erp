@@ -18,6 +18,8 @@ jobs:
         with:
           node-version: 20.18.0
           cache: npm
+      - name: Validate package manifests
+        run: npm run check:manifests
       - name: Install locked dependencies
         run: npm ci
       - name: Check JavaScript syntax
