@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui2/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui3/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -117,8 +117,19 @@ test("login password visibility starts hidden and the eye icon reflects the real
   assert.match(indexSource, /id="loginPassword"[^>]*type="password"/);
   assert.match(indexSource, /id="toggleLoginPassword"[\s\S]*?<path d="M3 3l18 18/);
   assert.match(appSource, /password\.type="password"/);
+  assert.match(appSource, /function initializePasswordVisibilityToggle/);
   assert.match(appSource, /toggle\.innerHTML=visible\?openEye:crossedEye/);
   assert.match(appSource, /visible\?bi\("Hide password","Jelszó elrejtése"\):bi\("Show password","Jelszó megjelenítése"\)/);
+});
+
+test("user editor requires exact password confirmation and provides two independent visibility controls", () => {
+  assert.match(appSource, /id="userPassword" name="password" type="password"/);
+  assert.match(appSource, /id="userPasswordConfirmation" name="password_confirmation" type="password"/);
+  assert.match(appSource, /id="toggleUserPassword"/);
+  assert.match(appSource, /id="toggleUserPasswordConfirmation"/);
+  assert.match(appSource, /body\.password!==body\.password_confirmation/);
+  assert.match(appSource, /PASSWORD_CONFIRMATION_MISMATCH/);
+  assert.match(appSource, /User and password updated successfully\./);
 });
 
 test("views and modal content are localized before they become visible", () => {
