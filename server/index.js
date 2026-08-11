@@ -13,6 +13,7 @@ const { legacyCalendarColor, validateCalendarColor } = require("./calendar-color
 const { createGoogleCalendarIntegration } = require("./google-calendar");
 const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
+const { registerEventRoutes } = require("./events");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -53,7 +54,7 @@ const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
     WORKER:[...commonView]
   };
@@ -656,6 +657,18 @@ function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || N
 function canManageCalendarColors(user){ return Boolean(user && (isSuperadminUser(user) || user.role === "ADMIN")); }
 function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 function requireSuperadmin(req,res,next){ return isSuperadminUser(req.user) ? next() : res.status(403).json({error:"Superadmin only / Csak szuperadmin"}); }
+registerEventRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  requireSuperadmin,
+  audit,
+  transactionalEmail,
+  qrSecret:process.env.EVENT_QR_SECRET||JWT_SECRET,
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
+  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
+});
 function resolveActiveUser(userId, userName){
   if(userId){const byId=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(userId);if(byId)return byId;}
   if(userName){return db.prepare("SELECT id,name FROM users WHERE lower(trim(name))=lower(trim(?)) AND status='Active' LIMIT 1").get(userName)||null;}
@@ -2220,7 +2233,7 @@ app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{co
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
-  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view'];
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
@@ -2272,6 +2285,13 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "calendar_oauth_states",
       "external_calendar_events",
       "calendar_integrations",
+      "event_checkins",
+      "event_refund_requests",
+      "event_tickets",
+      "event_invitations",
+      "event_closures",
+      "events",
+      "event_categories",
       "journal_lines",
       "journal_entries",
       "accounts",
@@ -2319,12 +2339,24 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
         WORKER:[...commonView]
       };
       const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
       Object.entries(defaults).forEach(([role,permissions])=>permissions.forEach(permission=>insertPermission.run(role,permission)));
+    }
+
+    if(exists("event_categories")){
+      const insertCategory=db.prepare("INSERT INTO event_categories(id,code,name_en,name_hu,sort_order) VALUES(?,?,?,?,?)");
+      [
+        ["EVC-PIANO-CONCERT","PIANO_CONCERT","Piano Concert","Zongorahangverseny",10],
+        ["EVC-ARTIST-PERFORMANCE","ARTIST_PERFORMANCE","Artist Performance","Művészi előadás",20],
+        ["EVC-SALON-CONCERT","SALON_CONCERT","Salon Concert","Szalonkoncert",30],
+        ["EVC-MASTERCLASS","MASTERCLASS","Masterclass","Mesterkurzus",40],
+        ["EVC-CULTURAL-EVENT","CULTURAL_EVENT","Cultural Event","Kulturális esemény",50],
+        ["EVC-OTHER-MUSICAL","OTHER_MUSICAL_EVENT","Other Musical Event","Egyéb zenei esemény",60]
+      ].forEach(row=>insertCategory.run(...row));
     }
 
     if(exists("sqlite_sequence")) db.prepare("DELETE FROM sqlite_sequence").run();
