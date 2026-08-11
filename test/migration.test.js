@@ -15,7 +15,9 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   const currentSchema = fs.readFileSync(path.join(projectRoot, "server", "schema.sql"), "utf8");
   const legacySchema = currentSchema
     .replace("  calendar_color TEXT,\n", "")
-    .replace("  planned_minutes INTEGER DEFAULT 0,\n", "");
+    .replace("  contact_email TEXT,\n", "")
+    .replace("  planned_minutes INTEGER DEFAULT 0,\n", "")
+    .replace(/-- Existing accounts remain verified by default[\s\S]*?CREATE TABLE IF NOT EXISTS contacts \(/, "CREATE TABLE IF NOT EXISTS contacts (");
   const db = new Database(dbPath);
   db.exec(legacySchema);
   const passwordHash = "legacy-hash";
@@ -41,12 +43,18 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   const jobColumns = migrated.prepare("PRAGMA table_info(jobs)").all().map((column) => column.name);
   assert.ok(columns.includes("calendar_color"));
   assert.ok(columns.includes("google_calendar_email"));
+  assert.ok(columns.includes("contact_email"));
   assert.ok(jobColumns.includes("planned_minutes"));
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_integrations'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_calendar_events'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_activations'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activation_email_log'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activation_email_events'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_jobs_time_range'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_lookup'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_normalized'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_contact_email'").get());
+  assert.equal(migrated.prepare("SELECT COUNT(*) count FROM account_activations").get().count, 0);
   assert.deepEqual(
     migrated.prepare("SELECT name,calendar_color FROM users ORDER BY name").all(),
     [{ name: "Károly", calendar_color: "#2563EB" }, { name: "Misi", calendar_color: "#EA580C" }]
