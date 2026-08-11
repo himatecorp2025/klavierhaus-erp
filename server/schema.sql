@@ -12,10 +12,52 @@ CREATE TABLE IF NOT EXISTS users (
   address TEXT,
   calendar_color TEXT,
   google_calendar_email TEXT,
+  contact_email TEXT,
   hidden_user INTEGER DEFAULT 0,
   is_superadmin INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Existing accounts remain verified by default because only newly created users
+-- receive a row in this table.
+CREATE TABLE IF NOT EXISTS account_activations (
+  user_id TEXT PRIMARY KEY,
+  code_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','VERIFIED')),
+  code_version INTEGER NOT NULL DEFAULT 1,
+  issued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  verified_at TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT,
+  last_delivery_status TEXT DEFAULT 'PENDING',
+  last_delivery_log_id TEXT,
+  last_sent_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS activation_email_log (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  recipient_email TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  provider_message_id TEXT,
+  status TEXT NOT NULL,
+  reason TEXT,
+  error_code TEXT,
+  last_event_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS activation_email_events (
+  event_id TEXT PRIMARY KEY,
+  provider_message_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  event_created_at TEXT,
+  received_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
