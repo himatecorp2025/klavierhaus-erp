@@ -467,7 +467,20 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
   .login-card{max-height:calc(100svh - max(24px,env(safe-area-inset-top)) - max(24px,env(safe-area-inset-bottom)));overflow:auto!important;-webkit-overflow-scrolling:touch;}
 }
 
-.password-toggle svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+.password-toggle{color:var(--text)!important;opacity:1!important;visibility:visible!important;}
+.password-toggle svg{display:block!important;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;opacity:1!important;visibility:visible!important;}
+.password-eye-shape,.password-eye-slash{display:block;opacity:1;transition:opacity .15s ease;}
+.password-toggle.password-visible .password-eye-slash{opacity:0;}
+.password-toggle.password-hidden .password-eye-slash{opacity:1;}
+.activation-form h2{margin:8px 0 10px;font-size:clamp(1.35rem,5vw,1.7rem)}
+.activation-form>p{margin:0 0 12px;color:var(--muted);line-height:1.45}
+.activation-form .activation-recipient{color:var(--accent);font-weight:750;overflow-wrap:anywhere}
+.activation-form #activationCode{text-align:center;font-size:clamp(1.35rem,7vw,1.8rem);font-weight:800;letter-spacing:.38em;font-variant-numeric:tabular-nums;padding-left:calc(.38em + 12px)}
+.activation-form .secondary,.activation-form .ghost-btn{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
+.activation-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.78rem;font-weight:800;white-space:nowrap}
+.activation-status.pending{background:rgba(245,158,11,.16);color:#fbbf24;border:1px solid rgba(245,158,11,.34)}
+.activation-status.verified{background:rgba(16,185,129,.14);color:#34d399;border:1px solid rgba(16,185,129,.3)}
+:root[data-theme="light"] .activation-status.pending{color:#92400e}:root[data-theme="light"] .activation-status.verified{color:#065f46}
 
 
 /* Mandatory notification activation gate */
