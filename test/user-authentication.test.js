@@ -165,6 +165,7 @@ test("superadmin password reset persists immediately and normalized email login 
     body: {
       name: "Duplicate Alex",
       email: " ALEX@KLAVIERHOUSE.LOCAL ",
+      contact_email: "duplicate.alex@example.com",
       password: "DuplicatePassword7",
       password_confirmation: "DuplicatePassword7",
       role: "WORKER"
@@ -179,6 +180,7 @@ test("superadmin password reset persists immediately and normalized email login 
     body: {
       name: "New Case User",
       email: " New.User@Example.COM ",
+      contact_email: " New.User.Contact@Example.COM ",
       password: "NewUserPassword8",
       password_confirmation: "NewUserPassword8",
       role: "WORKER"
@@ -186,9 +188,16 @@ test("superadmin password reset persists immediately and normalized email login 
   });
   assert.equal(createdUser.status, 200, JSON.stringify(createdUser.payload));
   assert.equal(createdUser.payload.email, "new.user@example.com");
+  assert.equal(createdUser.payload.contact_email, "new.user.contact@example.com");
+  assert.equal(createdUser.payload.activation_status, "PENDING");
+  assert.equal(createdUser.payload.activation_delivery_status, "NOT_CONFIGURED");
   assert.equal(Object.hasOwn(createdUser.payload, "password"), false);
   assert.equal(Object.hasOwn(createdUser.payload, "password_hash"), false);
-  assert.equal((await login(" NEW.USER@EXAMPLE.COM ", "NewUserPassword8")).status, 200);
+  const pendingLogin = await login(" NEW.USER@EXAMPLE.COM ", "NewUserPassword8");
+  assert.equal(pendingLogin.status, 200);
+  assert.equal(pendingLogin.payload.activation_required, true);
+  assert.equal(typeof pendingLogin.payload.activation_token, "string");
+  assert.equal(Object.hasOwn(pendingLogin.payload, "token"), false);
   assert.equal((await login("new.user@example.com", "newuserpassword8")).status, 401);
 
   const workerReset = await request(baseUrl, "/api/users/U-W", {
