@@ -1,6 +1,7 @@
 
 let token=localStorage.getItem("kh_token");
 let user=JSON.parse(localStorage.getItem("kh_user")||"null");
+let pendingAccountActivation=null;
 let currentWeekStart=startOfWeek(new Date());
 let currentView="scheduler";
 let currentLang="en";
@@ -66,11 +67,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 
 const staticTranslations={
  en:{
-   appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",
+   appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",activationTitle:"Verify your account",activationDescription:"Enter the six-digit code sent to your contact email.",activationCode:"Activation code",activationVerify:"Verify and continue",activationResend:"Send a new code",activationBack:"Back to login",activationRecipient:"Code sent to",
    scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
-   appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",
+   appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",activationTitle:"Fiók ellenőrzése",activationDescription:"Add meg a kapcsolattartási e-mail-címedre küldött hatjegyű kódot.",activationCode:"Aktiválókód",activationVerify:"Ellenőrzés és belépés",activationResend:"Új kód küldése",activationBack:"Vissza a belépéshez",activationRecipient:"A kód címzettje",
    scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
@@ -103,6 +104,7 @@ function updateStaticChromeLanguage(){
   const title=document.getElementById("pageTitle"); if(title && currentView) title.textContent=navLabel(currentView);
   document.documentElement.lang=currentLang==="hu"?"hu":"en";
   updateLoginPasswordToggle();
+  updateActivationLanguage();
   updateCountdownDisplay();
 }
 function splitBilingualText(text){
@@ -142,6 +144,7 @@ function applyLanguageToDOM(root=currentLanguageRoot()){
   const sub=document.querySelector(".login-card p"); if(sub) sub.textContent=tr("loginSubtitle");
   const passLabel=document.querySelector('label[for="password"], #loginForm label:nth-of-type(2)'); if(passLabel) passLabel.textContent=tr("password");
   const loginBtn=document.querySelector('#loginForm button[type="submit"]'); if(loginBtn) loginBtn.textContent=tr("login");
+  updateActivationLanguage();
   const subtitle=document.getElementById("headerSubtitle"); if(subtitle) subtitle.textContent=tr("operations");
   const logoutBtn=document.getElementById("logoutBtn"); if(logoutBtn) logoutBtn.textContent=tr("logout");
   const delBtn=document.getElementById("deleteEverythingBtn"); if(delBtn) delBtn.textContent=tr("deleteEverything");
@@ -517,12 +520,12 @@ function updatePasswordVisibilityToggle(password,toggle){
  if(!password||!toggle)return;
  const visible=password.type==="text";
  toggle.classList.toggle("active",visible);
+ toggle.classList.toggle("password-visible",visible);
+ toggle.classList.toggle("password-hidden",!visible);
  toggle.setAttribute("aria-pressed",String(visible));
  toggle.setAttribute("aria-label",visible?bi("Hide password","Jelszó elrejtése"):bi("Show password","Jelszó megjelenítése"));
  toggle.setAttribute("title",visible?bi("Hide password","Jelszó elrejtése"):bi("Show password","Jelszó megjelenítése"));
- const openEye='<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.7"/></svg>';
- const crossedEye='<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.7 10.7 0 0112 4c5.5 0 9 6 9 6a16.7 16.7 0 01-2.5 3.2M6.6 6.6C4.3 8.1 3 10 3 10s3.5 6 9 6a9.7 9.7 0 004-.8"/></svg>';
- toggle.innerHTML=visible?openEye:crossedEye;
+ if(!toggle.querySelector(".password-eye-icon"))toggle.innerHTML='<svg class="password-eye-icon" aria-hidden="true" viewBox="0 0 24 24"><path class="password-eye-shape" d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle class="password-eye-shape" cx="12" cy="12" r="2.7"/><path class="password-eye-slash" d="M3 3l18 18"/></svg>';
 }
 function initializePasswordVisibilityToggle(password,toggle){
  if(!password||!toggle)return;
@@ -547,6 +550,37 @@ function initLoginExperience(){
   initializePasswordVisibilityToggle(password,toggle);
  }
  if(form){form.addEventListener("animationend",()=>{}, {once:true});}
+ const code=document.getElementById("activationCode");
+ if(code)code.addEventListener("input",()=>{code.value=code.value.replace(/\D/g,"").slice(0,6);});
+}
+
+function updateActivationLanguage(){
+ const mapping={activationTitle:"activationTitle",activationDescription:"activationDescription",activationCodeLabel:"activationCode",activationVerifyButton:"activationVerify",activationResendButton:"activationResend",activationBackButton:"activationBack"};
+ Object.entries(mapping).forEach(([id,key])=>{const element=document.getElementById(id);if(element)element.textContent=tr(key);});
+ const recipient=document.getElementById("activationRecipient");
+ if(recipient)recipient.textContent=pendingAccountActivation?.contactEmailMasked?`${tr("activationRecipient")}: ${pendingAccountActivation.contactEmailMasked}`:"";
+}
+function showAccountActivationStep(result){
+ pendingAccountActivation={token:String(result.activation_token||""),contactEmailMasked:String(result.contact_email_masked||"")};
+ document.getElementById("loginForm")?.classList.add("hidden");
+ document.getElementById("activationForm")?.classList.remove("hidden");
+ const code=document.getElementById("activationCode");if(code){code.value="";code.focus({preventScroll:true});}
+ updateActivationLanguage();
+}
+function showLoginStep(){
+ pendingAccountActivation=null;
+ document.getElementById("activationForm")?.classList.add("hidden");
+ document.getElementById("loginForm")?.classList.remove("hidden");
+ const code=document.getElementById("activationCode");if(code)code.value="";
+ document.getElementById("loginEmail")?.focus({preventScroll:true});
+}
+function completeLoginSession(result,email=""){
+ token=result.token;user=result.user;
+ localStorage.setItem("kh_token",token);
+ localStorage.setItem("kh_user",JSON.stringify(user));
+ if(email)localStorage.setItem("kh_last_login_email",email);
+ pendingAccountActivation=null;
+ loadLanguage();boot();
 }
 
 $("#loginForm").onsubmit=async e=>{
@@ -556,14 +590,38 @@ $("#loginForm").onsubmit=async e=>{
  try{
   const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)});
   const r=await response.json().catch(()=>({error:"INVALID_LOGIN"}));
-  if(!response.ok || !r.token)return showError(r.error||"INVALID_LOGIN");
-  token=r.token;user=r.user;
-  localStorage.setItem("kh_token",token);
-  localStorage.setItem("kh_user",JSON.stringify(user));
-  localStorage.setItem("kh_last_login_email",fd.email);
-  loadLanguage();boot();
+  if(!response.ok)return showError(r.error||"INVALID_LOGIN");
+  if(r.activation_required){localStorage.setItem("kh_last_login_email",fd.email);return showAccountActivationStep(r);}
+  if(!r.token)return showError("INVALID_LOGIN");
+  completeLoginSession(r,fd.email);
  }catch(_error){showError("LOGIN_SERVICE_UNAVAILABLE");}
 };
+$("#activationForm").onsubmit=async e=>{
+ e.preventDefault();
+ if(!pendingAccountActivation?.token)return showLoginStep();
+ const activationCode=String(document.getElementById("activationCode")?.value||"").trim();
+ if(!/^\d{6}$/.test(activationCode))return showError("INVALID_ACTIVATION_CODE");
+ try{
+  const response=await fetch("/api/account-activation/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({activation_token:pendingAccountActivation.token,activation_code:activationCode})});
+  const result=await response.json().catch(()=>({error:"INVALID_ACTIVATION_CODE"}));
+  if(!response.ok)return showError(result.error||"INVALID_ACTIVATION_CODE");
+  completeLoginSession(result,localStorage.getItem("kh_last_login_email")||"");
+ }catch(_error){showError("LOGIN_SERVICE_UNAVAILABLE");}
+};
+$("#activationResendButton").onclick=async()=>{
+ if(!pendingAccountActivation?.token)return showLoginStep();
+ const button=document.getElementById("activationResendButton");button.disabled=true;
+ try{
+  const response=await fetch("/api/account-activation/resend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({activation_token:pendingAccountActivation.token})});
+  const result=await response.json().catch(()=>({error:"EMAIL_DELIVERY_FAILED"}));
+  if(!response.ok)return showError(result.error||"EMAIL_DELIVERY_FAILED");
+  pendingAccountActivation.token=String(result.activation_token||pendingAccountActivation.token);
+  pendingAccountActivation.contactEmailMasked=String(result.contact_email_masked||pendingAccountActivation.contactEmailMasked);
+  document.getElementById("activationCode").value="";updateActivationLanguage();
+  showToast(bi("A new activation code has been sent.","Az új aktiválókódot elküldtük."),"success");
+ }catch(_error){showError("EMAIL_DELIVERY_FAILED");}finally{button.disabled=false;}
+};
+$("#activationBackButton").onclick=showLoginStep;
 $("#logoutBtn").onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
@@ -2828,10 +2886,12 @@ async function renderUsers(){
    const editBtn=isAdmin()?` <button class="small" onclick='openUser(${esc(x)},false)'>${tr("editUser")}</button>`:"";
    const messageBtn=` <button class="small icon-message-btn" title="${bi("Send message","Üzenet küldése")}" aria-label="${bi("Send message","Üzenet küldése")}" onclick='openDirectMessage(${esc(x)})'>✎</button>`;
    const deleteBtn=isSuperadmin()?` <button class="small danger-btn" onclick="deleteUser('${x.id}')">${bi("Delete","Törlés")}</button>`:"";
+   const resendBtn=isAdmin()&&x.activation_status==="PENDING"?` <button class="small" onclick="resendUserActivation('${x.id}')">${bi("Resend activation code","Aktiválókód újraküldése")}</button>`:"";
    const color=workerColor(x.name,x.calendar_color);
-   return `<tr><td>${htmlText(x.name||"")}</td><td>${htmlText(x.email||"")}</td><td>${htmlText(x.google_calendar_email||"")}</td><td>${htmlText(x.role||"")}</td><td><span class="user-color-cell"><i class="user-color-swatch" style="--user-color:${color}" aria-hidden="true"></i><span>${color}</span></span></td><td>${htmlText(x.phone||"")}</td><td>${htmlText(x.address||"")}</td><td>${htmlText(x.status||"")}</td><td>${profileBtn}${editBtn}${messageBtn}${deleteBtn}</td></tr>`;
+   const activation=x.activation_status==="PENDING"?bi("Pending activation","Aktiválásra vár"):bi("Verified","Ellenőrzött");
+   return `<tr><td>${htmlText(x.name||"")}</td><td>${htmlText(x.email||"")}</td><td>${htmlText(x.contact_email||"")}</td><td>${htmlText(x.google_calendar_email||"")}</td><td>${htmlText(x.role||"")}</td><td><span class="user-color-cell"><i class="user-color-swatch" style="--user-color:${color}" aria-hidden="true"></i><span>${color}</span></span></td><td>${htmlText(x.phone||"")}</td><td>${htmlText(x.address||"")}</td><td>${htmlText(x.status||"")}</td><td><span class="activation-status ${x.activation_status==="PENDING"?"pending":"verified"}">${activation}</span></td><td>${profileBtn}${editBtn}${messageBtn}${resendBtn}${deleteBtn}</td></tr>`;
  }).join("");
- $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>${bi("Name","Név")}</th><th>${bi("ERP email","ERP e-mail")}</th><th>${bi("Google Calendar email","Google Naptár e-mail")}</th><th>${bi("Role","Szerepkör")}</th><th>${bi("Calendar color","Naptárszín")}</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>${bi("Status","Állapot")}</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+ $("#users").innerHTML=`<div class="panel"><div class="toolbar"><h3>${tr("users")}</h3>${canAdd?`<button onclick="openUser(null,false)">+ ${tr("addUser")}</button>`:""}</div><div class="table-wrap"><table><thead><tr><th>${bi("Name","Név")}</th><th>${bi("ERP login email","ERP belépési e-mail")}</th><th>${bi("Contact email","Kapcsolattartási e-mail")}</th><th>${bi("Google Calendar email","Google Naptár e-mail")}</th><th>${bi("Role","Szerepkör")}</th><th>${bi("Calendar color","Naptárszín")}</th><th>${tr("phone")}</th><th>${tr("address")}</th><th>${bi("Status","Állapot")}</th><th>${bi("Account verification","Fiókellenőrzés")}</th><th>${tr("actions")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
  applyLanguageToDOM(document.getElementById("users"));
 }
 function openUser(row=null, selfProfile=false){
@@ -2850,7 +2910,8 @@ function openUser(row=null, selfProfile=false){
  const passwordRequired=isEdit?"":"required";
  const passwordHelp=isEdit?`<small>${tr("leaveEmpty")}</small>`:"";
  const passwordFields=`<div class="field user-password-field"><label for="userPassword">${isEdit?tr("newPassword"):tr("password")}</label><div class="password-field"><input id="userPassword" name="password" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPassword" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div><div class="field user-password-field"><label for="userPasswordConfirmation">${isEdit?bi("Confirm new password","Új jelszó megerősítése"):bi("Confirm password","Jelszó megerősítése")}</label><div class="password-field"><input id="userPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPasswordConfirmation" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div>`;
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>${bi("ERP email","ERP e-mail")}</label><input name="email" type="email" value="${row?.email||""}" required autocomplete="username" autocapitalize="none" spellcheck="false"></div><div class="field full"><label>${bi("Google Calendar email","Google Naptár e-mail")}</label><input name="google_calendar_email" type="email" value="${row?.google_calendar_email||""}" placeholder="${bi("Example: employee@gmail.com","Példa: munkatars@gmail.com")}"><small>${bi("Events created with this address in the shared Klavierhaus Work calendar are assigned to this employee.","A közös Klavierhaus Work naptárban ezzel a címmel létrehozott események ehhez a munkatárshoz kerülnek.")}</small></div>${passwordFields}<div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ const contactEmailRequired=!isEdit||row?.activation_status==="PENDING"?"required":"";
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${htmlText(row?.name||"")}" required></div><div class="field"><label>${bi("ERP login email","ERP belépési e-mail")}</label><input name="email" type="email" value="${htmlText(row?.email||"")}" required autocomplete="username" autocapitalize="none" spellcheck="false"><small>${bi("This may be an internal .local address used only for ERP login.","Ez lehet kizárólag ERP-belépéshez használt belső .local cím.")}</small></div><div class="field full"><label>${bi("Real contact and activation email","Valódi kapcsolattartási és aktiválási e-mail")}</label><input name="contact_email" type="email" value="${htmlText(row?.contact_email||"")}" ${contactEmailRequired} autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="employee@example.com"><small>${bi("The one-time activation code is sent here. A .local address cannot be used.","Az egyszeri aktiválókód erre a címre érkezik. .local cím itt nem használható.")}</small></div><div class="field full"><label>${bi("Google Calendar email","Google Naptár e-mail")}</label><input name="google_calendar_email" type="email" value="${htmlText(row?.google_calendar_email||"")}" placeholder="${bi("Example: employee@gmail.com","Példa: munkatars@gmail.com")}"><small>${bi("Events created with this address in the shared Klavierhaus Work calendar are assigned to this employee.","A közös Klavierhaus Work naptárban ezzel a címmel létrehozott események ehhez a munkatárshoz kerülnek.")}</small></div>${passwordFields}<div class="field"><label>${tr("phone")}</label><input name="phone" value="${htmlText(row?.phone||"")}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${htmlText(row?.address||"")}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
  initializePasswordVisibilityToggle(document.getElementById("userPassword"),document.getElementById("toggleUserPassword"));
  initializePasswordVisibilityToggle(document.getElementById("userPasswordConfirmation"),document.getElementById("toggleUserPasswordConfirmation"));
  $("#form").onsubmit=async e=>{
@@ -2861,6 +2922,7 @@ function openUser(row=null, selfProfile=false){
    const selectedTheme=body.profile_theme;
    delete body.profile_language;delete body.profile_theme;
    body.email=String(body.email||"").trim().toLowerCase();
+   body.contact_email=String(body.contact_email||"").trim().toLowerCase();
    if(body.password!==body.password_confirmation)return showError("PASSWORD_CONFIRMATION_MISMATCH");
    const passwordChanged=Boolean(body.password);
    if(isEdit&&!passwordChanged){delete body.password;delete body.password_confirmation;}
@@ -2868,16 +2930,22 @@ function openUser(row=null, selfProfile=false){
    let saved;
    if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
    else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});
-   const {password_updated:_passwordUpdated,...savedUser}=saved;
+   const {password_updated:_passwordUpdated,email_delivery_error:_deliveryError,activation_delivery_status:_deliveryStatus,...savedUser}=saved;
    if(isEdit&&row.id===user.id){
     user={...user,...savedUser};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;
     if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}
    }
    schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();
-   showToast(isEdit?(passwordChanged?bi("User and password updated successfully.","A felhasználó és a jelszó módosítása sikeres."):bi("User updated successfully.","A felhasználó módosítása sikeres.")):bi("User created successfully.","A felhasználó létrehozása sikeres."),"success");
+   if(!isEdit&&saved.activation_delivery_status!=="ACCEPTED")showToast(bi("User created, but the activation email was not sent. Configure email delivery, then use Resend activation code.","A felhasználó létrejött, de az aktiváló e-mail nem ment ki. Állítsd be az e-mail-küldést, majd használd az Aktiválókód újraküldése gombot."),"error");
+   else showToast(isEdit?(passwordChanged?bi("User and password updated successfully.","A felhasználó és a jelszó módosítása sikeres."):bi("User updated successfully.","A felhasználó módosítása sikeres.")):bi("User created and the activation code was sent.","A felhasználó létrejött, az aktiválókódot elküldtük."),"success");
    if(currentView==="users"&&isAdmin())renderUsers();
   }catch(err){showError(err);}
  };
+}
+async function resendUserActivation(id){
+ if(!isAdmin())return showError("PERMISSION_DENIED");
+ if(!await appConfirm(bi("Send a new activation code? The previous code will become invalid.","Küldjünk új aktiválókódot? A korábbi kód érvénytelenné válik."),{type:"warning",confirmText:bi("Send new code","Új kód küldése")}))return;
+ try{await api(`/api/users/${encodeURIComponent(id)}/resend-activation`,{method:"POST"});showToast(bi("A new activation code has been sent.","Az új aktiválókódot elküldtük."),"success");await renderUsers();}catch(error){showError(error);}
 }
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!await appConfirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?"),{type:"error",confirmText:bi("Delete permanently","Végleges törlés")}))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err)}}
 
@@ -2892,8 +2960,8 @@ function showToast(message,type="info"){
 function localizedErrorMessage(error){
  const code=String(error?.message||error||"");const details=error?.details||{};
  const userManagementErrors={
-  en:{INVALID_LOGIN:"Login failed. Check your email address and password.",ACCOUNT_INACTIVE:"This user account is inactive. Contact an administrator.",ACCOUNT_ROLE_INVALID:"This account has an invalid role. Contact the superadministrator.",USER_EMAIL_CONFLICT:"More than one account uses this email address. The superadministrator must resolve the duplicate before login.",USER_EMAIL_ALREADY_USED:"This ERP email address is already assigned to another user.",INVALID_USER_EMAIL:"Enter a valid ERP email address.",PASSWORD_CONFIRMATION_MISMATCH:"The two password fields must match exactly, including uppercase and lowercase letters.",PASSWORD_UPDATE_FAILED:"The password could not be saved. No changes were applied.",USER_UPDATE_FAILED:"The user could not be updated. No changes were applied.",LOGIN_SERVICE_UNAVAILABLE:"The login service is temporarily unavailable. Please try again."},
-  hu:{INVALID_LOGIN:"Sikertelen belépés. Ellenőrizd az e-mail-címet és a jelszót.",ACCOUNT_INACTIVE:"Ez a felhasználói fiók inaktív. Fordulj egy adminisztrátorhoz.",ACCOUNT_ROLE_INVALID:"A fiók szerepköre érvénytelen. Fordulj a szuperadminisztrátorhoz.",USER_EMAIL_CONFLICT:"Ehhez az e-mail-címhez több fiók tartozik. A belépés előtt a szuperadminisztrátornak fel kell oldania a duplikációt.",USER_EMAIL_ALREADY_USED:"Ez az ERP e-mail-cím már egy másik felhasználóhoz tartozik.",INVALID_USER_EMAIL:"Adj meg érvényes ERP e-mail-címet.",PASSWORD_CONFIRMATION_MISMATCH:"A két jelszómezőnek pontosan egyeznie kell, a kis- és nagybetűket is beleértve.",PASSWORD_UPDATE_FAILED:"A jelszó mentése sikertelen. A rendszer nem alkalmazta a módosításokat.",USER_UPDATE_FAILED:"A felhasználó módosítása sikertelen. A rendszer nem alkalmazta a módosításokat.",LOGIN_SERVICE_UNAVAILABLE:"A bejelentkezési szolgáltatás átmenetileg nem érhető el. Próbáld újra."}
+  en:{INVALID_LOGIN:"Login failed. Check your email address and password.",ACCOUNT_INACTIVE:"This user account is inactive. Contact an administrator.",ACCOUNT_ROLE_INVALID:"This account has an invalid role. Contact the superadministrator.",USER_EMAIL_CONFLICT:"More than one account uses this email address. The superadministrator must resolve the duplicate before login.",USER_EMAIL_ALREADY_USED:"This ERP email address is already assigned to another user.",INVALID_USER_EMAIL:"Enter a valid ERP login email address.",INVALID_CONTACT_EMAIL:"Enter a real contact email address. Internal .local addresses cannot receive activation messages.",CONTACT_EMAIL_ALREADY_USED:"This contact email address is already assigned to another user.",ACTIVATION_CONTACT_EMAIL_MISSING:"This account has no valid contact email. Ask an administrator to add one.",INVALID_ACTIVATION_SESSION:"The activation session is no longer valid. Return to login and sign in again.",INVALID_ACTIVATION_CODE:"Enter the correct six-digit activation code.",ACTIVATION_ALREADY_COMPLETED:"This account is already verified. Return to login.",ACTIVATION_NOT_REQUIRED:"This account does not require activation.",ACTIVATION_TEMPORARILY_LOCKED:"Too many incorrect codes were entered. Try again in 15 minutes.",ACTIVATION_RESEND_TOO_SOON:"Please wait one minute before requesting another activation code.",EMAIL_DELIVERY_NOT_CONFIGURED:"Transactional email is not configured on the server. Contact the superadministrator.",EMAIL_DELIVERY_FAILED:"The activation email could not be sent. Please try again or contact the superadministrator.",USER_CREATE_FAILED:"The user could not be created. No partial user record was saved.",USER_NOT_FOUND:"The selected user could not be found.",PASSWORD_CONFIRMATION_MISMATCH:"The two password fields must match exactly, including uppercase and lowercase letters.",PASSWORD_UPDATE_FAILED:"The password could not be saved. No changes were applied.",USER_UPDATE_FAILED:"The user could not be updated. No changes were applied.",LOGIN_SERVICE_UNAVAILABLE:"The login service is temporarily unavailable. Please try again."},
+  hu:{INVALID_LOGIN:"Sikertelen belépés. Ellenőrizd az e-mail-címet és a jelszót.",ACCOUNT_INACTIVE:"Ez a felhasználói fiók inaktív. Fordulj egy adminisztrátorhoz.",ACCOUNT_ROLE_INVALID:"A fiók szerepköre érvénytelen. Fordulj a szuperadminisztrátorhoz.",USER_EMAIL_CONFLICT:"Ehhez az e-mail-címhez több fiók tartozik. A belépés előtt a szuperadminisztrátornak fel kell oldania a duplikációt.",USER_EMAIL_ALREADY_USED:"Ez az ERP e-mail-cím már egy másik felhasználóhoz tartozik.",INVALID_USER_EMAIL:"Adj meg érvényes ERP belépési e-mail-címet.",INVALID_CONTACT_EMAIL:"Adj meg valódi kapcsolattartási e-mail-címet. A belső .local címekre nem küldhető aktiváló üzenet.",CONTACT_EMAIL_ALREADY_USED:"Ez a kapcsolattartási e-mail-cím már egy másik felhasználóhoz tartozik.",ACTIVATION_CONTACT_EMAIL_MISSING:"Ehhez a fiókhoz nincs érvényes kapcsolattartási e-mail-cím. Kérd egy adminisztrátor segítségét.",INVALID_ACTIVATION_SESSION:"Az aktiválási munkamenet már nem érvényes. Térj vissza, majd jelentkezz be újra.",INVALID_ACTIVATION_CODE:"Add meg a helyes, hatjegyű aktiválókódot.",ACTIVATION_ALREADY_COMPLETED:"Ezt a fiókot már ellenőrizték. Térj vissza a belépéshez.",ACTIVATION_NOT_REQUIRED:"Ehhez a fiókhoz nem szükséges aktiválás.",ACTIVATION_TEMPORARILY_LOCKED:"Túl sok hibás kódot adtál meg. Próbáld újra 15 perc múlva.",ACTIVATION_RESEND_TOO_SOON:"Új aktiválókód kérése előtt várj egy percet.",EMAIL_DELIVERY_NOT_CONFIGURED:"A tranzakciós e-mail-küldés nincs beállítva a szerveren. Fordulj a szuperadminisztrátorhoz.",EMAIL_DELIVERY_FAILED:"Az aktiváló e-mailt nem sikerült elküldeni. Próbáld újra, vagy fordulj a szuperadminisztrátorhoz.",USER_CREATE_FAILED:"A felhasználót nem sikerült létrehozni. Részleges felhasználói rekord nem maradt az adatbázisban.",USER_NOT_FOUND:"A kiválasztott felhasználó nem található.",PASSWORD_CONFIRMATION_MISMATCH:"A két jelszómezőnek pontosan egyeznie kell, a kis- és nagybetűket is beleértve.",PASSWORD_UPDATE_FAILED:"A jelszó mentése sikertelen. A rendszer nem alkalmazta a módosításokat.",USER_UPDATE_FAILED:"A felhasználó módosítása sikertelen. A rendszer nem alkalmazta a módosításokat.",LOGIN_SERVICE_UNAVAILABLE:"A bejelentkezési szolgáltatás átmenetileg nem érhető el. Próbáld újra."}
  };
  if(userManagementErrors[currentLang]?.[code])return userManagementErrors[currentLang][code];
  const googleErrors={
