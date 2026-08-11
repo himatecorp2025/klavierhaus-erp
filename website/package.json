@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/site-content.js && node --check public/app.js",
+    "check": "node --check server/index.js && node --check server/event-client.js && node --check server/site-content.js && node --check public/app.js",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
