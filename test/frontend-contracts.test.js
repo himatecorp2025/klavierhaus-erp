@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui5/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui6/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -65,10 +65,19 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(eventSource, /closeEventRecord/);
   assert.match(eventSource, /deleteEventDraft/);
   assert.match(eventSource, /step="300"/);
+  assert.match(eventSource, /name="event_image"/);
+  assert.match(eventSource, /prepareEventImageFile/);
+  assert.match(eventSource, /Save without publishing','Mentés közzététel nélkül/);
+  assert.match(eventSource, /Save and publish','Mentés és publikálás/);
+  assert.match(eventSource, /Event description · English/);
+  assert.match(eventSource, /Eseményleírás · Magyar/);
+  assert.doesNotMatch(eventSource, /name="slug_en"|name="slug_hu"/);
+  assert.doesNotMatch(eventSource, /Short description · English|Rövid leírás · Magyar|Hero image URL|Borítókép URL/);
   assert.match(styles, /Event operations module v25/);
+  assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui5/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui6/);
 });
 
 test("Google Calendar UI is bilingual, range-limited and preserves status-color priority", () => {
