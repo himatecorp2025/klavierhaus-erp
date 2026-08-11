@@ -252,6 +252,176 @@ LEFT JOIN journal_lines jl ON jl.account_code=a.code
 GROUP BY a.code;
 
 
+-- Public cultural events are managed by the protected ERP and published to the
+-- separately deployed website through a read-only API. All additions are
+-- forward-compatible and leave existing ERP business records untouched.
+CREATE TABLE IF NOT EXISTS event_categories (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name_en TEXT NOT NULL,
+  name_hu TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  event_key TEXT NOT NULL UNIQUE,
+  category_id TEXT NOT NULL,
+  access_type TEXT NOT NULL CHECK(access_type IN ('PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL')),
+  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),
+  slug_en TEXT NOT NULL UNIQUE,
+  slug_hu TEXT NOT NULL UNIQUE,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  short_description_en TEXT,
+  short_description_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  performer_name TEXT,
+  hero_image_url TEXT,
+  gallery_json TEXT DEFAULT '[]',
+  venue_name TEXT NOT NULL,
+  venue_street TEXT NOT NULL,
+  venue_city TEXT NOT NULL,
+  venue_region TEXT NOT NULL,
+  venue_postal_code TEXT NOT NULL,
+  venue_country TEXT NOT NULL DEFAULT 'US',
+  timezone TEXT NOT NULL DEFAULT 'America/New_York',
+  start_at TEXT NOT NULL,
+  end_at TEXT NOT NULL,
+  previous_start_at TEXT,
+  capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),
+  price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  sales_start_at TEXT,
+  sales_end_at TEXT,
+  refund_policy_version TEXT NOT NULL DEFAULT 'KH-48H-V1',
+  published_at TEXT,
+  closed_at TEXT,
+  closed_by_user_id TEXT,
+  closure_snapshot_json TEXT,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(category_id) REFERENCES event_categories(id),
+  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_invitations (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  guest_name TEXT NOT NULL,
+  guest_email TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','ACCEPTED','DECLINED','REVOKED')),
+  token_hash TEXT NOT NULL UNIQUE,
+  delivery_status TEXT NOT NULL DEFAULT 'PENDING',
+  provider_message_id TEXT,
+  sent_at TEXT,
+  accepted_at TEXT,
+  declined_at TEXT,
+  revoked_at TEXT,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(event_id,guest_email),
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_tickets (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  invitation_id TEXT,
+  source_type TEXT NOT NULL CHECK(source_type IN ('INVITATION','COMPLIMENTARY','PURCHASE')),
+  buyer_name TEXT,
+  attendee_name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  public_code TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'VALID' CHECK(status IN ('VALID','USED','VOID','REFUNDED')),
+  price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  checked_in_at TEXT,
+  checked_in_by_user_id TEXT,
+  voided_at TEXT,
+  voided_by_user_id TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(invitation_id),
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(invitation_id) REFERENCES event_invitations(id) ON DELETE SET NULL,
+  FOREIGN KEY(checked_in_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(voided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_checkins (
+  id TEXT PRIMARY KEY,
+  event_id TEXT,
+  ticket_id TEXT,
+  result TEXT NOT NULL CHECK(result IN ('ACCEPTED','ALREADY_USED','INVALID','VOID','REVERTED')),
+  token_fingerprint TEXT,
+  performed_by_user_id TEXT,
+  details TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
+  FOREIGN KEY(performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_refund_requests (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  ticket_id TEXT NOT NULL,
+  requester_name TEXT,
+  requester_email TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK(status IN ('REQUESTED','APPROVED','REJECTED','PROCESSED')),
+  eligibility_code TEXT NOT NULL,
+  eligible INTEGER NOT NULL CHECK(eligible IN (0,1)),
+  resolution_note TEXT,
+  requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  resolved_at TEXT,
+  resolved_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
+  FOREIGN KEY(resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_closures (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  snapshot_json TEXT NOT NULL,
+  closed_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+INSERT OR IGNORE INTO event_categories(id,code,name_en,name_hu,sort_order) VALUES
+ ('EVC-PIANO-CONCERT','PIANO_CONCERT','Piano Concert','Zongorahangverseny',10),
+ ('EVC-ARTIST-PERFORMANCE','ARTIST_PERFORMANCE','Artist Performance','Művészi előadás',20),
+ ('EVC-SALON-CONCERT','SALON_CONCERT','Salon Concert','Szalonkoncert',30),
+ ('EVC-MASTERCLASS','MASTERCLASS','Masterclass','Mesterkurzus',40),
+ ('EVC-CULTURAL-EVENT','CULTURAL_EVENT','Cultural Event','Kulturális esemény',50),
+ ('EVC-OTHER-MUSICAL','OTHER_MUSICAL_EVENT','Other Musical Event','Egyéb zenei esemény',60);
+
+
 CREATE TABLE IF NOT EXISTS app_settings (
   setting_key TEXT PRIMARY KEY,
   setting_value TEXT,
