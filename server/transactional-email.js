@@ -1,6 +1,7 @@
 const { Resend } = require("resend");
 
 const DEFAULT_FROM = "Klavierhaus Accounts <accounts@klavierhaus.com>";
+const DEFAULT_EVENT_FROM = "Klavierhaus Events <events@klavierhaus.com>";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -38,6 +39,40 @@ function buildActivationEmail({ name, code, appBaseUrl = "" }) {
   return { subject, text, html };
 }
 
+function eventDate(value, locale) {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "America/New_York",
+    dateStyle: "long",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function buildEventInvitationEmail({ name, event, invitationUrl }) {
+  const safeName = escapeHtml(name || "Guest");
+  const safeTitleEn = escapeHtml(event.title_en || "Klavierhaus event");
+  const safeTitleHu = escapeHtml(event.title_hu || event.title_en || "Klavierhaus esemény");
+  const safeVenue = escapeHtml(event.venue_name || "Klavierhaus");
+  const safeUrl = escapeHtml(invitationUrl);
+  const dateEn = eventDate(event.start_at, "en-US");
+  const dateHu = eventDate(event.start_at, "hu-HU");
+  const subject = `Private invitation: ${event.title_en || "Klavierhaus event"} / Személyes meghívás`;
+  const text = [
+    `Hello ${name || "Guest"},`,
+    `Klavierhaus invites you to ${event.title_en || "a private event"}.`,
+    `${dateEn} · ${event.venue_name || "Klavierhaus"}`,
+    `Accept or decline: ${invitationUrl}`,
+    "Your invitation reserves a place only after you accept it and while capacity remains.",
+    "",
+    `Kedves ${name || "Vendég"}!`,
+    `A Klavierhaus szeretettel meghívja a következő eseményre: ${event.title_hu || event.title_en || "Klavierhaus esemény"}.`,
+    `${dateHu} · ${event.venue_name || "Klavierhaus"}`,
+    `Elfogadás vagy visszautasítás: ${invitationUrl}`,
+    "A meghívás csak az elfogadás után és a szabad férőhelyek erejéig foglal helyet."
+  ].join("\n");
+  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="margin:0 0 12px;color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:30px">${safeTitleEn}</h1><p>Hello ${safeName},</p><p>Klavierhaus is pleased to extend a private invitation.</p><p style="color:#d9d1c1"><strong>${escapeHtml(dateEn)}</strong><br>${safeVenue}</p><p style="margin:26px 0"><a href="${safeUrl}" style="display:inline-block;padding:13px 22px;border-radius:999px;background:#c9a45d;color:#080807;text-decoration:none;font-weight:700">Respond to invitation / Válasz a meghívásra</a></p><p style="color:#aaa08f">A place is reserved only after acceptance and while capacity remains.</p><hr style="margin:30px 0;border:0;border-top:1px solid #3b3428"><h2 style="font-family:Georgia,serif">${safeTitleHu}</h2><p>Kedves ${safeName}!</p><p>A Klavierhaus szeretettel meghívja erre a különleges eseményre.</p><p style="color:#d9d1c1"><strong>${escapeHtml(dateHu)}</strong><br>${safeVenue}</p><p style="color:#aaa08f">A meghívás csak elfogadás után és a szabad férőhelyek erejéig foglal helyet.</p></div></div></body></html>`;
+  return { subject, text, html };
+}
+
 function safeProviderCode(error) {
   const candidate = String(error?.name || error?.code || "EMAIL_DELIVERY_FAILED").toUpperCase();
   return /^[A-Z0-9_-]{2,80}$/.test(candidate) ? candidate : "EMAIL_DELIVERY_FAILED";
@@ -46,6 +81,7 @@ function safeProviderCode(error) {
 function createTransactionalEmail(env = process.env) {
   const apiKey = String(env.RESEND_API_KEY || "").trim();
   const from = String(env.EMAIL_FROM || DEFAULT_FROM).trim();
+  const eventFrom = String(env.EVENT_EMAIL_FROM || DEFAULT_EVENT_FROM).trim();
   const replyTo = String(env.EMAIL_REPLY_TO || "").trim();
   const appBaseUrl = String(env.APP_BASE_URL || "").trim();
   const webhookSecret = String(env.RESEND_WEBHOOK_SECRET || "").trim();
@@ -78,6 +114,29 @@ function createTransactionalEmail(env = process.env) {
       }
       return { providerMessageId: String(data.id) };
     },
+    async sendEventInvitation({ to, name, event, invitationUrl, idempotencyKey }) {
+      if (!apiKey || !eventFrom) {
+        const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+        error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
+        throw error;
+      }
+      const content = buildEventInvitationEmail({ name, event, invitationUrl });
+      const { data, error } = await resend.emails.send({
+        from: eventFrom,
+        to: [String(to || "").trim().toLowerCase()],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+        ...(replyTo ? { replyTo } : {}),
+        tags: [{ name: "category", value: "event_invitation" }]
+      }, { idempotencyKey });
+      if (error || !data?.id) {
+        const deliveryError = new Error("EMAIL_DELIVERY_FAILED");
+        deliveryError.code = safeProviderCode(error);
+        throw deliveryError;
+      }
+      return { providerMessageId: String(data.id) };
+    },
     verifyWebhook({ payload, id, timestamp, signature }) {
       if (!webhookSecret) {
         const error = new Error("EMAIL_WEBHOOK_NOT_CONFIGURED");
@@ -93,4 +152,4 @@ function createTransactionalEmail(env = process.env) {
   };
 }
 
-module.exports = { buildActivationEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, createTransactionalEmail };
