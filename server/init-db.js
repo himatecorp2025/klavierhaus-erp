@@ -62,6 +62,23 @@ function ensureNormalizedUserEmailIndexes() {
   ensureIndex("idx_users_email_normalized", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_normalized ON users(lower(trim(email))) WHERE email IS NOT NULL AND trim(email)<>''");
 }
 
+function ensureNormalizedContactEmailIndexes() {
+  ensureIndex("idx_users_contact_email_lookup", "CREATE INDEX IF NOT EXISTS idx_users_contact_email_lookup ON users(lower(trim(contact_email)))");
+  const duplicates = db.prepare(`
+    SELECT lower(trim(contact_email)) AS normalized_email,COUNT(*) AS count
+    FROM users
+    WHERE contact_email IS NOT NULL AND trim(contact_email)<>''
+    GROUP BY lower(trim(contact_email))
+    HAVING COUNT(*)>1
+    ORDER BY normalized_email
+  `).all();
+  if (duplicates.length) {
+    log(`WARNING: ${duplicates.length} normalized contact email conflict(s) found; accounts were preserved and new duplicates are blocked by the API`);
+    return;
+  }
+  ensureIndex("idx_users_contact_email", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_contact_email ON users(lower(trim(contact_email))) WHERE contact_email IS NOT NULL AND trim(contact_email)<>''");
+}
+
 function preservedBusinessCounts() {
   const tables = ["users", "contacts", "pianos", "jobs", "inventory_items"];
   return Object.fromEntries(tables.map((tableName) => [
@@ -86,10 +103,12 @@ function migrationRequiresBackup() {
     : "";
   const usersMissingCalendarColor = tableExists("users") && !tableColumns("users").has("calendar_color");
   const usersMissingGoogleCalendarEmail = tableExists("users") && !tableColumns("users").has("google_calendar_email");
+  const usersMissingContactEmail = tableExists("users") && !tableColumns("users").has("contact_email");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing;
+  const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing;
 }
 
 function createPreMigrationBackup() {
@@ -127,6 +146,7 @@ function migrateUsersRoleConstraint() {
         address TEXT,
         calendar_color TEXT,
         google_calendar_email TEXT,
+        contact_email TEXT,
         hidden_user INTEGER DEFAULT 0,
         is_superadmin INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -135,13 +155,13 @@ function migrateUsersRoleConstraint() {
     `);
     db.exec(`
       INSERT INTO users_new(
-        id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin,created_at,updated_at
+        id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,contact_email,hidden_user,is_superadmin,created_at,updated_at
       )
       SELECT
         id,name,email,password_hash,
         CASE WHEN role IN ('ADMIN','MANAGER','WORKER') THEN role ELSE 'WORKER' END,
         CASE WHEN role='VIEWER' THEN 'Inactive' ELSE COALESCE(status,'Active') END,
-        phone,address,calendar_color,google_calendar_email,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
+        phone,address,calendar_color,google_calendar_email,contact_email,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
       FROM users
     `);
     db.exec("DROP TABLE users");
@@ -229,6 +249,7 @@ function runMigrations() {
     ensureColumn("users", "address", "TEXT");
     ensureColumn("users", "calendar_color", "TEXT");
     ensureColumn("users", "google_calendar_email", "TEXT");
+    ensureColumn("users", "contact_email", "TEXT");
     ensureColumn("users", "hidden_user", "INTEGER DEFAULT 0");
     ensureColumn("users", "is_superadmin", "INTEGER DEFAULT 0");
 
@@ -335,6 +356,7 @@ function runMigrations() {
   ensureIndex("idx_jobs_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_time_range ON jobs(start_time,end_time)");
   ensureIndex("idx_jobs_assignee_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_assignee_time_range ON jobs(assigned_user_id,start_time,end_time)");
   ensureNormalizedUserEmailIndexes();
+  ensureNormalizedContactEmailIndexes();
   ensureIndex("idx_users_google_calendar_email", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_calendar_email ON users(lower(trim(google_calendar_email))) WHERE google_calendar_email IS NOT NULL AND trim(google_calendar_email)<>''");
   ensureIndex("idx_external_calendar_events_job", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_job ON external_calendar_events(job_id)");
   ensureIndex("idx_external_calendar_events_review", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_review ON external_calendar_events(review_status,updated_at DESC)");
@@ -350,6 +372,9 @@ function runMigrations() {
   ensureIndex("idx_push_subscriptions_user", "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)");
   ensureIndex("idx_notification_devices_user_status", "CREATE INDEX IF NOT EXISTS idx_notification_devices_user_status ON notification_devices(user_id,status)");
   ensureIndex("idx_push_activation_tests_user_device", "CREATE INDEX IF NOT EXISTS idx_push_activation_tests_user_device ON push_activation_tests(user_id,device_id,created_at DESC)");
+  ensureIndex("idx_account_activations_status", "CREATE INDEX IF NOT EXISTS idx_account_activations_status ON account_activations(status,updated_at DESC)");
+  ensureIndex("idx_activation_email_log_user", "CREATE INDEX IF NOT EXISTS idx_activation_email_log_user ON activation_email_log(user_id,created_at DESC)");
+  ensureIndex("idx_activation_email_log_provider_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_activation_email_log_provider_id ON activation_email_log(provider_message_id) WHERE provider_message_id IS NOT NULL AND trim(provider_message_id)<>''");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
