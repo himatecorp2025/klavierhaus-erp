@@ -1,0 +1,25 @@
+{
+  "name": "klavierhaus-public-website",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Independent public website foundation for Klavierhaus",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=20.18.0 <21.0.0",
+    "npm": ">=10.0.0 <11.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "check": "node --check server/index.js && node --check server/site-content.js && node --check public/app.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "compression": "1.8.1",
+    "dotenv": "16.4.7",
+    "express": "4.22.2"
+  },
+  "overrides": {
+    "path-to-regexp": "0.1.13"
+  }
+}
