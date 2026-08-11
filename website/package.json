@@ -1,34 +1,23 @@
 {
-  "name": "klavierhaus-calendar-finance-system",
-  "version": "6.5.0",
-  "description": "Klavierhaus calendar-first work management with finance and income statement",
+  "name": "klavierhaus-public-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Independent bilingual public website for Klavierhaus culture, artists, pianos, and services",
   "main": "server/index.js",
   "engines": {
     "node": ">=20.18.0 <21.0.0",
     "npm": ">=10.0.0 <11.0.0"
   },
   "scripts": {
-    "prestart": "node server/init-db.js",
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "init-db": "node server/init-db.js",
-    "check:manifests": "node test/helpers/check-package-manifests.js",
-    "check": "node --check server/index.js && node --check server/init-db.js && node --check server/calendar-colors.js && node --check server/google-calendar.js && node --check server/upload-middleware.js && node --check server/account-activation.js && node --check server/transactional-email.js && node --check public/app.js && node --check public/service-worker.js",
-    "test": "node --test --test-concurrency=1 test/*.test.js",
-    "generate-vapid": "web-push generate-vapid-keys"
+    "check": "node --check server/index.js && node --check server/site-content.js && node --check public/app.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
-    "adm-zip": "0.6.0",
-    "bcryptjs": "2.4.3",
-    "better-sqlite3": "11.10.0",
     "compression": "1.8.1",
-    "cors": "2.8.5",
     "dotenv": "16.4.7",
-    "express": "4.22.2",
-    "jsonwebtoken": "9.0.2",
-    "multer": "2.2.0",
-    "resend": "6.19.0",
-    "web-push": "3.6.7"
+    "express": "4.22.2"
   },
   "overrides": {
     "path-to-regexp": "0.1.13"
