@@ -513,8 +513,7 @@ function initCustomSelectSystem(){
  document.addEventListener('scroll',event=>{if(activeCustomSelect && (event.target===activeCustomSelect.menu || activeCustomSelect.menu.contains(event.target)))return;closeCustomSelect();},true);
 }
 
-function updateLoginPasswordToggle(){
- const password=document.getElementById("loginPassword"),toggle=document.getElementById("toggleLoginPassword");
+function updatePasswordVisibilityToggle(password,toggle){
  if(!password||!toggle)return;
  const visible=password.type==="text";
  toggle.classList.toggle("active",visible);
@@ -525,6 +524,19 @@ function updateLoginPasswordToggle(){
  const crossedEye='<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.7 10.7 0 0112 4c5.5 0 9 6 9 6a16.7 16.7 0 01-2.5 3.2M6.6 6.6C4.3 8.1 3 10 3 10s3.5 6 9 6a9.7 9.7 0 004-.8"/></svg>';
  toggle.innerHTML=visible?openEye:crossedEye;
 }
+function initializePasswordVisibilityToggle(password,toggle){
+ if(!password||!toggle)return;
+ password.type="password";
+ toggle.onclick=()=>{
+  password.type=password.type==="password"?"text":"password";
+  updatePasswordVisibilityToggle(password,toggle);
+  password.focus({preventScroll:true});
+ };
+ updatePasswordVisibilityToggle(password,toggle);
+}
+function updateLoginPasswordToggle(){
+ updatePasswordVisibilityToggle(document.getElementById("loginPassword"),document.getElementById("toggleLoginPassword"));
+}
 function initLoginExperience(){
  const form=document.getElementById("loginForm");
  const email=document.getElementById("loginEmail");
@@ -532,14 +544,26 @@ function initLoginExperience(){
  const toggle=document.getElementById("toggleLoginPassword");
  if(email && !email.value){email.value=localStorage.getItem("kh_last_login_email")||"";}
  if(toggle && password){
-  password.type="password";
-  toggle.onclick=()=>{password.type=password.type==="password"?"text":"password";updateLoginPasswordToggle();password.focus({preventScroll:true});};
-  updateLoginPasswordToggle();
+  initializePasswordVisibilityToggle(password,toggle);
  }
  if(form){form.addEventListener("animationend",()=>{}, {once:true});}
 }
 
-$("#loginForm").onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(e.target));const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)}).then(r=>r.json());if(r.token){token=r.token;user=r.user;localStorage.setItem("kh_token",token);localStorage.setItem("kh_user",JSON.stringify(user));localStorage.setItem("kh_last_login_email",String(fd.email||""));loadLanguage();boot()}else await appAlert(bi("Login failed. Check your email address and password.","Sikertelen belépés. Ellenőrizd az e-mail-címet és a jelszót."),"error")};
+$("#loginForm").onsubmit=async e=>{
+ e.preventDefault();
+ const fd=Object.fromEntries(new FormData(e.target));
+ fd.email=String(fd.email||"").trim().toLowerCase();
+ try{
+  const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fd)});
+  const r=await response.json().catch(()=>({error:"INVALID_LOGIN"}));
+  if(!response.ok || !r.token)return showError(r.error||"INVALID_LOGIN");
+  token=r.token;user=r.user;
+  localStorage.setItem("kh_token",token);
+  localStorage.setItem("kh_user",JSON.stringify(user));
+  localStorage.setItem("kh_last_login_email",fd.email);
+  loadLanguage();boot();
+ }catch(_error){showError("LOGIN_SERVICE_UNAVAILABLE");}
+};
 $("#logoutBtn").onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
@@ -2823,8 +2847,37 @@ function openUser(row=null, selfProfile=false){
  const statusField = canFullEdit ? `<div class="field"><label>${bi("Status","Állapot")}</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
  const colorField = (canFullEdit || canCreate) ? `<div class="field calendar-color-field"><label>${bi("Calendar color","Naptárszín")}</label><input name="calendar_color" type="color" value="${workerColor(row?.name||"",row?.calendar_color||"#0891B2")}" required><small class="calendar-color-help">${bi("Reserved status colors cannot be selected: orange, green, red and gray.","A lefoglalt állapotszínek nem választhatók: narancssárga, zöld, piros és szürke.")}</small></div>` : "";
  const preferenceFields=selfProfile?`<div class="field profile-preferences"><label>${bi("Language","Nyelv")}</label><select name="profile_language"><option value="en" ${currentLang==="en"?"selected":""}>American English</option><option value="hu" ${currentLang==="hu"?"selected":""}>Magyar</option></select></div><div class="field profile-preferences"><label>${bi("Appearance","Megjelenés")}</label><select name="profile_theme"><option value="dark" ${currentTheme==="dark"?"selected":""}>${bi("Dark","Sötét")}</option><option value="light" ${currentTheme==="light"?"selected":""}>${bi("Light","Világos")}</option></select></div><div class="field full profile-role-info"><label>${bi("Role","Szerepkör")}</label><input value="${htmlText(row?.role||user?.role||"")}" disabled></div>`:"";
- $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>${bi("ERP email","ERP e-mail")}</label><input name="email" type="email" value="${row?.email||""}" required></div><div class="field full"><label>${bi("Google Calendar email","Google Naptár e-mail")}</label><input name="google_calendar_email" type="email" value="${row?.google_calendar_email||""}" placeholder="${bi("Example: employee@gmail.com","Példa: munkatars@gmail.com")}"><small>${bi("Events created with this address in the shared Klavierhaus Work calendar are assigned to this employee.","A közös Klavierhaus Work naptárban ezzel a címmel létrehozott események ehhez a munkatárshoz kerülnek.")}</small></div><div class="field"><label>${isEdit?tr("newPassword"):tr("password")}</label><input name="password" type="password" ${isEdit?"":"required"}></div><div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
- $("#form").onsubmit=async e=>{e.preventDefault();try{let body=Object.fromEntries(new FormData(e.target));const selectedLanguage=body.profile_language;const selectedTheme=body.profile_theme;delete body.profile_language;delete body.profile_theme;if(body.calendar_color){body.calendar_color=String(body.calendar_color).toUpperCase();if(reservedCalendarColors.includes(body.calendar_color)){showError("RESERVED_CALENDAR_COLOR");return;}}if(isEdit&&!body.password)delete body.password;let saved;if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});if(isEdit&&row.id===user.id){user={...user,...saved};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}}schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();if(currentView==="users"&&isAdmin())renderUsers();}catch(err){showError(err)}};
+ const passwordRequired=isEdit?"":"required";
+ const passwordHelp=isEdit?`<small>${tr("leaveEmpty")}</small>`:"";
+ const passwordFields=`<div class="field user-password-field"><label for="userPassword">${isEdit?tr("newPassword"):tr("password")}</label><div class="password-field"><input id="userPassword" name="password" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPassword" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div><div class="field user-password-field"><label for="userPasswordConfirmation">${isEdit?bi("Confirm new password","Új jelszó megerősítése"):bi("Confirm password","Jelszó megerősítése")}</label><div class="password-field"><input id="userPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPasswordConfirmation" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div>`;
+ $("#form").innerHTML=`<div class="form-grid"><div class="field"><label>${bi("Name","Név")}</label><input name="name" value="${row?.name||""}" required></div><div class="field"><label>${bi("ERP email","ERP e-mail")}</label><input name="email" type="email" value="${row?.email||""}" required autocomplete="username" autocapitalize="none" spellcheck="false"></div><div class="field full"><label>${bi("Google Calendar email","Google Naptár e-mail")}</label><input name="google_calendar_email" type="email" value="${row?.google_calendar_email||""}" placeholder="${bi("Example: employee@gmail.com","Példa: munkatars@gmail.com")}"><small>${bi("Events created with this address in the shared Klavierhaus Work calendar are assigned to this employee.","A közös Klavierhaus Work naptárban ezzel a címmel létrehozott események ehhez a munkatárshoz kerülnek.")}</small></div>${passwordFields}<div class="field"><label>${tr("phone")}</label><input name="phone" value="${row?.phone||""}"></div><div class="field full"><label>${tr("address")}</label><input name="address" value="${row?.address||""}"></div>${roleField}${statusField}${colorField}${preferenceFields}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${isEdit?tr("saveChanges"):tr("createUser")}</button></div>`;
+ initializePasswordVisibilityToggle(document.getElementById("userPassword"),document.getElementById("toggleUserPassword"));
+ initializePasswordVisibilityToggle(document.getElementById("userPasswordConfirmation"),document.getElementById("toggleUserPasswordConfirmation"));
+ $("#form").onsubmit=async e=>{
+  e.preventDefault();
+  try{
+   let body=Object.fromEntries(new FormData(e.target));
+   const selectedLanguage=body.profile_language;
+   const selectedTheme=body.profile_theme;
+   delete body.profile_language;delete body.profile_theme;
+   body.email=String(body.email||"").trim().toLowerCase();
+   if(body.password!==body.password_confirmation)return showError("PASSWORD_CONFIRMATION_MISMATCH");
+   const passwordChanged=Boolean(body.password);
+   if(isEdit&&!passwordChanged){delete body.password;delete body.password_confirmation;}
+   if(body.calendar_color){body.calendar_color=String(body.calendar_color).toUpperCase();if(reservedCalendarColors.includes(body.calendar_color))return showError("RESERVED_CALENDAR_COLOR");}
+   let saved;
+   if(isEdit)saved=await api(`/api/users/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
+   else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});
+   const {password_updated:_passwordUpdated,...savedUser}=saved;
+   if(isEdit&&row.id===user.id){
+    user={...user,...savedUser};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;
+    if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}
+   }
+   schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();
+   showToast(isEdit?(passwordChanged?bi("User and password updated successfully.","A felhasználó és a jelszó módosítása sikeres."):bi("User updated successfully.","A felhasználó módosítása sikeres.")):bi("User created successfully.","A felhasználó létrehozása sikeres."),"success");
+   if(currentView==="users"&&isAdmin())renderUsers();
+  }catch(err){showError(err);}
+ };
 }
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!await appConfirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?"),{type:"error",confirmText:bi("Delete permanently","Végleges törlés")}))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err)}}
 
@@ -2838,6 +2891,11 @@ function showToast(message,type="info"){
 }
 function localizedErrorMessage(error){
  const code=String(error?.message||error||"");const details=error?.details||{};
+ const userManagementErrors={
+  en:{INVALID_LOGIN:"Login failed. Check your email address and password.",ACCOUNT_INACTIVE:"This user account is inactive. Contact an administrator.",ACCOUNT_ROLE_INVALID:"This account has an invalid role. Contact the superadministrator.",USER_EMAIL_CONFLICT:"More than one account uses this email address. The superadministrator must resolve the duplicate before login.",USER_EMAIL_ALREADY_USED:"This ERP email address is already assigned to another user.",INVALID_USER_EMAIL:"Enter a valid ERP email address.",PASSWORD_CONFIRMATION_MISMATCH:"The two password fields must match exactly, including uppercase and lowercase letters.",PASSWORD_UPDATE_FAILED:"The password could not be saved. No changes were applied.",USER_UPDATE_FAILED:"The user could not be updated. No changes were applied.",LOGIN_SERVICE_UNAVAILABLE:"The login service is temporarily unavailable. Please try again."},
+  hu:{INVALID_LOGIN:"Sikertelen belépés. Ellenőrizd az e-mail-címet és a jelszót.",ACCOUNT_INACTIVE:"Ez a felhasználói fiók inaktív. Fordulj egy adminisztrátorhoz.",ACCOUNT_ROLE_INVALID:"A fiók szerepköre érvénytelen. Fordulj a szuperadminisztrátorhoz.",USER_EMAIL_CONFLICT:"Ehhez az e-mail-címhez több fiók tartozik. A belépés előtt a szuperadminisztrátornak fel kell oldania a duplikációt.",USER_EMAIL_ALREADY_USED:"Ez az ERP e-mail-cím már egy másik felhasználóhoz tartozik.",INVALID_USER_EMAIL:"Adj meg érvényes ERP e-mail-címet.",PASSWORD_CONFIRMATION_MISMATCH:"A két jelszómezőnek pontosan egyeznie kell, a kis- és nagybetűket is beleértve.",PASSWORD_UPDATE_FAILED:"A jelszó mentése sikertelen. A rendszer nem alkalmazta a módosításokat.",USER_UPDATE_FAILED:"A felhasználó módosítása sikertelen. A rendszer nem alkalmazta a módosításokat.",LOGIN_SERVICE_UNAVAILABLE:"A bejelentkezési szolgáltatás átmenetileg nem érhető el. Próbáld újra."}
+ };
+ if(userManagementErrors[currentLang]?.[code])return userManagementErrors[currentLang][code];
  const googleErrors={
   en:{INVALID_GOOGLE_CALENDAR_EMAIL:"Enter a valid Google Calendar email address.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"This Google Calendar email is already assigned to another employee.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Assign the imported event to an active employee before completing the review.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Resolve the schedule conflict before completing the review.",GOOGLE_SOURCE_EVENT_CANCELLED:"The Google source event was cancelled. Edit or delete the ERP job as appropriate.",GOOGLE_CALENDAR_NOT_CONFIGURED:"The Google Calendar server settings are incomplete.",GOOGLE_CALENDAR_NOT_CONNECTED:"Google Calendar is not connected."},
   hu:{INVALID_GOOGLE_CALENDAR_EMAIL:"Adj meg érvényes Google Naptár e-mail-címet.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"Ez a Google Naptár e-mail-cím már egy másik munkatárshoz tartozik.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Az ellenőrzés befejezése előtt rendeld az importált eseményt aktív munkatárshoz.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Az ellenőrzés befejezése előtt oldd fel az időpontütközést.",GOOGLE_SOURCE_EVENT_CANCELLED:"A forrásként szolgáló Google-eseményt törölték. Szükség szerint módosítsd vagy töröld az ERP-munkát.",GOOGLE_CALENDAR_NOT_CONFIGURED:"A Google Naptár szerverbeállításai hiányosak.",GOOGLE_CALENDAR_NOT_CONNECTED:"A Google Naptár nincs csatlakoztatva."}
