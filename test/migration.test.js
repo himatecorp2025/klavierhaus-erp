@@ -45,6 +45,8 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_integrations'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_calendar_events'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_jobs_time_range'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_lookup'").get());
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_normalized'").get());
   assert.deepEqual(
     migrated.prepare("SELECT name,calendar_color FROM users ORDER BY name").all(),
     [{ name: "Károly", calendar_color: "#2563EB" }, { name: "Misi", calendar_color: "#EA580C" }]
@@ -59,5 +61,34 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
 
   const backups = fs.readdirSync(backupDir).filter((name) => name.endsWith(".sqlite"));
   assert.equal(backups.length, 1);
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
+
+test("migration preserves pre-existing normalized email conflicts and reports them without blocking deployment", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kh-email-conflict-"));
+  const dbPath = path.join(tempRoot, "existing.sqlite");
+  const backupDir = path.join(tempRoot, "backups");
+  const schema = fs.readFileSync(path.join(projectRoot, "server", "schema.sql"), "utf8");
+  const db = new Database(dbPath);
+  db.exec(schema);
+  const insert = db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,hidden_user,is_superadmin) VALUES(?,?,?,?,?,'Active',0,0)");
+  insert.run("U-1", "First Alex", "alex@example.com", "hash-1", "ADMIN");
+  insert.run("U-2", "Second Alex", " ALEX@example.com ", "hash-2", "WORKER");
+  db.close();
+
+  const result = spawnSync(process.execPath, [path.join(projectRoot, "server", "init-db.js")], {
+    cwd: projectRoot,
+    env: { ...process.env, DB_PATH: dbPath, BACKUP_DIR: backupDir },
+    encoding: "utf8"
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /normalized user email conflict/);
+
+  const migrated = new Database(dbPath, { readonly: true });
+  assert.equal(migrated.prepare("SELECT COUNT(*) count FROM users").get().count, 2);
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_lookup'").get());
+  assert.equal(Boolean(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_users_email_normalized'").get()), false);
+  assert.equal(migrated.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+  migrated.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
