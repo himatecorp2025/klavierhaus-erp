@@ -246,7 +246,7 @@ app.use('/api',(req,res,next)=>{
   const started=Date.now();
   res.on('finish',()=>{
     if(req.skipAutoAudit || req.path.startsWith('/audit-log') || isSuperadminUser(req.user)) return;
-    const safeBody={...(req.body||{})}; if(safeBody.password) safeBody.password='[REDACTED]';
+    const safeBody=redactPasswordFields(req.body||{});
     const isWork=req.path==='/jobs'||req.path.startsWith('/jobs/');
     audit(req,req.method,isWork?'jobs':(req.path.split('/')[1]||'api'),req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`,isWork?'WORK':'TECHNICAL');
   });
@@ -254,6 +254,21 @@ app.use('/api',(req,res,next)=>{
 });
 
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
+function normalizeUserEmail(value){ return String(value||'').trim().toLowerCase(); }
+function isValidUserEmail(value){ return /^[^\s@]+@[^\s@]+$/.test(String(value||'')); }
+function userAuditSnapshot(value){
+  if(!value)return null;
+  const {password_hash:_passwordHash,...safe}=value;
+  return safe;
+}
+function redactPasswordFields(value){
+  if(Array.isArray(value))return value.map(redactPasswordFields);
+  if(!value || typeof value!=='object')return value;
+  return Object.fromEntries(Object.entries(value).map(([key,item])=>[
+    key,
+    String(key).toLowerCase().includes('password')?'[REDACTED]':redactPasswordFields(item)
+  ]));
+}
 function nextContactId(){
   const rows = db.prepare("SELECT id FROM contacts WHERE id LIKE 'C-%'").all();
   let max = 0;
@@ -722,14 +737,23 @@ function getJobByAnyId(rawId, body={}){
 }
 
 app.post("/api/login",(req,res)=>{
-  const {email,password}=req.body;
-  const u=db.prepare("SELECT * FROM users WHERE lower(email)=lower(?) AND status='Active'").get(String(email||""));
-  const valid=!!u && bcrypt.compareSync(String(password||''), u.password_hash);
+  const normalizedEmail=normalizeUserEmail(req.body?.email);
+  const password=String(req.body?.password||'');
+  if(!normalizedEmail || !password) return res.status(400).json({error:"REQUIRED_FIELDS"});
+
+  const matches=db.prepare("SELECT * FROM users WHERE lower(trim(email))=? ORDER BY created_at,id").all(normalizedEmail);
+  const activeMatches=matches.filter(row=>String(row.status||'').trim().toLowerCase()==='active');
+  if(matches.length && !activeMatches.length) return res.status(403).json({error:"ACCOUNT_INACTIVE"});
+  if(activeMatches.length>1) return res.status(409).json({error:"USER_EMAIL_CONFLICT"});
+  const u=activeMatches[0]||null;
+  let valid=false;
+  try{valid=!!u && bcrypt.compareSync(password,u.password_hash);}catch(_error){valid=false;}
   if(!valid){
-    if(!u || Number(u.is_superadmin||0)!==1) audit({user:u?{id:u.id,name:u.name,email:u.email,role:u.role,is_superadmin:0}:{id:'',name:'',email:String(email||''),role:'',is_superadmin:0}},'LOGIN_FAILED','authentication',u?.id||'',null,{email:String(email||'')},0,'Invalid login','TECHNICAL');
-    return res.status(401).json({error:"Invalid login"});
+    if(!u || Number(u.is_superadmin||0)!==1) audit({user:u?{id:u.id,name:u.name,email:u.email,role:u.role,is_superadmin:0}:{id:'',name:'',email:normalizedEmail,role:'',is_superadmin:0}},'LOGIN_FAILED','authentication',u?.id||'',null,{email:normalizedEmail},0,'Invalid login','TECHNICAL');
+    return res.status(401).json({error:"INVALID_LOGIN"});
   }
   const isSuper=Number(u.is_superadmin||0)===1;
+  if(!isSuper && !VISIBLE_USER_ROLES.includes(u.role)) return res.status(403).json({error:"ACCOUNT_ROLE_INVALID"});
   const effectiveRole=isSuper?"SUPERADMIN":u.role;
   const loginUser={id:u.id,name:u.name,email:u.email,google_calendar_email:u.google_calendar_email||'',role:effectiveRole,is_superadmin:isSuper?1:0};
   const token=jwt.sign(loginUser, JWT_SECRET, {expiresIn:"30d"});
@@ -1193,10 +1217,14 @@ app.get("/api/users", auth, (req,res)=> {
 });
 
 app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
-  const {name,email,password,role}=req.body;
-  if(!name || !email || !password || !role) return res.status(400).json({error:"Name, email, password and role are required"});
+  const {name,password,role}=req.body;
+  const email=normalizeUserEmail(req.body.email);
+  if(!name || !email || !password || !role) return res.status(400).json({error:"REQUIRED_FIELDS"});
+  if(!isValidUserEmail(email)) return res.status(400).json({error:"INVALID_USER_EMAIL"});
+  if(password!==String(req.body.password_confirmation??'')) return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   if(!VISIBLE_USER_ROLES.includes(role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
+  if(db.prepare("SELECT id FROM users WHERE lower(trim(email))=? LIMIT 1").get(email)) return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
   if(!canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
   const activeNames=db.prepare("SELECT name FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all().map(row=>row.name);
   const orderedNames=[...activeNames,name].sort((a,b)=>String(a).localeCompare(String(b)));
@@ -1227,39 +1255,56 @@ app.put("/api/users/:id", auth, (req,res)=>{
   if(!selfEdit && !superEdit && !roleAdmin) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.calendar_color!==undefined && !canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
 
+  const changes={...req.body};
   let allowed = (superEdit || roleAdmin) ? ["name","email","google_calendar_email","role","status","phone","address"] : ["name","email","google_calendar_email","phone","address"];
   if(canManageCalendarColors(req.user)) allowed.push("calendar_color");
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
   if(req.body.role!==undefined && !VISIBLE_USER_ROLES.includes(req.body.role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
-  if(req.body.calendar_color!==undefined){
-    const colorValidation=validateCalendarColor(req.body.calendar_color);
-    if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
-    req.body.calendar_color=colorValidation.color;
+  if(changes.email!==undefined){
+    changes.email=normalizeUserEmail(changes.email);
+    if(!isValidUserEmail(changes.email)) return res.status(400).json({error:"INVALID_USER_EMAIL"});
+    const duplicate=db.prepare("SELECT id FROM users WHERE lower(trim(email))=? AND id<>? LIMIT 1").get(changes.email,target.id);
+    if(duplicate) return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
   }
-  if(req.body.google_calendar_email!==undefined){
-    req.body.google_calendar_email=String(req.body.google_calendar_email||'').trim().toLowerCase()||null;
-    if(req.body.google_calendar_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.google_calendar_email)) return res.status(400).json({error:'INVALID_GOOGLE_CALENDAR_EMAIL'});
-    const duplicate=req.body.google_calendar_email?db.prepare("SELECT id FROM users WHERE lower(trim(google_calendar_email))=? AND id<>?").get(req.body.google_calendar_email,target.id):null;
+  if(changes.calendar_color!==undefined){
+    const colorValidation=validateCalendarColor(changes.calendar_color);
+    if(!colorValidation.ok) return res.status(400).json({error:colorValidation.error});
+    changes.calendar_color=colorValidation.color;
+  }
+  if(changes.google_calendar_email!==undefined){
+    changes.google_calendar_email=String(changes.google_calendar_email||'').trim().toLowerCase()||null;
+    if(changes.google_calendar_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.google_calendar_email)) return res.status(400).json({error:'INVALID_GOOGLE_CALENDAR_EMAIL'});
+    const duplicate=changes.google_calendar_email?db.prepare("SELECT id FROM users WHERE lower(trim(google_calendar_email))=? AND id<>?").get(changes.google_calendar_email,target.id):null;
     if(duplicate) return res.status(409).json({error:'GOOGLE_CALENDAR_EMAIL_ALREADY_USED'});
   }
 
-  const cols=allowed.filter(c=>req.body[c]!==undefined);
-  if(req.body.password){ cols.push("password_hash"); req.body.password_hash=bcrypt.hashSync(req.body.password,10); }
+  const password=typeof req.body.password==='string'?req.body.password:'';
+  const passwordConfirmation=typeof req.body.password_confirmation==='string'?req.body.password_confirmation:'';
+  const passwordChangeRequested=password.length>0 || passwordConfirmation.length>0;
+  if(passwordChangeRequested && (!password || password!==passwordConfirmation)) return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
+  const values={};
+  allowed.filter(c=>changes[c]!==undefined).forEach(c=>{values[c]=changes[c];});
+  if(passwordChangeRequested) values.password_hash=bcrypt.hashSync(password,10);
+  const cols=Object.keys(values);
   const updateUserTx=db.transaction(()=>{
-    if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]),req.params.id);
-    if(req.body.name!==undefined && String(req.body.name)!==String(target.name)){
-      db.prepare("UPDATE jobs SET assigned_to=? WHERE assigned_user_id=?").run(req.body.name,target.id);
-      db.prepare("UPDATE jobs SET created_by=? WHERE created_by_user_id=?").run(req.body.name,target.id);
-      db.prepare("UPDATE jobs SET last_reassigned_by=? WHERE last_reassigned_by_user_id=?").run(req.body.name,target.id);
-      db.prepare("UPDATE planned_jobs SET preferred_assigned_to=? WHERE preferred_assigned_user_id=?").run(req.body.name,target.id);
-      db.prepare("UPDATE planned_jobs SET created_by=? WHERE created_by_user_id=?").run(req.body.name,target.id);
+    if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>values[c]),req.params.id);
+    if(passwordChangeRequested){
+      const persisted=db.prepare("SELECT password_hash FROM users WHERE id=?").get(req.params.id);
+      if(!persisted || !bcrypt.compareSync(password,persisted.password_hash)) throw new Error("PASSWORD_UPDATE_FAILED");
+    }
+    if(changes.name!==undefined && String(changes.name)!==String(target.name)){
+      db.prepare("UPDATE jobs SET assigned_to=? WHERE assigned_user_id=?").run(changes.name,target.id);
+      db.prepare("UPDATE jobs SET created_by=? WHERE created_by_user_id=?").run(changes.name,target.id);
+      db.prepare("UPDATE jobs SET last_reassigned_by=? WHERE last_reassigned_by_user_id=?").run(changes.name,target.id);
+      db.prepare("UPDATE planned_jobs SET preferred_assigned_to=? WHERE preferred_assigned_user_id=?").run(changes.name,target.id);
+      db.prepare("UPDATE planned_jobs SET created_by=? WHERE created_by_user_id=?").run(changes.name,target.id);
     }
   });
-  updateUserTx();
+  try{updateUserTx();}catch(error){return res.status(500).json({error:error.message==='PASSWORD_UPDATE_FAILED'?error.message:"USER_UPDATE_FAILED"});}
   const u=db.prepare("SELECT id,name,email,google_calendar_email,role,status,phone,address,calendar_color FROM users WHERE id=?").get(req.params.id);
-  audit(req,"UPDATE","users",req.params.id,target,u);
-  res.json(u);
+  audit(req,"UPDATE","users",req.params.id,userAuditSnapshot(target),u);
+  res.json({...u,password_updated:passwordChangeRequested});
 });
 
 app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
