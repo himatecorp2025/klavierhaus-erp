@@ -26,7 +26,8 @@ test("health endpoint identifies stage-one public website", async () => {
       status: "ok",
       service: "klavierhaus-public-website",
       version: "1.0.0",
-      indexing: "disabled"
+      indexing: "disabled",
+      event_api: "not-configured"
     });
   });
 });
