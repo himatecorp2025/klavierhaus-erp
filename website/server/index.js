@@ -350,7 +350,7 @@ function organizationStructuredData(baseUrl) {
   };
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce }) {
+function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [] }) {
   const { key, language } = route;
   const copy = getGlobal(language);
   const page = getPage(key, language);
@@ -361,7 +361,10 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce }) {
   const hungarianUrl = pageUrl(baseUrl, getRoute(key, "hu"));
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
   const robots = allowIndexing ? "index, follow" : "noindex, nofollow, noarchive";
-  const sections = page.sections.map((section) => renderSection(section, language)).join("");
+  const sections = page.sections.map((section) => {
+    const rendered = renderSection(section, language);
+    return key === "home" && section.id === "artists" ? `${rendered}${renderHomeEventShowcase(homeEvents, language)}` : rendered;
+  }).join("");
 
   return `<!doctype html>
 <html lang="${escapeHtml(copy.locale)}" class="no-js">
@@ -407,8 +410,15 @@ const eventCopy = Object.freeze({
     listTitle: "Intimate encounters in music.",
     listLead: "A considered programme of concerts, salons, masterclasses, and cultural gatherings in New York.",
     upcoming: "Upcoming programme",
+    homeEyebrow: "The next encounters",
+    homeTitle: "Enter the room where music becomes personal.",
+    homeLead: "A curated sequence of intimate performances and cultural gatherings at Klavierhaus.",
     noEvents: "The next programme is being prepared. Please return soon.",
-    details: "View event",
+    details: "View details",
+    viewAll: "View all events",
+    buyTickets: "Buy tickets",
+    reservePlace: "Reserve a place",
+    ticketsSoon: "Tickets coming soon",
     date: "Date",
     venue: "Venue",
     artist: "Artist",
@@ -438,8 +448,15 @@ const eventCopy = Object.freeze({
     listTitle: "Meghitt találkozások a zenében.",
     listLead: "Koncertek, szalonestek, mesterkurzusok és kulturális találkozások gondosan összeállított New York-i programja.",
     upcoming: "Közelgő programok",
+    homeEyebrow: "A következő találkozások",
+    homeTitle: "Lépjen be a térbe, ahol a zene személyessé válik.",
+    homeLead: "Meghitt előadások és kulturális találkozások gondosan válogatott sora a Klavierhausban.",
     noEvents: "A következő program előkészítés alatt áll. Kérjük, látogasson vissza hamarosan.",
-    details: "Esemény megtekintése",
+    details: "Részletek",
+    viewAll: "Összes esemény",
+    buyTickets: "Jegyvásárlás",
+    reservePlace: "Helyfoglalás",
+    ticketsSoon: "Jegyek hamarosan",
     date: "Időpont",
     venue: "Helyszín",
     artist: "Művész",
@@ -501,6 +518,46 @@ function eventVenue(event) {
     .filter(Boolean).join(", ");
 }
 
+function eventExcerpt(event, max = 190) {
+  const text = String(event.description || event.short_description || "").replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  const candidate = text.slice(0, max + 1);
+  const boundary = candidate.lastIndexOf(" ");
+  return `${candidate.slice(0, boundary > max * 0.65 ? boundary : max).trim()}…`;
+}
+
+function renderPublicEventCard(event, language, index = 0) {
+  const labels = eventCopy[language];
+  const excerpt = eventExcerpt(event);
+  const ticketLabel = event.access_type === "PUBLIC_FREE" ? labels.reservePlace : labels.buyTickets;
+  return `<article class="public-event-card" data-reveal data-event-index="${index + 1}">
+    <a class="public-event-card__media" href="${escapeHtml(eventPath(event, language))}" aria-label="${escapeHtml(`${labels.details}: ${event.title}`)}">
+      ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="${escapeHtml(event.title)}" loading="lazy" decoding="async">` : '<span class="public-event-card__ornament" aria-hidden="true">K</span>'}
+      <span class="public-event-card__number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
+    </a>
+    <div class="public-event-card__body">
+      <div class="public-event-card__heading"><p class="eyebrow">${escapeHtml(event.category)}</p><p class="public-event-card__date">${escapeHtml(formatEventDate(event.start_at, language))}</p></div>
+      <h2><a href="${escapeHtml(eventPath(event, language))}">${escapeHtml(event.title)}</a></h2>
+      ${event.performer_name ? `<p class="public-event-card__artist">${escapeHtml(labels.artist)} · ${escapeHtml(event.performer_name)}</p>` : ""}
+      ${excerpt ? `<p class="public-event-card__excerpt">${escapeHtml(excerpt)}</p>` : ""}
+      <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language))}</span></div>
+      <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a><span class="event-card-action event-card-action--pending" aria-disabled="true"><span>${escapeHtml(ticketLabel)}</span><small>${escapeHtml(labels.ticketsSoon)}</small></span></div>
+    </div>
+  </article>`;
+}
+
+function renderHomeEventShowcase(events, language) {
+  const labels = eventCopy[language];
+  const cards = events.length
+    ? events.slice(0, 6).map((event, index) => renderPublicEventCard(event, language, index)).join("")
+    : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
+  return `<section class="section home-event-showcase" id="upcoming-events">
+    <div class="home-event-showcase__heading" data-reveal><div><p class="eyebrow">${escapeHtml(labels.homeEyebrow)}</p><h2>${escapeHtml(labels.homeTitle)}</h2></div><p>${escapeHtml(labels.homeLead)}</p></div>
+    <div class="public-event-grid public-event-grid--home">${cards}</div>
+    <a class="home-event-showcase__all text-link" href="${escapeHtml(getRoute("events", language))}"><span>${escapeHtml(labels.viewAll)}</span><span aria-hidden="true">↗</span></a>
+  </section>`;
+}
+
 function renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl, imageUrl, robots, nonce, structuredData = [] }) {
   const copy = getGlobal(language);
   const englishUrl = language === "en" ? canonicalUrl : alternateUrl;
@@ -535,7 +592,7 @@ function eventStructuredData(event, baseUrl, language) {
     "@context": "https://schema.org",
     "@type": "Event",
     name: event.title,
-    description: event.short_description || event.description,
+    description: event.description || event.short_description,
     startDate: event.start_at,
     endDate: event.end_at,
     eventStatus: event.status === "CANCELLED"
@@ -569,16 +626,7 @@ function renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce
   const canonicalRoute = getRoute("events", language);
   const alternateRoute = getRoute("events", getAlternateLanguage(language));
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
-  const cards = events.length ? events.map((event) => `<article class="public-event-card" data-reveal>
-    ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="" loading="lazy" decoding="async">` : '<span class="public-event-card__ornament" aria-hidden="true">K</span>'}
-    <div class="public-event-card__body">
-      <p class="eyebrow">${escapeHtml(event.category)}</p>
-      <h2>${escapeHtml(event.title)}</h2>
-      <p class="public-event-card__date">${escapeHtml(formatEventDate(event.start_at, language))}</p>
-      <p>${escapeHtml(event.short_description)}</p>
-      <a class="text-link" href="${escapeHtml(eventPath(event, language))}"><span>${escapeHtml(labels.details)}</span><span aria-hidden="true">↗</span></a>
-    </div>
-  </article>`).join("") : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
+  const cards = events.length ? events.map((event, index) => renderPublicEventCard(event, language, index)).join("") : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
 
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({
     language,
@@ -609,7 +657,7 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({
     language,
     title: `${event.title} | Klavierhaus`,
-    description: event.short_description || event.description,
+    description: event.description || event.short_description,
     canonicalUrl,
     alternateUrl: pageUrl(baseUrl, alternatePath),
     imageUrl,
@@ -623,10 +671,10 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
       <header class="event-detail-hero">
         ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="" fetchpriority="high" decoding="async">` : ""}
         <div class="event-detail-hero__shade" aria-hidden="true"></div>
-        <div class="event-detail-hero__copy" data-reveal><p class="eyebrow">${escapeHtml(event.category)}</p><h1>${escapeHtml(event.title)}</h1><p>${escapeHtml(event.short_description)}</p></div>
+        <div class="event-detail-hero__copy" data-reveal><p class="eyebrow">${escapeHtml(event.category)}</p><h1>${escapeHtml(event.title)}</h1>${eventExcerpt(event,260)?`<p>${escapeHtml(eventExcerpt(event,260))}</p>`:""}</div>
       </header>
       <div class="event-detail-layout">
-        <section class="event-detail-narrative" data-reveal>${statusNotice ? `<p class="event-public-status">${escapeHtml(statusNotice)}</p>` : ""}${renderParagraphs(String(event.description || "").split(/\n+/).filter(Boolean))}</section>
+        <section class="event-detail-narrative" data-reveal>${statusNotice ? `<p class="event-public-status">${escapeHtml(statusNotice)}</p>` : ""}${event.description?renderParagraphs(String(event.description).split(/\n+/).filter(Boolean)):""}</section>
         <aside class="event-facts" data-reveal>
           <dl>
             <div><dt>${escapeHtml(labels.date)}</dt><dd>${escapeHtml(formatEventDate(event.start_at, language))}</dd></div>
@@ -838,7 +886,7 @@ function createApp(options = {}) {
     }
   });
 
-  app.use((req, res) => {
+  app.use(async (req, res) => {
     const requestedPath = req.path;
     const normalizedPath = normalizePathname(requestedPath);
 
@@ -864,12 +912,21 @@ function createApp(options = {}) {
       return;
     }
 
-    res.setHeader("Cache-Control", "no-cache");
+    let homeEvents = [];
+    if (route.key === "home" && eventClient.configured) {
+      try {
+        homeEvents = await eventClient.list(route.language);
+      } catch (error) {
+        console.warn(`[website] Homepage event feed unavailable: ${error.code || error.message}`);
+      }
+    }
+    res.setHeader("Cache-Control", route.key === "home" ? "public, max-age=30, stale-while-revalidate=120" : "no-cache");
     res.type("html").send(renderDocument({
       route,
       baseUrl,
       allowIndexing,
-      nonce: res.locals.cspNonce
+      nonce: res.locals.cspNonce,
+      homeEvents
     }));
   });
 
