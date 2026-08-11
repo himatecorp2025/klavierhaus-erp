@@ -28,3 +28,26 @@ jobs:
         run: npm test
       - name: Check production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  public-website-verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.0
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install locked website dependencies
+        run: npm ci
+      - name: Check website JavaScript syntax
+        run: npm run check
+      - name: Run website automated tests
+        run: npm test
+      - name: Check website production dependencies
+        run: npm audit --omit=dev --audit-level=high
