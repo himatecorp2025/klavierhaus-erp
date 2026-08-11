@@ -41,11 +41,34 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui4/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui5/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
   assert.match(serviceWorker, /ACKNOWLEDGE_NOTIFICATION/);
+});
+
+test("event administration is bilingual, admin-only, responsive, and available in the refreshed PWA shell", () => {
+  const eventStart = appSource.indexOf("let eventAdminRows=[]");
+  const eventEnd = appSource.indexOf("async function renderAuditLog", eventStart);
+  const eventSource = appSource.slice(eventStart, eventEnd);
+  assert.ok(eventStart > 0);
+  assert.match(indexSource, /<section id="events" class="view"><\/section>/);
+  assert.match(appSource, /if\(!isAdmin\(\)\)return showError\('PERMISSION_DENIED'\)/);
+  assert.match(eventSource, /Public, invitation-only and internal cultural programmes/);
+  assert.match(eventSource, /Nyilvános, meghívásos és belső kulturális programok/);
+  assert.match(eventSource, /createEventInvitation/);
+  assert.match(eventSource, /createComplimentaryTicket/);
+  assert.match(eventSource, /submitEventCheckIn/);
+  assert.match(eventSource, /revertEventCheckIn/);
+  assert.match(eventSource, /resolveEventRefund/);
+  assert.match(eventSource, /closeEventRecord/);
+  assert.match(eventSource, /deleteEventDraft/);
+  assert.match(eventSource, /step="300"/);
+  assert.match(styles, /Event operations module v25/);
+  assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
+  assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui5/);
 });
 
 test("Google Calendar UI is bilingual, range-limited and preserves status-color priority", () => {
