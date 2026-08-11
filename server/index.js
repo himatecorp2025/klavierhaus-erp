@@ -17,6 +17,7 @@ const { registerEventRoutes } = require("./events");
 const {
   createDocumentUpload,
   createBrandingUpload,
+  createEventImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
   uploadErrorHandler
@@ -39,6 +40,8 @@ if(!JWT_SECRET || JWT_SECRET.length < 32){
 }
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 fs.mkdirSync(UPLOAD_DIR, {recursive:true});
+const EVENT_IMAGE_DIR=path.join(UPLOAD_DIR,"events");
+fs.mkdirSync(EVENT_IMAGE_DIR,{recursive:true});
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
@@ -213,6 +216,7 @@ app.post('/api/webhooks/resend',express.raw({type:'application/json',limit:'1mb'
 });
 app.use(express.json({limit:"10mb"}));
 const brandingUpload=createBrandingUpload(UPLOAD_DIR);
+const eventImageUpload=createEventImageUpload(EVENT_IMAGE_DIR);
 const clientImportUpload=createClientImportUpload();
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
@@ -665,6 +669,8 @@ registerEventRoutes({
   requireSuperadmin,
   audit,
   transactionalEmail,
+  eventImageUpload,
+  eventImageDir:EVENT_IMAGE_DIR,
   qrSecret:process.env.EVENT_QR_SECRET||JWT_SECRET,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
