@@ -21,7 +21,7 @@ function event(language = "en") {
     slug: hungarian ? "arany-szalonest" : "golden-salon-evening",
     alternate_slug: hungarian ? "golden-salon-evening" : "arany-szalonest",
     title: hungarian ? "Arany szalonest" : "Golden Salon Evening",
-    short_description: hungarian ? "Meghitt zongoraest New Yorkban." : "An intimate evening of piano music in New York.",
+    short_description: "",
     description: hungarian ? "A zene és a művészet különleges találkozása." : "A considered encounter between music and artistry.",
     category: hungarian ? "Szalonkoncert" : "Salon concert",
     category_code: "SALON_CONCERT",
@@ -92,6 +92,10 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     const englishList = await (await fetch(`${origin}/events`)).text();
     const hungarianList = await (await fetch(`${origin}/hu/esemenyek`)).text();
     assert.match(englishList, /Golden Salon Evening/);
+    assert.match(englishList, /public-event-grid/);
+    assert.match(englishList, /public-event-card__actions/);
+    assert.match(englishList, /View details/);
+    assert.match(englishList, /Buy tickets/);
     assert.doesNotMatch(englishList, /Arany szalonest/);
     assert.match(hungarianList, /Arany szalonest/);
     assert.doesNotMatch(hungarianList, /Golden Salon Evening/);
@@ -111,6 +115,28 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     assert.match(sitemap, /https:\/\/klavierhaus\.com\/hu\/esemenyek\/arany-szalonest/);
     assert.doesNotMatch(sitemap, /invitation|meghivas/);
     assert.doesNotMatch(sitemap, /klavierhaus-salon|klavierhaus-szalon/);
+  });
+});
+
+test("homepage places the nearest public events in a bilingual two-column editorial stream", async () => {
+  const api = createFakeApi();
+  await withServer({
+    baseUrl: "https://klavierhaus.com",
+    allowIndexing: true,
+    eventApiBaseUrl: "https://erp.example.com",
+    fetchImpl: api.fetchImpl
+  }, async (origin) => {
+    const english = await (await fetch(`${origin}/`)).text();
+    const hungarian = await (await fetch(`${origin}/hu/`)).text();
+    assert.match(english, /id="upcoming-events"/);
+    assert.match(english, /Enter the room where music becomes personal/);
+    assert.match(english, /Golden Salon Evening/);
+    assert.match(english, /View all events/);
+    assert.doesNotMatch(english, /Arany szalonest/);
+    assert.match(hungarian, /Lépjen be a térbe, ahol a zene személyessé válik/);
+    assert.match(hungarian, /Arany szalonest/);
+    assert.match(hungarian, /Összes esemény/);
+    assert.doesNotMatch(hungarian, /Golden Salon Evening/);
   });
 });
 
