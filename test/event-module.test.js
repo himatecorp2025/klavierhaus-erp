@@ -42,8 +42,9 @@ async function waitForServer(baseUrl, child) {
 async function request(baseUrl, endpoint, { token, method = "GET", body } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const response = await fetch(`${baseUrl}${endpoint}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const multipart = body instanceof FormData;
+  if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${baseUrl}${endpoint}`, { method, headers, body: body === undefined ? undefined : (multipart ? body : JSON.stringify(body)) });
   const payload = await response.json();
   return { status: response.status, payload };
 }
@@ -52,8 +53,8 @@ function eventBody(overrides = {}) {
   return {
     category_id: "EVC-SALON-CONCERT",
     access_type: "PUBLIC_FREE",
-    slug_en: "private-salon-evening",
-    slug_hu: "privat-szalonest",
+    slug_en: "manually-supplied-slug-must-be-ignored",
+    slug_hu: "a-kezi-azonositot-figyelmen-kivul-kell-hagyni",
     title_en: "Private Salon Evening",
     title_hu: "Privát szalonest",
     short_description_en: "An intimate evening of piano music.",
@@ -73,6 +74,17 @@ function eventBody(overrides = {}) {
     price_cents: 0,
     ...overrides
   };
+}
+
+function eventForm(overrides = {}) {
+  const form = new FormData();
+  const values = eventBody(overrides);
+  for (const [key, value] of Object.entries(values)) form.set(key, String(value ?? ""));
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  png.writeUInt32BE(1600, 16);
+  png.writeUInt32BE(900, 20);
+  form.set("event_image", new Blob([png], { type: "image/png" }), "event.png");
+  return form;
 }
 
 test("event module enforces roles, capacity, invitation, QR admission, refunds, retention, and one-time closure", async (t) => {
@@ -150,10 +162,29 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(invalidStep.status, 400);
   assert.equal(invalidStep.payload.error, "INVALID_TIME_STEP");
 
-  const created = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: eventBody() });
+  const missingImage = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: eventBody() });
+  assert.equal(missingImage.status, 400);
+  assert.equal(missingImage.payload.error, "EVENT_IMAGE_REQUIRED");
+
+  const created = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: eventForm() });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
   assert.equal(created.payload.status, "DRAFT");
+  assert.equal(created.payload.slug_en, "private-salon-evening");
+  assert.equal(created.payload.slug_hu, "privat-szalonest");
+  assert.match(created.payload.hero_image_url, /^\/uploads\/events\/event-/);
   const eventId = created.payload.id;
+
+  const duplicateSlug = await request(baseUrl, "/api/events", {
+    token: adminToken,
+    method: "POST",
+    body: eventForm({ start_local: "2031-04-10T22:00", end_local: "2031-04-10T23:00" })
+  });
+  assert.equal(duplicateSlug.status, 201, JSON.stringify(duplicateSlug.payload));
+  assert.equal(duplicateSlug.payload.slug_en, "private-salon-evening-2031-04-10");
+  assert.equal(duplicateSlug.payload.slug_hu, "privat-szalonest-2031-04-10");
+  const duplicateDeleted = await request(baseUrl, `/api/events/${duplicateSlug.payload.id}`, { token: superToken, method: "DELETE" });
+  assert.equal(duplicateDeleted.status, 200);
+  assert.equal(fs.readdirSync(path.join(uploadDir, "events")).length, 1, "deleting an unpublished event must remove its image file");
 
   const publicBeforePublish = await request(baseUrl, "/api/public/events");
   assert.equal(publicBeforePublish.status, 200);
@@ -169,6 +200,22 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(publicEnglish.payload[0].title, "Private Salon Evening");
   assert.equal(publicHungarian.payload[0].title, "Privát szalonest");
   assert.equal(publicEnglish.payload[0].capacity_remaining, 2);
+
+  const editedPublished = await request(baseUrl, `/api/events/${eventId}`, {
+    token: adminToken,
+    method: "PUT",
+    body: eventBody({
+      title_en: "Private Salon Evening — Revised",
+      title_hu: "Privát szalonest — módosítva",
+      description_en: "",
+      description_hu: ""
+    })
+  });
+  assert.equal(editedPublished.status, 200, JSON.stringify(editedPublished.payload));
+  assert.equal(editedPublished.payload.slug_en, "private-salon-evening", "a published English URL must remain stable after a title edit");
+  assert.equal(editedPublished.payload.slug_hu, "privat-szalonest", "a published Hungarian URL must remain stable after a title edit");
+  assert.equal(editedPublished.payload.description_en, "", "the English event description must remain optional");
+  assert.equal(editedPublished.payload.description_hu, "", "the Hungarian event description must remain optional");
 
   const invitation = await request(baseUrl, `/api/events/${eventId}/invitations`, {
     token: adminToken,
@@ -260,7 +307,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   const deletable = await request(baseUrl, "/api/events", {
     token: adminToken,
     method: "POST",
-    body: eventBody({ slug_en: "deletable-draft", slug_hu: "torolheto-piszkozat", title_en: "Deletable draft", title_hu: "Törölhető piszkozat" })
+    body: eventForm({ title_en: "Deletable unpublished event", title_hu: "Törölhető nem publikált esemény" })
   });
   assert.equal(deletable.status, 201);
   const adminCannotDelete = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE" });
@@ -271,10 +318,8 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   const past = await request(baseUrl, "/api/events", {
     token: adminToken,
     method: "POST",
-    body: eventBody({
+    body: eventForm({
       access_type: "INTERNAL",
-      slug_en: "past-internal-event",
-      slug_hu: "multbeli-belso-esemeny",
       title_en: "Past internal event",
       title_hu: "Múltbeli belső esemény",
       start_local: "2020-04-10T19:00",
