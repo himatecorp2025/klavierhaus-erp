@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui3/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui4/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -115,11 +115,16 @@ test("manual scheduling uses wall-clock arithmetic, five-minute steps and readab
 
 test("login password visibility starts hidden and the eye icon reflects the real state", () => {
   assert.match(indexSource, /id="loginPassword"[^>]*type="password"/);
-  assert.match(indexSource, /id="toggleLoginPassword"[\s\S]*?<path d="M3 3l18 18/);
+  assert.match(indexSource, /id="toggleLoginPassword"[^>]*password-hidden[\s\S]*?password-eye-shape[\s\S]*?password-eye-slash/);
   assert.match(appSource, /password\.type="password"/);
   assert.match(appSource, /function initializePasswordVisibilityToggle/);
-  assert.match(appSource, /toggle\.innerHTML=visible\?openEye:crossedEye/);
+  assert.match(appSource, /toggle\.classList\.toggle\("password-visible",visible\)/);
+  assert.match(appSource, /toggle\.classList\.toggle\("password-hidden",!visible\)/);
+  assert.match(appSource, /if\(!toggle\.querySelector\("\.password-eye-icon"\)\)/);
   assert.match(appSource, /visible\?bi\("Hide password","Jelszó elrejtése"\):bi\("Show password","Jelszó megjelenítése"\)/);
+  assert.match(styles, /\.password-toggle\{color:var\(--text\)!important;opacity:1!important;visibility:visible!important/);
+  assert.match(styles, /\.password-toggle\.password-visible \.password-eye-slash\{opacity:0/);
+  assert.match(styles, /\.password-toggle\.password-hidden \.password-eye-slash\{opacity:1/);
 });
 
 test("user editor requires exact password confirmation and provides two independent visibility controls", () => {
@@ -130,6 +135,20 @@ test("user editor requires exact password confirmation and provides two independ
   assert.match(appSource, /body\.password!==body\.password_confirmation/);
   assert.match(appSource, /PASSWORD_CONFIRMATION_MISMATCH/);
   assert.match(appSource, /User and password updated successfully\./);
+});
+
+test("new accounts collect a real contact email and complete one-time activation before boot", () => {
+  assert.match(indexSource, /id="activationForm"/);
+  assert.match(indexSource, /id="activationCode"[^>]*inputmode="numeric"[^>]*maxlength="6"/);
+  assert.match(appSource, /function showAccountActivationStep/);
+  assert.match(appSource, /activation_required/);
+  assert.match(appSource, /\/api\/account-activation\/verify/);
+  assert.match(appSource, /\/api\/account-activation\/resend/);
+  assert.match(appSource, /name="contact_email" type="email"/);
+  assert.match(appSource, /\.local address cannot be used/);
+  assert.match(appSource, /resendUserActivation/);
+  assert.match(appSource, /pendingAccountActivation=null/);
+  assert.doesNotMatch(appSource, /localStorage\.setItem\(["'][^"']*activation/i);
 });
 
 test("views and modal content are localized before they become visible", () => {
