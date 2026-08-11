@@ -11,6 +11,8 @@ const jwt = require("jsonwebtoken");
 const Database = require("better-sqlite3");
 const { legacyCalendarColor, validateCalendarColor } = require("./calendar-colors");
 const { createGoogleCalendarIntegration } = require("./google-calendar");
+const { createTransactionalEmail } = require("./transactional-email");
+const { createAccountActivationService } = require("./account-activation");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -40,6 +42,8 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
+const transactionalEmail=createTransactionalEmail(process.env);
+const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -190,6 +194,22 @@ const upload=createDocumentUpload(UPLOAD_DIR);
 
 app.use(cors());
 app.use(compression({threshold:1024}));
+app.post('/api/webhooks/resend',express.raw({type:'application/json',limit:'1mb'}),(req,res)=>{
+  try{
+    const payload=Buffer.isBuffer(req.body)?req.body.toString('utf8'):String(req.body||'');
+    const event=transactionalEmail.verifyWebhook({
+      payload,
+      id:req.headers['svix-id'],
+      timestamp:req.headers['svix-timestamp'],
+      signature:req.headers['svix-signature']
+    });
+    accountActivation.recordWebhook(event,String(req.headers['svix-id']||''));
+    res.json({received:true});
+  }catch(error){
+    const status=error?.code==='EMAIL_WEBHOOK_NOT_CONFIGURED'?503:400;
+    res.status(status).json({error:status===503?'EMAIL_WEBHOOK_NOT_CONFIGURED':'INVALID_EMAIL_WEBHOOK'});
+  }
+});
 app.use(express.json({limit:"10mb"}));
 const brandingUpload=createBrandingUpload(UPLOAD_DIR);
 const clientImportUpload=createClientImportUpload();
@@ -256,6 +276,13 @@ app.use('/api',(req,res,next)=>{
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
 function normalizeUserEmail(value){ return String(value||'').trim().toLowerCase(); }
 function isValidUserEmail(value){ return /^[^\s@]+@[^\s@]+$/.test(String(value||'')); }
+function normalizeContactEmail(value){ return String(value||'').trim().toLowerCase(); }
+function isValidContactEmail(value){
+  const email=normalizeContactEmail(value);
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return false;
+  const domain=email.split('@')[1]||'';
+  return !domain.endsWith('.local') && domain!=='localhost';
+}
 function userAuditSnapshot(value){
   if(!value)return null;
   const {password_hash:_passwordHash,...safe}=value;
@@ -266,7 +293,7 @@ function redactPasswordFields(value){
   if(!value || typeof value!=='object')return value;
   return Object.fromEntries(Object.entries(value).map(([key,item])=>[
     key,
-    String(key).toLowerCase().includes('password')?'[REDACTED]':redactPasswordFields(item)
+    (String(key).toLowerCase().includes('password') || ['activation_code','activation_token','code_hash'].includes(String(key).toLowerCase()))?'[REDACTED]':redactPasswordFields(item)
   ]));
 }
 function nextContactId(){
@@ -617,7 +644,7 @@ function auth(req,res,next){
   if(!token) return res.status(401).json({error:"Missing token"});
   try{
     const tokenUser=jwt.verify(token, JWT_SECRET);
-    const currentUser=db.prepare("SELECT id,name,email,role,status,google_calendar_email,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
+    const currentUser=db.prepare("SELECT id,name,email,contact_email,role,status,google_calendar_email,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
     if(!currentUser) return res.status(401).json({error:"User no longer exists or is inactive"});
     req.user={...tokenUser,...currentUser,role:Number(currentUser.is_superadmin||0)===1?'SUPERADMIN':currentUser.role};
     next();
@@ -736,6 +763,41 @@ function getJobByAnyId(rawId, body={}){
   return null;
 }
 
+function loginUserPayload(row){
+  const isSuper=Number(row.is_superadmin||0)===1;
+  return {
+    id:row.id,
+    name:row.name,
+    email:row.email,
+    contact_email:row.contact_email||'',
+    google_calendar_email:row.google_calendar_email||'',
+    role:isSuper?'SUPERADMIN':row.role,
+    is_superadmin:isSuper?1:0
+  };
+}
+function createAuthenticatedSession(row){
+  const loginUser=loginUserPayload(row);
+  return {token:jwt.sign(loginUser,JWT_SECRET,{expiresIn:'30d'}),user:loginUser};
+}
+function createActivationToken(row){
+  const activation=accountActivation.state(row.id);
+  return jwt.sign({id:row.id,purpose:'ACCOUNT_ACTIVATION',activation_version:Number(activation?.code_version||0)},JWT_SECRET,{expiresIn:'30m'});
+}
+function activationUserFromToken(value){
+  const decoded=jwt.verify(String(value||''),JWT_SECRET);
+  if(decoded?.purpose!=='ACCOUNT_ACTIVATION'||!decoded.id)throw new Error('INVALID_ACTIVATION_SESSION');
+  const row=db.prepare("SELECT * FROM users WHERE id=? AND status='Active'").get(decoded.id);
+  if(!row)throw new Error('INVALID_ACTIVATION_SESSION');
+  return row;
+}
+function activationResendCooldown(row){
+  if(!row?.last_sent_at)return 0;
+  const cooldownMs=process.env.NODE_ENV==='test'?Math.max(0,Number(process.env.ACTIVATION_RESEND_COOLDOWN_MS||0)):60_000;
+  if(cooldownMs===0)return 0;
+  const elapsed=Date.now()-Date.parse(`${row.last_sent_at}Z`);
+  return Number.isFinite(elapsed)&&elapsed<cooldownMs?Math.ceil((cooldownMs-elapsed)/1000):0;
+}
+
 app.post("/api/login",(req,res)=>{
   const normalizedEmail=normalizeUserEmail(req.body?.email);
   const password=String(req.body?.password||'');
@@ -754,11 +816,44 @@ app.post("/api/login",(req,res)=>{
   }
   const isSuper=Number(u.is_superadmin||0)===1;
   if(!isSuper && !VISIBLE_USER_ROLES.includes(u.role)) return res.status(403).json({error:"ACCOUNT_ROLE_INVALID"});
-  const effectiveRole=isSuper?"SUPERADMIN":u.role;
-  const loginUser={id:u.id,name:u.name,email:u.email,google_calendar_email:u.google_calendar_email||'',role:effectiveRole,is_superadmin:isSuper?1:0};
-  const token=jwt.sign(loginUser, JWT_SECRET, {expiresIn:"30d"});
-  audit({user:loginUser},'LOGIN','authentication',u.id,null,{email:u.email},1,'Successful login','TECHNICAL');
-  res.json({token,user:loginUser});
+  const activation=accountActivation.state(u.id);
+  if(activation?.status==='PENDING'){
+    if(!isValidContactEmail(u.contact_email))return res.status(409).json({error:'ACTIVATION_CONTACT_EMAIL_MISSING'});
+    audit({user:loginUserPayload(u)},'ACTIVATION_REQUIRED','authentication',u.id,null,{email:u.email},1,'Valid credentials; account activation required','TECHNICAL');
+    return res.json({activation_required:true,activation_token:createActivationToken(u),contact_email_masked:accountActivation.maskEmail(u.contact_email)});
+  }
+  const session=createAuthenticatedSession(u);
+  audit({user:session.user},'LOGIN','authentication',u.id,null,{email:u.email},1,'Successful login','TECHNICAL');
+  res.json(session);
+});
+app.post('/api/account-activation/verify',(req,res)=>{
+  req.skipAutoAudit=true;
+  let activationUser;
+  try{activationUser=activationUserFromToken(req.body?.activation_token);}catch(_error){return res.status(401).json({error:'INVALID_ACTIVATION_SESSION'});}
+  const result=accountActivation.verify(activationUser.id,req.body?.activation_code);
+  if(!result.ok){
+    audit({user:loginUserPayload(activationUser)},'ACTIVATION_FAILED','authentication',activationUser.id,null,{reason:result.error},0,result.error,'TECHNICAL');
+    const status=result.error==='ACTIVATION_TEMPORARILY_LOCKED'?429:400;
+    return res.status(status).json({error:result.error,retry_after_seconds:result.retryAfterSeconds});
+  }
+  const session=createAuthenticatedSession(activationUser);
+  audit({user:session.user},'ACCOUNT_ACTIVATED','authentication',activationUser.id,null,{status:'VERIFIED'},1,'Account activated successfully','TECHNICAL');
+  res.json(session);
+});
+app.post('/api/account-activation/resend',async(req,res)=>{
+  req.skipAutoAudit=true;
+  let activationUser;
+  try{activationUser=activationUserFromToken(req.body?.activation_token);}catch(_error){return res.status(401).json({error:'INVALID_ACTIVATION_SESSION'});}
+  const current=accountActivation.state(activationUser.id);
+  if(!current||current.status!=='PENDING')return res.status(409).json({error:'ACTIVATION_ALREADY_COMPLETED'});
+  const retryAfter=activationResendCooldown(current);
+  if(retryAfter)return res.status(429).json({error:'ACTIVATION_RESEND_TOO_SOON',retry_after_seconds:retryAfter});
+  if(!isValidContactEmail(activationUser.contact_email))return res.status(409).json({error:'ACTIVATION_CONTACT_EMAIL_MISSING'});
+  const issuance=accountActivation.issue(activationUser.id);
+  const delivery=await accountActivation.deliver(activationUser,issuance,'USER_RESEND');
+  audit({user:loginUserPayload(activationUser)},'ACTIVATION_RESENT','authentication',activationUser.id,null,{delivery_status:delivery.status},delivery.status==='ACCEPTED'?1:0,'Activation email resend requested','TECHNICAL');
+  if(delivery.status!=='ACCEPTED')return res.status(502).json({error:delivery.error||'EMAIL_DELIVERY_FAILED'});
+  res.json({ok:true,activation_token:createActivationToken(activationUser),contact_email_masked:accountActivation.maskEmail(activationUser.contact_email)});
 });
 app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.user.id,null,null,1,'User logout','TECHNICAL');res.json({ok:true});});
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
@@ -1213,18 +1308,25 @@ app.get("/api/income-statement", auth, (req,res)=>{
 
 app.get("/api/users", auth, (req,res)=> {
   // Hidden superadmin is never listed. Everyone may see the visible team list.
-  res.json(db.prepare("SELECT id,name,email,google_calendar_email,role,status,phone,address,calendar_color,created_at FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY role,name").all());
+  res.json(db.prepare(`SELECT u.id,u.name,u.email,u.contact_email,u.google_calendar_email,u.role,u.status,u.phone,u.address,u.calendar_color,u.created_at,
+    CASE WHEN aa.user_id IS NULL THEN 'VERIFIED' ELSE aa.status END AS activation_status,
+    COALESCE(aa.last_delivery_status,'LEGACY_ACCOUNT') AS activation_delivery_status
+    FROM users u LEFT JOIN account_activations aa ON aa.user_id=u.id
+    WHERE COALESCE(u.hidden_user,0)=0 ORDER BY u.role,u.name`).all());
 });
 
-app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
+app.post("/api/users", auth, requirePermission("users.create"), async(req,res)=>{
   const {name,password,role}=req.body;
   const email=normalizeUserEmail(req.body.email);
-  if(!name || !email || !password || !role) return res.status(400).json({error:"REQUIRED_FIELDS"});
+  const contactEmail=normalizeContactEmail(req.body.contact_email);
+  if(!name || !email || !contactEmail || !password || !role) return res.status(400).json({error:"REQUIRED_FIELDS"});
   if(!isValidUserEmail(email)) return res.status(400).json({error:"INVALID_USER_EMAIL"});
+  if(!isValidContactEmail(contactEmail)) return res.status(400).json({error:"INVALID_CONTACT_EMAIL"});
   if(password!==String(req.body.password_confirmation??'')) return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
   if(role==="SUPERADMIN") return res.status(403).json({error:"Superadmin cannot be created from UI / Szuperadmin nem hozható létre a felületről"});
   if(!VISIBLE_USER_ROLES.includes(role)) return res.status(400).json({error:"INVALID_USER_ROLE"});
   if(db.prepare("SELECT id FROM users WHERE lower(trim(email))=? LIMIT 1").get(email)) return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
+  if(db.prepare("SELECT id FROM users WHERE lower(trim(contact_email))=? LIMIT 1").get(contactEmail)) return res.status(409).json({error:"CONTACT_EMAIL_ALREADY_USED"});
   if(!canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
   const activeNames=db.prepare("SELECT name FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') ORDER BY name").all().map(row=>row.name);
   const orderedNames=[...activeNames,name].sort((a,b)=>String(a).localeCompare(String(b)));
@@ -1236,15 +1338,21 @@ app.post("/api/users", auth, requirePermission("users.create"), (req,res)=>{
   if(googleCalendarEmail && db.prepare("SELECT id FROM users WHERE lower(trim(google_calendar_email))=?").get(googleCalendarEmail)) return res.status(409).json({error:'GOOGLE_CALENDAR_EMAIL_ALREADY_USED'});
   const id=rid("U");
   const hash=bcrypt.hashSync(password,10);
-  db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-    .run(id,name,email,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,googleCalendarEmail||null,0,0);
-  const created={id,name,email,google_calendar_email:googleCalendarEmail,role,status:"Active",phone:req.body.phone||"",address:req.body.address||"",calendar_color:colorValidation.color};
-  db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
-  audit(req,"CREATE","users",id,null,created);
-  res.json(created);
+  let issuance;
+  const createUser=db.transaction(()=>{
+    db.prepare("INSERT INTO users(id,name,email,contact_email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id,name,email,contactEmail,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,googleCalendarEmail||null,0,0);
+    db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
+    issuance=accountActivation.issue(id);
+  });
+  try{createUser();}catch(_error){return res.status(500).json({error:'USER_CREATE_FAILED'});}
+  const created={id,name,email,contact_email:contactEmail,google_calendar_email:googleCalendarEmail,role,status:"Active",phone:req.body.phone||"",address:req.body.address||"",calendar_color:colorValidation.color,activation_status:'PENDING'};
+  const delivery=await accountActivation.deliver(created,issuance,'INITIAL');
+  audit(req,"CREATE","users",id,null,{...created,activation_delivery_status:delivery.status});
+  res.json({...created,activation_delivery_status:delivery.status,email_delivery_error:delivery.error||null});
 });
 
-app.put("/api/users/:id", auth, (req,res)=>{
+app.put("/api/users/:id", auth, async(req,res)=>{
   const target=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if(!target) return res.status(404).json({error:"User not found"});
   if(Number(target.hidden_user||0)===1 && !isSuperadminUser(req.user)) return res.status(403).json({error:"Hidden system owner cannot be edited"});
@@ -1256,7 +1364,7 @@ app.put("/api/users/:id", auth, (req,res)=>{
   if(req.body.calendar_color!==undefined && !canManageCalendarColors(req.user)) return res.status(403).json({error:"PERMISSION_DENIED"});
 
   const changes={...req.body};
-  let allowed = (superEdit || roleAdmin) ? ["name","email","google_calendar_email","role","status","phone","address"] : ["name","email","google_calendar_email","phone","address"];
+  let allowed = (superEdit || roleAdmin) ? ["name","email","contact_email","google_calendar_email","role","status","phone","address"] : ["name","email","contact_email","google_calendar_email","phone","address"];
   if(canManageCalendarColors(req.user)) allowed.push("calendar_color");
   if(!superEdit && !roleAdmin && (req.body.role!==undefined || req.body.status!==undefined)) return res.status(403).json({error:"PERMISSION_DENIED"});
   if(req.body.role==="SUPERADMIN") return res.status(403).json({error:"Cannot promote visible user to hidden superadmin from UI"});
@@ -1266,6 +1374,14 @@ app.put("/api/users/:id", auth, (req,res)=>{
     if(!isValidUserEmail(changes.email)) return res.status(400).json({error:"INVALID_USER_EMAIL"});
     const duplicate=db.prepare("SELECT id FROM users WHERE lower(trim(email))=? AND id<>? LIMIT 1").get(changes.email,target.id);
     if(duplicate) return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
+  }
+  if(changes.contact_email!==undefined){
+    changes.contact_email=normalizeContactEmail(changes.contact_email)||null;
+    if(changes.contact_email && !isValidContactEmail(changes.contact_email)) return res.status(400).json({error:"INVALID_CONTACT_EMAIL"});
+    const activation=accountActivation.state(target.id);
+    if(activation?.status==='PENDING' && !changes.contact_email) return res.status(400).json({error:'ACTIVATION_CONTACT_EMAIL_MISSING'});
+    const duplicate=changes.contact_email?db.prepare("SELECT id FROM users WHERE lower(trim(contact_email))=? AND id<>? LIMIT 1").get(changes.contact_email,target.id):null;
+    if(duplicate) return res.status(409).json({error:"CONTACT_EMAIL_ALREADY_USED"});
   }
   if(changes.calendar_color!==undefined){
     const colorValidation=validateCalendarColor(changes.calendar_color);
@@ -1287,12 +1403,16 @@ app.put("/api/users/:id", auth, (req,res)=>{
   allowed.filter(c=>changes[c]!==undefined).forEach(c=>{values[c]=changes[c];});
   if(passwordChangeRequested) values.password_hash=bcrypt.hashSync(password,10);
   const cols=Object.keys(values);
+  let activationIssuance=null;
+  const contactEmailChanged=changes.contact_email!==undefined && String(changes.contact_email||'')!==String(target.contact_email||'');
+  const targetActivation=accountActivation.state(target.id);
   const updateUserTx=db.transaction(()=>{
     if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>values[c]),req.params.id);
     if(passwordChangeRequested){
       const persisted=db.prepare("SELECT password_hash FROM users WHERE id=?").get(req.params.id);
       if(!persisted || !bcrypt.compareSync(password,persisted.password_hash)) throw new Error("PASSWORD_UPDATE_FAILED");
     }
+    if(contactEmailChanged && targetActivation?.status==='PENDING') activationIssuance=accountActivation.issue(target.id);
     if(changes.name!==undefined && String(changes.name)!==String(target.name)){
       db.prepare("UPDATE jobs SET assigned_to=? WHERE assigned_user_id=?").run(changes.name,target.id);
       db.prepare("UPDATE jobs SET created_by=? WHERE created_by_user_id=?").run(changes.name,target.id);
@@ -1302,9 +1422,30 @@ app.put("/api/users/:id", auth, (req,res)=>{
     }
   });
   try{updateUserTx();}catch(error){return res.status(500).json({error:error.message==='PASSWORD_UPDATE_FAILED'?error.message:"USER_UPDATE_FAILED"});}
-  const u=db.prepare("SELECT id,name,email,google_calendar_email,role,status,phone,address,calendar_color FROM users WHERE id=?").get(req.params.id);
+  const u=db.prepare(`SELECT u.id,u.name,u.email,u.contact_email,u.google_calendar_email,u.role,u.status,u.phone,u.address,u.calendar_color,
+    CASE WHEN aa.user_id IS NULL THEN 'VERIFIED' ELSE aa.status END AS activation_status,
+    COALESCE(aa.last_delivery_status,'LEGACY_ACCOUNT') AS activation_delivery_status
+    FROM users u LEFT JOIN account_activations aa ON aa.user_id=u.id WHERE u.id=?`).get(req.params.id);
+  let activationDelivery=null;
+  if(activationIssuance)activationDelivery=await accountActivation.deliver(u,activationIssuance,'CONTACT_EMAIL_CHANGED');
   audit(req,"UPDATE","users",req.params.id,userAuditSnapshot(target),u);
-  res.json({...u,password_updated:passwordChangeRequested});
+  res.json({...u,password_updated:passwordChangeRequested,activation_delivery_status:activationDelivery?.status||u.activation_delivery_status,email_delivery_error:activationDelivery?.error||null});
+});
+
+app.post('/api/users/:id/resend-activation',auth,requirePermission('users.create'),async(req,res)=>{
+  const target=db.prepare("SELECT * FROM users WHERE id=? AND COALESCE(hidden_user,0)=0").get(req.params.id);
+  if(!target)return res.status(404).json({error:'USER_NOT_FOUND'});
+  const activation=accountActivation.state(target.id);
+  if(!activation)return res.status(409).json({error:'ACTIVATION_NOT_REQUIRED'});
+  if(activation.status!=='PENDING')return res.status(409).json({error:'ACTIVATION_ALREADY_COMPLETED'});
+  if(!isValidContactEmail(target.contact_email))return res.status(409).json({error:'ACTIVATION_CONTACT_EMAIL_MISSING'});
+  const retryAfter=activationResendCooldown(activation);
+  if(retryAfter)return res.status(429).json({error:'ACTIVATION_RESEND_TOO_SOON',retry_after_seconds:retryAfter});
+  const issuance=accountActivation.issue(target.id);
+  const delivery=await accountActivation.deliver(target,issuance,'ADMIN_RESEND');
+  audit(req,'ACTIVATION_RESENT','users',target.id,null,{delivery_status:delivery.status},delivery.status==='ACCEPTED'?1:0,'Activation email resent','TECHNICAL');
+  if(delivery.status!=='ACCEPTED')return res.status(502).json({error:delivery.error||'EMAIL_DELIVERY_FAILED'});
+  res.json({ok:true,activation_status:'PENDING',activation_delivery_status:delivery.status});
 });
 
 app.delete("/api/users/:id", auth, requireSuperadmin, (req,res)=>{
