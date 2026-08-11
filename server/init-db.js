@@ -45,6 +45,23 @@ function ensureIndex(name, sql) {
   log(`Index ready: ${name}`);
 }
 
+function ensureNormalizedUserEmailIndexes() {
+  ensureIndex("idx_users_email_lookup", "CREATE INDEX IF NOT EXISTS idx_users_email_lookup ON users(lower(trim(email)))");
+  const duplicates = db.prepare(`
+    SELECT lower(trim(email)) AS normalized_email,COUNT(*) AS count
+    FROM users
+    WHERE email IS NOT NULL AND trim(email)<>''
+    GROUP BY lower(trim(email))
+    HAVING COUNT(*)>1
+    ORDER BY normalized_email
+  `).all();
+  if (duplicates.length) {
+    log(`WARNING: ${duplicates.length} normalized user email conflict(s) found; accounts were preserved and new duplicates are blocked by the API`);
+    return;
+  }
+  ensureIndex("idx_users_email_normalized", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_normalized ON users(lower(trim(email))) WHERE email IS NOT NULL AND trim(email)<>''");
+}
+
 function preservedBusinessCounts() {
   const tables = ["users", "contacts", "pianos", "jobs", "inventory_items"];
   return Object.fromEntries(tables.map((tableName) => [
@@ -317,6 +334,7 @@ function runMigrations() {
   ensureIndex("idx_jobs_assigned_user_id", "CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)");
   ensureIndex("idx_jobs_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_time_range ON jobs(start_time,end_time)");
   ensureIndex("idx_jobs_assignee_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_assignee_time_range ON jobs(assigned_user_id,start_time,end_time)");
+  ensureNormalizedUserEmailIndexes();
   ensureIndex("idx_users_google_calendar_email", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_calendar_email ON users(lower(trim(google_calendar_email))) WHERE google_calendar_email IS NOT NULL AND trim(google_calendar_email)<>''");
   ensureIndex("idx_external_calendar_events_job", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_job ON external_calendar_events(job_id)");
   ensureIndex("idx_external_calendar_events_review", "CREATE INDEX IF NOT EXISTS idx_external_calendar_events_review ON external_calendar_events(review_status,updated_at DESC)");
