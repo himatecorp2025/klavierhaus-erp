@@ -80,7 +80,7 @@ function ensureNormalizedContactEmailIndexes() {
 }
 
 function preservedBusinessCounts() {
-  const tables = ["users", "contacts", "pianos", "jobs", "inventory_items"];
+  const tables = ["users", "contacts", "pianos", "jobs", "inventory_items", "events", "event_invitations", "event_tickets"];
   return Object.fromEntries(tables.map((tableName) => [
     tableName,
     tableExists(tableName) ? Number(db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get().count || 0) : 0
@@ -108,7 +108,8 @@ function migrationRequiresBackup() {
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing;
+  const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing;
 }
 
 function createPreMigrationBackup() {
@@ -375,6 +376,14 @@ function runMigrations() {
   ensureIndex("idx_account_activations_status", "CREATE INDEX IF NOT EXISTS idx_account_activations_status ON account_activations(status,updated_at DESC)");
   ensureIndex("idx_activation_email_log_user", "CREATE INDEX IF NOT EXISTS idx_activation_email_log_user ON activation_email_log(user_id,created_at DESC)");
   ensureIndex("idx_activation_email_log_provider_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_activation_email_log_provider_id ON activation_email_log(provider_message_id) WHERE provider_message_id IS NOT NULL AND trim(provider_message_id)<>''");
+  ensureIndex("idx_events_public_schedule", "CREATE INDEX IF NOT EXISTS idx_events_public_schedule ON events(access_type,status,published_at,start_at)");
+  ensureIndex("idx_events_category_schedule", "CREATE INDEX IF NOT EXISTS idx_events_category_schedule ON events(category_id,start_at)");
+  ensureIndex("idx_event_invitations_event_status", "CREATE INDEX IF NOT EXISTS idx_event_invitations_event_status ON event_invitations(event_id,status,created_at)");
+  ensureIndex("idx_event_invitations_email", "CREATE INDEX IF NOT EXISTS idx_event_invitations_email ON event_invitations(lower(trim(guest_email)))");
+  ensureIndex("idx_event_tickets_event_status", "CREATE INDEX IF NOT EXISTS idx_event_tickets_event_status ON event_tickets(event_id,status,source_type)");
+  ensureIndex("idx_event_tickets_contact", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact ON event_tickets(lower(trim(contact_email)))");
+  ensureIndex("idx_event_checkins_event_time", "CREATE INDEX IF NOT EXISTS idx_event_checkins_event_time ON event_checkins(event_id,created_at DESC)");
+  ensureIndex("idx_event_refunds_event_status", "CREATE INDEX IF NOT EXISTS idx_event_refunds_event_status ON event_refund_requests(event_id,status,requested_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
