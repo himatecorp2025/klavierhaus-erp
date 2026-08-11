@@ -8,8 +8,10 @@ const express=require("express");
 const {
   createDocumentUpload,
   createBrandingUpload,
+  createEventImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  inspectImageFile,
   uploadErrorHandler
 }=require("../server/upload-middleware");
 
@@ -129,6 +131,27 @@ test("branding upload rejects unsupported image formats",async t=>{
   assert.deepEqual(fs.readdirSync(directory),[]);
 });
 
+test("event image upload accepts one JPG or PNG, rejects SVG, and verifies image signatures",async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"kh-event-image-upload-"));
+  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const server=await createTestServer(t,createEventImageUpload(directory));
+  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=","base64");
+  png.writeUInt32BE(1600,16);png.writeUInt32BE(900,20);
+  const boundary="kh-event-image";
+  const accepted=await request(server,{headers:multipartHeaders(boundary),body:multipartBody({boundary,filename:"artist.png",mimeType:"image/png",content:png})});
+  assert.equal(accepted.status,200);
+  assert.equal(accepted.json.inMemory,false);
+  const rejectedBoundary="kh-event-svg";
+  const rejected=await request(server,{headers:multipartHeaders(rejectedBoundary),body:multipartBody({boundary:rejectedBoundary,filename:"artist.svg",mimeType:"image/svg+xml",content:"<svg/>"})});
+  assert.equal(rejected.status,400);
+  assert.equal(rejected.json.error,"INVALID_EVENT_IMAGE_TYPE");
+
+  const fixture=path.join(directory,"signature.png");fs.writeFileSync(fixture,png);
+  assert.deepEqual(inspectImageFile(fixture),{type:"image/png",width:1600,height:900});
+  fs.writeFileSync(fixture,Buffer.from("not-an-image"));
+  assert.equal(inspectImageFile(fixture),null);
+});
+
 test("document upload enforces its 20 MiB file-size limit",async t=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),"kh-document-limit-"));
   t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
@@ -156,9 +179,12 @@ test("malformed multipart data returns a controlled error and does not stop the 
 
 test("production upload routes keep authentication and role checks before Multer",()=>{
   const source=fs.readFileSync(path.resolve(__dirname,"../server/index.js"),"utf8");
+  const eventSource=fs.readFileSync(path.resolve(__dirname,"../server/events.js"),"utf8");
   assert.match(source,/app\.post\('\/api\/imports\/clients\/analyze',auth,permit\('ADMIN'\),clientImportUpload\.single\('file'\)/);
   assert.match(source,/app\.post\('\/api\/imports\/pianos\/analyze',auth,permit\('ADMIN'\),pianoImportUpload\.single\('file'\)/);
   assert.match(source,/app\.post\('\/api\/settings\/branding\/logo',auth,permit\('ADMIN'\),brandingUpload\.single\('logo'\)/);
   assert.match(source,/app\.post\('\/api\/settings\/branding\/background',auth,permit\('ADMIN'\),brandingUpload\.single\('background'\)/);
   assert.match(source,/app\.post\("\/api\/jobs\/:id\/close", auth, upload\.single\("file"\)/);
+  assert.match(eventSource,/app\.post\("\/api\/events", auth, admin, eventImage/);
+  assert.match(eventSource,/app\.put\("\/api\/events\/:id", auth, admin, eventImage/);
 });
