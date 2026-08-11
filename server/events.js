@@ -1,9 +1,13 @@
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const QRCode = require("qrcode");
+const { inspectImageFile } = require("./upload-middleware");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
 const PUBLIC_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
+const PUBLIC_LIST_STATUSES = ["PUBLISHED", "RESCHEDULED"];
 const ACTIVE_TICKET_STATUSES = ["VALID", "USED"];
 const REFUND_STATUSES = new Set(["REQUESTED", "APPROVED", "REJECTED", "PROCESSED"]);
 const NY_TIME_ZONE = "America/New_York";
@@ -21,8 +25,24 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
 }
 
-function validSlug(value) {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(cleanText(value, 160));
+function slugify(value) {
+  const normalized = cleanText(value, 300)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120)
+    .replace(/-+$/g, "");
+  return normalized || "event";
+}
+
+function excerpt(value, max = 220) {
+  const text = cleanText(value, 20000).replace(/\s+/g, " ");
+  if (text.length <= max) return text;
+  const candidate = text.slice(0, max + 1);
+  const boundary = candidate.lastIndexOf(" ");
+  return `${candidate.slice(0, boundary > max * 0.65 ? boundary : max).trim()}…`;
 }
 
 function safeJson(value, fallback = []) {
@@ -108,22 +128,24 @@ function normalizeOptionalDate(value) {
   return { value: date.toISOString() };
 }
 
-function publicEventRow(row, language, capacity) {
+function publicEventRow(row, language, capacity, assetBaseUrl = "") {
   const lang = language === "hu" ? "hu" : "en";
+  const description = row[`description_${lang}`] || row[`short_description_${lang}`] || "";
+  const imagePath = row.hero_image_url || "";
   return {
     id: row.id,
     event_key: row.event_key,
     slug: row[`slug_${lang}`],
     alternate_slug: row[`slug_${lang === "hu" ? "en" : "hu"}`],
     title: row[`title_${lang}`],
-    short_description: row[`short_description_${lang}`] || "",
-    description: row[`description_${lang}`] || "",
+    short_description: excerpt(description),
+    description,
     category: row[`category_name_${lang}`] || "",
     category_code: row.category_code,
     access_type: row.access_type,
     status: row.status,
     performer_name: row.performer_name || "",
-    hero_image_url: row.hero_image_url || "",
+    hero_image_url: imagePath.startsWith("/") && assetBaseUrl ? `${assetBaseUrl}${imagePath}` : imagePath,
     gallery: JSON.parse(row.gallery_json || "[]"),
     venue: {
       name: row.venue_name,
@@ -156,6 +178,25 @@ function createEventService({ db, qrSecret }) {
 
   function eventById(id) {
     return db.prepare(`${selectEventSql} WHERE e.id=?`).get(id) || null;
+  }
+
+  function uniqueSlug(title, language, startAt, excludeId = "") {
+    const column = language === "hu" ? "slug_hu" : "slug_en";
+    const base = slugify(title);
+    const dateSuffix = cleanText(startAt, 40).slice(0, 10);
+    const candidates = [base, dateSuffix ? `${base}-${dateSuffix}` : ""];
+    for (const candidate of candidates.filter(Boolean)) {
+      const used = db.prepare(`SELECT 1 FROM events WHERE ${column}=? AND id<>? LIMIT 1`).get(candidate, excludeId);
+      if (!used) return candidate;
+    }
+    let sequence = 2;
+    while (sequence < 10000) {
+      const candidate = `${base}-${dateSuffix || "event"}-${sequence}`;
+      const used = db.prepare(`SELECT 1 FROM events WHERE ${column}=? AND id<>? LIMIT 1`).get(candidate, excludeId);
+      if (!used) return candidate;
+      sequence += 1;
+    }
+    return `${base}-${crypto.randomBytes(4).toString("hex")}`;
   }
 
   function ticketCounts(eventId) {
@@ -195,10 +236,11 @@ function createEventService({ db, qrSecret }) {
 
   function validateEventInput(body, existing = null) {
     const merged = { ...(existing || {}), ...(body || {}) };
-    const required = ["category_id", "access_type", "slug_en", "slug_hu", "title_en", "title_hu", "venue_name", "venue_street", "venue_city", "venue_region", "venue_postal_code"];
+    const descriptionEn = Object.prototype.hasOwnProperty.call(body || {}, "description_en") ? body.description_en : (merged.description_en || merged.short_description_en);
+    const descriptionHu = Object.prototype.hasOwnProperty.call(body || {}, "description_hu") ? body.description_hu : (merged.description_hu || merged.short_description_hu);
+    const required = ["category_id", "access_type", "title_en", "title_hu", "venue_name", "venue_street", "venue_city", "venue_region", "venue_postal_code"];
     if (required.some((field) => !cleanText(merged[field]))) return { error: "REQUIRED_EVENT_FIELDS" };
     if (!EVENT_ACCESS_TYPES.has(merged.access_type)) return { error: "INVALID_EVENT_ACCESS_TYPE" };
-    if (!validSlug(merged.slug_en) || !validSlug(merged.slug_hu)) return { error: "INVALID_EVENT_SLUG" };
     const category = db.prepare("SELECT id,active FROM event_categories WHERE id=?").get(merged.category_id);
     if (!category || !Number(category.active)) return { error: "EVENT_CATEGORY_NOT_AVAILABLE" };
     const times = normalizeEventTimes(merged.start_local || merged.start_at, merged.end_local || merged.end_at);
@@ -222,8 +264,8 @@ function createEventService({ db, qrSecret }) {
         category_id: cleanText(merged.category_id, 100), access_type: merged.access_type,
         slug_en: cleanText(merged.slug_en, 160), slug_hu: cleanText(merged.slug_hu, 160),
         title_en: cleanText(merged.title_en, 300), title_hu: cleanText(merged.title_hu, 300),
-        short_description_en: cleanText(merged.short_description_en, 700), short_description_hu: cleanText(merged.short_description_hu, 700),
-        description_en: cleanText(merged.description_en, 20000), description_hu: cleanText(merged.description_hu, 20000),
+        short_description_en: excerpt(descriptionEn, 700), short_description_hu: excerpt(descriptionHu, 700),
+        description_en: cleanText(descriptionEn, 20000), description_hu: cleanText(descriptionHu, 20000),
         performer_name: cleanText(merged.performer_name, 300), hero_image_url: cleanText(merged.hero_image_url, 1000),
         gallery_json: safeJson(merged.gallery ?? merged.gallery_json, []), venue_name: cleanText(merged.venue_name, 300),
         venue_street: cleanText(merged.venue_street, 300), venue_city: cleanText(merged.venue_city, 160),
@@ -271,17 +313,44 @@ function createEventService({ db, qrSecret }) {
     return { eligible: false, code: "WITHIN_48_HOURS" };
   }
 
-  return { selectEventSql, eventById, eventResponse, validateEventInput, capacity, ticketCounts, createTicket, qrToken, verifyQrToken, refundEligibility };
+  return { selectEventSql, eventById, eventResponse, validateEventInput, uniqueSlug, capacity, ticketCounts, createTicket, qrToken, verifyQrToken, refundEligibility };
 }
 
 function registerEventRoutes(options) {
-  const { app, db, auth, permit, requireSuperadmin, audit, transactionalEmail } = options;
+  const { app, db, auth, permit, requireSuperadmin, audit, transactionalEmail, eventImageUpload, eventImageDir } = options;
   const qrSecret = String(options.qrSecret || "");
   if (qrSecret.length < 32) throw new Error("EVENT_QR_SECRET must be at least 32 characters long");
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
   const service = createEventService({ db, qrSecret });
   const admin = permit("ADMIN");
+  const eventImage = eventImageUpload ? eventImageUpload.single("event_image") : (_req, _res, next) => next();
+
+  function removeUploadedFile(filePath) {
+    if (!filePath) return;
+    try { fs.unlinkSync(filePath); } catch (_error) {}
+  }
+
+  function removeStoredEventImage(imageUrl) {
+    const prefix = "/uploads/events/";
+    if (!imageUrl || !String(imageUrl).startsWith(prefix) || !eventImageDir) return;
+    const fileName = path.basename(String(imageUrl));
+    removeUploadedFile(path.join(eventImageDir, fileName));
+  }
+
+  function uploadedEventImage(req) {
+    if (!req.file) return { imageUrl: "" };
+    const details = inspectImageFile(req.file.path);
+    if (!details) {
+      removeUploadedFile(req.file.path);
+      return { error: "INVALID_EVENT_IMAGE" };
+    }
+    if (details.width < 1600 || details.height < 900) {
+      removeUploadedFile(req.file.path);
+      return { error: "EVENT_IMAGE_TOO_SMALL" };
+    }
+    return { imageUrl: `/uploads/events/${path.basename(req.file.path)}`, details };
+  }
 
   function sendError(res, error, fallback = "EVENT_OPERATION_FAILED") {
     const code = cleanText(error?.message || fallback, 120) || fallback;
@@ -299,13 +368,13 @@ function registerEventRoutes(options) {
   app.get("/api/public/events", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
     const includePast = String(req.query.include_past || "false") === "true";
-    const placeholders = PUBLIC_STATUSES.map(() => "?").join(",");
+    const placeholders = PUBLIC_LIST_STATUSES.map(() => "?").join(",");
     const rows = db.prepare(`${service.selectEventSql}
       WHERE e.published_at IS NOT NULL AND e.access_type IN ('PUBLIC_PAID','PUBLIC_FREE')
         AND e.status IN (${placeholders}) ${includePast ? "" : "AND e.end_at>=?"}
-      ORDER BY e.start_at`).all(...PUBLIC_STATUSES, ...(includePast ? [] : [new Date().toISOString()]));
+      ORDER BY e.start_at`).all(...PUBLIC_LIST_STATUSES, ...(includePast ? [] : [new Date().toISOString()]));
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    res.json(rows.map((row) => publicEventRow(row, language, service.capacity(row.id))));
+    res.json(rows.map((row) => publicEventRow(row, language, service.capacity(row.id), erpBaseUrl)));
   });
 
   app.get("/api/public/events/:slug", (req, res) => {
@@ -316,7 +385,7 @@ function registerEventRoutes(options) {
       AND e.access_type IN ('PUBLIC_PAID','PUBLIC_FREE') AND e.status IN (${placeholders})`).get(req.params.slug, ...PUBLIC_STATUSES);
     if (!row) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    res.json(publicEventRow(row, language, service.capacity(row.id)));
+    res.json(publicEventRow(row, language, service.capacity(row.id), erpBaseUrl));
   });
 
   app.get("/api/public/event-invitations/:token", (req, res) => {
@@ -417,12 +486,18 @@ function registerEventRoutes(options) {
     res.json({ ...service.eventResponse(row), invitations, tickets, refunds });
   });
 
-  app.post("/api/events", auth, admin, (req, res) => {
+  app.post("/api/events", auth, admin, eventImage, (req, res) => {
     const validation = service.validateEventInput(req.body);
-    if (validation.error) return res.status(400).json({ error: validation.error });
+    if (validation.error) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: validation.error }); }
+    const uploaded = uploadedEventImage(req);
+    if (uploaded.error) return res.status(400).json({ error: uploaded.error });
+    if (!uploaded.imageUrl) return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" });
     const value = validation.value;
     const id = newId("EVT");
     const eventKey = `EV-${new Date().getUTCFullYear()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+    value.slug_en = service.uniqueSlug(value.title_en, "en", req.body?.start_local || value.start_at);
+    value.slug_hu = service.uniqueSlug(value.title_hu, "hu", req.body?.start_local || value.start_at);
+    value.hero_image_url = uploaded.imageUrl;
     try {
       db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,performer_name,hero_image_url,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,sales_start_at,sales_end_at,created_by_user_id,updated_by_user_id)
         VALUES(@id,@event_key,@category_id,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@performer_name,@hero_image_url,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@sales_start_at,@sales_end_at,@created_by_user_id,@updated_by_user_id)`)
@@ -430,29 +505,50 @@ function registerEventRoutes(options) {
       const created = service.eventById(id);
       audit(req, "CREATE", "events", id, null, created, 1, "Event draft created");
       res.status(201).json(service.eventResponse(created));
-    } catch (error) { sendError(res, Object.assign(new Error(String(error.message).includes("UNIQUE") ? "EVENT_SLUG_ALREADY_USED" : "EVENT_CREATE_FAILED"), { status: 409 })); }
+    } catch (error) {
+      removeUploadedFile(req.file?.path);
+      sendError(res, Object.assign(new Error(String(error.message).includes("UNIQUE") ? "EVENT_SLUG_ALREADY_USED" : "EVENT_CREATE_FAILED"), { status: 409 }));
+    }
   });
 
-  app.put("/api/events/:id", auth, admin, (req, res) => {
+  app.put("/api/events/:id", auth, admin, eventImage, (req, res) => {
     const before = service.eventById(req.params.id);
-    if (!ensureMutable(before, res)) return;
+    if (!ensureMutable(before, res)) { removeUploadedFile(req.file?.path); return; }
     const validation = service.validateEventInput(req.body, service.eventResponse(before));
-    if (validation.error) return res.status(400).json({ error: validation.error });
+    if (validation.error) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: validation.error }); }
+    const uploaded = uploadedEventImage(req);
+    if (uploaded.error) return res.status(400).json({ error: uploaded.error });
     const value = validation.value;
+    const titlesChanged = value.title_en !== before.title_en || value.title_hu !== before.title_hu;
+    if (before.published_at) {
+      value.slug_en = before.slug_en;
+      value.slug_hu = before.slug_hu;
+    } else if (titlesChanged) {
+      value.slug_en = service.uniqueSlug(value.title_en, "en", req.body?.start_local || value.start_at, before.id);
+      value.slug_hu = service.uniqueSlug(value.title_hu, "hu", req.body?.start_local || value.start_at, before.id);
+    } else {
+      value.slug_en = before.slug_en;
+      value.slug_hu = before.slug_hu;
+    }
+    value.hero_image_url = uploaded.imageUrl || before.hero_image_url;
     try {
       db.prepare(`UPDATE events SET category_id=@category_id,access_type=@access_type,slug_en=@slug_en,slug_hu=@slug_hu,title_en=@title_en,title_hu=@title_hu,short_description_en=@short_description_en,short_description_hu=@short_description_hu,description_en=@description_en,description_hu=@description_hu,performer_name=@performer_name,hero_image_url=@hero_image_url,gallery_json=@gallery_json,venue_name=@venue_name,venue_street=@venue_street,venue_city=@venue_city,venue_region=@venue_region,venue_postal_code=@venue_postal_code,venue_country=@venue_country,timezone=@timezone,start_at=@start_at,end_at=@end_at,capacity_total=@capacity_total,price_cents=@price_cents,currency=@currency,sales_start_at=@sales_start_at,sales_end_at=@sales_end_at,updated_by_user_id=@updated_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
         .run({ id: before.id, ...value, updated_by_user_id: req.user.id });
       const after = service.eventById(before.id);
+      if (uploaded.imageUrl && before.hero_image_url !== uploaded.imageUrl) removeStoredEventImage(before.hero_image_url);
       audit(req, "UPDATE", "events", before.id, before, after, 1, "Event updated");
       res.json(service.eventResponse(after));
-    } catch (error) { sendError(res, Object.assign(new Error(String(error.message).includes("UNIQUE") ? "EVENT_SLUG_ALREADY_USED" : "EVENT_UPDATE_FAILED"), { status: 409 })); }
+    } catch (error) {
+      removeUploadedFile(req.file?.path);
+      sendError(res, Object.assign(new Error(String(error.message).includes("UNIQUE") ? "EVENT_SLUG_ALREADY_USED" : "EVENT_UPDATE_FAILED"), { status: 409 }));
+    }
   });
 
   app.post("/api/events/:id/publish", auth, admin, (req, res) => {
     const before = service.eventById(req.params.id);
     if (!ensureMutable(before, res)) return;
     if (before.status !== "DRAFT") return res.status(409).json({ error: "EVENT_ALREADY_PUBLISHED" });
-    if (!cleanText(before.short_description_en) || !cleanText(before.short_description_hu) || !cleanText(before.description_en) || !cleanText(before.description_hu)) return res.status(400).json({ error: "BILINGUAL_EVENT_CONTENT_REQUIRED" });
+    if (!cleanText(before.hero_image_url)) return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" });
     if (before.access_type === "PUBLIC_PAID" && Number(before.price_cents) <= 0) return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
     db.prepare("UPDATE events SET status='PUBLISHED',published_at=COALESCE(published_at,CURRENT_TIMESTAMP),updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, before.id);
     const after = service.eventById(before.id);
@@ -523,6 +619,7 @@ function registerEventRoutes(options) {
       (SELECT COUNT(*) FROM event_refund_requests WHERE event_id=?) refunds`).get(event.id, event.id, event.id, event.id);
     if (event.status !== "DRAFT" || Object.values(dependencies).some((count) => Number(count) > 0)) return res.status(409).json({ error: "EVENT_RETENTION_REQUIRED", dependencies });
     db.prepare("DELETE FROM events WHERE id=?").run(event.id);
+    removeStoredEventImage(event.hero_image_url);
     res.json({ ok: true });
   });
 
@@ -668,6 +765,8 @@ module.exports = {
   formatInTimeZone,
   localNewYorkToUtc,
   normalizeEventTimes,
+  slugify,
+  excerpt,
   registerEventRoutes,
   tokenHash
 };
