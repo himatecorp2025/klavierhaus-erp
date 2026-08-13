@@ -46,6 +46,24 @@ function createEventImageUpload(uploadDir){
   });
 }
 
+function createWebsiteImageUpload(uploadDir){
+  return multer({
+    storage:multer.diskStorage({
+      destination:(_req,_file,cb)=>cb(null,uploadDir),
+      filename:(_req,file,cb)=>{
+        const extension=/\.png$/i.test(file.originalname||"")?".png":".jpg";
+        cb(null,`website-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`);
+      }
+    }),
+    limits:{fileSize:12*1024*1024,files:1},
+    fileFilter:(_req,file,cb)=>{
+      const mime=String(file.mimetype||"").toLowerCase();
+      const ok=["image/png","image/jpeg","image/jpg"].includes(mime)&&/\.(png|jpe?g)$/i.test(file.originalname||"");
+      cb(ok?null:new Error("INVALID_WEBSITE_IMAGE_TYPE"),ok);
+    }
+  });
+}
+
 function inspectImageFile(filePath){
   const buffer=require("fs").readFileSync(filePath);
   if(buffer.length>=33&&buffer.toString("hex",0,8)==="89504e470d0a1a0a"&&buffer.includes(Buffer.from("IEND"))){
@@ -107,6 +125,7 @@ module.exports={
   createDocumentUpload,
   createBrandingUpload,
   createEventImageUpload,
+  createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
   inspectImageFile,
