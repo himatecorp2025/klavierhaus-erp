@@ -5,8 +5,8 @@ const Stripe = require("stripe");
 
 const HOLD_MINUTES = 15;
 const HOLD_MS = HOLD_MINUTES * 60 * 1000;
-const TEST_SECRET_PREFIX = "sk_test_";
-const LIVE_SECRET_PREFIX = "sk_live_";
+const TEST_SECRET_PREFIXES = ["sk_test_", "rk_test_"];
+const LIVE_SECRET_PREFIXES = ["sk_live_", "rk_live_"];
 
 function cleanText(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
@@ -48,11 +48,11 @@ function createStripeSandbox(options = {}) {
   const webhookSecret = cleanText(options.webhookSecret ?? env.STRIPE_WEBHOOK_SECRET, 500);
   const websiteBaseUrl = normalizeBaseUrl(options.websiteBaseUrl ?? env.WEBSITE_BASE_URL, "https://klavierhaus-home.onrender.com");
 
-  if (secretKey.startsWith(LIVE_SECRET_PREFIX)) {
+  if (LIVE_SECRET_PREFIXES.some((prefix) => secretKey.startsWith(prefix))) {
     throw new Error("Live Stripe keys are not accepted while Stripe Sandbox mode is enforced");
   }
-  if (secretKey && !secretKey.startsWith(TEST_SECRET_PREFIX)) {
-    throw new Error("STRIPE_SECRET_KEY must be a Stripe test secret key beginning with sk_test_");
+  if (secretKey && !TEST_SECRET_PREFIXES.some((prefix) => secretKey.startsWith(prefix))) {
+    throw new Error("STRIPE_SECRET_KEY must be a Stripe test secret key beginning with sk_test_ or rk_test_");
   }
   if (webhookSecret && !webhookSecret.startsWith("whsec_")) {
     throw new Error("STRIPE_WEBHOOK_SECRET must begin with whsec_");
