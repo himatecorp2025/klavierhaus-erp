@@ -87,7 +87,10 @@ function formatInTimeZone(date, timeZone = NY_TIME_ZONE) {
     output[part.type] = part.value;
     return output;
   }, {});
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  // Some Node/ICU builds render local midnight as 24:00 even with h23.
+  // The ERP stores wall-clock values in the HTML datetime-local 00:00 form.
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}`;
 }
 
 function localNewYorkToUtc(value) {
@@ -400,6 +403,61 @@ function registerEventRoutes(options) {
     res.json(publicEventRow(row, language, service.capacity(row.id), erpBaseUrl, paymentConfiguration));
   });
 
+  // Internal ERP calendar feed. Cultural events are projected into the
+  // scheduler as read-only calendar entries; no job or Google Calendar record
+  // is created, so this feed cannot trigger worker assignment or Google sync.
+  app.get("/api/calendar-events", auth, (req, res) => {
+    const from = localNewYorkToUtc(cleanText(req.query.from, 40));
+    const to = localNewYorkToUtc(cleanText(req.query.to, 40));
+    if (!from || !to || to.getTime() <= from.getTime()) return res.status(400).json({ error: "INVALID_EVENT_RANGE" });
+    const rows = db.prepare(`${service.selectEventSql} WHERE e.start_at<? AND e.end_at>? ORDER BY e.start_at`).all(to.toISOString(), from.toISOString());
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(rows.map((row) => ({
+      id: `calendar-event:${row.id}`,
+      event_id: row.id,
+      calendar_entry_type: "KLAVIERHAUS_EVENT",
+      title_en: row.title_en,
+      title_hu: row.title_hu,
+      performer_name: row.performer_name || "",
+      venue_name: row.venue_name,
+      venue_address: [row.venue_street, row.venue_city, row.venue_region, row.venue_postal_code].filter(Boolean).join(", "),
+      start_time: formatInTimeZone(new Date(row.start_at), row.timezone),
+      end_time: formatInTimeZone(new Date(row.end_at), row.timezone),
+      status: row.status,
+      access_type: row.access_type,
+      event_key: row.event_key,
+      google_sync_disabled: true
+    })));
+  });
+
+  app.get("/api/calendar-events/:id", auth, (req, res) => {
+    const row = service.eventById(req.params.id);
+    if (!row) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    const cap = service.capacity(row.id);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({
+      id: row.id,
+      event_key: row.event_key,
+      title_en: row.title_en,
+      title_hu: row.title_hu,
+      description_en: row.description_en || row.short_description_en || "",
+      description_hu: row.description_hu || row.short_description_hu || "",
+      performer_name: row.performer_name || "",
+      venue_name: row.venue_name,
+      venue_address: [row.venue_street, row.venue_city, row.venue_region, row.venue_postal_code].filter(Boolean).join(", "),
+      start_local: formatInTimeZone(new Date(row.start_at), row.timezone),
+      end_local: formatInTimeZone(new Date(row.end_at), row.timezone),
+      status: row.status,
+      access_type: row.access_type,
+      capacity_total: Number(row.capacity_total),
+      capacity_remaining: Number(cap?.remaining || 0),
+      public_url_en: row.published_at ? `${websiteBaseUrl}/events/${encodeURIComponent(row.slug_en)}` : null,
+      public_url_hu: row.published_at ? `${websiteBaseUrl}/hu/esemenyek/${encodeURIComponent(row.slug_hu)}` : null,
+      google_sync_disabled: true,
+      can_manage: req.user.role === "ADMIN" || req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin || 0) === 1
+    });
+  });
+
   app.post("/api/public/events/:slug/checkout", async (req, res) => {
     const language = req.body?.language === "hu" ? "hu" : "en";
     const column = language === "hu" ? "slug_hu" : "slug_en";
@@ -550,6 +608,10 @@ function registerEventRoutes(options) {
     value.slug_hu = service.uniqueSlug(value.title_hu, "hu", req.body?.start_local || value.start_at);
     value.hero_image_url = uploaded.imageUrl;
     const publishNow = String(req.body?.publish_now || "") === "1";
+    if (publishNow && value.access_type.startsWith("PUBLIC_") && !value.performer_name) {
+      removeUploadedFile(req.file?.path);
+      return res.status(400).json({ error: "PUBLIC_EVENT_PERFORMER_REQUIRED" });
+    }
     if (publishNow && value.access_type === "PUBLIC_PAID" && Number(value.price_cents) <= 0) {
       removeUploadedFile(req.file?.path);
       return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
@@ -588,6 +650,7 @@ function registerEventRoutes(options) {
     }
     value.hero_image_url = uploaded.imageUrl || before.hero_image_url;
     const publishNow = String(req.body?.publish_now || "") === "1" && before.status === "DRAFT";
+    if (publishNow && value.access_type.startsWith("PUBLIC_") && !value.performer_name) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "PUBLIC_EVENT_PERFORMER_REQUIRED" }); }
     if (publishNow && !value.hero_image_url) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" }); }
     if (publishNow && value.access_type === "PUBLIC_PAID" && Number(value.price_cents) <= 0) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" }); }
     try {
@@ -608,6 +671,7 @@ function registerEventRoutes(options) {
     if (!ensureMutable(before, res)) return;
     if (before.status !== "DRAFT") return res.status(409).json({ error: "EVENT_ALREADY_PUBLISHED" });
     if (!cleanText(before.hero_image_url)) return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" });
+    if (before.access_type.startsWith("PUBLIC_") && !cleanText(before.performer_name)) return res.status(400).json({ error: "PUBLIC_EVENT_PERFORMER_REQUIRED" });
     if (before.access_type === "PUBLIC_PAID" && Number(before.price_cents) <= 0) return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
     db.prepare("UPDATE events SET status='PUBLISHED',published_at=COALESCE(published_at,CURRENT_TIMESTAMP),updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, before.id);
     const after = service.eventById(before.id);
