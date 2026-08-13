@@ -297,6 +297,9 @@ CREATE TABLE IF NOT EXISTS events (
   start_at TEXT NOT NULL,
   end_at TEXT NOT NULL,
   previous_start_at TEXT,
+  cancellation_reason TEXT,
+  cancelled_at TEXT,
+  cancelled_by_user_id TEXT,
   capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),
   price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
   currency TEXT NOT NULL DEFAULT 'USD',
@@ -312,6 +315,7 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(category_id) REFERENCES event_categories(id),
+  FOREIGN KEY(cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -353,6 +357,8 @@ CREATE TABLE IF NOT EXISTS event_tickets (
   status TEXT NOT NULL DEFAULT 'VALID' CHECK(status IN ('VALID','USED','VOID','REFUNDED')),
   price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
   currency TEXT NOT NULL DEFAULT 'USD',
+  event_payment_id TEXT,
+  ticket_sequence INTEGER,
   checked_in_at TEXT,
   checked_in_by_user_id TEXT,
   voided_at TEXT,
@@ -401,6 +407,62 @@ CREATE TABLE IF NOT EXISTS event_refund_requests (
   FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
   FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
   FOREIGN KEY(resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Stripe is deliberately sandbox-only in this release. A short-lived hold
+-- protects general-admission capacity while the hosted Checkout is open.
+CREATE TABLE IF NOT EXISTS event_checkout_holds (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK(quantity > 0),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','PAID','EXPIRED','CANCELLED','FAILED','REFUNDED')),
+  expires_at TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  purchaser_name TEXT,
+  purchaser_email TEXT,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  amount_total INTEGER NOT NULL DEFAULT 0 CHECK(amount_total >= 0),
+  stripe_checkout_session_id TEXT UNIQUE,
+  stripe_payment_intent_id TEXT,
+  failure_code TEXT,
+  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_payments (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  hold_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK(status IN ('PAID','REFUND_PENDING','REFUNDED','REFUND_FAILED')),
+  purchaser_name TEXT NOT NULL,
+  purchaser_email TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK(quantity > 0),
+  amount_total INTEGER NOT NULL CHECK(amount_total >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  stripe_checkout_session_id TEXT NOT NULL UNIQUE,
+  stripe_payment_intent_id TEXT NOT NULL UNIQUE,
+  stripe_refund_id TEXT UNIQUE,
+  stripe_fee_cents INTEGER,
+  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
+  paid_at TEXT,
+  refunded_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(hold_id) REFERENCES event_checkout_holds(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('PROCESSING','PROCESSED','FAILED')),
+  failure_code TEXT,
+  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
+  received_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  processed_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS event_closures (
