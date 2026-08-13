@@ -73,6 +73,29 @@ function buildEventInvitationEmail({ name, event, invitationUrl }) {
   return { subject, text, html };
 }
 
+function buildEventInterestEmail({ event, language = "en", websiteBaseUrl = "" }) {
+  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
+  const subject = language === "hu" ? `Érdeklődés rögzítve: ${title}` : `Interest recorded: ${title}`;
+  const url = `${String(websiteBaseUrl || "").replace(/\/$/, "")}${language === "hu" ? `/hu/esemenyek/${event.slug_hu}` : `/events/${event.slug_en}`}`;
+  const text = language === "hu"
+    ? `Köszönjük érdeklődését a(z) ${title} esemény iránt. Értesítjük, ha új alkalmat hirdetünk meg.\n${url}`
+    : `Thank you for your interest in ${title}. We will notify you if a new edition is announced.\n${url}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">${escapeHtml(title)}</h1><p>${escapeHtml(text.split("\n")[0])}</p><p><a href="${escapeHtml(url)}" style="color:#d7b66b">${escapeHtml(language === "hu" ? "Esemény megtekintése" : "View event")}</a></p></div></div></body></html>`;
+  return { subject, text, html };
+}
+
+function buildEventReturnAnnouncement({ event, language = "en", websiteBaseUrl = "" }) {
+  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
+  const url = `${String(websiteBaseUrl || "").replace(/\/$/, "")}${language === "hu" ? `/hu/esemenyek/${event.slug_hu}` : `/events/${event.slug_en}`}`;
+  const when = eventDate(event.start_at, language === "hu" ? "hu-HU" : "en-US");
+  const subject = language === "hu" ? `Új időpont: ${title}` : `A new date is available: ${title}`;
+  const lead = language === "hu" ? "Az Ön érdeklődése alapján értesítjük, hogy az eseményt ismét meghirdettük." : "You asked to be informed, and this Klavierhaus event is now available again.";
+  const action = language === "hu" ? "Esemény és jegyek" : "Event and tickets";
+  const text = `${lead}\n${title}\n${when}\n${url}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">${escapeHtml(title)}</h1><p>${escapeHtml(lead)}</p><p><strong>${escapeHtml(when)}</strong></p><p><a href="${escapeHtml(url)}" style="display:inline-block;padding:13px 22px;border-radius:999px;background:#c9a45d;color:#080807;text-decoration:none;font-weight:700">${escapeHtml(action)}</a></p></div></div></body></html>`;
+  return { subject, text, html };
+}
+
 function safeProviderCode(error) {
   const candidate = String(error?.name || error?.code || "EMAIL_DELIVERY_FAILED").toUpperCase();
   return /^[A-Z0-9_-]{2,80}$/.test(candidate) ? candidate : "EMAIL_DELIVERY_FAILED";
@@ -137,6 +160,36 @@ function createTransactionalEmail(env = process.env) {
       }
       return { providerMessageId: String(data.id) };
     },
+    async sendEventInterestConfirmation({ to, event, language, websiteBaseUrl, idempotencyKey }) {
+      if (!apiKey || !eventFrom) {
+        const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+        error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
+        throw error;
+      }
+      const content = buildEventInterestEmail({ event, language, websiteBaseUrl });
+      const { data, error } = await resend.emails.send({
+        from: eventFrom,
+        to: [String(to || "").trim().toLowerCase()],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+        ...(replyTo ? { replyTo } : {}),
+        tags: [{ name: "category", value: "event_interest" }]
+      }, { idempotencyKey });
+      if (error || !data?.id) {
+        const deliveryError = new Error("EMAIL_DELIVERY_FAILED");
+        deliveryError.code = safeProviderCode(error);
+        throw deliveryError;
+      }
+      return { providerMessageId: String(data.id) };
+    },
+    async sendEventReturnAnnouncement({ to, event, language, websiteBaseUrl, idempotencyKey }) {
+      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildEventReturnAnnouncement({ event, language, websiteBaseUrl });
+      const { data, error } = await resend.emails.send({ from: eventFrom, to: [String(to || "").trim().toLowerCase()], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "event_return" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
     verifyWebhook({ payload, id, timestamp, signature }) {
       if (!webhookSecret) {
         const error = new Error("EMAIL_WEBHOOK_NOT_CONFIGURED");
@@ -152,4 +205,4 @@ function createTransactionalEmail(env = process.env) {
   };
 }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, createTransactionalEmail };
