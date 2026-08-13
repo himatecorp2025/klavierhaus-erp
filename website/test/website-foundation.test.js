@@ -25,7 +25,7 @@ test("health endpoint identifies stage-one public website", async () => {
     assert.deepEqual(await response.json(), {
       status: "ok",
       service: "klavierhaus-public-website",
-      version: "1.0.0",
+      version: "1.1.0",
       indexing: "disabled",
       event_api: "not-configured"
     });
@@ -123,7 +123,7 @@ test("website manifest stays self-contained and independent from ERP storage", (
   const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
 
   assert.equal(manifest.name, "klavierhaus-public-website");
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.1.0");
   assert.equal(lockfile.version, manifest.version);
   assert.equal(lockfile.packages[""].version, manifest.version);
   assert.equal(manifest.scripts.start, "node server/index.js");
