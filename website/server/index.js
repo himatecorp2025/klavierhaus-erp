@@ -344,13 +344,21 @@ function renderFooter(copy, language) {
         <p class="footer-label">${escapeHtml(copy.footerLegal)}</p>
         <a href="${escapeHtml(getRoute("privacy", language))}">${escapeHtml(copy.footerPrivacy)}</a>
         <a href="${escapeHtml(getRoute("ticketTerms", language))}">${escapeHtml(copy.footerTerms)}</a>
+        <button class="footer-privacy-button" type="button" data-privacy-settings>${escapeHtml(language === "hu" ? "Követési beállítások" : "Tracking settings")}</button>
       </div>
     </div>
     <div class="footer-bottom">
       <span>© <span data-current-year></span> ${escapeHtml(brand.name)}. ${escapeHtml(copy.rights)}</span>
       <span>${escapeHtml(brand.footerLocations)}</span>
     </div>
-  </footer>`;
+  </footer>${renderPrivacyControls(language)}`;
+}
+
+function renderPrivacyControls(language) {
+  const hu = language === "hu";
+  return `<section class="consent-banner" data-consent-banner hidden aria-labelledby="consent-title"><div><p class="eyebrow">${hu ? "Adatvédelem" : "Privacy"}</p><h2 id="consent-title">${hu ? "Ön dönt a mérésről." : "You decide about measurement."}</h2><p>${hu ? "A szükséges tárolás mindig aktív. Analitikai és marketingmérés csak az Ön hozzájárulása után indul." : "Essential storage is always active. Analytics and marketing measurement starts only after your consent."}</p></div><div class="consent-actions"><button class="button button--ghost" type="button" data-consent-essential>${hu ? "Csak szükséges" : "Essential only"}</button><button class="button button--primary" type="button" data-consent-all>${hu ? "Mind elfogadom" : "Accept all"}</button><button class="text-link" type="button" data-consent-settings>${hu ? "Beállítások" : "Settings"}</button></div></section>
+  <dialog class="privacy-dialog" data-consent-dialog><form method="dialog"><button class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">${hu ? "Követési beállítások" : "Tracking settings"}</p><h2>${hu ? "Adatvédelmi választás" : "Privacy choices"}</h2><label><input type="checkbox" checked disabled> ${hu ? "Szükséges működés" : "Essential functionality"}</label><label><input type="checkbox" data-consent-analytics> ${hu ? "Analitika" : "Analytics"}</label><label><input type="checkbox" data-consent-marketing> ${hu ? "Marketing" : "Marketing"}</label><button class="button button--primary" value="save" data-consent-save>${hu ? "Választás mentése" : "Save choices"}</button></form></dialog>
+  <dialog class="interest-dialog" data-interest-dialog><form method="dialog" data-interest-form><button class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">Klavierhaus</p><h2>${hu ? "Értesítsen a következő alkalomról" : "Notify me about the next edition"}</h2><p data-interest-title></p><input type="hidden" name="event_id"><label>${hu ? "E-mail-cím" : "Email address"}<input type="email" name="email" maxlength="320" autocomplete="email" required></label><label class="checkbox-row"><input type="checkbox" name="notify_event" required> ${hu ? "Kérek értesítést ennek az eseménynek az új időpontjáról." : "Notify me when this event returns."}</label><label class="checkbox-row"><input type="checkbox" name="marketing_consent"> ${hu ? "Külön hozzájárulok általános kulturális hírekhez is." : "I separately consent to general cultural news."}</label><button class="button button--primary" type="submit">${hu ? "Értesítést kérek" : "Keep me informed"}</button><p class="form-result" data-interest-result aria-live="polite"></p></form></dialog>`;
 }
 
 function organizationStructuredData(baseUrl, copy = {}) {
@@ -374,7 +382,8 @@ function organizationStructuredData(baseUrl, copy = {}) {
   };
 }
 
-function renderReviewShowcase(reviews, language, fallbackSection = null) {
+function renderReviewShowcase(reviews, language, fallbackSection = null, globalOverride = null) {
+  const labels = (globalOverride || getGlobal(language)).collectionLabels || {};
   const items = reviews.length ? reviews : (fallbackSection ? [{ person_name: fallbackSection.attribution, quote: fallbackSection.quote, role: "", image_url: shared.artistSalonImage, image_alt: fallbackSection.attribution }] : []);
   if (!items.length) return "";
   const cards = items.map((review, index) => `<article class="review-card" data-review-card data-reveal>
@@ -382,37 +391,71 @@ function renderReviewShowcase(reviews, language, fallbackSection = null) {
     <div><span class="review-card__quote" aria-hidden="true">“</span><blockquote>${escapeHtml(review.quote || "")}</blockquote><p><strong>${escapeHtml(review.person_name || "")}</strong>${review.role ? `<span>${escapeHtml(review.role)}</span>` : ""}</p></div>
     <span class="review-card__number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
   </article>`).join("");
-  return `<section class="section review-showcase" id="reviews"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Vélemények" : "Reflections")}</p><h2>${escapeHtml(language === "hu" ? "A zene emléke tovább él." : "The memory of music remains.")}</h2></div><div class="review-carousel" data-review-carousel><div class="review-track">${cards}</div><div class="review-controls"><button type="button" data-review-previous aria-label="${escapeHtml(language === "hu" ? "Előző vélemény" : "Previous review")}">←</button><div class="review-dots" data-review-dots></div><button type="button" data-review-next aria-label="${escapeHtml(language === "hu" ? "Következő vélemény" : "Next review")}">→</button></div></div></section>`;
+  return `<section class="section review-showcase" id="reviews"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.reviewsEyebrow || (language === "hu" ? "Vélemények" : "Reflections"))}</p><h2>${escapeHtml(labels.reviewsTitle || (language === "hu" ? "A zene emléke tovább él." : "The memory of music remains."))}</h2></div><div class="review-carousel" data-review-carousel><div class="review-track">${cards}</div><div class="review-controls"><button type="button" data-review-previous aria-label="${escapeHtml(language === "hu" ? "Előző vélemény" : "Previous review")}">←</button><div class="review-dots" data-review-dots></div><button type="button" data-review-next aria-label="${escapeHtml(language === "hu" ? "Következő vélemény" : "Next review")}">→</button></div></div></section>`;
 }
 
 function showroomPath(item, language) {
   return language === "hu" ? `/hu/zongorak/${item.slug}` : `/pianos/${item.slug}`;
 }
 
+const pianoBrands = Object.freeze([
+  { slug: "steinway", label: "Steinway & Sons", matches: (value) => /^steinway/i.test(value) },
+  { slug: "fazioli", label: "Fazioli", matches: (value) => /^fazioli/i.test(value) },
+  { slug: "bosendorfer", label: "Bösendorfer", matches: (value) => /^(bösendorfer|bosendorfer)/i.test(value) }
+]);
+
+function pianoBrandPath(brand, language) {
+  return language === "hu" ? `/hu/zongorak/${brand.slug}` : `/pianos/${brand.slug}`;
+}
+
+function resolvePianoBrand(value) {
+  const source = String(value || "").trim();
+  return pianoBrands.find((brand) => brand.matches(source)) || null;
+}
+
 function servicePath(item, language) {
   return language === "hu" ? `/hu/szolgaltatasok/${item.slug}` : `/services/${item.slug}`;
+}
+
+function artistPath(item, language) {
+  return language === "hu" ? `/hu/muveszek/${item.slug}` : `/artists/${item.slug}`;
+}
+
+function renderArtistCollection(items, language, options = {}) {
+  if (!items.length) return "";
+  const labels = (options.copy || getGlobal(language)).collectionLabels || {};
+  const cards = items.map((item) => `<article class="artist-profile-card" data-reveal><a href="${escapeHtml(artistPath(item, language))}"><span class="artist-profile-card__media"><img src="${escapeHtml(item.portrait_url)}" alt="${escapeHtml(item.portrait_alt || item.name)}" loading="lazy" decoding="async"></span><span class="artist-profile-card__copy"><span class="eyebrow">${escapeHtml(item.role || labels.artistFallbackRole || (language === "hu" ? "Művész" : "Artist"))}</span><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(labels.artistProfile || (language === "hu" ? "Művészprofil" : "Artist profile"))} ↗</span></span></a></article>`).join("");
+  return `<section class="section artist-collection${options.compact ? " artist-collection--home" : ""}" id="artist-directory"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.artistsEyebrow || (language === "hu" ? "Művészeink" : "Our artists"))}</p><h2>${escapeHtml(labels.artistsTitle || (language === "hu" ? "Akik lélegzetet adnak a hangszernek." : "The people who give the instrument breath."))}</h2></div><div class="artist-profile-grid">${cards}</div></section>`;
 }
 
 function renderShowroomCollection(items, language, options = {}) {
   if (!items.length) return "";
   const compact = Boolean(options.compact);
-  const cards = items.map((item) => `<article class="catalog-card" data-reveal>
-    <a class="catalog-card__image" href="${escapeHtml(showroomPath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
-    <div class="catalog-card__body"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h3 class="word-safe-title"><a href="${escapeHtml(showroomPath(item, language))}">${escapeHtml(item.title)}</a></h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(language === "hu" ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(language === "hu" ? "Privát megtekintés" : "Arrange a private viewing")}</span><span aria-hidden="true">↗</span></a></div>
-  </article>`).join("");
-  return `<section class="section catalog-showcase${compact ? " catalog-showcase--home" : ""}" id="showroom-pianos"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Bemutatótermi zongorák" : "The showroom")}</p><h2>${escapeHtml(language === "hu" ? "Kivételes hangszerek, személyes találkozásra." : "Exceptional instruments, encountered in person.")}</h2><p>${escapeHtml(language === "hu" ? "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg." : "A piano's true character is known only through tone, touch, and time in the room.")}</p></div><div class="catalog-grid">${cards}</div></section>`;
+  const labels = (options.copy || getGlobal(language)).collectionLabels || {};
+  const grouped = pianoBrands.map((brand) => ({ brand, items: items.filter((item) => brand.matches(item.brand)) })).filter((entry) => entry.items.length);
+  const cards = grouped.map(({ brand, items: brandItems }) => {
+    const item = brandItems[0];
+    const path = pianoBrandPath(brand, language);
+    return `<article class="catalog-card piano-brand-card" data-reveal>
+      <a class="catalog-card__image" href="${escapeHtml(path)}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
+      <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h3 class="word-safe-title"><a href="${escapeHtml(path)}">${escapeHtml(brand.label)}</a></h3><p>${escapeHtml(`${brandItems.length} ${brandItems.length === 1 ? labels.showroomInstrumentSingular : labels.showroomInstrumentPlural}`)}</p><a class="text-link" href="${escapeHtml(path)}"><span>${escapeHtml(labels.showroomDiscover || (language === "hu" ? "A hangszerek felfedezése" : "Discover the instruments"))}</span><span aria-hidden="true">↗</span></a></div>
+    </article>`;
+  }).join("");
+  return `<section class="section catalog-showcase${compact ? " catalog-showcase--home" : ""}" id="showroom-pianos"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.showroomEyebrow || (language === "hu" ? "Bemutatótermi zongorák" : "The showroom"))}</p><h2>${escapeHtml(labels.showroomTitle || (language === "hu" ? "Kivételes hangszerek, személyes találkozásra." : "Exceptional instruments, encountered in person."))}</h2><p>${escapeHtml(labels.showroomLead || (language === "hu" ? "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg." : "A piano's true character is known only through tone, touch, and time in the room."))}</p></div><div class="catalog-grid">${cards}</div></section>`;
 }
 
 function renderServiceCollection(items, language, options = {}) {
   if (!items.length) return "";
+  const labels = (options.copy || getGlobal(language)).collectionLabels || {};
   const cards = items.map((item) => `<article class="catalog-card service-catalog-card" data-reveal>
     <a class="catalog-card__image" href="${escapeHtml(servicePath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
-    <div class="catalog-card__body"><p class="eyebrow">Klavierhaus atelier</p><h3 class="word-safe-title"><a href="${escapeHtml(servicePath(item, language))}">${escapeHtml(item.title)}</a></h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<a class="text-link" href="${escapeHtml(servicePath(item, language))}"><span>${escapeHtml(language === "hu" ? "Személyes felmérés egyeztetése" : "Arrange a private assessment")}</span><span aria-hidden="true">↗</span></a></div>
+    <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h3 class="word-safe-title"><a href="${escapeHtml(servicePath(item, language))}">${escapeHtml(item.title)}</a></h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<button class="text-link" type="button" data-service-request data-service-id="${escapeHtml(item.id)}" data-service-title="${escapeHtml(item.title)}"><span>${escapeHtml(labels.serviceAssessment || (language === "hu" ? "Személyes felmérés egyeztetése" : "Arrange a private assessment"))}</span><span aria-hidden="true">↗</span></button></div>
   </article>`).join("");
-  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Személyre szabott gondoskodás" : "Bespoke care")}</p><h2>${escapeHtml(language === "hu" ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention.")}</h2><p>${escapeHtml(language === "hu" ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument.")}</p></div><div class="catalog-grid">${cards}</div></section>`;
+  const hu = language === "hu";
+  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.servicesEyebrow || (hu ? "Személyre szabott gondoskodás" : "Bespoke care"))}</p><h2>${escapeHtml(labels.servicesTitle || (hu ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention."))}</h2><p>${escapeHtml(labels.servicesLead || (hu ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument."))}</p></div><div class="catalog-grid">${cards}</div></section><dialog class="service-dialog" data-service-dialog><form method="dialog" data-service-form><button class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h2>${hu ? "Személyes konzultáció" : "Private consultation"}</h2><p data-service-title></p><input type="hidden" name="service_id"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel"></label><label>${hu ? "Megjegyzés" : "Note"}<textarea name="message" maxlength="5000" rows="4"></textarea></label><label>${hu ? "Kapcsolattartás módja" : "Preferred contact"}<select name="preferred_contact"><option value="EMAIL">Email</option><option value="PHONE">${hu ? "Telefon" : "Phone"}</option><option value="EITHER">${hu ? "Bármelyik" : "Either"}</option></select></label><label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${hu ? "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot." : "I consent to being contacted about this enquiry."}</label><label class="checkbox-row"><input name="consent_marketing" type="checkbox"> ${hu ? "Külön hozzájárulok kulturális hírekhez." : "I separately consent to cultural news."}</label><button class="button button--primary" type="submit">${hu ? "Visszahívást kérek" : "Request a callback"}</button><p class="form-result" data-service-result aria-live="polite"></p></form></dialog>`;
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], pageOverride = null, globalOverride = null }) {
+function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], artists = [], pageOverride = null, globalOverride = null }) {
   const { key, language } = route;
   const copy = globalOverride || getGlobal(language);
   const page = pageOverride || getPage(key, language);
@@ -424,12 +467,19 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
   const robots = allowIndexing ? "index, follow" : "noindex, nofollow, noarchive";
   const testimonial = page.sections.find((section) => section.id === "testimonial") || null;
-  const sections = page.sections.filter((section) => !(key === "home" && ["salon", "testimonial"].includes(section.id))).map((section) => {
-    if (key === "home" && section.id === "manifesto") return `${renderSection(section, language)}${renderHomeEventShowcase(homeEvents, language, copy)}${renderReviewShowcase(reviews, language, testimonial)}`;
-    if (key === "home" && section.id === "pianos" && showroomPianos.length) return renderShowroomCollection(showroomPianos, language, { compact: true });
-    if (key === "home" && section.id === "craft" && websiteServices.length) return renderServiceCollection(websiteServices, language, { compact: true });
+  const sections = page.sections.filter((section) => {
+    if (key === "home" && ["salon", "testimonial"].includes(section.id)) return false;
+    if (key === "pianos" && showroomPianos.length && ["selection", "inventory"].includes(section.id)) return false;
+    if (key === "services" && websiteServices.length && section.id === "services") return false;
+    if (key === "artists" && artists.length && section.id === "artist-directory") return false;
+    return true;
+  }).map((section) => {
+    if (key === "home" && section.id === "manifesto") return `${renderSection(section, language)}${renderHomeEventShowcase(homeEvents, language, copy)}${renderReviewShowcase(reviews, language, testimonial, copy)}`;
+    if (key === "home" && section.id === "pianos" && showroomPianos.length) return renderShowroomCollection(showroomPianos, language, { compact: true, copy });
+    if (key === "home" && section.id === "craft" && websiteServices.length) return renderServiceCollection(websiteServices, language, { compact: true, copy });
+    if (key === "home" && section.id === "artists" && artists.length) return renderArtistCollection(artists, language, { compact: true, copy });
     return renderSection(section, language);
-  }).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language) : "") + (key === "services" ? renderServiceCollection(websiteServices, language) : "");
+  }).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
 
   return `<!doctype html>
 <html lang="${escapeHtml(copy.locale)}" class="no-js">
@@ -507,6 +557,7 @@ const eventCopy = Object.freeze({
     capacity: "Availability",
     available: "places available",
     soldOut: "Sold out",
+    repeatEvent: "I’d like this event to return",
     price: "Admission",
     complimentary: "Complimentary",
     ticketingSoon: "Online ticketing will open in the next release. No reservation has been created yet.",
@@ -561,6 +612,7 @@ const eventCopy = Object.freeze({
     capacity: "Elérhetőség",
     available: "szabad hely",
     soldOut: "Megtelt",
+    repeatEvent: "Szeretném újra ezt az eseményt",
     price: "Belépőjegy",
     complimentary: "Díjmentes",
     ticketingSoon: "Az online jegyvásárlás a következő fejlesztési szakaszban nyílik meg. Helyfoglalás még nem történt.",
@@ -646,8 +698,8 @@ function renderEventCardAction(event, language, labels = resolveEventCopy(langua
   if (event.status === "CANCELLED") {
     return `<span class="event-card-action event-card-action--cancelled" aria-disabled="true">${escapeHtml(labels.cancelled)}</span>`;
   }
-  if (event.sold_out) {
-    return `<span class="event-card-action event-card-action--pending" aria-disabled="true">${escapeHtml(labels.soldOut)}</span>`;
+  if (event.repeat_interest_available) {
+    return `<button class="event-card-action event-card-action--interest" type="button" data-interest-open data-event-id="${escapeHtml(event.id)}" data-event-title="${escapeHtml(event.title)}"><span>${escapeHtml(labels.soldOut)}</span><small>${escapeHtml(labels.repeatEvent)}</small></button>`;
   }
   if (event.checkout_available) {
     const id = `${language}-paid-${String(event.id).replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -794,7 +846,7 @@ function renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce
   })}</head><body class="template-events" data-language="${escapeHtml(language)}" data-page="events">
   ${renderHeader({ copy, language, currentKey: "events" })}
   <main id="main-content">
-    <section class="dynamic-event-hero"><div data-reveal><p class="eyebrow">${escapeHtml(page?.hero?.eyebrow || labels.listEyebrow)}</p><h1>${escapeHtml(page?.hero?.title || labels.listTitle)}</h1><p>${escapeHtml(page?.hero?.lead || labels.listLead)}</p></div></section>
+    <section class="dynamic-event-hero">${page?.hero?.image ? `<img class="dynamic-event-hero__image" src="${escapeHtml(page.hero.image)}" alt="${escapeHtml(page.hero.imageAlt || page.hero.title || labels.listTitle)}" fetchpriority="high" decoding="async"><span class="dynamic-event-hero__shade" aria-hidden="true"></span>` : ""}<div data-reveal><p class="eyebrow">${escapeHtml(page?.hero?.eyebrow || labels.listEyebrow)}</p><h1>${escapeHtml(page?.hero?.title || labels.listTitle)}</h1><p>${escapeHtml(page?.hero?.lead || labels.listLead)}</p></div></section>
     <section class="dynamic-event-list" aria-labelledby="programme-title"><div class="section-heading" data-reveal><p class="eyebrow">Klavierhaus</p><h2 id="programme-title">${escapeHtml(labels.upcoming)}</h2></div><div class="public-event-grid">${cards}</div></section>
   </main>${renderFooter(copy, language)}</body></html>`;
 }
@@ -823,7 +875,9 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
       <button class="button button--primary" type="submit">${escapeHtml(labels.reservationSubmit)}</button>
     </form>`;
   } else if (event.status !== "CANCELLED") {
-    ticketing = `<p class="event-ticketing-notice">${escapeHtml(event.sold_out ? labels.soldOut : labels.ticketingSoon)}</p>`;
+    ticketing = event.repeat_interest_available
+      ? `<div class="event-ticketing-notice event-sold-out"><strong>${escapeHtml(labels.soldOut)}</strong><button class="button button--ghost" type="button" data-interest-open data-event-id="${escapeHtml(event.id)}" data-event-title="${escapeHtml(event.title)}">${escapeHtml(labels.repeatEvent)}</button></div>`
+      : `<p class="event-ticketing-notice">${escapeHtml(labels.ticketingSoon)}</p>`;
   }
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({
     language,
@@ -879,6 +933,40 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
   const canonicalUrl = pageUrl(baseUrl, currentPath);
   const ctaLabel = language === "hu" ? (isPiano ? "Privát megtekintés egyeztetése" : "Személyes felmérés egyeztetése") : (isPiano ? "Arrange a private viewing" : "Arrange a private assessment");
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${item.title} | Klavierhaus`, description: item.summary || item.description || item.title, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<a class="button button--primary" href="${escapeHtml(getRoute("consultation", language))}">${escapeHtml(ctaLabel)} <span aria-hidden="true">↗</span></a></div></article></main>${renderFooter(copy, language)}</body></html>`;
+}
+
+function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const labels = copy.collectionLabels || {};
+  const alternateLanguage = getAlternateLanguage(language);
+  const canonicalPath = pianoBrandPath(brand, language);
+  const alternatePath = pianoBrandPath(brand, alternateLanguage);
+  const canonicalUrl = pageUrl(baseUrl, canonicalPath);
+  const hu = language === "hu";
+  const description = hu
+    ? `${brand.label} zongorák a Klavierhaus New York-i bemutatótermében, személyes meghallgatásra és privát kiválasztásra.`
+    : `${brand.label} pianos in the Klavierhaus New York showroom, available for private listening and personal selection.`;
+  const itemList = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: `${brand.label} · Klavierhaus`,
+    itemListElement: items.map((item, index) => ({ "@type": "ListItem", position: index + 1, url: pageUrl(baseUrl, showroomPath(item, language)), name: item.title }))
+  };
+  const instruments = items.map((item, index) => `<article class="piano-brand-instrument${index % 2 ? " piano-brand-instrument--reverse" : ""}" data-reveal>
+    <a class="piano-brand-instrument__media" href="${escapeHtml(showroomPath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
+    <div class="piano-brand-instrument__copy"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h2 class="word-safe-title">${escapeHtml(item.title)}</h2>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(hu ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(labels.brandInstrumentDetails || (hu ? "A hangszer részletei" : "Explore the instrument"))}</span><span aria-hidden="true">↗</span></a></div>
+  </article>`).join("");
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${brand.label} Pianos | Klavierhaus`, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: items[0]?.image_url || shared.heroImage, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), itemList], globalCopyOverride: copy })}</head><body class="template-piano-brand" data-language="${escapeHtml(language)}" data-page="pianos">${renderHeader({ copy, language, currentKey: "pianos", alternateRouteOverride: alternatePath })}<main id="main-content"><header class="piano-brand-hero"><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h1 class="word-safe-title">${escapeHtml(brand.label)}</h1><p>${escapeHtml(labels.brandLead || (hu ? "A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás." : "Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter."))}</p></header><section class="piano-brand-list">${instruments}</section><section class="section section--cta"><div class="cta-inner"><p class="eyebrow">${escapeHtml(labels.brandPrivateSelection || (hu ? "Személyes kiválasztás" : "Private selection"))}</p><h2>${escapeHtml(labels.brandCtaTitle || (hu ? "Találkozzon a hangszerrel, mielőtt döntést hoz." : "Meet the instrument before making a decision."))}</h2><a class="button button--primary" href="${escapeHtml(getRoute("consultation", language))}">${escapeHtml(labels.brandCta || (hu ? "Privát időpont egyeztetése" : "Arrange a private appointment"))} <span aria-hidden="true">↗</span></a></div></section></main>${renderFooter(copy, language)}</body></html>`;
+}
+
+function renderArtistDetail({ artist, language, baseUrl, allowIndexing, nonce, globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const currentPath = artistPath(artist, language);
+  const alternatePath = artistPath({ ...artist, slug: artist.alternate_slug }, getAlternateLanguage(language));
+  const canonicalUrl = pageUrl(baseUrl, currentPath);
+  const personSchema = { "@context": "https://schema.org", "@type": "Person", name: artist.name, description: artist.biography || artist.role, image: artist.portrait_url, url: canonicalUrl };
+  const events = Array.isArray(artist.events) && artist.events.length ? `<section class="artist-related-events"><p class="eyebrow">${escapeHtml(language === "hu" ? "Kapcsolódó események" : "Related events")}</p>${artist.events.map((event) => `<a href="${escapeHtml(language === "hu" ? `/hu/esemenyek/${event.slug}` : `/events/${event.slug}`)}"><span>${escapeHtml(event.title)}</span><span>${escapeHtml(formatEventDate(event.start_at, language, { dateOnly: true }))} ↗</span></a>`).join("")}</section>` : "";
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${artist.name} | Klavierhaus`, description: artist.biography || artist.role || artist.name, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: artist.portrait_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), personSchema], globalCopyOverride: copy })}</head><body class="template-artist-detail" data-language="${escapeHtml(language)}" data-page="artists">${renderHeader({ copy, language, currentKey: "artists", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="artist-detail"><div class="artist-detail__portrait"><img src="${escapeHtml(artist.portrait_url)}" alt="${escapeHtml(artist.portrait_alt || artist.name)}" fetchpriority="high" decoding="async"></div><div class="artist-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(artist.role || (language === "hu" ? "Művész" : "Artist"))}</p><h1>${escapeHtml(artist.name)}</h1>${artist.biography ? renderParagraphs(String(artist.biography).split(/\n+/).filter(Boolean)) : ""}${events}</div></article></main>${renderFooter(copy, language)}</body></html>`;
 }
 
 function renderInvitation({ invitation, token, language, baseUrl, nonce, result = "", error = "", globalOverride = null }) {
@@ -961,6 +1049,7 @@ function createApp(options = {}) {
   app.enable("strict routing");
   app.use(compression());
   app.use(express.urlencoded({ extended: false, limit: "16kb" }));
+  app.use(express.json({ limit: "32kb" }));
   app.use((req, res, next) => {
     const nonce = crypto.randomBytes(16).toString("base64");
     res.locals.cspNonce = nonce;
@@ -970,7 +1059,7 @@ function createApp(options = {}) {
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
-    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
+    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}' https://www.googletagmanager.com https://www.clarity.ms; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://www.clarity.ms; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
     if (!allowIndexing) res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
     next();
   });
@@ -1006,11 +1095,12 @@ function createApp(options = {}) {
     }
     const staticRoutes = Object.keys(routeDefinitions)
       .filter((key) => key !== "salon")
-      .flatMap((key) => [getRoute(key, "en"), getRoute(key, "hu")])
+      .flatMap((key) => [getRoute(key, "en"), getRoute(key, "hu")]);
+    staticRoutes.push(...pianoBrands.flatMap((brand) => [pianoBrandPath(brand, "en"), pianoBrandPath(brand, "hu")]));
     const dynamicRoutes = [];
     if (eventClient.configured) {
       const feeds = await Promise.allSettled([
-        eventClient.list("en"), eventClient.list("hu"), eventClient.showroomPianos("en"), eventClient.showroomPianos("hu"), eventClient.services("en"), eventClient.services("hu")
+        eventClient.list("en"), eventClient.list("hu"), eventClient.showroomPianos("en"), eventClient.showroomPianos("hu"), eventClient.services("en"), eventClient.services("hu"), eventClient.artists("en"), eventClient.artists("hu")
       ]);
       const values = feeds.map((result) => result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []);
       dynamicRoutes.push(...values[0].map((event) => eventPath(event, "en")));
@@ -1019,10 +1109,44 @@ function createApp(options = {}) {
       dynamicRoutes.push(...values[3].map((item) => showroomPath(item, "hu")));
       dynamicRoutes.push(...values[4].map((item) => servicePath(item, "en")));
       dynamicRoutes.push(...values[5].map((item) => servicePath(item, "hu")));
+      dynamicRoutes.push(...values[6].map((item) => artistPath(item, "en")));
+      dynamicRoutes.push(...values[7].map((item) => artistPath(item, "hu")));
     }
     const urls = [...new Set([...staticRoutes, ...dynamicRoutes])]
       .map((route) => `<url><loc>${escapeHtml(pageUrl(baseUrl, route))}</loc></url>`).join("");
     res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
+  });
+
+  app.get("/preview/:token", async (req, res) => {
+    try {
+      const preview = await eventClient.preview(req.params.token);
+      const route = { key: preview.page_key, language: preview.language };
+      if (!routeDefinitions[route.key] && route.key !== "global") throw Object.assign(new Error("PREVIEW_NOT_FOUND"), { status: 404 });
+      const content = route.key === "global" ? null : preview.content;
+      const globalContent = route.key === "global" ? preview.content : await eventClient.content("global", route.language).catch(() => null);
+      res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+      res.type("html").send(renderDocument({ route: route.key === "global" ? { key: "home", language: route.language } : route, baseUrl, allowIndexing: false, nonce: res.locals.cspNonce, pageOverride: content, globalOverride: globalContent?.content || globalContent || null }));
+    } catch (_error) { res.status(404).type("html").send(renderNotFound({ language: "en", baseUrl, allowIndexing: false, nonce: res.locals.cspNonce })); }
+  });
+
+  app.get("/api/site/device-token", async (_req, res) => {
+    try { res.setHeader("Cache-Control", "no-store"); res.json(await eventClient.deviceToken()); }
+    catch (_error) { res.status(503).json({ error: "MEASUREMENT_UNAVAILABLE" }); }
+  });
+  app.get("/api/site/tracking-config", async (_req, res) => {
+    try { res.json(await eventClient.trackingConfig()); } catch (_error) { res.json({ ga4_measurement_id: "", clarity_project_id: "" }); }
+  });
+  app.post("/api/site/track", async (req, res) => {
+    try { const result = await eventClient.track(req.body || {}); res.status(201).json(result); }
+    catch (error) { res.status(error.status || 503).json({ error: error.code || "MEASUREMENT_UNAVAILABLE" }); }
+  });
+  app.post("/api/site/contact-leads", async (req, res) => {
+    try { const result = await eventClient.createLead(req.body || {}); res.status(201).json(result); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "CONTACT_REQUEST_FAILED" }); }
+  });
+  app.post("/api/site/events/:eventId/repeat-interest", async (req, res) => {
+    try { const result = await eventClient.repeatInterest(req.params.eventId, req.body || {}); res.status(201).json(result); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "EVENT_INTEREST_FAILED" }); }
   });
 
   app.get(["/events", "/hu/esemenyek"], async (req, res, next) => {
@@ -1042,9 +1166,27 @@ function createApp(options = {}) {
     if (!eventClient.configured) return next();
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
+      const brand = pianoBrands.find((item) => item.slug === String(req.params.slug || "").toLowerCase());
+      if (brand) {
+        const [allItems, globalContent] = await Promise.all([eventClient.showroomPianos(language), eventClient.content("global", language).catch(() => null)]);
+        const items = allItems.filter((item) => brand.matches(item.brand));
+        if (!items.length) return next();
+        res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+        return res.type("html").send(renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
+      }
       const [item, globalContent] = await Promise.all([eventClient.showroomPiano(req.params.slug, language), eventClient.content("global", language).catch(() => null)]);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
       res.type("html").send(renderCatalogDetail({ item, kind: "piano", language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
+    } catch (error) { if (error.status === 404) return next(); next(error); }
+  });
+
+  app.get(["/artists/:slug", "/hu/muveszek/:slug"], async (req, res, next) => {
+    if (!eventClient.configured) return next();
+    const language = req.path.startsWith("/hu/") ? "hu" : "en";
+    try {
+      const [artist, globalContent] = await Promise.all([eventClient.artist(req.params.slug, language), eventClient.content("global", language).catch(() => null)]);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+      res.type("html").send(renderArtistDetail({ artist, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
     } catch (error) { if (error.status === 404) return next(); next(error); }
   });
 
@@ -1174,6 +1316,7 @@ function createApp(options = {}) {
     let reviews = [];
     let showroomPianos = [];
     let websiteServices = [];
+    let artists = [];
     let pageOverride = null;
     let globalOverride = null;
     if (eventClient.configured) {
@@ -1183,9 +1326,10 @@ function createApp(options = {}) {
         route.key === "home" ? eventClient.list(route.language) : Promise.resolve([]),
         route.key === "home" ? eventClient.reviews(route.language) : Promise.resolve([]),
         ["home","pianos"].includes(route.key) ? eventClient.showroomPianos(route.language) : Promise.resolve([]),
-        ["home","services"].includes(route.key) ? eventClient.services(route.language) : Promise.resolve([])
+        ["home","services"].includes(route.key) ? eventClient.services(route.language) : Promise.resolve([]),
+        ["home","artists"].includes(route.key) ? eventClient.artists(route.language) : Promise.resolve([])
       ];
-      const [contentResult,globalResult,eventResult,reviewResult,pianoResult,serviceResult] = await Promise.allSettled(requests);
+      const [contentResult,globalResult,eventResult,reviewResult,pianoResult,serviceResult,artistResult] = await Promise.allSettled(requests);
       if (contentResult.status === "fulfilled") pageOverride = contentResult.value?.content || null;
       else console.warn(`[website] Page content fallback: ${contentResult.reason?.code || contentResult.reason?.message}`);
       if (globalResult.status === "fulfilled") globalOverride = globalResult.value?.content || null;
@@ -1194,6 +1338,7 @@ function createApp(options = {}) {
       if (reviewResult.status === "fulfilled") reviews = reviewResult.value;
       if (pianoResult.status === "fulfilled") showroomPianos = pianoResult.value;
       if (serviceResult.status === "fulfilled") websiteServices = serviceResult.value;
+      if (artistResult.status === "fulfilled") artists = artistResult.value;
     }
     res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
     res.type("html").send(renderDocument({
@@ -1205,6 +1350,7 @@ function createApp(options = {}) {
       reviews,
       showroomPianos,
       websiteServices,
+      artists,
       pageOverride,
       globalOverride
     }));
