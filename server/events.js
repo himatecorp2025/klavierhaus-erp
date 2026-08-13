@@ -7,7 +7,7 @@ const { inspectImageFile } = require("./upload-middleware");
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
 const PUBLIC_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
-const PUBLIC_LIST_STATUSES = ["PUBLISHED", "RESCHEDULED"];
+const PUBLIC_LIST_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
 const ACTIVE_TICKET_STATUSES = ["VALID", "USED"];
 const REFUND_STATUSES = new Set(["REQUESTED", "APPROVED", "REJECTED", "PROCESSED"]);
 const NY_TIME_ZONE = "America/New_York";
@@ -128,7 +128,7 @@ function normalizeOptionalDate(value) {
   return { value: date.toISOString() };
 }
 
-function publicEventRow(row, language, capacity, assetBaseUrl = "") {
+function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfiguration = {}) {
   const lang = language === "hu" ? "hu" : "en";
   const description = row[`description_${lang}`] || row[`short_description_${lang}`] || "";
   const imagePath = row.hero_image_url || "";
@@ -144,6 +144,7 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "") {
     category_code: row.category_code,
     access_type: row.access_type,
     status: row.status,
+    cancellation_reason: row.cancellation_reason || "",
     performer_name: row.performer_name || "",
     hero_image_url: imagePath.startsWith("/") && assetBaseUrl ? `${assetBaseUrl}${imagePath}` : imagePath,
     gallery: JSON.parse(row.gallery_json || "[]"),
@@ -168,11 +169,15 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "") {
     currency: row.currency,
     sales_start_at: row.sales_start_at || null,
     sales_end_at: row.sales_end_at || null,
-    published_at: row.published_at
+    published_at: row.published_at,
+    checkout_available: Boolean(paymentConfiguration.enabled && row.access_type === "PUBLIC_PAID" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0),
+    reservation_available: Boolean(row.access_type === "PUBLIC_FREE" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0),
+    stripe_test_mode: Boolean(paymentConfiguration.test_mode),
+    hold_minutes: Number(paymentConfiguration.hold_minutes || 15)
   };
 }
 
-function createEventService({ db, qrSecret }) {
+function createEventService({ db, qrSecret, activeHoldCount = () => 0 }) {
   const selectEventSql = `SELECT e.*,c.code AS category_code,c.name_en AS category_name_en,c.name_hu AS category_name_hu
     FROM events e JOIN event_categories c ON c.id=e.category_id`;
 
@@ -216,7 +221,8 @@ function createEventService({ db, qrSecret }) {
     const event = eventById(eventId);
     if (!event) return null;
     const counts = ticketCounts(eventId);
-    return { total: Number(event.capacity_total), occupied: counts.occupied, remaining: Math.max(0, Number(event.capacity_total) - counts.occupied), counts };
+    const held = Math.max(0, Number(activeHoldCount(eventId) || 0));
+    return { total: Number(event.capacity_total), occupied: counts.occupied, held, remaining: Math.max(0, Number(event.capacity_total) - counts.occupied - held), counts };
   }
 
   function eventResponse(row) {
@@ -317,13 +323,14 @@ function createEventService({ db, qrSecret }) {
 }
 
 function registerEventRoutes(options) {
-  const { app, db, auth, permit, requireSuperadmin, audit, transactionalEmail, eventImageUpload, eventImageDir } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, eventImageUpload, eventImageDir, stripeSandbox } = options;
   const qrSecret = String(options.qrSecret || "");
   if (qrSecret.length < 32) throw new Error("EVENT_QR_SECRET must be at least 32 characters long");
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
-  const service = createEventService({ db, qrSecret });
+  const service = createEventService({ db, qrSecret, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
   const admin = permit("ADMIN");
+  const requireSuperadmin = permit("SUPERADMIN");
   const eventImage = eventImageUpload ? eventImageUpload.single("event_image") : (_req, _res, next) => next();
 
   function removeUploadedFile(filePath) {
@@ -374,7 +381,8 @@ function registerEventRoutes(options) {
         AND e.status IN (${placeholders}) ${includePast ? "" : "AND e.end_at>=?"}
       ORDER BY e.start_at`).all(...PUBLIC_LIST_STATUSES, ...(includePast ? [] : [new Date().toISOString()]));
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    res.json(rows.map((row) => publicEventRow(row, language, service.capacity(row.id), erpBaseUrl)));
+    const paymentConfiguration = stripeSandbox?.configuration?.() || { enabled: false, test_mode: true, hold_minutes: 15 };
+    res.json(rows.map((row) => publicEventRow(row, language, service.capacity(row.id), erpBaseUrl, paymentConfiguration)));
   });
 
   app.get("/api/public/events/:slug", (req, res) => {
@@ -385,7 +393,45 @@ function registerEventRoutes(options) {
       AND e.access_type IN ('PUBLIC_PAID','PUBLIC_FREE') AND e.status IN (${placeholders})`).get(req.params.slug, ...PUBLIC_STATUSES);
     if (!row) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    res.json(publicEventRow(row, language, service.capacity(row.id), erpBaseUrl));
+    const paymentConfiguration = stripeSandbox?.configuration?.() || { enabled: false, test_mode: true, hold_minutes: 15 };
+    res.json(publicEventRow(row, language, service.capacity(row.id), erpBaseUrl, paymentConfiguration));
+  });
+
+  app.post("/api/public/events/:slug/checkout", async (req, res) => {
+    const language = req.body?.language === "hu" ? "hu" : "en";
+    const column = language === "hu" ? "slug_hu" : "slug_en";
+    const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (!stripeSandbox?.createCheckout) return res.status(503).json({ error: "STRIPE_SANDBOX_NOT_CONFIGURED" });
+    try {
+      const result = await stripeSandbox.createCheckout({ event, language, quantity: req.body?.quantity });
+      res.status(201).json(result);
+    } catch (error) { sendError(res, error, "STRIPE_CHECKOUT_FAILED"); }
+  });
+
+  app.post("/api/public/events/:slug/reservations", (req, res) => {
+    const language = req.body?.language === "hu" ? "hu" : "en";
+    const column = language === "hu" ? "slug_hu" : "slug_en";
+    const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.access_type !== "PUBLIC_FREE" || !["PUBLISHED", "RESCHEDULED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    const attendeeName = cleanText(req.body?.attendee_name, 200);
+    const contactEmail = normalizeEmail(req.body?.contact_email);
+    const quantity = Number(req.body?.quantity || 1);
+    if (!attendeeName || !validEmail(contactEmail)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(event.capacity_total)) return res.status(400).json({ error: "INVALID_TICKET_QUANTITY" });
+    try {
+      const tickets = db.transaction(() => {
+        if (service.capacity(event.id).remaining < quantity) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
+        const created = [];
+        for (let sequence = 1; sequence <= quantity; sequence += 1) {
+          const name = quantity === 1 ? attendeeName : `${attendeeName} · ${sequence}/${quantity}`;
+          created.push(service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", buyerName: attendeeName, attendeeName: name, contactEmail }));
+        }
+        return created;
+      })();
+      res.status(201).json({ ok: true, tickets: tickets.map((ticket) => ({ ticket_code: ticket.public_code })) });
+    } catch (error) { sendError(res, error); }
   });
 
   app.get("/api/public/event-invitations/:token", (req, res) => {
@@ -483,7 +529,9 @@ function registerEventRoutes(options) {
     const invitations = db.prepare("SELECT id,event_id,guest_name,guest_email,language,status,delivery_status,sent_at,accepted_at,declined_at,revoked_at,created_at FROM event_invitations WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const tickets = db.prepare("SELECT id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const refunds = db.prepare("SELECT * FROM event_refund_requests WHERE event_id=? ORDER BY requested_at DESC").all(row.id);
-    res.json({ ...service.eventResponse(row), invitations, tickets, refunds });
+    const payments = db.prepare("SELECT * FROM event_payments WHERE event_id=? ORDER BY created_at DESC").all(row.id);
+    const checkoutHolds = db.prepare("SELECT id,quantity,status,expires_at,purchaser_name,purchaser_email,amount_total,currency,test_mode,created_at FROM event_checkout_holds WHERE event_id=? ORDER BY created_at DESC LIMIT 100").all(row.id);
+    res.json({ ...service.eventResponse(row), invitations, tickets, refunds, payments, checkout_holds: checkoutHolds, stripe: stripeSandbox?.configuration?.() || { enabled: false, test_mode: true } });
   });
 
   app.post("/api/events", auth, admin, eventImage, (req, res) => {
@@ -569,12 +617,16 @@ function registerEventRoutes(options) {
     res.json(service.eventResponse(after));
   });
 
-  app.post("/api/events/:id/cancel", auth, admin, (req, res) => {
+  app.post("/api/events/:id/cancel", auth, admin, async (req, res) => {
     const before = service.eventById(req.params.id);
     if (!ensureMutable(before, res)) return;
-    db.prepare("UPDATE events SET status='CANCELLED',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, before.id);
+    const reason = cleanText(req.body?.reason, 1000);
+    if (!reason) return res.status(400).json({ error: "EVENT_CANCELLATION_REASON_REQUIRED" });
+    db.prepare("UPDATE events SET status='CANCELLED',cancellation_reason=?,cancelled_at=CURRENT_TIMESTAMP,cancelled_by_user_id=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(reason, req.user.id, req.user.id, before.id);
+    if (stripeSandbox?.expireEventSessions) await stripeSandbox.expireEventSessions(before.id);
     const after = service.eventById(before.id);
-    audit(req, "CANCEL", "events", before.id, before, after, 1, cleanText(req.body?.reason, 1000));
+    audit(req, "CANCEL", "events", before.id, before, after, 1, reason);
     res.json(service.eventResponse(after));
   });
 
@@ -599,7 +651,30 @@ function registerEventRoutes(options) {
       const counts = service.ticketCounts(event.id);
       const invitationCounts = Object.fromEntries(db.prepare("SELECT status,COUNT(*) count FROM event_invitations WHERE event_id=? GROUP BY status").all(event.id).map((row) => [row.status, Number(row.count)]));
       const refundCounts = Object.fromEntries(db.prepare("SELECT status,COUNT(*) count FROM event_refund_requests WHERE event_id=? GROUP BY status").all(event.id).map((row) => [row.status, Number(row.count)]));
-      const report = { event_id: event.id, event_key: event.event_key, closed_at: new Date().toISOString(), capacity_total: Number(event.capacity_total), tickets: counts, invitations: invitationCounts, refunds: refundCounts, attended: counts.used, no_show: counts.valid, test_mode: true, finance_connected: false };
+      const paymentSummary = db.prepare(`SELECT COUNT(*) AS transactions,
+        COALESCE(SUM(CASE WHEN status IN ('PAID','REFUND_PENDING') THEN amount_total ELSE 0 END),0) AS gross_cents,
+        COALESCE(SUM(CASE WHEN status='REFUNDED' THEN amount_total ELSE 0 END),0) AS refunded_cents
+        FROM event_payments WHERE event_id=? AND test_mode=1`).get(event.id);
+      const report = {
+        event_id: event.id,
+        event_key: event.event_key,
+        closed_at: new Date().toISOString(),
+        capacity_total: Number(event.capacity_total),
+        tickets: counts,
+        invitations: invitationCounts,
+        refunds: refundCounts,
+        payments: {
+          transactions: Number(paymentSummary.transactions || 0),
+          gross_cents: Number(paymentSummary.gross_cents || 0),
+          refunded_cents: Number(paymentSummary.refunded_cents || 0),
+          net_cents: Number(paymentSummary.gross_cents || 0) - Number(paymentSummary.refunded_cents || 0),
+          currency: event.currency || "USD"
+        },
+        attended: counts.used,
+        no_show: counts.valid,
+        test_mode: true,
+        finance_connected: false
+      };
       db.prepare("INSERT INTO event_closures(id,event_id,snapshot_json,closed_by_user_id) VALUES(?,?,?,?)").run(newId("EVCLS"), event.id, JSON.stringify(report), req.user.id);
       db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(req.user.id, JSON.stringify(report), req.user.id, event.id);
@@ -609,17 +684,25 @@ function registerEventRoutes(options) {
     res.json(snapshot);
   });
 
-  app.delete("/api/events/:id", auth, requireSuperadmin, (req, res) => {
+  app.delete("/api/events/:id", auth, admin, async (req, res) => {
     const event = service.eventById(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    const superadmin = req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin || 0) === 1;
     const dependencies = db.prepare(`SELECT
       (SELECT COUNT(*) FROM event_invitations WHERE event_id=?) invitations,
       (SELECT COUNT(*) FROM event_tickets WHERE event_id=?) tickets,
       (SELECT COUNT(*) FROM event_checkins WHERE event_id=?) checkins,
-      (SELECT COUNT(*) FROM event_refund_requests WHERE event_id=?) refunds`).get(event.id, event.id, event.id, event.id);
-    if (event.status !== "DRAFT" || Object.values(dependencies).some((count) => Number(count) > 0)) return res.status(409).json({ error: "EVENT_RETENTION_REQUIRED", dependencies });
+      (SELECT COUNT(*) FROM event_refund_requests WHERE event_id=?) refunds,
+      (SELECT COUNT(*) FROM event_checkout_holds WHERE event_id=?) checkout_holds,
+      (SELECT COUNT(*) FROM event_payments WHERE event_id=?) payments,
+      (SELECT COUNT(*) FROM event_closures WHERE event_id=?) closures`).get(event.id, event.id, event.id, event.id, event.id, event.id, event.id);
+    const hasDependencies = Object.values(dependencies).some((count) => Number(count) > 0);
+    if (!superadmin && hasDependencies) return res.status(409).json({ error: "EVENT_CANCEL_REQUIRED", dependencies });
+    if (superadmin && stripeSandbox?.expireEventSessions) await stripeSandbox.expireEventSessions(event.id);
+    const before = service.eventResponse(event);
     db.prepare("DELETE FROM events WHERE id=?").run(event.id);
     removeStoredEventImage(event.hero_image_url);
+    audit(req, "DELETE", "events", event.id, before, null, 1, superadmin ? "Permanent superadmin deletion" : "Deletion without related records");
     res.json({ ok: true });
   });
 
@@ -743,14 +826,26 @@ function registerEventRoutes(options) {
       JOIN event_tickets t ON t.id=r.ticket_id WHERE r.event_id=? ORDER BY r.requested_at DESC`).all(req.params.id));
   });
 
-  app.put("/api/events/refund-requests/:id", auth, admin, (req, res) => {
+  app.put("/api/events/refund-requests/:id", auth, admin, async (req, res) => {
     const request = db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(req.params.id);
     if (!request) return res.status(404).json({ error: "REFUND_REQUEST_NOT_FOUND" });
     const status = cleanText(req.body?.status, 30).toUpperCase();
     if (!REFUND_STATUSES.has(status) || status === "PROCESSED") return res.status(400).json({ error: "INVALID_REFUND_STATUS" });
     if (status === "APPROVED" && !Number(request.eligible)) return res.status(409).json({ error: "REFUND_NOT_ELIGIBLE" });
+    const resolutionNote = cleanText(req.body?.resolution_note, 2000);
+    if (status === "APPROVED") {
+      const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(request.ticket_id);
+      if (ticket?.source_type === "PURCHASE") {
+        try {
+          await stripeSandbox.refundPaymentForTicket(ticket.id, resolutionNote || request.reason);
+          db.prepare("UPDATE event_refund_requests SET status='PROCESSED',resolution_note=?,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+            .run(resolutionNote, req.user.id, request.id);
+          return res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
+        } catch (error) { return sendError(res, error, "STRIPE_REFUND_FAILED"); }
+      }
+    }
     db.prepare("UPDATE event_refund_requests SET status=?,resolution_note=?,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(status, cleanText(req.body?.resolution_note, 2000), req.user.id, request.id);
+      .run(status, resolutionNote, req.user.id, request.id);
     res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
   });
 
