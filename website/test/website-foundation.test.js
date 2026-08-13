@@ -210,3 +210,27 @@ test("base URL normalization uses the actual Render host as safe fallback", () =
   assert.equal(normalizeBaseUrl("https://klavierhaus-home.onrender.com/path?x=1"), "https://klavierhaus-home.onrender.com");
   assert.equal(normalizeBaseUrl("javascript:alert(1)"), "https://klavierhaus-home.onrender.com");
 });
+
+test("final luxury design contract keeps compact margins, safe titles, five-card desktop events and responsive inner scrolling", () => {
+  const websiteRoot = path.join(__dirname, "..");
+  const css = fs.readFileSync(path.join(websiteRoot, "public", "design-v3.css"), "utf8");
+  const browserSource = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
+  const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
+  assert.match(css, /--kh-gutter:clamp\(/);
+  assert.match(css, /grid-auto-columns:calc\(\(100% - 4 \* var\(--kh-card-gap\)\)\/5\.32\)/);
+  assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(css, /@media\(max-width:760px\)/);
+  assert.match(css, /word-break:keep-all!important/);
+  assert.match(css, /border-radius:15px/);
+  assert.match(css, /overflow-y:auto/);
+  assert.match(browserSource, /site-header\.is-hidden|classList\.add\("is-hidden"\)/);
+  assert.match(browserSource, /data-ticket-quantity/);
+  assert.match(browserSource, /data-review-carousel/);
+  assert.doesNotMatch(browserSource, /addEventListener\("wheel"/);
+  assert.match(serverSource, /renderHomeEventShowcase\(homeEvents/);
+  assert.match(serverSource, /renderReviewShowcase\(reviews/);
+  assert.match(serverSource, /renderShowroomCollection/);
+  assert.match(serverSource, /renderServiceCollection/);
+  assert.match(serverSource, /rel="canonical"/);
+  assert.match(serverSource, /hreflang="x-default"/);
+});
