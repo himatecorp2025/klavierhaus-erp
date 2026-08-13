@@ -25,7 +25,7 @@ test("health endpoint identifies stage-one public website", async () => {
     assert.deepEqual(await response.json(), {
       status: "ok",
       service: "klavierhaus-public-website",
-      version: "1.1.0",
+      version: "1.2.0",
       indexing: "disabled",
       event_api: "not-configured"
     });
@@ -46,6 +46,7 @@ test("every English and Hungarian route renders localized canonical metadata", a
         assert.match(body, /hreflang="hu-HU"/);
         assert.match(body, /class="brand-logo"/);
         assert.match(body, /data-current-year/);
+        assert.match(body, /"LocalBusiness"/);
       }
     }
   });
@@ -123,7 +124,7 @@ test("website manifest stays self-contained and independent from ERP storage", (
   const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
 
   assert.equal(manifest.name, "klavierhaus-public-website");
-  assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.version, "1.2.0");
   assert.equal(lockfile.version, manifest.version);
   assert.equal(lockfile.packages[""].version, manifest.version);
   assert.equal(manifest.scripts.start, "node server/index.js");
@@ -151,6 +152,10 @@ test("public pages include security headers and an admin-ready content contract"
   assert.match(css, /--gold:\s*#b79a60/);
   assert.match(css, /@media \(max-width:\s*760px\)/);
   assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /--page-gutter:\s*clamp\(/);
+  assert.match(css, /border-radius:\s*15px/);
+  assert.match(css, /grid-auto-columns:\s*calc\(\(100% - 2 \* clamp\([^)]*\)\)\/3\)/);
+  assert.match(css, /grid-auto-columns:\s*86%/);
   assert.match(contentSource, /Public content contract/);
   assert.match(contentSource, /sections:/);
   assert.match(contentSource, /seo:/);
@@ -162,7 +167,8 @@ test("brand and editorial assets are locally served and optimized", async () => 
     "public/brand/klavierhaus-round-white.png",
     "public/media/klavierhaus-hero.jpg",
     "public/media/klavierhaus-salon.jpg",
-    "public/media/klavierhaus-craft.jpg"
+    "public/media/klavierhaus-craft.jpg",
+    "public/media/klavierhaus-artists-salon.jpg"
   ];
 
   for (const relativePath of expectedFiles) {
