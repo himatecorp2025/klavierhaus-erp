@@ -77,6 +77,30 @@ function createEventClient(options = {}) {
     services(language) {
       return request(`/api/public/website-services?lang=${language === "hu" ? "hu" : "en"}`);
     },
+    artists(language) {
+      return request(`/api/public/website-artists?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    artist(slug, language) {
+      return request(`/api/public/website-artists/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    preview(token) {
+      return request(`/api/public/website-preview/${encodeURIComponent(token)}`);
+    },
+    deviceToken() {
+      return request("/api/public/device-token");
+    },
+    trackingConfig() {
+      return request("/api/public/tracking-config");
+    },
+    track(event) {
+      return request("/api/public/tracking-events", { method: "POST", body: JSON.stringify(event) });
+    },
+    createLead(lead) {
+      return request("/api/public/contact-leads", { method: "POST", body: JSON.stringify(lead) });
+    },
+    repeatInterest(eventId, value) {
+      return request(`/api/public/events/${encodeURIComponent(eventId)}/repeat-interest`, { method: "POST", body: JSON.stringify(value) });
+    },
     service(slug, language) {
       return request(`/api/public/website-services/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
