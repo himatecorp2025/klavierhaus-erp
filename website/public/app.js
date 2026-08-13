@@ -54,6 +54,15 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 updateHeader();
 
+document.querySelectorAll("[data-event-carousel]").forEach((carousel) => {
+  const track = carousel.querySelector(".public-event-grid--home");
+  const controls = carousel.parentElement?.querySelector(".event-carousel__controls");
+  if (!track || !controls) return;
+  const move = (direction) => track.scrollBy({ left: direction * Math.max(280, track.clientWidth * 0.9), behavior: reducedMotion ? "auto" : "smooth" });
+  controls.querySelector("[data-event-carousel-previous]")?.addEventListener("click", () => move(-1));
+  controls.querySelector("[data-event-carousel-next]")?.addEventListener("click", () => move(1));
+});
+
 const revealElements = document.querySelectorAll("[data-reveal]");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
