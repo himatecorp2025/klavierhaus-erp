@@ -44,7 +44,7 @@ function createEventClient(options = {}) {
       if (!response.ok) {
         const error = new Error(payload.error || `Event API request failed (${response.status}).`);
         error.status = response.status;
-        error.code = payload.code || "EVENT_API_ERROR";
+        error.code = payload.error || payload.code || "EVENT_API_ERROR";
         error.payload = payload;
         throw error;
       }
@@ -61,6 +61,23 @@ function createEventClient(options = {}) {
     },
     detail(slug, language) {
       return request(`/api/public/events/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    createCheckout(slug, language, quantity) {
+      return request(`/api/public/events/${encodeURIComponent(slug)}/checkout`, {
+        method: "POST",
+        body: JSON.stringify({ language: language === "hu" ? "hu" : "en", quantity })
+      });
+    },
+    reserve(slug, language, reservation) {
+      return request(`/api/public/events/${encodeURIComponent(slug)}/reservations`, {
+        method: "POST",
+        body: JSON.stringify({
+          language: language === "hu" ? "hu" : "en",
+          attendee_name: reservation.attendeeName,
+          contact_email: reservation.contactEmail,
+          quantity: reservation.quantity
+        })
+      });
     },
     invitation(token, language) {
       return request(`/api/public/event-invitations/${encodeURIComponent(token)}?lang=${language === "hu" ? "hu" : "en"}`);
