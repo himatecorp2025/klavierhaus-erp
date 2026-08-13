@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui8/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui9/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -78,7 +78,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui8/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui9/);
 });
 
 test("Landing Page Design exposes protected bilingual page, SEO, review, legal-copy and image publishing controls", () => {
@@ -86,9 +86,9 @@ test("Landing Page Design exposes protected bilingual page, SEO, review, legal-c
   const designEnd = appSource.indexOf("async function renderAuditLog", designStart);
   const designSource = appSource.slice(designStart, designEnd);
   assert.ok(designStart > 0);
-  assert.match(appSource, /else if\(v==="website_design"\) await renderWebsiteDesign\(\)/);
+  assert.match(appSource, /v==="website_design"\|\|v==="pages_content"/);
   assert.match(appSource, /function ensureView\(id\)/);
-  assert.match(appSource, /\["website_design","Landing Page Design \/ Weboldal dizájn"\]/);
+  assert.match(appSource, /\["website_design","Landing Page Design","Landing Page dizájn"\]/);
   assert.match(designSource, /if\(!isAdmin\(\)\)return showError\('PERMISSION_DENIED'\)/);
   assert.match(designSource, /Search appearance \(SEO\)','Keresési megjelenés \(SEO\)/);
   assert.match(designSource, /Review \/ quotation','Vélemény \/ idézet/);
@@ -105,8 +105,8 @@ test("Google Calendar UI is bilingual, range-limited and preserves status-color 
   assert.match(appSource, /Google Calendar integration','Google Naptár-integráció/);
   assert.match(appSource, /Google Calendar email","Google Naptár e-mail/);
   assert.match(appSource, /Mark as reviewed','Ellenőrzés befejezése/);
-  assert.match(appSource, /jobsRangeUrl\(date,addDaysToDateKey\(date,1\)\)/);
-  assert.match(appSource, /jobsRangeUrl\(weekDates\[0\],addDaysToDateKey\(weekDates\[6\],1\)\)/);
+  assert.match(appSource, /loadCalendarEntries\(date,addDaysToDateKey\(date,1\)\)/);
+  assert.match(appSource, /loadCalendarEntries\(weekDates\[0\],addDaysToDateKey\(weekDates\[6\],1\)\)/);
   assert.match(appSource, /calendarIntegrationClass\(j\)/);
   assert.match(styles, /timeline-event\.GoogleAttention/);
   assert.doesNotMatch(styles, /timeline-event\.GoogleAttention\{[^}]*background:/);
@@ -233,4 +233,27 @@ test("large master lists are cached, coalesced and searched with debounce", () =
   assert.match(appSource, /document\.visibilityState!=="hidden"/);
   assert.match(serverSource, /compression\(\{threshold:1024\}\)/);
   assert.match(serverSource, /busy_timeout = 5000/);
+});
+
+test("administrator navigation is grouped and website catalog editors are protected and bilingual", () => {
+  assert.match(appSource, /id:"website_events",label:\["Website & Events","Weboldal és események"\]/);
+  assert.match(appSource, /id:"marketing",label:\["Marketing","Marketing"\]/);
+  assert.match(appSource, /id:"technical",label:\["Technical Operations","Technikai működés"\]/);
+  assert.ok(appSource.indexOf('["scheduler","Scheduler / Naptár"]') < appSource.indexOf('adminNavGroups'));
+  assert.match(appSource, /function toggleAdminNavGroup/);
+  assert.match(appSource, /renderWebsiteServices/);
+  assert.match(appSource, /renderShowroomPianos/);
+  assert.match(appSource, /renderWebsiteReviews/);
+  assert.match(appSource, /showroom deletion must not touch client pianos|ERP client pianos were not touched|elkülönülnek az ügyfélzongoráktól/);
+  assert.match(styles, /\.nav-group-items/);
+  assert.match(styles, /\.website-catalog-admin-grid/);
+});
+
+test("cultural events use a dedicated internal calendar contract and never call Google synchronization", () => {
+  assert.match(appSource, /\/api\/calendar-events\?from=/);
+  assert.match(appSource, /calendar_entry_type==="KLAVIERHAUS_EVENT"/);
+  assert.match(appSource, /Internal calendar only — this event is not synchronized to Google Calendar/);
+  assert.match(styles, /timeline-event\.KlavierhausEvent/);
+  assert.match(styles, /internal-event-badge/);
+  assert.doesNotMatch(appSource.slice(appSource.indexOf("async function openCalendarEntry"), appSource.indexOf("async function renderScheduler")), /google-calendar|Google Calendar API/);
 });
