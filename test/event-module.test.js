@@ -300,9 +300,12 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(ticketAfterCancel.status, 409);
   assert.equal(ticketAfterCancel.payload.error, "EVENT_NOT_AVAILABLE");
 
+  const adminDeleteWithRecords = await request(baseUrl, `/api/events/${eventId}`, { token: adminToken, method: "DELETE" });
+  assert.equal(adminDeleteWithRecords.status, 409);
+  assert.equal(adminDeleteWithRecords.payload.error, "EVENT_CANCEL_REQUIRED");
   const deletePublished = await request(baseUrl, `/api/events/${eventId}`, { token: superToken, method: "DELETE" });
-  assert.equal(deletePublished.status, 409);
-  assert.equal(deletePublished.payload.error, "EVENT_RETENTION_REQUIRED");
+  assert.equal(deletePublished.status, 200);
+  assert.equal(deletePublished.payload.ok, true);
 
   const deletable = await request(baseUrl, "/api/events", {
     token: adminToken,
@@ -310,9 +313,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
     body: eventForm({ title_en: "Deletable unpublished event", title_hu: "Törölhető nem publikált esemény" })
   });
   assert.equal(deletable.status, 201);
-  const adminCannotDelete = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE" });
-  assert.equal(adminCannotDelete.status, 403);
-  const deleted = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: superToken, method: "DELETE" });
+  const deleted = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE" });
   assert.equal(deleted.status, 200);
 
   const past = await request(baseUrl, "/api/events", {
