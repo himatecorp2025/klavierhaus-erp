@@ -286,6 +286,8 @@ CREATE TABLE IF NOT EXISTS events (
   description_hu TEXT,
   performer_name TEXT,
   hero_image_url TEXT,
+  hero_image_alt_en TEXT,
+  hero_image_alt_hu TEXT,
   gallery_json TEXT DEFAULT '[]',
   venue_name TEXT NOT NULL,
   venue_street TEXT NOT NULL,
@@ -489,6 +491,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
   setting_value TEXT,
   updated_by TEXT,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Published website copy is stored per page and language. The bundled website
+-- content remains the safe fallback, while administrators can update the same
+-- structured document without injecting HTML into the public renderer.
+CREATE TABLE IF NOT EXISTS website_content_pages (
+  page_key TEXT NOT NULL,
+  language TEXT NOT NULL CHECK(language IN ('en','hu')),
+  content_json TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_by_user_id TEXT,
+  published_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(page_key,language),
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- One-way Google Calendar -> ERP integration. OAuth secrets are encrypted by the
