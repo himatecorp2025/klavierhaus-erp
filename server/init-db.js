@@ -110,7 +110,10 @@ function migrationRequiresBackup() {
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing;
+  const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
+  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
+  const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || sampleFlagsMissing;
 }
 
 function createPreMigrationBackup() {
@@ -314,8 +317,17 @@ function runMigrations() {
     ensureColumn("events", "cancelled_by_user_id", "TEXT");
     ensureColumn("events", "hero_image_alt_en", "TEXT");
     ensureColumn("events", "hero_image_alt_hu", "TEXT");
+    ensureColumn("events", "sold_out_at", "TEXT");
+    ensureColumn("events", "is_sample", "INTEGER DEFAULT 0");
+    ensureColumn("events", "relaunch_source_event_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
+    ensureColumn("website_reviews", "is_sample", "INTEGER DEFAULT 0");
+    ensureColumn("website_showroom_pianos", "is_sample", "INTEGER DEFAULT 0");
+    ensureColumn("website_services", "is_sample", "INTEGER DEFAULT 0");
+    ensureColumn("event_repeat_requests", "notified_at", "TEXT");
+    ensureColumn("event_repeat_requests", "notification_event_id", "TEXT");
+    ensureColumn("event_repeat_requests", "delivery_status", "TEXT");
 
     // Inventory.
     const inventoryColumns = {
@@ -404,6 +416,15 @@ function runMigrations() {
   ensureIndex("idx_website_reviews_public", "CREATE INDEX IF NOT EXISTS idx_website_reviews_public ON website_reviews(visible,sort_order,updated_at DESC)");
   ensureIndex("idx_showroom_pianos_public", "CREATE INDEX IF NOT EXISTS idx_showroom_pianos_public ON website_showroom_pianos(published,availability_status,featured,sort_order,updated_at DESC)");
   ensureIndex("idx_website_services_public", "CREATE INDEX IF NOT EXISTS idx_website_services_public ON website_services(visible,featured,sort_order,updated_at DESC)");
+  ensureIndex("idx_website_artists_public", "CREATE INDEX IF NOT EXISTS idx_website_artists_public ON website_artists(published,featured,sort_order,updated_at DESC)");
+  ensureIndex("idx_website_media_created", "CREATE INDEX IF NOT EXISTS idx_website_media_created ON website_media(created_at DESC)");
+  ensureIndex("idx_website_leads_status", "CREATE INDEX IF NOT EXISTS idx_website_leads_status ON website_contact_leads(status,created_at DESC)");
+  ensureIndex("idx_website_content_versions", "CREATE INDEX IF NOT EXISTS idx_website_content_versions ON website_content_versions(page_key,language,version DESC)");
+  ensureIndex("idx_website_preview_expiry", "CREATE INDEX IF NOT EXISTS idx_website_preview_expiry ON website_preview_tokens(expires_at)");
+  ensureIndex("idx_website_integration_oauth_expiry", "CREATE INDEX IF NOT EXISTS idx_website_integration_oauth_expiry ON website_integration_oauth_states(expires_at)");
+  ensureIndex("idx_event_repeat_requests", "CREATE INDEX IF NOT EXISTS idx_event_repeat_requests ON event_repeat_requests(event_id,created_at DESC)");
+  ensureIndex("idx_marketing_campaigns_active", "CREATE INDEX IF NOT EXISTS idx_marketing_campaigns_active ON marketing_campaigns(active,updated_at DESC)");
+  ensureIndex("idx_website_tracking_events", "CREATE INDEX IF NOT EXISTS idx_website_tracking_events ON website_tracking_events(event_name,created_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
