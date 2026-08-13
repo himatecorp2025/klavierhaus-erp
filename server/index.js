@@ -16,6 +16,7 @@ const { createAccountActivationService } = require("./account-activation");
 const { registerEventRoutes } = require("./events");
 const { registerWebsiteContentRoutes } = require("./website-content");
 const { registerWebsiteCatalogRoutes } = require("./website-catalog");
+const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const {
   createDocumentUpload,
@@ -273,7 +274,7 @@ app.use('/api',(req,res,next)=>{
   if(req.method!=='DELETE') return next();
   const h=req.headers.authorization||'';
   try{req.user=req.user||jwt.verify(h.startsWith('Bearer ')?h.slice(7):'',JWT_SECRET);}catch(e){return res.status(401).json({error:'AUTH_REQUIRED'});}
-  if(/^\/events\/[^/]+$/.test(req.path)||/^\/(?:website-reviews|website-services|showroom-pianos)\/[^/]+$/.test(req.path)) return next();
+  if(/^\/events\/[^/]+$/.test(req.path)||/^\/(?:website-reviews|website-services|showroom-pianos|website-artists)\/[^/]+$/.test(req.path)) return next();
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'PERMISSION_DENIED'});
   next();
 });
@@ -706,6 +707,20 @@ registerWebsiteCatalogRoutes({
   permit,
   audit,
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
+});
+registerWebsitePlatformRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  requireSuperadmin,
+  audit,
+  websiteImageUpload,
+  websiteImageDir:WEBSITE_IMAGE_DIR,
+  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
+  transactionalEmail,
+  env:process.env
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
