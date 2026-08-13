@@ -508,6 +508,83 @@ CREATE TABLE IF NOT EXISTS website_content_pages (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Public website collections are deliberately separate from ERP customer
+-- pianos and work records. This prevents public showroom/catalog editing from
+-- mutating operational client data.
+CREATE TABLE IF NOT EXISTS website_reviews (
+  id TEXT PRIMARY KEY,
+  person_name TEXT NOT NULL,
+  role_en TEXT,
+  role_hu TEXT,
+  quote_en TEXT NOT NULL,
+  quote_hu TEXT NOT NULL,
+  portrait_url TEXT NOT NULL,
+  portrait_alt_en TEXT,
+  portrait_alt_hu TEXT,
+  linked_event_id TEXT,
+  visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(linked_event_id) REFERENCES events(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_showroom_pianos (
+  id TEXT PRIMARY KEY,
+  slug_en TEXT NOT NULL UNIQUE,
+  slug_hu TEXT NOT NULL UNIQUE,
+  brand TEXT NOT NULL,
+  model TEXT,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  summary_en TEXT,
+  summary_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  image_url TEXT NOT NULL,
+  image_alt_en TEXT,
+  image_alt_hu TEXT,
+  gallery_json TEXT NOT NULL DEFAULT '[]',
+  availability_status TEXT NOT NULL DEFAULT 'AVAILABLE' CHECK(availability_status IN ('AVAILABLE','RESERVED','SOLD','HIDDEN')),
+  featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
+  published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_services (
+  id TEXT PRIMARY KEY,
+  slug_en TEXT NOT NULL UNIQUE,
+  slug_hu TEXT NOT NULL UNIQUE,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  summary_en TEXT,
+  summary_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  image_url TEXT NOT NULL,
+  image_alt_en TEXT,
+  image_alt_hu TEXT,
+  visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
+  featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- One-way Google Calendar -> ERP integration. OAuth secrets are encrypted by the
 -- application before they are written to this table.
 CREATE TABLE IF NOT EXISTS calendar_integrations (
