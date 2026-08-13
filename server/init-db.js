@@ -311,6 +311,8 @@ function runMigrations() {
     ensureColumn("events", "cancellation_reason", "TEXT");
     ensureColumn("events", "cancelled_at", "TEXT");
     ensureColumn("events", "cancelled_by_user_id", "TEXT");
+    ensureColumn("events", "hero_image_alt_en", "TEXT");
+    ensureColumn("events", "hero_image_alt_hu", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
 
@@ -397,6 +399,7 @@ function runMigrations() {
   ensureIndex("idx_event_payments_event_status", "CREATE INDEX IF NOT EXISTS idx_event_payments_event_status ON event_payments(event_id,status,created_at DESC)");
   ensureIndex("idx_event_tickets_payment", "CREATE INDEX IF NOT EXISTS idx_event_tickets_payment ON event_tickets(event_payment_id,ticket_sequence)");
   ensureIndex("idx_stripe_webhook_status", "CREATE INDEX IF NOT EXISTS idx_stripe_webhook_status ON stripe_webhook_events(status,received_at DESC)");
+  ensureIndex("idx_website_content_updated", "CREATE INDEX IF NOT EXISTS idx_website_content_updated ON website_content_pages(updated_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
