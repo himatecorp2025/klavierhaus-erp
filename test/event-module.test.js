@@ -166,6 +166,34 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(missingImage.status, 400);
   assert.equal(missingImage.payload.error, "EVENT_IMAGE_REQUIRED");
 
+  const paidWithoutPrice = eventForm({
+    access_type: "PUBLIC_PAID",
+    title_en: "Invalid zero dollar paid event",
+    title_hu: "Hibás nulla dolláros fizetős esemény",
+    price_cents: 0,
+    publish_now: 1
+  });
+  const rejectedPaidPublish = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: paidWithoutPrice });
+  assert.equal(rejectedPaidPublish.status, 400);
+  assert.equal(rejectedPaidPublish.payload.error, "PAID_EVENT_PRICE_REQUIRED");
+
+  const atomicPublishForm = eventForm({
+    title_en: "Atomically published concert",
+    title_hu: "Atomikusan publikált hangverseny",
+    start_local: "2031-04-11T19:00",
+    end_local: "2031-04-11T21:00",
+    publish_now: 1
+  });
+  const atomicPublish = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: atomicPublishForm });
+  assert.equal(atomicPublish.status, 201, JSON.stringify(atomicPublish.payload));
+  assert.equal(atomicPublish.payload.status, "PUBLISHED");
+  assert.ok(atomicPublish.payload.published_at, "an atomic publish must set published_at in the same response");
+  const atomicPublic = await request(baseUrl, `/api/public/events/${atomicPublish.payload.slug_en}?lang=en`);
+  assert.equal(atomicPublic.status, 200);
+  assert.equal(atomicPublic.payload.title, "Atomically published concert");
+  const atomicDeleted = await request(baseUrl, `/api/events/${atomicPublish.payload.id}`, { token: adminToken, method: "DELETE" });
+  assert.equal(atomicDeleted.status, 200, JSON.stringify(atomicDeleted.payload));
+
   const created = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: eventForm() });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
   assert.equal(created.payload.status, "DRAFT");
@@ -312,7 +340,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
     method: "POST",
     body: eventForm({ title_en: "Deletable unpublished event", title_hu: "Törölhető nem publikált esemény" })
   });
-  assert.equal(deletable.status, 201);
+  assert.equal(deletable.status, 201, JSON.stringify(deletable.payload));
   const deleted = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE" });
   assert.equal(deleted.status, 200);
 
@@ -338,6 +366,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   const auditDb = new Database(dbPath, { readonly: true });
   assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM event_closures WHERE event_id=?").get(past.payload.id).count, 1);
   assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM audit_log WHERE action='REVERT_CHECK_IN' AND record_id=?").get(eventId).count, 1);
+  assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM audit_log WHERE action='CREATE_AND_PUBLISH'").get().count, 1);
   assert.equal(auditDb.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
   assert.equal(auditDb.prepare("PRAGMA foreign_key_check").all().length, 0);
   auditDb.close();
