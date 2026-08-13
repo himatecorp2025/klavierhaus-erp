@@ -109,7 +109,8 @@ function migrationRequiresBackup() {
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing;
+  const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing;
 }
 
 function createPreMigrationBackup() {
@@ -400,6 +401,9 @@ function runMigrations() {
   ensureIndex("idx_event_tickets_payment", "CREATE INDEX IF NOT EXISTS idx_event_tickets_payment ON event_tickets(event_payment_id,ticket_sequence)");
   ensureIndex("idx_stripe_webhook_status", "CREATE INDEX IF NOT EXISTS idx_stripe_webhook_status ON stripe_webhook_events(status,received_at DESC)");
   ensureIndex("idx_website_content_updated", "CREATE INDEX IF NOT EXISTS idx_website_content_updated ON website_content_pages(updated_at DESC)");
+  ensureIndex("idx_website_reviews_public", "CREATE INDEX IF NOT EXISTS idx_website_reviews_public ON website_reviews(visible,sort_order,updated_at DESC)");
+  ensureIndex("idx_showroom_pianos_public", "CREATE INDEX IF NOT EXISTS idx_showroom_pianos_public ON website_showroom_pianos(published,availability_status,featured,sort_order,updated_at DESC)");
+  ensureIndex("idx_website_services_public", "CREATE INDEX IF NOT EXISTS idx_website_services_public ON website_services(visible,featured,sort_order,updated_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
