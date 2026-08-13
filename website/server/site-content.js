@@ -9,7 +9,7 @@
  * redesigning the public website.
  */
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 
 const routeDefinitions = Object.freeze({
   home: { en: "/", hu: "/hu/" },
@@ -40,7 +40,7 @@ const shared = Object.freeze({
   heroImage: "/assets/media/klavierhaus-hero.jpg",
   salonImage: "/assets/media/klavierhaus-salon.jpg",
   craftImage: "/assets/media/klavierhaus-craft.jpg",
-  artistSalonImage: "/assets/media/klavierhaus-artist-salon.png"
+  artistSalonImage: "/assets/media/klavierhaus-artists-salon.jpg"
 });
 
 const globalCopy = Object.freeze({
@@ -49,6 +49,23 @@ const globalCopy = Object.freeze({
     languageCode: "en",
     languageName: "English",
     alternateLabel: "HU",
+    brand: {
+      name: "Klavierhaus",
+      wordmark: "KLAVIERHAUS",
+      logoImage: shared.logo,
+      addressLine1: shared.addressLines[0],
+      addressLine2: shared.addressLines[1],
+      phoneDisplay: shared.phoneDisplay,
+      phoneHref: shared.phoneHref,
+      emailDisplay: shared.emailDisplay,
+      emailHref: shared.emailHref,
+      footerLocations: "New York · France",
+      schemaStreetAddress: "790 11th Avenue",
+      schemaLocality: "New York",
+      schemaRegion: "NY",
+      schemaPostalCode: "10019",
+      schemaCountry: "US"
+    },
     brandAriaLabel: "Klavierhaus home",
     logoAlt: "Klavierhaus — New York and France",
     skipLabel: "Skip to content",
@@ -78,13 +95,80 @@ const globalCopy = Object.freeze({
     notFoundEyebrow: "404",
     notFoundTitle: "This room is not part of the house.",
     notFoundBody: "The requested page could not be found. Return to the Klavierhaus experience or choose a destination from the menu.",
-    soonLabel: "Programme in preparation"
+    soonLabel: "Programme in preparation",
+    eventLabels: {
+      listEyebrow: "Klavierhaus programme",
+      listTitle: "Intimate encounters in music.",
+      listLead: "A considered programme of concerts, salons, masterclasses, and cultural gatherings in New York.",
+      upcoming: "Upcoming programme",
+      homeEyebrow: "The next encounters",
+      homeTitle: "Enter the room where music becomes personal.",
+      homeLead: "A curated sequence of intimate performances and cultural gatherings at Klavierhaus.",
+      noEvents: "The next programme is being prepared. Please return soon.",
+      details: "View details",
+      viewAll: "View all events",
+      buyTickets: "Buy tickets",
+      reservePlace: "Reserve a place",
+      ticketsSoon: "Tickets coming soon",
+      testMode: "TEST MODE",
+      testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
+      quantity: "Number of tickets",
+      attendeeName: "Full name",
+      attendeeEmail: "Email address",
+      continueToCheckout: "Continue to secure test checkout",
+      reservationSubmit: "Confirm complimentary reservation",
+      checkoutSuccess: "Your test payment was received. The ticket is issued after Stripe confirms the payment by webhook.",
+      checkoutCancelled: "Checkout was cancelled. The temporary place will be released automatically.",
+      checkoutError: "Checkout could not be started. Please try again.",
+      reservationSuccess: "Your complimentary reservation has been recorded.",
+      cancellationReason: "Organizer's notice",
+      date: "Date",
+      venue: "Venue",
+      artist: "Artist",
+      capacity: "Availability",
+      available: "places available",
+      soldOut: "Sold out",
+      price: "Admission",
+      complimentary: "Complimentary",
+      ticketingSoon: "Online ticketing will open soon. No reservation has been created yet.",
+      cancelled: "This event has been canceled by the organizer. Please contact our customer service team regarding your refund.",
+      rescheduled: "This event has been rescheduled.",
+      invitationEyebrow: "Private invitation",
+      invitationTitle: "You are invited.",
+      invitationLead: "Please confirm whether you will attend. A place is reserved only after acceptance and while capacity remains.",
+      guest: "Guest",
+      accept: "Accept invitation",
+      decline: "Decline invitation",
+      accepted: "Your invitation has been accepted. Your personal ticket has been created.",
+      declined: "Your invitation has been declined and no place has been reserved.",
+      answered: "This invitation has already been answered.",
+      unavailable: "This invitation is no longer available.",
+      privacy: "This private page is excluded from search engines. The invitation link is personal.",
+      back: "View public events"
+    }
   }),
   hu: Object.freeze({
     locale: "hu-HU",
     languageCode: "hu",
     languageName: "Magyar",
     alternateLabel: "EN",
+    brand: {
+      name: "Klavierhaus",
+      wordmark: "KLAVIERHAUS",
+      logoImage: shared.logo,
+      addressLine1: shared.addressLines[0],
+      addressLine2: shared.addressLines[1],
+      phoneDisplay: shared.phoneDisplay,
+      phoneHref: shared.phoneHref,
+      emailDisplay: shared.emailDisplay,
+      emailHref: shared.emailHref,
+      footerLocations: "New York · Franciaország",
+      schemaStreetAddress: "790 11th Avenue",
+      schemaLocality: "New York",
+      schemaRegion: "NY",
+      schemaPostalCode: "10019",
+      schemaCountry: "US"
+    },
     brandAriaLabel: "Klavierhaus főoldal",
     logoAlt: "Klavierhaus — New York és Franciaország",
     skipLabel: "Ugrás a tartalomhoz",
@@ -114,7 +198,57 @@ const globalCopy = Object.freeze({
     notFoundEyebrow: "404",
     notFoundTitle: "Ez a terem nem része a háznak.",
     notFoundBody: "A kért oldal nem található. Térjen vissza a Klavierhaus világába, vagy válasszon a menüből.",
-    soonLabel: "A program előkészítés alatt"
+    soonLabel: "A program előkészítés alatt",
+    eventLabels: {
+      listEyebrow: "Klavierhaus program",
+      listTitle: "Meghitt találkozások a zenében.",
+      listLead: "Koncertek, szalonestek, mesterkurzusok és kulturális találkozások gondosan összeállított New York-i programja.",
+      upcoming: "Közelgő programok",
+      homeEyebrow: "A következő találkozások",
+      homeTitle: "Lépjen be a térbe, ahol a zene személyessé válik.",
+      homeLead: "Meghitt előadások és kulturális találkozások gondosan válogatott sora a Klavierhausban.",
+      noEvents: "A következő program előkészítés alatt áll. Kérjük, látogasson vissza hamarosan.",
+      details: "Részletek",
+      viewAll: "Összes esemény",
+      buyTickets: "Jegyvásárlás",
+      reservePlace: "Helyfoglalás",
+      ticketsSoon: "Jegyek hamarosan",
+      testMode: "TESZTÜZEM",
+      testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
+      quantity: "Jegyek száma",
+      attendeeName: "Teljes név",
+      attendeeEmail: "E-mail-cím",
+      continueToCheckout: "Tovább a biztonságos tesztfizetéshez",
+      reservationSubmit: "Díjmentes helyfoglalás megerősítése",
+      checkoutSuccess: "A tesztfizetés beérkezett. A jegy a Stripe webhook-visszaigazolása után készül el.",
+      checkoutCancelled: "A fizetés megszakadt. Az ideiglenes helyfoglalás automatikusan felszabadul.",
+      checkoutError: "A fizetés nem indítható el. Kérjük, próbálja újra.",
+      reservationSuccess: "A díjmentes helyfoglalást rögzítettük.",
+      cancellationReason: "A szervező tájékoztatása",
+      date: "Időpont",
+      venue: "Helyszín",
+      artist: "Művész",
+      capacity: "Elérhetőség",
+      available: "szabad hely",
+      soldOut: "Megtelt",
+      price: "Belépőjegy",
+      complimentary: "Díjmentes",
+      ticketingSoon: "Az online jegyvásárlás hamarosan megnyílik. Helyfoglalás még nem történt.",
+      cancelled: "Az eseményt a szervező törölte. A visszatérítéssel kapcsolatban kérjük, forduljon ügyfélszolgálatunkhoz.",
+      rescheduled: "Az esemény új időpontra került.",
+      invitationEyebrow: "Személyes meghívó",
+      invitationTitle: "Szeretettel meghívjuk.",
+      invitationLead: "Kérjük, jelezze részvételi szándékát. A hely csak elfogadás után és a szabad kapacitás erejéig kerül lefoglalásra.",
+      guest: "Meghívott",
+      accept: "Meghívás elfogadása",
+      decline: "Meghívás visszautasítása",
+      accepted: "A meghívást elfogadta. Személyes belépőjegye elkészült.",
+      declined: "A meghívást visszautasította, ezért hely nem került lefoglalásra.",
+      answered: "Erre a meghívásra már érkezett válasz.",
+      unavailable: "Ez a meghívás már nem érhető el.",
+      privacy: "Ez a személyes oldal nincs jelen a keresőkben. A meghívó hivatkozása személyre szól.",
+      back: "Nyilvános események"
+    }
   })
 });
 
@@ -145,17 +279,9 @@ const pages = Object.freeze({
             "Klavierhaus brings together the expressive soul of the piano, the people who reveal it, and audiences who value closeness over spectacle.",
             "Here, craft supports culture. Every instrument, performance, and private encounter begins with attention—to tone, to touch, and to the human experience of sound."
           ],
-          link: { label: "Discover our story", key: "story" }
-        },
-        {
-          id: "salon",
-          type: "visual",
-          eyebrow: "Intimate encounters",
-          title: "The art of listening, without the distance.",
-          body: ["A Klavierhaus salon is conceived as a meeting between artist, instrument, and guest—not as a performance observed from afar."],
           image: shared.salonImage,
-          imageAlt: "An intimate piano recital with a small audience in a New York salon",
-          link: { label: "Explore events", key: "events" }
+          imageAlt: "A pianist sharing music with an intimate audience at Klavierhaus",
+          link: { label: "Discover our story", key: "story" }
         },
         {
           id: "testimonial",
@@ -390,8 +516,7 @@ const pages = Object.freeze({
         secondary: { label: "Privát látogatás egyeztetése", key: "consultation" }
       },
       sections: [
-        { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], link: { label: "Történetünk", key: "story" } },
-        { id: "salon", type: "visual", eyebrow: "Bensőséges találkozások", title: "A hallgatás művészete, távolság nélkül.", body: ["A Klavierhaus szalonja a művész, a hangszer és a vendég találkozása — nem egy távolról megfigyelt előadás."], image: shared.salonImage, imageAlt: "Bensőséges zongoraest kis közönséggel egy New York-i szalonban", link: { label: "Eseményeink", key: "events" } },
+        { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], image: shared.salonImage, imageAlt: "Zongoraművész és közönsége egy meghitt Klavierhaus eseményen", link: { label: "Történetünk", key: "story" } },
         { id: "testimonial", type: "quote", quote: "Számomra a Klavierhaus igazi zenei kincs.", attribution: "Richard Goode" },
         { id: "culture", type: "visual", reverse: true, eyebrow: "Kulturális küldetés", title: "Megőrizni a zene érzelmi nyelvét.", body: ["Egy rohanó világban a Klavierhaus védi azokat a ritka feltételeket, amelyek között a szépség teljességében hallható: egy kivételes hangszer, egy érzékeny művész és egy közönség, amely elég közel van minden színváltozás érzékeléséhez."], image: shared.heroImage, imageAlt: "Elegáns privát térben megvilágított koncertzongora", link: { label: "Kulturális küldetésünk", key: "mission" } },
         { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk majd be."], image: shared.artistSalonImage, imageAlt: "Zongoraművész bensőséges közönség előtt egy elegáns Klavierhaus szalonban", link: { label: "Művészeink", key: "artists" } },
@@ -612,5 +737,7 @@ module.exports = {
   getRoute,
   normalizePathname,
   routeDefinitions,
-  shared
+  shared,
+  pages,
+  globalCopy
 };
