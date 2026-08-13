@@ -88,7 +88,29 @@ function isNavigationActive(itemKey, currentKey) {
   return itemKey === "services" && ["restoration", "tuning", "concert"].includes(currentKey);
 }
 
+function resolveBrand(copy = {}) {
+  const brand = copy.brand && typeof copy.brand === "object" ? copy.brand : {};
+  return {
+    name: brand.name || "Klavierhaus",
+    wordmark: brand.wordmark || "KLAVIERHAUS",
+    logoImage: brand.logoImage || shared.logo,
+    addressLine1: brand.addressLine1 || shared.addressLines[0],
+    addressLine2: brand.addressLine2 || shared.addressLines[1],
+    phoneDisplay: brand.phoneDisplay || shared.phoneDisplay,
+    phoneHref: brand.phoneHref || shared.phoneHref,
+    emailDisplay: brand.emailDisplay || shared.emailDisplay,
+    emailHref: brand.emailHref || shared.emailHref,
+    footerLocations: brand.footerLocations || "New York · France",
+    schemaStreetAddress: brand.schemaStreetAddress || "790 11th Avenue",
+    schemaLocality: brand.schemaLocality || "New York",
+    schemaRegion: brand.schemaRegion || "NY",
+    schemaPostalCode: brand.schemaPostalCode || "10019",
+    schemaCountry: brand.schemaCountry || "US"
+  };
+}
+
 function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" }) {
+  const brand = resolveBrand(copy);
   const alternateLanguage = getAlternateLanguage(language);
   const alternateRoute = alternateRouteOverride || getRoute(currentKey, alternateLanguage);
   const navItems = copy.nav.map((item) => {
@@ -99,8 +121,8 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
   return `<a class="skip-link" href="#main-content">${escapeHtml(copy.skipLabel)}</a>
   <header class="site-header" data-site-header>
     <a class="brand" href="${escapeHtml(getRoute("home", language))}" aria-label="${escapeHtml(copy.brandAriaLabel)}">
-      <img class="brand-logo" src="${escapeHtml(shared.logo)}" alt="${escapeHtml(copy.logoAlt)}" width="320" height="333">
-      <span class="brand-wordmark">KLAVIERHAUS</span>
+      <img class="brand-logo" src="${escapeHtml(brand.logoImage)}" alt="${escapeHtml(copy.logoAlt)}" width="320" height="333">
+      <span class="brand-wordmark">${escapeHtml(brand.wordmark)}</span>
     </a>
     <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-navigation" aria-label="${escapeHtml(copy.menuOpenLabel)}" data-menu-toggle data-open-label="${escapeHtml(copy.menuOpenLabel)}" data-close-label="${escapeHtml(copy.menuCloseLabel)}">
       <span></span><span></span>
@@ -117,9 +139,9 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
   </header>`;
 }
 
-function renderHero(page, language) {
+function renderHero(page, language, globalCopyOverride = null) {
   const hero = page.hero;
-  const copy = getGlobal(language);
+  const copy = globalCopyOverride || getGlobal(language);
   const hasImage = Boolean(hero.image);
   const actions = hero.primary || hero.secondary
     ? `<div class="hero-actions">
@@ -155,12 +177,11 @@ function renderHero(page, language) {
 }
 
 function renderStatement(section, language) {
-  return `<section class="section section--statement" id="${escapeHtml(section.id)}" data-reveal>
+  return `<section class="section section--statement${section.image ? " has-image" : ""}" id="${escapeHtml(section.id)}" data-reveal>
     <div class="section-marker"><span>${escapeHtml(section.eyebrow)}</span></div>
     <div class="statement-content">
       <h2>${escapeHtml(section.title)}</h2>
-      <div class="statement-copy">${renderParagraphs(section.body)}</div>
-      ${renderTextLink(section.link, language)}
+      <div class="statement-lower"><div><div class="statement-copy">${renderParagraphs(section.body)}</div>${renderTextLink(section.link, language)}</div>${section.image ? renderPicture(section.image, section.imageAlt || "", "statement-image") : ""}</div>
     </div>
   </section>`;
 }
@@ -298,10 +319,11 @@ function renderSection(section, language) {
 }
 
 function renderFooter(copy, language) {
+  const brand = resolveBrand(copy);
   return `<footer class="site-footer">
     <div class="footer-primary">
       <div class="footer-brand">
-        <img src="${escapeHtml(shared.logo)}" alt="" width="320" height="333" loading="lazy" decoding="async">
+        <img src="${escapeHtml(brand.logoImage)}" alt="" width="320" height="333" loading="lazy" decoding="async">
         <p>${escapeHtml(copy.footerStatement)}</p>
       </div>
       <div class="footer-column">
@@ -313,9 +335,9 @@ function renderFooter(copy, language) {
       </div>
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerVisit)}</p>
-        <address>${escapeHtml(shared.addressLines[0])}<br>${escapeHtml(shared.addressLines[1])}</address>
-        <a href="${escapeHtml(shared.phoneHref)}">${escapeHtml(shared.phoneDisplay)}</a>
-        <a href="${escapeHtml(shared.emailHref)}">${escapeHtml(shared.emailDisplay)}</a>
+        <address>${escapeHtml(brand.addressLine1)}<br>${escapeHtml(brand.addressLine2)}</address>
+        <a href="${escapeHtml(brand.phoneHref)}">${escapeHtml(brand.phoneDisplay)}</a>
+        <a href="${escapeHtml(brand.emailHref)}">${escapeHtml(brand.emailDisplay)}</a>
         <a href="${escapeHtml(getRoute("contact", language))}">${escapeHtml(copy.footerContact)}</a>
       </div>
       <div class="footer-column">
@@ -325,36 +347,37 @@ function renderFooter(copy, language) {
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <span data-current-year></span> Klavierhaus. ${escapeHtml(copy.rights)}</span>
-      <span>New York · France</span>
+      <span>© <span data-current-year></span> ${escapeHtml(brand.name)}. ${escapeHtml(copy.rights)}</span>
+      <span>${escapeHtml(brand.footerLocations)}</span>
     </div>
   </footer>`;
 }
 
-function organizationStructuredData(baseUrl) {
+function organizationStructuredData(baseUrl, copy = {}) {
+  const brand = resolveBrand(copy);
   return {
     "@context": "https://schema.org",
-    "@type": "Organization",
-    name: "Klavierhaus",
+    "@type": ["LocalBusiness", "Organization"],
+    name: brand.name,
     url: `${baseUrl}/`,
-    logo: pageUrl(baseUrl, shared.logo),
-    email: shared.emailDisplay,
-    telephone: "+1-212-245-4535",
+    logo: pageUrl(baseUrl, brand.logoImage),
+    email: brand.emailDisplay,
+    telephone: brand.phoneDisplay,
     address: {
       "@type": "PostalAddress",
-      streetAddress: "790 11th Avenue",
-      addressLocality: "New York",
-      addressRegion: "NY",
-      postalCode: "10019",
-      addressCountry: "US"
+      streetAddress: brand.schemaStreetAddress,
+      addressLocality: brand.schemaLocality,
+      addressRegion: brand.schemaRegion,
+      postalCode: brand.schemaPostalCode,
+      addressCountry: brand.schemaCountry
     }
   };
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [] }) {
+function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], pageOverride = null, globalOverride = null }) {
   const { key, language } = route;
-  const copy = getGlobal(language);
-  const page = getPage(key, language);
+  const copy = globalOverride || getGlobal(language);
+  const page = pageOverride || getPage(key, language);
   const alternateLanguage = getAlternateLanguage(language);
   const canonicalRoute = getRoute(key, language);
   const alternateRoute = getRoute(key, alternateLanguage);
@@ -362,9 +385,9 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [] 
   const hungarianUrl = pageUrl(baseUrl, getRoute(key, "hu"));
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
   const robots = allowIndexing ? "index, follow" : "noindex, nofollow, noarchive";
-  const sections = page.sections.map((section) => {
+  const sections = page.sections.filter((section) => !(key === "home" && section.id === "salon")).map((section) => {
     const rendered = renderSection(section, language);
-    return key === "home" && section.id === "artists" ? `${rendered}${renderHomeEventShowcase(homeEvents, language)}` : rendered;
+    return key === "home" && section.id === "manifesto" ? `${rendered}${renderHomeEventShowcase(homeEvents, language, copy)}` : rendered;
   }).join("");
 
   return `<!doctype html>
@@ -377,7 +400,7 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [] 
   <meta name="robots" content="${robots}">
   <meta name="description" content="${escapeHtml(page.seo.description)}">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Klavierhaus">
+  <meta property="og:site_name" content="${escapeHtml(resolveBrand(copy).name)}">
   <meta property="og:title" content="${escapeHtml(page.seo.title)}">
   <meta property="og:description" content="${escapeHtml(page.seo.description)}">
   <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
@@ -387,17 +410,17 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [] 
   <link rel="alternate" hreflang="en-US" href="${escapeHtml(englishUrl)}">
   <link rel="alternate" hreflang="hu-HU" href="${escapeHtml(hungarianUrl)}">
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
-  <link rel="icon" type="image/png" href="${escapeHtml(shared.logo)}">
+  <link rel="icon" type="image/png" href="${escapeHtml(resolveBrand(copy).logoImage)}">
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
-  <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl))}</script>
+  <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <title>${escapeHtml(page.seo.title)}</title>
 </head>
 <body class="template-${escapeHtml(page.template)}" data-language="${escapeHtml(language)}" data-page="${escapeHtml(key)}">
   ${renderHeader({ copy, language, currentKey: key })}
   <main id="main-content">
-    ${renderHero(page, language)}
+    ${renderHero(page, language, copy)}
     <div class="content-shell">${sections}</div>
   </main>
   ${renderFooter(copy, language)}
@@ -441,7 +464,7 @@ const eventCopy = Object.freeze({
     price: "Admission",
     complimentary: "Complimentary",
     ticketingSoon: "Online ticketing will open in the next release. No reservation has been created yet.",
-    cancelled: "This event has been cancelled.",
+    cancelled: "This event has been canceled by the organizer. Please contact our customer service team regarding your refund.",
     rescheduled: "This event has been rescheduled.",
     invitationEyebrow: "Private invitation",
     invitationTitle: "You are invited.",
@@ -491,7 +514,7 @@ const eventCopy = Object.freeze({
     price: "Belépőjegy",
     complimentary: "Díjmentes",
     ticketingSoon: "Az online jegyvásárlás a következő fejlesztési szakaszban nyílik meg. Helyfoglalás még nem történt.",
-    cancelled: "Az eseményt töröltük.",
+    cancelled: "Az eseményt a szervező törölte. A visszatérítéssel kapcsolatban kérjük, forduljon ügyfélszolgálatunkhoz.",
     rescheduled: "Az esemény új időpontra került.",
     invitationEyebrow: "Személyes meghívó",
     invitationTitle: "Szeretettel meghívjuk.",
@@ -507,6 +530,12 @@ const eventCopy = Object.freeze({
     back: "Nyilvános események"
   })
 });
+
+function resolveEventCopy(language, globalOverride = null) {
+  const fallback = eventCopy[language === "hu" ? "hu" : "en"];
+  const global = globalOverride || getGlobal(language);
+  return { ...fallback, ...(global?.eventLabels || {}) };
+}
 
 function eventPath(event, language) {
   return language === "hu" ? `/hu/esemenyek/${event.slug}` : `/events/${event.slug}`;
@@ -530,8 +559,8 @@ function formatEventDate(value, language, options = {}) {
   }).format(date);
 }
 
-function formatEventPrice(event, language) {
-  if (event.access_type === "PUBLIC_FREE" || Number(event.price_cents || 0) === 0) return eventCopy[language].complimentary;
+function formatEventPrice(event, language, labels = resolveEventCopy(language)) {
+  if (event.access_type === "PUBLIC_FREE" || Number(event.price_cents || 0) === 0) return labels.complimentary;
   return new Intl.NumberFormat(language === "hu" ? "hu-HU" : "en-US", {
     style: "currency",
     currency: event.currency || "USD"
@@ -551,8 +580,7 @@ function eventExcerpt(event, max = 190) {
   return `${candidate.slice(0, boundary > max * 0.65 ? boundary : max).trim()}…`;
 }
 
-function renderEventCardAction(event, language) {
-  const labels = eventCopy[language];
+function renderEventCardAction(event, language, labels = resolveEventCopy(language)) {
   if (event.status === "CANCELLED") {
     return `<span class="event-card-action event-card-action--cancelled" aria-disabled="true">${escapeHtml(labels.cancelled)}</span>`;
   }
@@ -572,12 +600,11 @@ function renderEventCardAction(event, language) {
   return `<span class="event-card-action event-card-action--pending" aria-disabled="true"><span>${escapeHtml(ticketLabel)}</span><small>${escapeHtml(labels.ticketsSoon)}</small></span>`;
 }
 
-function renderPublicEventCard(event, language, index = 0) {
-  const labels = eventCopy[language];
+function renderPublicEventCard(event, language, index = 0, labels = resolveEventCopy(language)) {
   const excerpt = eventExcerpt(event);
   return `<article class="public-event-card" data-reveal data-event-index="${index + 1}">
     <a class="public-event-card__media" href="${escapeHtml(eventPath(event, language))}" aria-label="${escapeHtml(`${labels.details}: ${event.title}`)}">
-      ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="${escapeHtml(event.title)}" loading="lazy" decoding="async">` : '<span class="public-event-card__ornament" aria-hidden="true">K</span>'}
+      ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="${escapeHtml(event.hero_image_alt || event.title)}" loading="lazy" decoding="async">` : '<span class="public-event-card__ornament" aria-hidden="true">K</span>'}
       <span class="public-event-card__number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
     </a>
     <div class="public-event-card__body">
@@ -585,26 +612,28 @@ function renderPublicEventCard(event, language, index = 0) {
       <h2><a href="${escapeHtml(eventPath(event, language))}">${escapeHtml(event.title)}</a></h2>
       ${event.performer_name ? `<p class="public-event-card__artist">${escapeHtml(labels.artist)} · ${escapeHtml(event.performer_name)}</p>` : ""}
       ${excerpt ? `<p class="public-event-card__excerpt">${escapeHtml(excerpt)}</p>` : ""}
-      <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language))}</span></div>
-      <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a>${renderEventCardAction(event, language)}</div>
+      <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language, labels))}</span></div>
+      <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a>${renderEventCardAction(event, language, labels)}</div>
     </div>
   </article>`;
 }
 
-function renderHomeEventShowcase(events, language) {
-  const labels = eventCopy[language];
+function renderHomeEventShowcase(events, language, globalOverride = null) {
+  const labels = resolveEventCopy(language, globalOverride);
   const cards = events.length
-    ? events.slice(0, 6).map((event, index) => renderPublicEventCard(event, language, index)).join("")
+    ? events.slice(0, 6).map((event, index) => renderPublicEventCard(event, language, index, labels)).join("")
     : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
   return `<section class="section home-event-showcase" id="upcoming-events">
     <div class="home-event-showcase__heading" data-reveal><div><p class="eyebrow">${escapeHtml(labels.homeEyebrow)}</p><h2>${escapeHtml(labels.homeTitle)}</h2></div><p>${escapeHtml(labels.homeLead)}</p></div>
-    <div class="public-event-grid public-event-grid--home">${cards}</div>
+    <div class="event-carousel" data-event-carousel><div class="public-event-grid public-event-grid--home">${cards}</div></div>
+    <div class="event-carousel__controls" aria-label="${escapeHtml(language === "hu" ? "Események lapozása" : "Browse events")}"><button type="button" data-event-carousel-previous aria-label="${escapeHtml(language === "hu" ? "Előző események" : "Previous events")}">←</button><button type="button" data-event-carousel-next aria-label="${escapeHtml(language === "hu" ? "Következő események" : "Next events")}">→</button></div>
     <a class="home-event-showcase__all text-link" href="${escapeHtml(getRoute("events", language))}"><span>${escapeHtml(labels.viewAll)}</span><span aria-hidden="true">↗</span></a>
   </section>`;
 }
 
-function renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl, imageUrl, robots, nonce, structuredData = [] }) {
-  const copy = getGlobal(language);
+function renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl, imageUrl, robots, nonce, structuredData = [], globalCopyOverride = null }) {
+  const copy = globalCopyOverride || getGlobal(language);
+  const brand = resolveBrand(copy);
   const englishUrl = language === "en" ? canonicalUrl : alternateUrl;
   return `<meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -613,7 +642,7 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <meta name="robots" content="${escapeHtml(robots)}">
   <meta name="description" content="${escapeHtml(description)}">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Klavierhaus">
+  <meta property="og:site_name" content="${escapeHtml(brand.name)}">
   <meta property="og:title" content="${escapeHtml(title)}">
   <meta property="og:description" content="${escapeHtml(description)}">
   <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
@@ -623,7 +652,7 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="alternate" hreflang="${language === "hu" ? "hu-HU" : "en-US"}" href="${escapeHtml(canonicalUrl)}">
   <link rel="alternate" hreflang="${language === "hu" ? "en-US" : "hu-HU"}" href="${escapeHtml(alternateUrl)}">
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
-  <link rel="icon" type="image/png" href="${escapeHtml(shared.logo)}">
+  <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   ${structuredData.map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
@@ -662,7 +691,7 @@ function eventStructuredData(event, baseUrl, language) {
   data.image = [event.hero_image_url || pageUrl(baseUrl, shared.salonImage)];
   if (event.performer_name) data.performer = { "@type": "Person", name: event.performer_name };
   if (event.previous_start_at) data.previousStartDate = event.previous_start_at;
-  if (["PUBLIC_PAID", "PUBLIC_FREE"].includes(event.access_type)) {
+  if (event.status !== "CANCELLED" && ["PUBLIC_PAID", "PUBLIC_FREE"].includes(event.access_type)) {
     data.offers = {
       "@type": "Offer",
       url,
@@ -677,35 +706,37 @@ function eventStructuredData(event, baseUrl, language) {
   return data;
 }
 
-function renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce }) {
-  const copy = getGlobal(language);
-  const labels = eventCopy[language];
+function renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce, pageOverride = null, globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const labels = resolveEventCopy(language, copy);
+  const page = pageOverride || getPage("events", language);
   const canonicalRoute = getRoute("events", language);
   const alternateRoute = getRoute("events", getAlternateLanguage(language));
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
-  const cards = events.length ? events.map((event, index) => renderPublicEventCard(event, language, index)).join("") : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
+  const cards = events.length ? events.map((event, index) => renderPublicEventCard(event, language, index, labels)).join("") : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
 
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({
     language,
-    title: `${labels.upcoming} | Klavierhaus`,
-    description: labels.listLead,
+    title: page?.seo?.title || `${labels.upcoming} | Klavierhaus`,
+    description: page?.seo?.description || labels.listLead,
     canonicalUrl,
     alternateUrl: pageUrl(baseUrl, alternateRoute),
-    imageUrl: pageUrl(baseUrl, shared.salonImage),
+    imageUrl: pageUrl(baseUrl, page?.hero?.image || shared.salonImage),
     robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive",
     nonce,
-    structuredData: [organizationStructuredData(baseUrl)]
+    structuredData: [organizationStructuredData(baseUrl, copy)],
+    globalCopyOverride: copy
   })}</head><body class="template-events" data-language="${escapeHtml(language)}" data-page="events">
   ${renderHeader({ copy, language, currentKey: "events" })}
   <main id="main-content">
-    <section class="dynamic-event-hero"><div data-reveal><p class="eyebrow">${escapeHtml(labels.listEyebrow)}</p><h1>${escapeHtml(labels.listTitle)}</h1><p>${escapeHtml(labels.listLead)}</p></div></section>
+    <section class="dynamic-event-hero"><div data-reveal><p class="eyebrow">${escapeHtml(page?.hero?.eyebrow || labels.listEyebrow)}</p><h1>${escapeHtml(page?.hero?.title || labels.listTitle)}</h1><p>${escapeHtml(page?.hero?.lead || labels.listLead)}</p></div></section>
     <section class="dynamic-event-list" aria-labelledby="programme-title"><div class="section-heading" data-reveal><p class="eyebrow">Klavierhaus</p><h2 id="programme-title">${escapeHtml(labels.upcoming)}</h2></div><div class="public-event-grid">${cards}</div></section>
   </main>${renderFooter(copy, language)}</body></html>`;
 }
 
-function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce, result = "" }) {
-  const copy = getGlobal(language);
-  const labels = eventCopy[language];
+function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce, result = "", globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const labels = resolveEventCopy(language, copy);
   const canonicalPath = eventPath(event, language);
   const alternatePath = language === "hu" ? `/events/${event.alternate_slug}` : `/hu/esemenyek/${event.alternate_slug}`;
   const canonicalUrl = pageUrl(baseUrl, canonicalPath);
@@ -738,13 +769,14 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
     imageUrl,
     robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive",
     nonce,
-    structuredData: [organizationStructuredData(baseUrl), eventStructuredData(event, baseUrl, language)]
+    structuredData: [organizationStructuredData(baseUrl, copy), eventStructuredData(event, baseUrl, language)],
+    globalCopyOverride: copy
   })}</head><body class="template-event-detail" data-language="${escapeHtml(language)}" data-page="events">
   ${renderHeader({ copy, language, currentKey: "events", alternateRouteOverride: alternatePath })}
   <main id="main-content">
     <article class="event-detail-page">
       <header class="event-detail-hero">
-        ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="" fetchpriority="high" decoding="async">` : ""}
+        ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="${escapeHtml(event.hero_image_alt || event.title)}" fetchpriority="high" decoding="async">` : ""}
         <div class="event-detail-hero__shade" aria-hidden="true"></div>
         <div class="event-detail-hero__copy" data-reveal><p class="eyebrow">${escapeHtml(event.category)}</p><h1>${escapeHtml(event.title)}</h1>${eventExcerpt(event,260)?`<p>${escapeHtml(eventExcerpt(event,260))}</p>`:""}</div>
       </header>
@@ -756,7 +788,7 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
             ${event.performer_name ? `<div><dt>${escapeHtml(labels.artist)}</dt><dd>${escapeHtml(event.performer_name)}</dd></div>` : ""}
             <div><dt>${escapeHtml(labels.venue)}</dt><dd>${escapeHtml(eventVenue(event))}</dd></div>
             <div><dt>${escapeHtml(labels.capacity)}</dt><dd>${event.sold_out ? escapeHtml(labels.soldOut) : `${escapeHtml(event.capacity_remaining)} ${escapeHtml(labels.available)}`}</dd></div>
-            <div><dt>${escapeHtml(labels.price)}</dt><dd>${escapeHtml(formatEventPrice(event, language))}</dd></div>
+            <div><dt>${escapeHtml(labels.price)}</dt><dd>${escapeHtml(formatEventPrice(event, language, labels))}</dd></div>
           </dl>
           ${ticketing}
         </aside>
@@ -765,9 +797,10 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
   </main>${renderFooter(copy, language)}</body></html>`;
 }
 
-function renderInvitation({ invitation, token, language, baseUrl, nonce, result = "", error = "" }) {
-  const copy = getGlobal(language);
-  const labels = eventCopy[language];
+function renderInvitation({ invitation, token, language, baseUrl, nonce, result = "", error = "", globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const brand = resolveBrand(copy);
+  const labels = resolveEventCopy(language, copy);
   const title = language === "hu" ? invitation.title_hu : invitation.title_en;
   const currentPath = invitationPath(token, language);
   const alternatePath = invitationPath(token, getAlternateLanguage(language));
@@ -782,11 +815,12 @@ function renderInvitation({ invitation, token, language, baseUrl, nonce, result 
     imageUrl: pageUrl(baseUrl, shared.salonImage),
     robots: "noindex, nofollow, noarchive",
     nonce,
-    structuredData: []
+    structuredData: [],
+    globalCopyOverride: copy
   })}</head><body class="template-invitation" data-language="${escapeHtml(language)}" data-page="events">
   ${renderHeader({ copy, language, currentKey: "events", alternateRouteOverride: alternatePath })}
   <main id="main-content" class="invitation-shell"><section class="invitation-card" data-reveal>
-    <img src="${escapeHtml(shared.logo)}" alt="" width="160" height="166">
+    <img src="${escapeHtml(brand.logoImage)}" alt="" width="160" height="166">
     <p class="eyebrow">${escapeHtml(labels.invitationEyebrow)}</p><h1>${escapeHtml(labels.invitationTitle)}</h1><p class="invitation-event-title">${escapeHtml(title)}</p><p>${escapeHtml(labels.invitationLead)}</p>
     <dl><div><dt>${escapeHtml(labels.guest)}</dt><dd>${escapeHtml(invitation.guest_name)}</dd></div><div><dt>${escapeHtml(labels.date)}</dt><dd>${escapeHtml(formatEventDate(invitation.start_at, language))}</dd></div><div><dt>${escapeHtml(labels.venue)}</dt><dd>${escapeHtml(invitation.venue_name)}</dd></div></dl>
     ${resultMessage ? `<p class="invitation-result success">${escapeHtml(resultMessage)}</p>` : ""}
@@ -823,7 +857,7 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
     </section>
   </main>
   ${renderFooter(copy, language)}
-  <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl))}</script>
+  <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
 </body>
 </html>`;
 }
@@ -907,9 +941,9 @@ function createApp(options = {}) {
     if (!eventClient.configured) return next();
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
-      const events = await eventClient.list(language);
+      const [events,content,globalContent] = await Promise.all([eventClient.list(language),eventClient.content("events",language).catch(() => null),eventClient.content("global",language).catch(() => null)]);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-      res.type("html").send(renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce }));
+      res.type("html").send(renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, pageOverride: content?.content || null, globalOverride: globalContent?.content || null }));
     } catch (error) {
       console.warn(`[website] Event listing fallback: ${error.code || error.message}`);
       next();
@@ -920,12 +954,12 @@ function createApp(options = {}) {
     if (!eventClient.configured) return next();
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
-      const event = await eventClient.detail(req.params.slug, language);
+      const [event,globalContent] = await Promise.all([eventClient.detail(req.params.slug, language),eventClient.content("global",language).catch(() => null)]);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
       const result = ["success", "cancelled", "error", "reserved"].includes(String(req.query.checkout || req.query.reservation || ""))
         ? String(req.query.checkout || req.query.reservation)
         : "";
-      res.type("html").send(renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, result }));
+      res.type("html").send(renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, result, globalOverride: globalContent?.content || null }));
     } catch (error) {
       if (error.status === 404) return next();
       console.warn(`[website] Event detail unavailable: ${error.code || error.message}`);
@@ -967,10 +1001,13 @@ function createApp(options = {}) {
   app.get(["/invitation/:token", "/hu/meghivas/:token"], async (req, res) => {
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
-      const invitation = await eventClient.invitation(req.params.token, language);
+      const [invitation, globalContent] = await Promise.all([
+        eventClient.invitation(req.params.token, language),
+        eventClient.content("global", language).catch(() => null)
+      ]);
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-      res.type("html").send(renderInvitation({ invitation, token: req.params.token, language, baseUrl, nonce: res.locals.cspNonce }));
+      res.type("html").send(renderInvitation({ invitation, token: req.params.token, language, baseUrl, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
     } catch (error) {
       res.status(error.status === 404 ? 404 : 503).type("html").send(renderNotFound({ language, baseUrl, allowIndexing: false, nonce: res.locals.cspNonce }));
     }
@@ -982,15 +1019,19 @@ function createApp(options = {}) {
     if (!["ACCEPT", "DECLINE"].includes(decision)) return res.status(400).type("html").send(renderNotFound({ language, baseUrl, allowIndexing: false, nonce: res.locals.cspNonce }));
     try {
       const result = await eventClient.respondToInvitation(req.params.token, decision);
-      const invitation = await eventClient.invitation(req.params.token, language);
+      const [invitation, globalContent] = await Promise.all([
+        eventClient.invitation(req.params.token, language),
+        eventClient.content("global", language).catch(() => null)
+      ]);
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-      res.type("html").send(renderInvitation({ invitation, token: req.params.token, language, baseUrl, nonce: res.locals.cspNonce, result: result.status }));
+      res.type("html").send(renderInvitation({ invitation, token: req.params.token, language, baseUrl, nonce: res.locals.cspNonce, result: result.status, globalOverride: globalContent?.content || null }));
     } catch (error) {
       let invitation;
       try { invitation = await eventClient.invitation(req.params.token, language); } catch (_readError) { invitation = null; }
       if (!invitation) return res.status(error.status === 404 ? 404 : 503).type("html").send(renderNotFound({ language, baseUrl, allowIndexing: false, nonce: res.locals.cspNonce }));
-      const message = error.code === "EVENT_SOLD_OUT" ? eventCopy[language].soldOut : error.code === "INVITATION_ALREADY_ANSWERED" ? eventCopy[language].answered : eventCopy[language].unavailable;
+      const labels = resolveEventCopy(language);
+      const message = error.code === "EVENT_SOLD_OUT" ? labels.soldOut : error.code === "INVITATION_ALREADY_ANSWERED" ? labels.answered : labels.unavailable;
       res.status(error.status || 409).type("html").send(renderInvitation({ invitation, token: req.params.token, language, baseUrl, nonce: res.locals.cspNonce, error: message }));
     }
   });
@@ -1022,20 +1063,26 @@ function createApp(options = {}) {
     }
 
     let homeEvents = [];
-    if (route.key === "home" && eventClient.configured) {
-      try {
-        homeEvents = await eventClient.list(route.language);
-      } catch (error) {
-        console.warn(`[website] Homepage event feed unavailable: ${error.code || error.message}`);
-      }
+    let pageOverride = null;
+    let globalOverride = null;
+    if (eventClient.configured) {
+      const requests = [eventClient.content(route.key, route.language),eventClient.content("global",route.language), route.key === "home" ? eventClient.list(route.language) : Promise.resolve([])];
+      const [contentResult,globalResult,eventResult] = await Promise.allSettled(requests);
+      if (contentResult.status === "fulfilled") pageOverride = contentResult.value?.content || null;
+      else console.warn(`[website] Page content fallback: ${contentResult.reason?.code || contentResult.reason?.message}`);
+      if (globalResult.status === "fulfilled") globalOverride = globalResult.value?.content || null;
+      if (eventResult.status === "fulfilled") homeEvents = eventResult.value;
+      else if (route.key === "home") console.warn(`[website] Homepage event feed unavailable: ${eventResult.reason?.code || eventResult.reason?.message}`);
     }
-    res.setHeader("Cache-Control", route.key === "home" ? "public, max-age=30, stale-while-revalidate=120" : "no-cache");
+    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
     res.type("html").send(renderDocument({
       route,
       baseUrl,
       allowIndexing,
       nonce: res.locals.cspNonce,
-      homeEvents
+      homeEvents,
+      pageOverride,
+      globalOverride
     }));
   });
 
