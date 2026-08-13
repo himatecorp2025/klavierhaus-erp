@@ -312,6 +312,9 @@ CREATE TABLE IF NOT EXISTS events (
   closed_at TEXT,
   closed_by_user_id TEXT,
   closure_snapshot_json TEXT,
+  sold_out_at TEXT,
+  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
+  relaunch_source_event_id TEXT,
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -320,7 +323,8 @@ CREATE TABLE IF NOT EXISTS events (
   FOREIGN KEY(cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(relaunch_source_event_id) REFERENCES events(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS event_invitations (
@@ -524,6 +528,7 @@ CREATE TABLE IF NOT EXISTS website_reviews (
   linked_event_id TEXT,
   visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
+  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -553,6 +558,7 @@ CREATE TABLE IF NOT EXISTS website_showroom_pianos (
   featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
   published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
+  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -577,12 +583,183 @@ CREATE TABLE IF NOT EXISTS website_services (
   visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
   featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
+  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Public artists are a separate editorial collection. They are never mixed
+-- with ERP users, workers, or customer contacts.
+CREATE TABLE IF NOT EXISTS website_artists (
+  id TEXT PRIMARY KEY,
+  slug_en TEXT NOT NULL UNIQUE,
+  slug_hu TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  role_en TEXT,
+  role_hu TEXT,
+  biography_en TEXT,
+  biography_hu TEXT,
+  portrait_url TEXT NOT NULL,
+  portrait_alt_en TEXT,
+  portrait_alt_hu TEXT,
+  gallery_json TEXT NOT NULL DEFAULT '[]',
+  featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
+  published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_media (
+  id TEXT PRIMARY KEY,
+  file_url TEXT NOT NULL UNIQUE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  file_size INTEGER NOT NULL,
+  alt_en TEXT,
+  alt_hu TEXT,
+  usage_type TEXT NOT NULL DEFAULT 'GENERAL',
+  created_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_contact_leads (
+  id TEXT PRIMARY KEY,
+  lead_type TEXT NOT NULL DEFAULT 'SERVICE_CALLBACK' CHECK(lead_type IN ('SERVICE_CALLBACK','PRIVATE_CONSULTATION','GENERAL_CONTACT','EVENT_INTEREST')),
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  service_id TEXT,
+  message TEXT,
+  preferred_contact TEXT NOT NULL DEFAULT 'EMAIL' CHECK(preferred_contact IN ('EMAIL','PHONE','EITHER')),
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),
+  consent_marketing INTEGER NOT NULL DEFAULT 0 CHECK(consent_marketing IN (0,1)),
+  source_path TEXT,
+  utm_source TEXT,
+  utm_medium TEXT,
+  utm_campaign TEXT,
+  status TEXT NOT NULL DEFAULT 'NEW' CHECK(status IN ('NEW','CONTACTED','QUALIFIED','CONVERTED','CLOSED')),
+  assigned_user_id TEXT,
+  internal_notes TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Draft/publish versions are immutable snapshots. website_content_pages keeps
+-- the currently published snapshot for the fast public read path.
+CREATE TABLE IF NOT EXISTS website_content_versions (
+  id TEXT PRIMARY KEY,
+  page_key TEXT NOT NULL,
+  language TEXT NOT NULL CHECK(language IN ('en','hu')),
+  version INTEGER NOT NULL,
+  content_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','ARCHIVED')),
+  created_by_user_id TEXT,
+  published_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  published_at TEXT,
+  UNIQUE(page_key,language,version),
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(published_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_preview_tokens (
+  token_hash TEXT PRIMARY KEY,
+  version_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(version_id) REFERENCES website_content_versions(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- One request is accepted per event and first-party device, and one per
+-- normalized email. Only a keyed hash of the browser identifier is retained.
+CREATE TABLE IF NOT EXISTS event_repeat_requests (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  email_normalized TEXT NOT NULL,
+  device_hash TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  notify_event INTEGER NOT NULL DEFAULT 1 CHECK(notify_event IN (0,1)),
+  marketing_consent INTEGER NOT NULL DEFAULT 0 CHECK(marketing_consent IN (0,1)),
+  source_path TEXT,
+  notified_at TEXT,
+  notification_event_id TEXT,
+  delivery_status TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(event_id,email_normalized),
+  UNIQUE(event_id,device_hash),
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(notification_event_id) REFERENCES events(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_integration_settings (
+  provider TEXT PRIMARY KEY CHECK(provider IN ('GA4','SEARCH_CONSOLE','GOOGLE_OAUTH','CLARITY')),
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED' CHECK(status IN ('DISCONNECTED','CONFIGURED','CONNECTED','ERROR')),
+  public_config_json TEXT NOT NULL DEFAULT '{}',
+  encrypted_secret TEXT,
+  last_tested_at TEXT,
+  last_sync_at TEXT,
+  last_error TEXT,
+  updated_by_user_id TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_integration_oauth_states (
+  state_hash TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 'GOOGLE',
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS marketing_campaigns (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  utm_source TEXT,
+  utm_medium TEXT,
+  utm_campaign TEXT NOT NULL,
+  utm_term TEXT,
+  utm_content TEXT,
+  destination_url TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_tracking_events (
+  id TEXT PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  anonymous_session_hash TEXT NOT NULL,
+  source_path TEXT,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  event_id TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  analytics_consent INTEGER NOT NULL DEFAULT 0 CHECK(analytics_consent IN (0,1)),
+  marketing_consent INTEGER NOT NULL DEFAULT 0 CHECK(marketing_consent IN (0,1)),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
 );
 
 -- One-way Google Calendar -> ERP integration. OAuth secrets are encrypted by the
