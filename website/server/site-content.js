@@ -96,6 +96,31 @@ const globalCopy = Object.freeze({
     notFoundTitle: "This room is not part of the house.",
     notFoundBody: "The requested page could not be found. Return to the Klavierhaus experience or choose a destination from the menu.",
     soonLabel: "Programme in preparation",
+    collectionLabels: {
+      reviewsEyebrow: "Reflections",
+      reviewsTitle: "The memory of music remains.",
+      artistsEyebrow: "Our artists",
+      artistsTitle: "The people who give the instrument breath.",
+      artistFallbackRole: "Artist",
+      artistProfile: "Artist profile",
+      showroomEyebrow: "The showroom",
+      showroomTitle: "Exceptional instruments, encountered in person.",
+      showroomLead: "A piano's true character is known only through tone, touch, and time in the room.",
+      showroomCardEyebrow: "Klavierhaus showroom",
+      showroomInstrumentSingular: "individually selected instrument in the showroom.",
+      showroomInstrumentPlural: "individually selected instruments in the showroom.",
+      showroomDiscover: "Discover the instruments",
+      servicesEyebrow: "Bespoke care",
+      servicesTitle: "Every instrument deserves individual attention.",
+      servicesLead: "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument.",
+      serviceCardEyebrow: "Klavierhaus atelier",
+      serviceAssessment: "Arrange a private assessment",
+      brandLead: "Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter.",
+      brandPrivateSelection: "Private selection",
+      brandCtaTitle: "Meet the instrument before making a decision.",
+      brandCta: "Arrange a private appointment",
+      brandInstrumentDetails: "Explore the instrument"
+    },
     eventLabels: {
       listEyebrow: "Klavierhaus programme",
       listTitle: "Intimate encounters in music.",
@@ -199,6 +224,31 @@ const globalCopy = Object.freeze({
     notFoundTitle: "Ez a terem nem része a háznak.",
     notFoundBody: "A kért oldal nem található. Térjen vissza a Klavierhaus világába, vagy válasszon a menüből.",
     soonLabel: "A program előkészítés alatt",
+    collectionLabels: {
+      reviewsEyebrow: "Vélemények",
+      reviewsTitle: "A zene emléke tovább él.",
+      artistsEyebrow: "Művészeink",
+      artistsTitle: "Akik lélegzetet adnak a hangszernek.",
+      artistFallbackRole: "Művész",
+      artistProfile: "Művészprofil",
+      showroomEyebrow: "Bemutatótermi zongorák",
+      showroomTitle: "Kivételes hangszerek, személyes találkozásra.",
+      showroomLead: "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg.",
+      showroomCardEyebrow: "Klavierhaus bemutatóterem",
+      showroomInstrumentSingular: "egyedileg válogatott hangszer a bemutatóteremben.",
+      showroomInstrumentPlural: "egyedileg válogatott hangszer a bemutatóteremben.",
+      showroomDiscover: "A hangszerek felfedezése",
+      servicesEyebrow: "Személyre szabott gondoskodás",
+      servicesTitle: "Minden hangszerhez külön figyelem tartozik.",
+      servicesLead: "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat.",
+      serviceCardEyebrow: "Klavierhaus műhely",
+      serviceAssessment: "Személyes felmérés egyeztetése",
+      brandLead: "A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás.",
+      brandPrivateSelection: "Személyes kiválasztás",
+      brandCtaTitle: "Találkozzon a hangszerrel, mielőtt döntést hoz.",
+      brandCta: "Privát időpont egyeztetése",
+      brandInstrumentDetails: "A hangszer részletei"
+    },
     eventLabels: {
       listEyebrow: "Klavierhaus program",
       listTitle: "Meghitt találkozások a zenében.",
@@ -487,7 +537,7 @@ const pages = Object.freeze({
       seo: { title: "Privacy | Klavierhaus", description: "Development-stage privacy information for the new Klavierhaus public website." },
       hero: { eyebrow: "Legal", title: "Privacy information", lead: "Development-stage notice for the temporary Klavierhaus public website." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Current development status", paragraphs: ["This temporary website provides only Stripe Sandbox test checkout; it does not currently provide account registration, live payment, marketing analytics, or an active contact form.", "Standard technical server logs may process information required to deliver and protect the website, such as request time, requested resource, browser information, and network address."], list: ["A complete privacy notice will be published before live payments, analytics, forms, or marketing cookies are enabled.", "The public website remains marked noindex during development.", "Questions may be sent to info@klavierhaus.com."], note: "This development notice must receive legal review before the final klavierhaus.com launch." }
+        { id: "privacy-status", type: "legal", title: "Current development status", paragraphs: ["This temporary website provides Stripe Sandbox test checkout without live payment. Service enquiries and event-interest requests can be submitted through the active forms; the information entered is transmitted to the Klavierhaus administration system for follow-up.", "Optional analytics and marketing measurement remain disabled until the visitor gives the corresponding consent. Standard technical server logs may process information required to deliver and protect the website, such as request time, requested resource, browser information, and network address."], list: ["Essential storage supports the requested website functions. Analytics and marketing technologies are controlled separately in Tracking settings.", "The public website remains marked noindex during development.", "A complete, legally reviewed privacy notice must be published before the final klavierhaus.com launch and live payments.", "Questions may be sent to info@klavierhaus.com."], note: "This development notice describes the current test environment and must receive legal review before launch." }
       ]
     },
     ticketTerms: {
@@ -674,7 +724,7 @@ const pages = Object.freeze({
       seo: { title: "Adatkezelés | Klavierhaus", description: "A Klavierhaus új nyilvános weboldalának fejlesztési adatkezelési tájékoztatója." },
       hero: { eyebrow: "Jogi információk", title: "Adatkezelési tájékoztató", lead: "Fejlesztési tájékoztató a Klavierhaus ideiglenes nyilvános weboldalához." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Jelenlegi fejlesztési állapot", paragraphs: ["Az ideiglenes weboldal kizárólag Stripe Sandbox tesztfizetést biztosít; jelenleg nincs felhasználói regisztráció, valódi pénzmozgás, marketinganalitika vagy aktív kapcsolatfelvételi űrlap.", "A weboldal működéséhez és védelméhez szükséges szabványos technikai szervernaplók kezelhetnek olyan adatokat, mint a kérés időpontja, a kért erőforrás, a böngésző adatai és a hálózati cím."], list: ["Az éles fizetés, analitika, űrlapok vagy marketingcookie-k aktiválása előtt teljes adatkezelési tájékoztató készül.", "A nyilvános weboldal a fejlesztés alatt noindex állapotban marad.", "Kérdés esetén az info@klavierhaus.com cím használható."], note: "A végleges klavierhaus.com indulása előtt ezt a fejlesztési tájékoztatót jogilag ellenőrizni kell." }
+        { id: "privacy-status", type: "legal", title: "Jelenlegi fejlesztési állapot", paragraphs: ["Az ideiglenes weboldal Stripe Sandbox tesztfizetést biztosít valódi pénzmozgás nélkül. A szolgáltatási érdeklődések és az események újraszervezésére vonatkozó kérések az aktív űrlapokon elküldhetők; a megadott adatok utánkövetés céljából a Klavierhaus adminisztrációs rendszerébe kerülnek.", "Az opcionális analitikai és marketingmérés mindaddig kikapcsolva marad, amíg a látogató az adott célhoz hozzá nem járul. A weboldal működéséhez és védelméhez szükséges szabványos technikai szervernaplók kezelhetnek olyan adatokat, mint a kérés időpontja, a kért erőforrás, a böngésző adatai és a hálózati cím."], list: ["A szükséges tárolás a kért weboldalfunkciókat biztosítja. Az analitikai és marketingtechnológiák külön vezérelhetők a Követési beállításokban.", "A nyilvános weboldal a fejlesztés alatt noindex állapotban marad.", "A végleges klavierhaus.com indulása és az éles fizetés előtt teljes, jogilag ellenőrzött adatkezelési tájékoztatót kell közzétenni.", "Kérdés esetén az info@klavierhaus.com cím használható."], note: "Ez a fejlesztési tájékoztató a jelenlegi tesztkörnyezetet írja le, és indulás előtt jogi ellenőrzést igényel." }
       ]
     },
     ticketTerms: {
