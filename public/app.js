@@ -44,6 +44,20 @@ const navs={
  WORKER:[["scheduler","Scheduler / Naptár"],["planned_jobs","Planned Jobs / Tervezett munkák"],["contacts","Clients / Ügyfelek"],["pianos","Pianos / Zongorák"],["closed_jobs","Closed Jobs / Lezárt munkák"],["knowledge_base","Invoices / Számlák"],["inventory","Inventory / Leltár"],["users","Users / Felhasználók"]]
 };
 
+const adminNavGroups=[
+ {id:"website_events",label:["Website & Events","Weboldal és események"],items:[
+  ["website_design","Landing Page Design","Landing Page dizájn"],["pages_content","Pages & Content","Oldalak és tartalmak"],["website_services","Services","Szolgáltatások"],["showroom_pianos","Showroom Pianos","Bemutatott zongorák"],["website_artists","Artists","Művészek"],["media_library","Media Library","Médiatár"],["events","Events","Események"],["event_tickets","Tickets & Reservations","Jegyek és foglalások"],["event_invitations","Invitations","Meghívások"],["event_guest_list","Guest List","Vendéglista"],["event_checkin","Check-in","Beléptetés"],["website_contacts","Contacts","Kapcsolatfelvételek"],["publish_preview","Publish & Preview","Publikálás és előnézet"]
+ ]},
+ {id:"marketing",label:["Marketing","Marketing"],items:[
+  ["marketing_overview","Marketing Overview","Marketing áttekintő"],["website_reviews","Reviews","Vélemények"],["seo_center","SEO Center","SEO-központ"],["search_performance","Search Performance","Keresési teljesítmény"],["keywords","Keywords","Kulcsszavak"],["content_opportunities","Content Opportunities","Tartalmi lehetőségek"],["local_seo","Local SEO","Helyi SEO"],["web_analytics","Web Analytics","Webanalitika"],["conversion_funnels","Conversion Funnels","Konverziós tölcsérek"],["click_paths","Click Paths","Kattintások és útvonalak"],["heatmaps","Heatmaps","Hőtérképek"],["campaigns_utm","Campaigns & UTM","Kampányok és UTM-kódok"],["leads","Leads","Érdeklődők"],["event_conversions","Event Conversions","Eseménykonverziók"],["marketing_reports","Marketing Reports","Marketingriportok"],["tracking_cookies","Tracking & Cookies","Követési és cookie-beállítások"]
+ ]},
+ {id:"technical",label:["Technical Operations","Technikai működés"],items:[
+  ["planned_jobs","Planned Jobs","Tervezett munkák"],["contacts","Clients","Ügyfelek"],["pianos","Client Pianos","Ügyfélzongorák"],["inventory","Inventory","Leltár"],["closed_jobs","Closed Jobs","Lezárt munkák"],["knowledge_base","Invoices & Documents","Számlák és dokumentumok"],["finance","Finance","Pénzügy"],["income_statement","Income Statement","Eredménykimutatás"],["users","Users","Felhasználók"],["audit_log","Audit Log","Módosítási napló"],["backups","Backups","Biztonsági mentések"],["settings","Settings","Beállítások"]
+ ]}
+];
+const adminNavigationItems=adminNavGroups.flatMap(group=>group.items.map(([view,en,hu])=>[view,`${en} / ${hu}`]));
+const adminNavigationLabels=Object.fromEntries(adminNavigationItems.map(([view,label])=>[view,label]));
+
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["billing_address","Billing address / Számlázási cím"],["has_piano","Has piano? / Van zongorája?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interested_buying","Interested in buying? / Vásárlási érdeklődő?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interest_brand","Interested brand / Érdeklődött márka"],["interest_model","Interested model / Érdeklődött modell"],["interest_budget","Budget / Keretösszeg","number"],["interest_timeline","Timeline / Várható vásárlási idő"],["interest_notes","Purchase interest notes / Vásárlási érdeklődés megjegyzés","textarea"],["owner","Relationship owner / Kapcsolattartó gazda"],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["customer_status_icon","name","phone","email","address","last_contact","next_step"]},
 pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["display_name","Piano name / description / Zongora neve / leírás"],["brand","Brand / Márka"],["model","Model / Típus / modell"],["serial_no","Serial No. / Gyári szám"],["year","Year / Év","number"],["ownership_type","Ownership / Tulajdon","select",["Customer owned","Company owned","Consignment","Rental","Unknown"]],["owner_contact_id","Owner client / Tulajdonos ügyfél"],["location","Location / Helyszín"],["estimated_value","Estimated value / Becsült érték","number"],["notes","Notes / Megjegyzés","textarea"]],cols:["display_name","serial_no","location","ownership_type","estimated_value"]},
@@ -90,12 +104,36 @@ function setLanguage(lang){
   if(token && currentView) render(currentView); else applyLanguageToDOM(document.getElementById("login"));
 }
 function tr(key){return (staticTranslations[currentLang]&&staticTranslations[currentLang][key])||staticTranslations.en[key]||key;}
-function navLabel(view){return tr(view)||view;}
+function navLabel(view){return splitBilingualText(adminNavigationLabels[view]||tr(view)||view);}
+function navItemAllowed(view){
+ if(isAdmin())return true;
+ if(view==="audit_log")return userPermissions.all||userPermissions.permissions.includes("audit.view");
+ return userPermissions.all||userPermissions.permissions.includes(`${view}.view`);
+}
+function visibleNavigationItems(){
+ if(isAdmin())return [["scheduler","Scheduler / Naptár"],...adminNavigationItems];
+ return (navs[user?.role]||navs.WORKER).filter(([view])=>navItemAllowed(view));
+}
+function adminNavGroupMarkup(group){
+ const active=group.items.some(([view])=>view===currentView);
+ const saved=JSON.parse(localStorage.getItem("kh_admin_nav_groups")||"{}");
+ const open=saved[group.id]!==undefined?Boolean(saved[group.id]):active||group.id==="website_events";
+ return `<section class="nav-group ${open?'open':''}" data-nav-section="${group.id}"><button type="button" class="nav-group-toggle" data-nav-group="${group.id}" aria-expanded="${open?'true':'false'}"><span>${htmlText(currentLang==='hu'?group.label[1]:group.label[0])}</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button><div class="nav-group-items">${group.items.map(([view,en,hu])=>`<button class="nav-btn nav-sub-btn ${view===currentView?'active':''}" data-v="${view}">${htmlText(currentLang==='hu'?hu:en)}</button>`).join('')}</div></section>`;
+}
 function renderNavigation(){
   if(!token || !user || !document.getElementById("nav")) return;
-  const nav=(navs[user.role]||navs.WORKER).filter(n=>(["settings","website_design"].includes(n[0]) ? isAdmin() : n[0]==="audit_log" ? (isAdmin()||userPermissions.all||userPermissions.permissions.includes("audit.view")) : (userPermissions.all || userPermissions.permissions.includes(`${n[0]}.view`))));
   const navEl=document.getElementById("nav");
-  navEl.innerHTML=nav.map(n=>`<button class="nav-btn ${n[0]===currentView?"active":""}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
+  if(isAdmin()){
+   navEl.innerHTML=`<button class="nav-btn nav-calendar-btn ${currentView==='scheduler'?'active':''}" data-v="scheduler">${navLabel('scheduler')}</button>${adminNavGroups.map(adminNavGroupMarkup).join('')}`;
+   return;
+  }
+  navEl.innerHTML=visibleNavigationItems().map(n=>`<button class="nav-btn ${n[0]===currentView?"active":""}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
+}
+function toggleAdminNavGroup(id){
+ const section=document.querySelector(`[data-nav-section="${id}"]`);if(!section)return;
+ const open=!section.classList.contains('open');section.classList.toggle('open',open);
+ section.querySelector('.nav-group-toggle')?.setAttribute('aria-expanded',String(open));
+ const saved=JSON.parse(localStorage.getItem('kh_admin_nav_groups')||'{}');saved[id]=open;localStorage.setItem('kh_admin_nav_groups',JSON.stringify(saved));
 }
 function updateStaticChromeLanguage(){
   const logout=document.getElementById("logoutBtn"); if(logout) logout.textContent=tr("logout");
@@ -851,6 +889,8 @@ async function boot(){
  $("#nav").onclick=e=>{
    let b=e.target.closest("button");
    if(!b)return;
+   if(b.dataset.navGroup){toggleAdminNavGroup(b.dataset.navGroup);return;}
+   if(!b.dataset.v)return;
    document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));
    b.classList.add("active");
    $("#pageTitle").textContent=b.textContent;
@@ -1033,6 +1073,7 @@ function schedulerFilterOptions(workers=[]){
 }
 function filterJobsForScheduler(jobs=[]){
  return jobs.filter(job=>{
+  if(job.calendar_entry_type==="KLAVIERHAUS_EVENT") return true;
   if(currentSchedulerWorker==="ALL") return true;
   if(currentSchedulerWorker==="COMPLETED") return String(job.status||"")==="Completed" || String(job.workflow_status||"")==="COMPLETED";
   if(currentSchedulerWorker==="FAILED") return String(job.status||"")==="Failed" || isOverdueJob(job);
@@ -1050,6 +1091,7 @@ setInterval(updateNYClock,30000);
 function isClosedJobStatus(status){ return ["Completed","Partially completed","Failed"].includes(String(status||"")); }
 function isOverdueJob(j){ return !isClosedJobStatus(j.status) && String(j.end_time||"") && String(j.end_time).slice(0,16) < nyNowLocalString(); }
 function calendarEventClass(j){
+ if(j?.calendar_entry_type==="KLAVIERHAUS_EVENT") return "KlavierhausEvent";
  const status=String(j.status||"");
  if(status==="Failed") return "Failed";
  if(isOverdueJob(j)) return "Overdue";
@@ -1058,6 +1100,7 @@ function calendarEventClass(j){
  return "WorkerColor";
 }
 function calendarStatusIcon(j){
+ if(j?.calendar_entry_type==="KLAVIERHAUS_EVENT") return String(j.status||"")==="CANCELLED" ? "!" : "◆";
  const cls=calendarEventClass(j);
  if(cls==="Completed") return "✓";
  if(cls==="Failed" || cls==="Overdue") return "!";
@@ -1087,9 +1130,42 @@ function calendarEventDensityClass(j){
 }
 function calendarEventCardMarkup(j){
  const time=`${String(j?.start_time||"").slice(11,16)}–${String(j?.end_time||"").slice(11,16)}`;
+ if(j?.calendar_entry_type==="KLAVIERHAUS_EVENT"){
+  const title=currentLang==="hu"?(j.title_hu||j.title_en):(j.title_en||j.title_hu);
+  const label=bi("KLAVIERHAUS EVENT","KLAVIERHAUS ESEMÉNY");
+  const status=String(j.status||"")==="CANCELLED"?` · ${bi("CANCELLED","TÖRÖLVE")}`:"";
+  return `<span class="kh-event-ribbon">${label}${status}</span><strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(title||"")}</b><small class="event-card-primary">${htmlText(j.performer_name||bi("Artist to be announced","A művész hamarosan"))}</small><small class="event-card-secondary">${htmlText(j.venue_name||"Klavierhaus")}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
+ }
  const client=String(j?.client_name||"—"),amount=calendarCardAmount(j);
  const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—");
  return `<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
+}
+
+async function loadCalendarEntries(fromDate,toDateExclusive){
+ const from=`${fromDate}T00:00`,to=`${toDateExclusive}T00:00`;
+ const [jobs,events]=await Promise.all([
+  api(jobsRangeUrl(fromDate,toDateExclusive)),
+  api(`/api/calendar-events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+ ]);
+ return [...jobs,...events];
+}
+
+async function openCalendarEntry(row){
+ if(row?.calendar_entry_type!=="KLAVIERHAUS_EVENT")return openJobDetails(row);
+ const event=await api(`/api/calendar-events/${encodeURIComponent(row.event_id)}`);
+ const title=currentLang==="hu"?(event.title_hu||event.title_en):(event.title_en||event.title_hu);
+ const description=currentLang==="hu"?(event.description_hu||event.description_en):(event.description_en||event.description_hu);
+ const publicUrl=currentLang==="hu"?event.public_url_hu:event.public_url_en;
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent=bi("Klavierhaus event","Klavierhaus esemény");
+ $("#form").innerHTML=`<article class="internal-event-detail"><span class="internal-event-badge">◆ ${bi("KLAVIERHAUS EVENT","KLAVIERHAUS ESEMÉNY")}</span><h2>${htmlText(title)}</h2><dl><div><dt>${bi("When","Időpont")}</dt><dd>${htmlText(String(event.start_local||"").replace("T"," "))} – ${htmlText(String(event.end_local||"").replace("T"," "))}</dd></div><div><dt>${bi("Artist","Művész")}</dt><dd>${htmlText(event.performer_name||bi("Artist to be announced","A művész hamarosan"))}</dd></div><div><dt>${bi("Venue","Helyszín")}</dt><dd>${htmlText(event.venue_name||"Klavierhaus")}<br>${htmlText(event.venue_address||"")}</dd></div><div><dt>${bi("Status","Állapot")}</dt><dd>${htmlText(eventStatusLabel(event.status))}</dd></div><div><dt>${bi("Availability","Elérhetőség")}</dt><dd>${Number(event.capacity_remaining||0)} / ${Number(event.capacity_total||0)}</dd></div></dl>${description?`<p>${htmlText(description)}</p>`:""}<div class="actions">${publicUrl?`<a class="button ghost-btn" href="${htmlText(publicUrl)}" target="_blank" rel="noopener noreferrer">${bi("Public event page","Nyilvános eseményoldal")} ↗</a>`:""}${event.can_manage?`<button type="button" onclick="manageCalendarEvent('${htmlText(event.id)}')">${bi("Manage event","Esemény kezelése")}</button>`:""}<button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezárás")}</button></div><p class="muted">${bi("Internal calendar only — this event is not synchronized to Google Calendar.","Csak a belső naptárban jelenik meg — az esemény nem szinkronizálódik a Google Naptárral.")}</p></article>`;
+ applyLanguageToDOM(document.getElementById("modal"));
+}
+
+async function manageCalendarEvent(id){
+ closeModal();
+ await render("events");
+ await openEventDetails(id);
 }
 
 function ensureView(id){
@@ -1133,7 +1209,13 @@ async function render(v,opts={}){
   else if(v==="finance") await renderFinance();
   else if(v==="inventory") await renderInventory();
   else if(v==="events") await renderEvents();
-  else if(v==="website_design") await renderWebsiteDesign();
+  else if(v==="website_design"||v==="pages_content") await renderWebsiteDesign(v);
+  else if(v==="website_services") await renderWebsiteServices();
+  else if(v==="showroom_pianos") await renderShowroomPianos();
+  else if(v==="website_reviews") await renderWebsiteReviews();
+  else if(["event_tickets","event_invitations","event_guest_list","event_checkin"].includes(v)) await renderEventWorkspace(v);
+  else if(v==="backups") await renderBackupsView();
+  else if(["website_artists","media_library","website_contacts","publish_preview","marketing_overview","seo_center","search_performance","keywords","content_opportunities","local_seo","web_analytics","conversion_funnels","click_paths","heatmaps","campaigns_utm","leads","event_conversions","marketing_reports","tracking_cookies"].includes(v)) await renderAdminModuleOverview(v);
   else if(v==="users") await renderUsers();
   else if(v==="audit_log") await renderAuditLog();
   else if(v==="settings") await renderSettings();
@@ -1170,7 +1252,7 @@ function updateMobileNavigationActive(){
 function closeMobileMore(){ const sheet=document.getElementById("mobileMoreSheet"); if(sheet){sheet.classList.add("hidden");sheet.setAttribute("aria-hidden","true");document.body.classList.remove("mobile-sheet-open");} }
 function openMobileMore(){
   const sheet=document.getElementById("mobileMoreSheet"), items=document.getElementById("mobileMoreItems"); if(!sheet||!items)return;
-  const all=(navs[user?.role]||navs.WORKER).filter(n=>!['contacts','pianos'].includes(n[0]) && (["settings","website_design"].includes(n[0])?isAdmin():n[0]==="audit_log"?(isAdmin()||userPermissions.all||userPermissions.permissions.includes("audit.view")):(userPermissions.all||userPermissions.permissions.includes(`${n[0]}.view`))));
+  const all=visibleNavigationItems().filter(n=>!['contacts','pianos'].includes(n[0]));
   const top=`<button type="button" class="mobile-more-item ${currentView==='scheduler'?'active':''}" data-more-view="scheduler"><span>📅</span><b>${tr('calendar')}</b></button>`;
   items.innerHTML=top+all.filter(n=>n[0]!=="scheduler").map(n=>`<button type="button" class="mobile-more-item ${currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
   sheet.classList.remove("hidden");sheet.setAttribute("aria-hidden","false");document.body.classList.add("mobile-sheet-open");
@@ -1178,7 +1260,7 @@ function openMobileMore(){
   const profile=document.getElementById("mobileProfileBtn"); if(profile) profile.onclick=()=>{closeMobileMore();openMyProfile();};
   const logout=document.getElementById("mobileLogoutBtn"); if(logout) logout.onclick=()=>logoutNow();
 }
-function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",website_design:"✦",users:"👤",audit_log:"🧾",settings:"⚙️",notifications:"🔔",scheduler:"📅"})[view]||"•"; }
+function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",event_tickets:"🎫",event_invitations:"✉️",event_guest_list:"📋",event_checkin:"⌁",website_design:"✦",pages_content:"▤",website_services:"♟",showroom_pianos:"♬",website_reviews:"❝",seo_center:"⌕",marketing_overview:"◫",users:"👤",audit_log:"🧾",backups:"⛁",settings:"⚙️",notifications:"🔔",scheduler:"📅"})[view]||"•"; }
 function initMobileAppShell(){
   const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
   nav.querySelectorAll("[data-mobile-view]").forEach(btn=>btn.onclick=()=>render(btn.dataset.mobileView));
@@ -1192,13 +1274,13 @@ function initMobileAppShell(){
 async function renderToday(){
   const target=ensureView("today");
   const date=nyDateKey();
-  const jobs=await api(jobsRangeUrl(date,addDaysToDateKey(date,1))); const workers=await loadSchedulerWorkers();
+  const jobs=await loadCalendarEntries(date,addDaysToDateKey(date,1)); const workers=await loadSchedulerWorkers();
   const dayStart=7*60, dayEnd=22*60, total=dayEnd-dayStart;
   const dailyJobs=filterJobsForScheduler(jobs).filter(j=>String(j.start_time||"").slice(0,10)===date);
   const layout=calendarLayout(dailyJobs,dayStart,dayEnd);
   const quarter=Array.from({length:(dayEnd-dayStart)/15+1},(_,i)=>{const min=dayStart+i*15;return `<i class="${min%60===0?'hour':''}" style="top:${((min-dayStart)/total)*100}%"></i>`}).join('');
   const times=Array.from({length:(dayEnd-dayStart)/60+1},(_,i)=>{const min=dayStart+i*60;return `<span style="top:${((min-dayStart)/total)*100}%">${String(Math.floor(min/60)).padStart(2,'0')}:00</span>`}).join('');
-  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openJobDetails(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`}).join('');
+  const events=layout.map(x=>{const j=x.event,top=((x.start-dayStart)/total)*100,height=((x.end-x.start)/total)*100,left=(x.lane/x.lanes)*100,width=100/x.lanes;const colorStyle=calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:'';return `<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="${colorStyle}top:${top}%;height:${height}%;left:${left}%;width:calc(${width}% - 4px)" onclick='openCalendarEntry(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`}).join('');
   target.innerHTML=`<div class="mobile-today-shell"><div class="today-page-header"><h2>${bi('Today','Ma')}</h2>${notificationBellMarkup('mobileTodayNotificationBell')}</div><section class="today-hero"><div><span>${bi('Today in New York','Ma New Yorkban')}</span><h2>${new Intl.DateTimeFormat(currentLang==='hu'?'hu-HU':'en-US',{timeZone:'America/New_York',weekday:'long',month:'long',day:'numeric'}).format(new Date())}</h2></div><div class="today-clock"><strong>${currentNYTimeString()}</strong><small>America/New_York</small></div></section><div class="today-list-head"><h2>${bi('My daily calendar','Napi naptáram')}</h2><div class="today-calendar-actions"><label class="today-worker-filter"><span>${tr('workerFilter')}</span><select class="worker-filter-select" aria-label="${tr('workerFilter')}" onchange="currentSchedulerWorker=this.value;renderToday()">${schedulerFilterOptions(workers)}</select></label><button type="button" onclick="render('scheduler')">${bi('Full calendar','Teljes naptár')} →</button></div></div><div class="daily-calendar-scroll"><div class="daily-calendar"><div class="timeline-times">${times}</div><div class="timeline-day daily-day" data-date="${date}" onclick="handleDailySlotClick(event,'${date}',${dayStart},${dayEnd})"><div class="quarter-grid">${quarter}</div><div class="current-time-line" data-date="${date}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>${events}</div></div></div></div>`;
   updateCurrentTimeLine(); clearInterval(currentTimeLineInterval); currentTimeLineInterval=setInterval(updateCurrentTimeLine,60000); updateMobileNavigationActive();
 }
@@ -1242,12 +1324,12 @@ function updateCurrentTimeLine(){
 async function renderScheduler(){
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const weekDates=week.map(d=>fmtDate(d));
- const jobs=await api(jobsRangeUrl(weekDates[0],addDaysToDateKey(weekDates[6],1)));
+ const jobs=await loadCalendarEntries(weekDates[0],addDaysToDateKey(weekDates[6],1));
  const workers=await loadSchedulerWorkers();
  const visibleJobs=filterJobsForScheduler(jobs);
  const dayStart=7*60, dayEnd=22*60, totalMinutes=dayEnd-dayStart;
  let html=`<div class="panel scheduler-panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${schedulerFilterOptions(workers)}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div>
- <div class="scheduler-legend"><span class="legend-active">◷ ${bi("Active — employee color","Aktív — munkavállalói szín")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-overdue">! ${bi("Overdue, not closed","Lejárt, nincs lezárva")}</span><span class="legend-failed">! ${bi("Failed","Sikertelen")}</span></div>
+ <div class="scheduler-legend"><span class="legend-klavierhaus-event">◆ ${bi("Klavierhaus event","Klavierhaus esemény")}</span><span class="legend-active">◷ ${bi("Active — employee color","Aktív — munkavállalói szín")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-overdue">! ${bi("Overdue, not closed","Lejárt, nincs lezárva")}</span><span class="legend-failed">! ${bi("Failed","Sikertelen")}</span></div>
  <div class="timeline-scroll"><div class="timeline-calendar"><div class="timeline-corner">${bi("Time","Idő")}</div>${week.map(d=>`<div class="timeline-day-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short"})}</b><span>${fmtDate(d)}</span></div>`).join("")}
  <div class="timeline-times">${Array.from({length:16},(_,i)=>`<span style="top:${(i*60/totalMinutes)*100}%">${String(i+7).padStart(2,"0")}:00</span>`).join("")}</div>`;
  for(const day of week){
@@ -1259,7 +1341,7 @@ async function renderScheduler(){
    for(const item of placed){
      const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
      const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openJobDetails(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`;
+     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openCalendarEntry(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`;
    }
    html+=`</div>`;
  }
@@ -3096,12 +3178,12 @@ function openEventEditor(id=null){
  const hasImage=Boolean(row?.hero_image_url);
  $('#form').innerHTML=`<div class="event-form-intro"><strong>${bi('Titles are bilingual. Event descriptions are optional, and public URLs are generated automatically.','A címek kétnyelvűek. Az eseményleírások opcionálisak, a nyilvános URL-eket pedig a rendszer automatikusan készíti el.')}</strong><span>${bi('All times use America/New_York.','Minden időpont az America/New_York időzónát használja.')}</span></div><div class="form-grid event-form-grid">
  <div class="field"><label>${bi('Category','Kategória')} *</label><select name="category_id" required>${eventCategoryOptions(row?.category_id||eventAdminCategories[0]?.id||'')}</select></div>
- <div class="field"><label>${bi('Access','Hozzáférés')} *</label><select name="access_type" required>${['PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL'].map(value=>`<option value="${value}" ${row?.access_type===value?'selected':''}>${htmlText(eventAccessLabel(value))}</option>`).join('')}</select></div>
+ <div class="field"><label>${bi('Access','Hozzáférés')} *</label><select name="access_type" required onchange="syncEventPerformerRequirement(this.form)">${['PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL'].map(value=>`<option value="${value}" ${row?.access_type===value?'selected':''}>${htmlText(eventAccessLabel(value))}</option>`).join('')}</select></div>
  <div class="field"><label>Title · English *</label><input name="title_en" value="${htmlText(row?.title_en||'')}" required></div>
  <div class="field"><label>Cím · Magyar *</label><input name="title_hu" value="${htmlText(row?.title_hu||'')}" required></div>
  <div class="field full"><label>Event description · English <span class="muted">(${bi('optional','opcionális')})</span></label><textarea name="description_en" rows="7">${htmlText(row?.description_en||row?.short_description_en||'')}</textarea></div>
  <div class="field full"><label>Eseményleírás · Magyar <span class="muted">(${bi('optional','opcionális')})</span></label><textarea name="description_hu" rows="7">${htmlText(row?.description_hu||row?.short_description_hu||'')}</textarea></div>
- <div class="field"><label>${bi('Performer / artist','Fellépő / művész')}</label><input name="performer_name" value="${htmlText(row?.performer_name||'')}"></div>
+ <div class="field"><label>${bi('Performer / artist','Fellépő / művész')} <span data-performer-required>*</span></label><input name="performer_name" value="${htmlText(row?.performer_name||'')}"><small>${bi('Required for public events; shown on every event card.','Nyilvános eseménynél kötelező; minden eseménykártyán megjelenik.')}</small></div>
 	 <div class="field full event-image-field"><label>${bi('Event image','Eseménykép')} *</label>${hasImage?`<img id="eventImagePreview" class="event-image-preview" src="${htmlText(eventImagePreviewUrl(row.hero_image_url))}" alt="${bi('Current event image','Jelenlegi eseménykép')}">`:`<div id="eventImagePlaceholder" class="event-image-placeholder">${bi('Select an elegant event or artist photograph.','Válassz elegáns esemény- vagy művészfotót.')}</div>`}<input id="eventImageInput" name="event_image" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" ${hasImage?'':'required'} onchange="previewEventImage(this)"><small>${bi('Required. JPG or PNG, at least 1600×900 px; the uploaded copy is optimized to a 16:9 image.','Kötelező. JPG vagy PNG, legalább 1600×900 px; a feltöltött példányt a rendszer 16:9 arányú képpé optimalizálja.')}</small></div>
 	 <div class="field"><label>Image alternative text · English</label><input name="hero_image_alt_en" value="${htmlText(row?.hero_image_alt_en||row?.title_en||'')}"></div>
 	 <div class="field"><label>Kép alternatív szövege · Magyar</label><input name="hero_image_alt_hu" value="${htmlText(row?.hero_image_alt_hu||row?.title_hu||'')}"></div>
@@ -3116,8 +3198,9 @@ function openEventEditor(id=null){
  <div class="field"><label>${bi('Postal code','Irányítószám')} *</label><input name="venue_postal_code" value="${htmlText(row?.venue_postal_code||'10019')}" required></div>
  <div class="field"><label>${bi('Country','Ország')} *</label><input name="venue_country" value="${htmlText(row?.venue_country||'US')}" maxlength="2" required></div>
  </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button>${row?.status==='DRAFT'||!row?`<button type="submit" class="ghost-btn" value="draft">${bi('Save without publishing','Mentés közzététel nélkül')}</button><button type="submit" value="publish">${bi('Save and publish','Mentés és publikálás')}</button>`:`<button type="submit" value="save">${bi('Save changes','Módosítások mentése')}</button>`}</div>`;
- $('#form').onsubmit=event=>saveEventEditor(event,row?.id||null);applyLanguageToDOM(document.getElementById('modal'));enhanceCustomSelects(document.getElementById('modal'));
+ $('#form').onsubmit=event=>saveEventEditor(event,row?.id||null);syncEventPerformerRequirement($('#form'));applyLanguageToDOM(document.getElementById('modal'));enhanceCustomSelects(document.getElementById('modal'));
 }
+function syncEventPerformerRequirement(form){const access=form?.querySelector('[name="access_type"]')?.value||'',input=form?.querySelector('[name="performer_name"]'),required=access.startsWith('PUBLIC_');if(input)input.required=required;form?.querySelector('[data-performer-required]')?.classList.toggle('hidden',!required);}
 
 async function prepareEventImageFile(file){
  if(!file)return null;
@@ -3194,10 +3277,83 @@ async function handleEventCheckInDeepLink(){
  try{await submitEventCheckIn(qrToken);}catch(_error){}
 }
 
+let websiteServiceRows=[];
+let showroomPianoRows=[];
+let websiteReviewRows=[];
+
+async function uploadWebsiteCollectionImage(file){
+ if(!(file instanceof File)||!file.size)return '';
+ const data=new FormData();data.set('website_image',file,file.name);
+ const uploaded=await api('/api/website-content/image',{method:'POST',body:data});
+ return uploaded.absolute_url||uploaded.image_url||'';
+}
+function publicCatalogCard(row,type){
+ const title=currentLang==='hu'?row.title_hu:row.title_en;
+ const summary=currentLang==='hu'?row.summary_hu:row.summary_en;
+ const status=type==='piano'?htmlText(row.availability_status):Number(row.visible)?bi('Visible','Látható'):bi('Hidden','Rejtett');
+ return `<article class="website-catalog-admin-card">${row.image_url?`<img src="${htmlText(row.image_url)}" alt="">`:''}<div><span class="event-status">${status}</span>${Number(row.featured)?`<span class="event-status">${bi('Featured','Kiemelt')}</span>`:''}<h3>${htmlText(title)}</h3>${type==='piano'?`<p class="muted">${htmlText([row.brand,row.model].filter(Boolean).join(' · '))}</p>`:''}<p>${htmlText(summary||'')}</p><small>${htmlText(row.slug_en||'')} · ${htmlText(row.slug_hu||'')}</small></div><div class="actions"><button type="button" class="small" onclick="${type==='piano'?'openShowroomPianoEditor':'openWebsiteServiceEditor'}('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button><button type="button" class="small danger-btn" onclick="deleteWebsiteCatalogRecord('${type}','${htmlText(row.id)}')">${bi('Delete','Törlés')}</button></div></article>`;
+}
+async function renderWebsiteServices(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');websiteServiceRows=await api('/api/website-services');const box=$('#website_services');
+ box.innerHTML=`${mobileBackHeader(bi('Services','Szolgáltatások'))}<div class="panel website-catalog-admin"><div class="toolbar"><div><p class="event-kicker">${bi('Website & events','Weboldal és események')}</p><h2>${bi('Private services','Privát szolgáltatások')}</h2><p class="muted">${bi('Bilingual, price-free service cards with a private consultation call to action.','Kétnyelvű, ár nélküli szolgáltatáskártyák privát konzultációs felhívással.')}</p></div><button type="button" onclick="openWebsiteServiceEditor()">＋ ${bi('New service','Új szolgáltatás')}</button></div><div class="website-catalog-admin-grid">${websiteServiceRows.length?websiteServiceRows.map(row=>publicCatalogCard(row,'service')).join(''):`<div class="empty-state">${bi('No editable services yet.','Még nincs szerkeszthető szolgáltatás.')}</div>`}</div></div>`;
+}
+function openWebsiteServiceEditor(id=''){
+ const row=websiteServiceRows.find(item=>item.id===id)||{};$('#modal').classList.remove('hidden');$('#modalTitle').textContent=id?bi('Edit service','Szolgáltatás szerkesztése'):bi('New service','Új szolgáltatás');
+ $('#form').innerHTML=`<div class="form-grid"><div class="field"><label>Title · English *</label><input name="title_en" value="${htmlText(row.title_en||'')}" required></div><div class="field"><label>Cím · Magyar *</label><input name="title_hu" value="${htmlText(row.title_hu||'')}" required></div><div class="field full"><label>Summary · English</label><textarea name="summary_en">${htmlText(row.summary_en||'')}</textarea></div><div class="field full"><label>Összefoglaló · Magyar</label><textarea name="summary_hu">${htmlText(row.summary_hu||'')}</textarea></div><div class="field full"><label>Description · English</label><textarea name="description_en" rows="7">${htmlText(row.description_en||'')}</textarea></div><div class="field full"><label>Leírás · Magyar</label><textarea name="description_hu" rows="7">${htmlText(row.description_hu||'')}</textarea></div><div class="field full event-image-field">${row.image_url?`<img src="${htmlText(row.image_url)}" alt="">`:''}<label>${bi('Service image','Szolgáltatás képe')} *</label><input name="image" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" ${row.image_url?'':'required'}><input name="image_url" type="hidden" value="${htmlText(row.image_url||'')}"></div><div class="field"><label>Image alt · English</label><input name="image_alt_en" value="${htmlText(row.image_alt_en||'')}"></div><div class="field"><label>Kép alt · Magyar</label><input name="image_alt_hu" value="${htmlText(row.image_alt_hu||'')}"></div><div class="field"><label>${bi('Order','Sorrend')}</label><input name="sort_order" type="number" value="${Number(row.sort_order||0)}"></div><label class="check-row"><input name="visible" type="checkbox" ${row.visible===0?'':'checked'}> ${bi('Visible','Látható')}</label><label class="check-row"><input name="featured" type="checkbox" ${Number(row.featured)?'checked':''}> ${bi('Featured','Kiemelt')}</label></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Save service','Szolgáltatás mentése')}</button></div>`;
+ $('#form').onsubmit=event=>saveWebsiteService(event,id);applyLanguageToDOM(document.getElementById('modal'));
+}
+async function saveWebsiteService(event,id=''){
+ event.preventDefault();try{const data=new FormData(event.target),file=data.get('image'),body=Object.fromEntries(data);delete body.image;if(file instanceof File&&file.size)body.image_url=await uploadWebsiteCollectionImage(file);body.visible=data.has('visible');body.featured=data.has('featured');body.sort_order=Number(body.sort_order||0);await api(id?`/api/website-services/${encodeURIComponent(id)}`:'/api/website-services',{method:id?'PUT':'POST',body:JSON.stringify(body)});closeModal();showToast(bi('Service published.','A szolgáltatás publikálva.'),'success');await renderWebsiteServices();}catch(error){showError(error)}
+}
+
+async function renderShowroomPianos(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');showroomPianoRows=await api('/api/showroom-pianos');const box=$('#showroom_pianos');
+ box.innerHTML=`${mobileBackHeader(bi('Showroom Pianos','Bemutatott zongorák'))}<div class="panel website-catalog-admin"><div class="toolbar"><div><p class="event-kicker">${bi('Website & events','Weboldal és események')}</p><h2>${bi('Showroom pianos','Bemutatott zongorák')}</h2><p class="muted">${bi('These instruments are independent from customer-owned pianos. No public price is displayed.','Ezek a hangszerek elkülönülnek az ügyfélzongoráktól. Nyilvános ár nem jelenik meg.')}</p></div><button type="button" onclick="openShowroomPianoEditor()">＋ ${bi('New showroom piano','Új bemutatott zongora')}</button></div><div class="website-catalog-admin-grid">${showroomPianoRows.length?showroomPianoRows.map(row=>publicCatalogCard(row,'piano')).join(''):`<div class="empty-state">${bi('No showroom pianos yet.','Még nincs bemutatott zongora.')}</div>`}</div></div>`;
+}
+function openShowroomPianoEditor(id=''){
+ const row=showroomPianoRows.find(item=>item.id===id)||{};$('#modal').classList.remove('hidden');$('#modalTitle').textContent=id?bi('Edit showroom piano','Bemutatott zongora szerkesztése'):bi('New showroom piano','Új bemutatott zongora');
+ $('#form').innerHTML=`<div class="form-grid"><div class="field"><label>${bi('Brand','Márka')} *</label><input name="brand" value="${htmlText(row.brand||'')}" required></div><div class="field"><label>${bi('Model','Modell')}</label><input name="model" value="${htmlText(row.model||'')}"></div><div class="field"><label>Title · English *</label><input name="title_en" value="${htmlText(row.title_en||'')}" required></div><div class="field"><label>Cím · Magyar *</label><input name="title_hu" value="${htmlText(row.title_hu||'')}" required></div><div class="field full"><label>Summary · English</label><textarea name="summary_en">${htmlText(row.summary_en||'')}</textarea></div><div class="field full"><label>Összefoglaló · Magyar</label><textarea name="summary_hu">${htmlText(row.summary_hu||'')}</textarea></div><div class="field full"><label>Description · English</label><textarea name="description_en" rows="7">${htmlText(row.description_en||'')}</textarea></div><div class="field full"><label>Leírás · Magyar</label><textarea name="description_hu" rows="7">${htmlText(row.description_hu||'')}</textarea></div><div class="field full event-image-field">${row.image_url?`<img src="${htmlText(row.image_url)}" alt="">`:''}<label>${bi('Piano image','Zongora képe')} *</label><input name="image" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" ${row.image_url?'':'required'}><input name="image_url" type="hidden" value="${htmlText(row.image_url||'')}"></div><div class="field"><label>Image alt · English</label><input name="image_alt_en" value="${htmlText(row.image_alt_en||'')}"></div><div class="field"><label>Kép alt · Magyar</label><input name="image_alt_hu" value="${htmlText(row.image_alt_hu||'')}"></div><div class="field"><label>${bi('Availability','Elérhetőség')}</label><select name="availability_status">${['AVAILABLE','RESERVED','SOLD','HIDDEN'].map(value=>`<option value="${value}" ${row.availability_status===value?'selected':''}>${value}</option>`).join('')}</select></div><div class="field"><label>${bi('Order','Sorrend')}</label><input name="sort_order" type="number" value="${Number(row.sort_order||0)}"></div><label class="check-row"><input name="published" type="checkbox" ${row.published===0?'':'checked'}> ${bi('Published','Publikált')}</label><label class="check-row"><input name="featured" type="checkbox" ${Number(row.featured)?'checked':''}> ${bi('Featured','Kiemelt')}</label></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Save piano','Zongora mentése')}</button></div>`;
+ $('#form').onsubmit=event=>saveShowroomPiano(event,id);applyLanguageToDOM(document.getElementById('modal'));enhanceCustomSelects(document.getElementById('modal'));
+}
+async function saveShowroomPiano(event,id=''){
+ event.preventDefault();try{const data=new FormData(event.target),file=data.get('image'),body=Object.fromEntries(data);delete body.image;if(file instanceof File&&file.size)body.image_url=await uploadWebsiteCollectionImage(file);body.published=data.has('published');body.featured=data.has('featured');body.sort_order=Number(body.sort_order||0);await api(id?`/api/showroom-pianos/${encodeURIComponent(id)}`:'/api/showroom-pianos',{method:id?'PUT':'POST',body:JSON.stringify(body)});closeModal();showToast(bi('Showroom piano published.','A bemutatott zongora publikálva.'),'success');await renderShowroomPianos();}catch(error){showError(error)}
+}
+
+async function renderWebsiteReviews(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');websiteReviewRows=await api('/api/website-reviews');const box=$('#website_reviews');
+ box.innerHTML=`${mobileBackHeader(bi('Reviews','Vélemények'))}<div class="panel website-catalog-admin"><div class="toolbar"><div><p class="event-kicker">${bi('Marketing · social proof','Marketing · társadalmi bizonyíték')}</p><h2>${bi('Reviews','Vélemények')}</h2><p class="muted">${bi('Portrait-led bilingual reviews displayed in the public carousel.','Portréval ellátott kétnyelvű vélemények a nyilvános lapozható szekcióban.')}</p></div><button type="button" onclick="openWebsiteReviewEditor()">＋ ${bi('New review','Új vélemény')}</button></div><div class="website-catalog-admin-grid">${websiteReviewRows.length?websiteReviewRows.map(row=>`<article class="website-review-admin-card"><img src="${htmlText(row.portrait_url)}" alt=""><div><span class="event-status">${Number(row.visible)?bi('Visible','Látható'):bi('Hidden','Rejtett')}</span><h3>${htmlText(row.person_name)}</h3><p class="muted">${htmlText(currentLang==='hu'?row.role_hu:row.role_en)}</p><blockquote>${htmlText(currentLang==='hu'?row.quote_hu:row.quote_en)}</blockquote></div><div class="actions"><button type="button" class="small" onclick="openWebsiteReviewEditor('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button><button type="button" class="small danger-btn" onclick="deleteWebsiteCatalogRecord('review','${htmlText(row.id)}')">${bi('Delete','Törlés')}</button></div></article>`).join(''):`<div class="empty-state">${bi('No reviews yet.','Még nincs vélemény.')}</div>`}</div></div>`;
+}
+function openWebsiteReviewEditor(id=''){
+ const row=websiteReviewRows.find(item=>item.id===id)||{};$('#modal').classList.remove('hidden');$('#modalTitle').textContent=id?bi('Edit review','Vélemény szerkesztése'):bi('New review','Új vélemény');
+ $('#form').innerHTML=`<div class="form-grid"><div class="field"><label>${bi('Name','Név')} *</label><input name="person_name" value="${htmlText(row.person_name||'')}" required></div><div class="field"><label>${bi('Related event ID (optional)','Kapcsolódó eseményazonosító (opcionális)')}</label><input name="linked_event_id" value="${htmlText(row.linked_event_id||'')}"></div><div class="field"><label>Role · English</label><input name="role_en" value="${htmlText(row.role_en||'')}"></div><div class="field"><label>Szerep · Magyar</label><input name="role_hu" value="${htmlText(row.role_hu||'')}"></div><div class="field full"><label>Review · English *</label><textarea name="quote_en" rows="5" required>${htmlText(row.quote_en||'')}</textarea></div><div class="field full"><label>Vélemény · Magyar *</label><textarea name="quote_hu" rows="5" required>${htmlText(row.quote_hu||'')}</textarea></div><div class="field full event-image-field">${row.portrait_url?`<img class="website-review-preview" src="${htmlText(row.portrait_url)}" alt="">`:''}<label>${bi('Portrait','Portré')} *</label><input name="image" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" ${row.portrait_url?'':'required'}><input name="portrait_url" type="hidden" value="${htmlText(row.portrait_url||'')}"></div><div class="field"><label>Portrait alt · English</label><input name="portrait_alt_en" value="${htmlText(row.portrait_alt_en||'')}"></div><div class="field"><label>Portré alt · Magyar</label><input name="portrait_alt_hu" value="${htmlText(row.portrait_alt_hu||'')}"></div><div class="field"><label>${bi('Order','Sorrend')}</label><input name="sort_order" type="number" value="${Number(row.sort_order||0)}"></div><label class="check-row"><input name="visible" type="checkbox" ${row.visible===0?'':'checked'}> ${bi('Visible','Látható')}</label></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Save review','Vélemény mentése')}</button></div>`;
+ $('#form').onsubmit=event=>saveWebsiteReview(event,id);applyLanguageToDOM(document.getElementById('modal'));
+}
+async function saveWebsiteReview(event,id=''){
+ event.preventDefault();try{const data=new FormData(event.target),file=data.get('image'),body=Object.fromEntries(data);delete body.image;if(file instanceof File&&file.size)body.portrait_url=await uploadWebsiteCollectionImage(file);body.visible=data.has('visible');body.sort_order=Number(body.sort_order||0);await api(id?`/api/website-reviews/${encodeURIComponent(id)}`:'/api/website-reviews',{method:id?'PUT':'POST',body:JSON.stringify(body)});closeModal();showToast(bi('Review published.','A vélemény publikálva.'),'success');await renderWebsiteReviews();}catch(error){showError(error)}
+}
+async function deleteWebsiteCatalogRecord(type,id){
+ if(!await appConfirm(bi('Delete this website record permanently?','Véglegesen töröljük ezt a weboldali rekordot?'),{type:'error',confirmText:bi('Delete','Törlés')}))return;
+ const route=type==='review'?'website-reviews':type==='piano'?'showroom-pianos':'website-services';try{await api(`/api/${route}/${encodeURIComponent(id)}`,{method:'DELETE'});showToast(bi('Record deleted.','A rekord törölve.'),'success');if(type==='review')await renderWebsiteReviews();else if(type==='piano')await renderShowroomPianos();else await renderWebsiteServices();}catch(error){showError(error)}
+}
+
+async function renderEventWorkspace(view){
+ if(!isAdmin())return showError('PERMISSION_DENIED');const rows=await api('/api/events'),box=$(`#${view}`),titles={event_tickets:["Tickets & Reservations","Jegyek és foglalások"],event_invitations:["Invitations","Meghívások"],event_guest_list:["Guest List","Vendéglista"],event_checkin:["Check-in","Beléptetés"]},title=titles[view];
+ const scanner=view==='event_checkin'?`<div class="event-operation-card"><h3>${bi('QR check-in','QR-belépés')}</h3><div class="field"><label>${bi('Ticket QR token','Jegy QR-token')}</label><input id="eventQrToken"></div><button type="button" onclick="submitEventCheckIn()">${bi('Admit guest','Vendég beléptetése')}</button></div>`:'';
+ box.innerHTML=`${mobileBackHeader(bi(title[0],title[1]))}<div class="panel event-admin-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Website & events','Weboldal és események')}</p><h2>${bi(title[0],title[1])}</h2><p class="muted">${bi('Select an event to open its protected operational workspace.','Válassz eseményt a védett operatív munkaterület megnyitásához.')}</p></div></div>${scanner}<div class="event-admin-grid">${rows.map(row=>`<article class="event-admin-card"><h3>${htmlText(currentLang==='hu'?row.title_hu:row.title_en)}</h3><p>${htmlText(eventDateLabel(row.start_at))}</p><p>${htmlText(row.performer_name||bi('Artist to be announced','A művész hamarosan'))}</p><button type="button" onclick="openEventDetails('${htmlText(row.id)}')">${bi('Open management','Kezelés megnyitása')}</button></article>`).join('')}</div></div>`;
+}
+async function renderBackupsView(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');const rows=await api('/api/backups'),box=$('#backups');box.innerHTML=`${mobileBackHeader(bi('Backups','Biztonsági mentések'))}<div class="panel"><div class="toolbar"><h2>${bi('Backups','Biztonsági mentések')}</h2>${isSuperadmin()?`<button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button>`:''}</div><p class="muted">${isSuperadmin()?bi('Creation, download and restore are restricted to the superadmin.','A létrehozás, letöltés és visszaállítás kizárólag a szuperadmin joga.'):bi('Administrators can view the backup register only.','Az adminok kizárólag a mentési listát tekinthetik meg.')}</p><div class="table-wrap"><table><thead><tr><th>${bi('Created','Létrehozva')}</th><th>${bi('File','Fájl')}</th><th>${bi('Status','Állapot')}</th><th>${bi('Actions','Műveletek')}</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${htmlText(row.created_at||'')}</td><td>${htmlText(row.file_name||'')}</td><td>${htmlText(row.status||'')}</td><td>${isSuperadmin()?`<button class="small" onclick="downloadBackup('${htmlText(row.id)}')">${bi('Download','Letöltés')}</button> <button class="small danger-btn" onclick="restoreBackup('${htmlText(row.id)}')">${bi('Restore','Visszaállítás')}</button>`:bi('View only','Csak megtekintés')}</td></tr>`).join('')||`<tr><td colspan="4">${bi('No backups yet.','Még nincs biztonsági mentés.')}</td></tr>`}</tbody></table></div></div>`;
+}
+async function renderAdminModuleOverview(view){
+ if(!isAdmin())return showError('PERMISSION_DENIED');const box=$(`#${view}`),label=navLabel(view),isMarketing=adminNavGroups[1].items.some(item=>item[0]===view),websiteBase=websiteDesignMeta?.website_base_url||'';
+ box.innerHTML=`${mobileBackHeader(label)}<div class="panel admin-module-overview"><p class="event-kicker">${isMarketing?bi('Marketing workspace','Marketing munkaterület'):bi('Website & events','Weboldal és események')}</p><h2>${htmlText(label)}</h2><p>${isMarketing?bi('This navigation destination is reserved for the approved analytics and SEO integration phase. No fabricated metrics are displayed before the verified provider connection is available.','Ez a menüpont a jóváhagyott analitikai és SEO-integrációs szakasz számára van fenntartva. Ellenőrzött szolgáltatói kapcsolat előtt nem jelenítünk meg kitalált mérőszámokat.'):bi('The approved destination is now part of the final information architecture. Its operational records are managed through Events or Landing Page Design until the dedicated workflow is connected.','A jóváhagyott menüpont már a végleges információs architektúra része. Az operatív rekordok a külön munkafolyamat bekötéséig az Események vagy a Landing Page Design felületen kezelhetők.')}</p><div class="actions"><button type="button" onclick="render('${isMarketing?'website_reviews':'website_design'}')">${isMarketing?bi('Open reviews','Vélemények megnyitása'):bi('Open website editor','Weboldalszerkesztő megnyitása')}</button>${websiteBase?`<a class="button ghost-btn" href="${htmlText(websiteBase)}" target="_blank" rel="noopener noreferrer">${bi('Open public website','Nyilvános weboldal megnyitása')} ↗</a>`:''}</div></div>`;
+}
+
 let websiteDesignMeta=null;
 let websiteDesignPage='home';
 let websiteDesignLanguage='en';
 let websiteDesignDocument=null;
+let websiteDesignTarget='website_design';
 
 function websiteDesignLabel(key){
  const labels={seo:bi('Search appearance (SEO)','Keresési megjelenés (SEO)'),hero:bi('Hero section','Hero szekció'),sections:bi('Page sections','Oldalszekciók'),title:bi('Title','Cím'),description:bi('Description','Leírás'),eyebrow:bi('Eyebrow','Felső címke'),lead:bi('Lead text','Bevezető szöveg'),body:bi('Body text','Törzsszöveg'),image:bi('Image','Kép'),imageAlt:bi('Image alternative text','Kép alternatív szövege'),quote:bi('Review / quotation','Vélemény / idézet'),attribution:bi('Attribution','Szerző'),intro:bi('Introduction','Bevezető'),items:bi('Cards','Kártyák'),label:bi('Link label','Linkfelirat'),note:bi('Note','Megjegyzés'),paragraphs:bi('Paragraphs','Bekezdések'),list:bi('List','Lista'),details:bi('Details','Részletek'),value:bi('Value','Érték')};
@@ -3218,12 +3374,12 @@ function websiteDesignEditorNode(value,path=[],key='content'){
 function websiteDesignPageOptions(){return (websiteDesignMeta?.pages||[]).map(page=>`<option value="${htmlText(page.page_key)}" ${page.page_key===websiteDesignPage?'selected':''}>${htmlText(currentLang==='hu'?page.title_hu:page.title_en)}</option>`).join('');}
 function websiteDesignPreviewUrl(){const selected=(websiteDesignMeta?.pages||[]).find(page=>page.page_key===websiteDesignPage),route=selected?.routes?.[websiteDesignLanguage]||'/';return `${String(websiteDesignMeta?.website_base_url||'').replace(/\/$/,'')}${route}`;}
 function renderWebsiteDesignEditor(){
- const box=$('#website_design');if(!box||!websiteDesignDocument)return;
+ const box=$(`#${websiteDesignTarget}`);if(!box||!websiteDesignDocument)return;
  box.innerHTML=`${mobileBackHeader(bi('Landing Page Design','Weboldal dizájn'))}<div class="panel website-design-shell"><div class="toolbar website-design-toolbar"><div><p class="event-kicker">${bi('Website & events · live content','Weboldal és események · élő tartalom')}</p><h2>${bi('Landing Page Design','Weboldal dizájn')}</h2><p class="muted">${bi('Edit every public page, SEO field, card, review, legal text and image. Saving publishes this language immediately.','Szerkeszd az összes nyilvános oldal SEO-mezőit, kártyáit, véleményeit, jogi szövegeit és képeit. A mentés ezt a nyelvet azonnal publikálja.')}</p></div><div class="actions"><a class="button ghost-btn" href="${htmlText(websiteDesignPreviewUrl())}" target="_blank" rel="noopener noreferrer">${bi('Open preview','Előnézet megnyitása')} ↗</a><button type="button" onclick="saveWebsiteDesign()">${bi('Save and publish','Mentés és publikálás')}</button></div></div><div class="website-design-controls"><label>${bi('Page','Oldal')}<select onchange="changeWebsiteDesignPage(this.value)">${websiteDesignPageOptions()}</select></label><label>${bi('Content language','Tartalom nyelve')}<select onchange="changeWebsiteDesignLanguage(this.value)"><option value="en" ${websiteDesignLanguage==='en'?'selected':''}>American English</option><option value="hu" ${websiteDesignLanguage==='hu'?'selected':''}>Magyar</option></select></label></div><div class="website-design-editor">${websiteDesignEditorNode(websiteDesignDocument,[],'page')}</div><div class="website-design-savebar"><button type="button" onclick="saveWebsiteDesign()">${bi('Save and publish page','Oldal mentése és publikálása')}</button></div></div>`;
  applyLanguageToDOM(box);enhanceCustomSelects(box);
 }
 async function loadWebsiteDesignDocument(){const result=await api(`/api/website-content/${encodeURIComponent(websiteDesignPage)}?lang=${websiteDesignLanguage}`);websiteDesignDocument=result.content;renderWebsiteDesignEditor();}
-async function renderWebsiteDesign(){if(!isAdmin())return showError('PERMISSION_DENIED');websiteDesignLanguage=currentLang==='hu'?'hu':'en';websiteDesignMeta=await api('/api/website-content/pages');if(!(websiteDesignMeta.pages||[]).some(page=>page.page_key===websiteDesignPage))websiteDesignPage=websiteDesignMeta.pages?.[0]?.page_key||'home';await loadWebsiteDesignDocument();}
+async function renderWebsiteDesign(target='website_design'){if(!isAdmin())return showError('PERMISSION_DENIED');websiteDesignTarget=target;websiteDesignLanguage=currentLang==='hu'?'hu':'en';websiteDesignMeta=await api('/api/website-content/pages');if(!(websiteDesignMeta.pages||[]).some(page=>page.page_key===websiteDesignPage))websiteDesignPage=websiteDesignMeta.pages?.[0]?.page_key||'home';await loadWebsiteDesignDocument();}
 async function changeWebsiteDesignPage(value){websiteDesignPage=value;await loadWebsiteDesignDocument();}
 async function changeWebsiteDesignLanguage(value){websiteDesignLanguage=value==='hu'?'hu':'en';await loadWebsiteDesignDocument();}
 async function uploadWebsiteDesignImage(input){try{const file=input.files?.[0];if(!file)return;const data=new FormData();data.set('website_image',file);const uploaded=await api('/api/website-content/image',{method:'POST',body:data});websiteDesignSetPath(JSON.parse(input.dataset.contentPath),uploaded.absolute_url||uploaded.image_url);renderWebsiteDesignEditor();showToast(bi('Image uploaded. Save the page to publish it.','A kép feltöltve. A publikáláshoz mentsd el az oldalt.'),'success');}catch(error){input.value='';showError(error)}}
@@ -3238,7 +3394,7 @@ function setAuditType(type){currentAuditType=type==='TECHNICAL'?'TECHNICAL':'WOR
 async function setRolePermission(role,permission,enabled){try{await api('/api/settings/permissions',{method:'PUT',body:JSON.stringify({role,permission,enabled})});}catch(e){showError(e);renderSettings();}}
 async function downloadAuditLog(){const r=await fetch(`/api/audit-log/export?type=${currentAuditType}`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=currentAuditType==='WORK'?'work-audit.csv':'technical-audit.csv';a.click();URL.revokeObjectURL(a.href);}
 async function clearAuditLog(){if(!isSuperadmin())return;if(await appConfirm(bi('Delete the complete audit log?','Töröljük a teljes módosítási naplót?'),{type:'error',confirmText:bi('Delete log','Napló törlése')})){await api(`/api/audit-log?type=${currentAuditType}`,{method:'DELETE'});renderSettings();}}
-async function createBackupNow(){try{await api('/api/backups',{method:'POST'});await appAlert(bi('Backup created successfully.','A biztonsági mentés elkészült.'),'success');renderSettings();}catch(e){showError(e)}}
+async function createBackupNow(){try{await api('/api/backups',{method:'POST'});await appAlert(bi('Backup created successfully.','A biztonsági mentés elkészült.'),'success');currentView==='backups'?renderBackupsView():renderSettings();}catch(e){showError(e)}}
 async function downloadBackup(id){const r=await fetch(`/api/backups/${id}/download`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)return showError((await r.json()).error);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=r.headers.get('content-disposition')?.match(/filename="?([^";]+)/)?.[1]||'backup.sqlite';a.click();URL.revokeObjectURL(a.href);}
 async function restoreBackup(id){const confirmation=await appPrompt(bi('Type RESTORE BACKUP to continue.','A folytatáshoz írd be: RESTORE BACKUP'),{type:'error',confirmText:bi('Continue','Folytatás')});if(confirmation!=='RESTORE BACKUP')return;const password=await appPrompt(bi('Enter your password.','Add meg a jelszavad.'),{type:'warning',inputType:'password',confirmText:bi('Restore backup','Mentés visszaállítása')});if(password===null)return;try{await api(`/api/backups/${id}/restore`,{method:'POST',body:JSON.stringify({confirmation,password})});await appAlert(bi('Backup restored. Restart the server now.','A mentés visszaállt. Most indítsd újra a szervert.'),'success');logoutNow();}catch(e){showError(e)}}
 
