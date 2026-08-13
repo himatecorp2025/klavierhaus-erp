@@ -374,7 +374,45 @@ function organizationStructuredData(baseUrl, copy = {}) {
   };
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], pageOverride = null, globalOverride = null }) {
+function renderReviewShowcase(reviews, language, fallbackSection = null) {
+  const items = reviews.length ? reviews : (fallbackSection ? [{ person_name: fallbackSection.attribution, quote: fallbackSection.quote, role: "", image_url: shared.artistSalonImage, image_alt: fallbackSection.attribution }] : []);
+  if (!items.length) return "";
+  const cards = items.map((review, index) => `<article class="review-card" data-review-card data-reveal>
+    <img src="${escapeHtml(review.image_url || shared.artistSalonImage)}" alt="${escapeHtml(review.image_alt || review.person_name || "Klavierhaus guest")}" loading="lazy" decoding="async">
+    <div><span class="review-card__quote" aria-hidden="true">“</span><blockquote>${escapeHtml(review.quote || "")}</blockquote><p><strong>${escapeHtml(review.person_name || "")}</strong>${review.role ? `<span>${escapeHtml(review.role)}</span>` : ""}</p></div>
+    <span class="review-card__number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
+  </article>`).join("");
+  return `<section class="section review-showcase" id="reviews"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Vélemények" : "Reflections")}</p><h2>${escapeHtml(language === "hu" ? "A zene emléke tovább él." : "The memory of music remains.")}</h2></div><div class="review-carousel" data-review-carousel><div class="review-track">${cards}</div><div class="review-controls"><button type="button" data-review-previous aria-label="${escapeHtml(language === "hu" ? "Előző vélemény" : "Previous review")}">←</button><div class="review-dots" data-review-dots></div><button type="button" data-review-next aria-label="${escapeHtml(language === "hu" ? "Következő vélemény" : "Next review")}">→</button></div></div></section>`;
+}
+
+function showroomPath(item, language) {
+  return language === "hu" ? `/hu/zongorak/${item.slug}` : `/pianos/${item.slug}`;
+}
+
+function servicePath(item, language) {
+  return language === "hu" ? `/hu/szolgaltatasok/${item.slug}` : `/services/${item.slug}`;
+}
+
+function renderShowroomCollection(items, language, options = {}) {
+  if (!items.length) return "";
+  const compact = Boolean(options.compact);
+  const cards = items.map((item) => `<article class="catalog-card" data-reveal>
+    <a class="catalog-card__image" href="${escapeHtml(showroomPath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
+    <div class="catalog-card__body"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h3 class="word-safe-title"><a href="${escapeHtml(showroomPath(item, language))}">${escapeHtml(item.title)}</a></h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(language === "hu" ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(language === "hu" ? "Privát megtekintés" : "Arrange a private viewing")}</span><span aria-hidden="true">↗</span></a></div>
+  </article>`).join("");
+  return `<section class="section catalog-showcase${compact ? " catalog-showcase--home" : ""}" id="showroom-pianos"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Bemutatótermi zongorák" : "The showroom")}</p><h2>${escapeHtml(language === "hu" ? "Kivételes hangszerek, személyes találkozásra." : "Exceptional instruments, encountered in person.")}</h2><p>${escapeHtml(language === "hu" ? "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg." : "A piano's true character is known only through tone, touch, and time in the room.")}</p></div><div class="catalog-grid">${cards}</div></section>`;
+}
+
+function renderServiceCollection(items, language, options = {}) {
+  if (!items.length) return "";
+  const cards = items.map((item) => `<article class="catalog-card service-catalog-card" data-reveal>
+    <a class="catalog-card__image" href="${escapeHtml(servicePath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
+    <div class="catalog-card__body"><p class="eyebrow">Klavierhaus atelier</p><h3 class="word-safe-title"><a href="${escapeHtml(servicePath(item, language))}">${escapeHtml(item.title)}</a></h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<a class="text-link" href="${escapeHtml(servicePath(item, language))}"><span>${escapeHtml(language === "hu" ? "Személyes felmérés egyeztetése" : "Arrange a private assessment")}</span><span aria-hidden="true">↗</span></a></div>
+  </article>`).join("");
+  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(language === "hu" ? "Személyre szabott gondoskodás" : "Bespoke care")}</p><h2>${escapeHtml(language === "hu" ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention.")}</h2><p>${escapeHtml(language === "hu" ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument.")}</p></div><div class="catalog-grid">${cards}</div></section>`;
+}
+
+function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], pageOverride = null, globalOverride = null }) {
   const { key, language } = route;
   const copy = globalOverride || getGlobal(language);
   const page = pageOverride || getPage(key, language);
@@ -385,10 +423,13 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   const hungarianUrl = pageUrl(baseUrl, getRoute(key, "hu"));
   const canonicalUrl = pageUrl(baseUrl, canonicalRoute);
   const robots = allowIndexing ? "index, follow" : "noindex, nofollow, noarchive";
-  const sections = page.sections.filter((section) => !(key === "home" && section.id === "salon")).map((section) => {
-    const rendered = renderSection(section, language);
-    return key === "home" && section.id === "manifesto" ? `${rendered}${renderHomeEventShowcase(homeEvents, language, copy)}` : rendered;
-  }).join("");
+  const testimonial = page.sections.find((section) => section.id === "testimonial") || null;
+  const sections = page.sections.filter((section) => !(key === "home" && ["salon", "testimonial"].includes(section.id))).map((section) => {
+    if (key === "home" && section.id === "manifesto") return `${renderSection(section, language)}${renderHomeEventShowcase(homeEvents, language, copy)}${renderReviewShowcase(reviews, language, testimonial)}`;
+    if (key === "home" && section.id === "pianos" && showroomPianos.length) return renderShowroomCollection(showroomPianos, language, { compact: true });
+    if (key === "home" && section.id === "craft" && websiteServices.length) return renderServiceCollection(websiteServices, language, { compact: true });
+    return renderSection(section, language);
+  }).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language) : "") + (key === "services" ? renderServiceCollection(websiteServices, language) : "");
 
   return `<!doctype html>
 <html lang="${escapeHtml(copy.locale)}" class="no-js">
@@ -413,6 +454,7 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   <link rel="icon" type="image/png" href="${escapeHtml(resolveBrand(copy).logoImage)}">
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
+  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <title>${escapeHtml(page.seo.title)}</title>
@@ -446,6 +488,10 @@ const eventCopy = Object.freeze({
     testMode: "TEST MODE",
     testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
     quantity: "Number of tickets",
+    total: "Total",
+    decreaseQuantity: "Remove one ticket",
+    increaseQuantity: "Add one ticket",
+    artistPending: "Artist to be announced",
     attendeeName: "Full name",
     attendeeEmail: "Email address",
     continueToCheckout: "Continue to secure test checkout",
@@ -496,6 +542,10 @@ const eventCopy = Object.freeze({
     testMode: "TESZTÜZEM",
     testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
     quantity: "Jegyek száma",
+    total: "Összesen",
+    decreaseQuantity: "Egy jegy eltávolítása",
+    increaseQuantity: "Egy jegy hozzáadása",
+    artistPending: "A művész hamarosan",
     attendeeName: "Teljes név",
     attendeeEmail: "E-mail-cím",
     continueToCheckout: "Tovább a biztonságos tesztfizetéshez",
@@ -580,6 +630,18 @@ function eventExcerpt(event, max = 190) {
   return `${candidate.slice(0, boundary > max * 0.65 ? boundary : max).trim()}…`;
 }
 
+function titleLengthClass(value) {
+  const text = String(value || "");
+  const longest = text.split(/\s+/).reduce((max, word) => Math.max(max, word.length), 0);
+  if (longest >= 22 || text.length >= 54) return " title-length--long";
+  if (longest >= 15 || text.length >= 36) return " title-length--medium";
+  return "";
+}
+
+function quantityControl(event, labels, id) {
+  return `<div class="ticket-quantity" data-ticket-quantity data-unit-price="${Number(event.price_cents || 0)}" data-currency="${escapeHtml(event.currency || "USD")}" data-locale="${escapeHtml(id.startsWith("hu-") ? "hu-HU" : "en-US")}"><span>${escapeHtml(labels.quantity)}</span><div><button type="button" data-quantity-minus aria-label="${escapeHtml(labels.decreaseQuantity)}">−</button><input id="${escapeHtml(id)}" name="quantity" type="number" inputmode="numeric" min="1" max="${Number(event.capacity_remaining || 1)}" value="1" required><button type="button" data-quantity-plus aria-label="${escapeHtml(labels.increaseQuantity)}">+</button></div>${Number(event.price_cents || 0) > 0 ? `<output data-ticket-total><small>${escapeHtml(labels.total)}</small> ${escapeHtml(formatEventPrice(event, id.startsWith("hu-") ? "hu" : "en", labels))}</output>` : ""}</div>`;
+}
+
 function renderEventCardAction(event, language, labels = resolveEventCopy(language)) {
   if (event.status === "CANCELLED") {
     return `<span class="event-card-action event-card-action--cancelled" aria-disabled="true">${escapeHtml(labels.cancelled)}</span>`;
@@ -588,13 +650,15 @@ function renderEventCardAction(event, language, labels = resolveEventCopy(langua
     return `<span class="event-card-action event-card-action--pending" aria-disabled="true">${escapeHtml(labels.soldOut)}</span>`;
   }
   if (event.checkout_available) {
+    const id = `${language}-paid-${String(event.id).replace(/[^A-Za-z0-9_-]/g, "")}`;
     return `<form class="event-card-checkout" method="post" action="${escapeHtml(eventPath(event, language))}/checkout">
-      <input type="hidden" name="quantity" value="1">
+      ${quantityControl(event, labels, id)}
       <button class="event-card-action event-card-action--checkout" type="submit"><span>${escapeHtml(labels.buyTickets)}</span><small>${escapeHtml(labels.testMode)}</small></button>
     </form>`;
   }
   if (event.reservation_available) {
-    return `<a class="event-card-action event-card-action--checkout" href="${escapeHtml(eventPath(event, language))}#reservation">${escapeHtml(labels.reservePlace)}</a>`;
+    const id = `${language}-free-${String(event.id).replace(/[^A-Za-z0-9_-]/g, "")}`;
+    return `<details class="event-card-reservation"><summary class="event-card-action event-card-action--checkout">${escapeHtml(labels.reservePlace)}</summary><form method="post" action="${escapeHtml(eventPath(event, language))}/reserve">${quantityControl(event, labels, id)}<label>${escapeHtml(labels.attendeeName)}<input name="attendee_name" type="text" maxlength="200" autocomplete="name" required></label><label>${escapeHtml(labels.attendeeEmail)}<input name="contact_email" type="email" maxlength="320" autocomplete="email" required></label><button class="button button--primary" type="submit">${escapeHtml(labels.reservationSubmit)}</button></form></details>`;
   }
   const ticketLabel = event.access_type === "PUBLIC_FREE" ? labels.reservePlace : labels.buyTickets;
   return `<span class="event-card-action event-card-action--pending" aria-disabled="true"><span>${escapeHtml(ticketLabel)}</span><small>${escapeHtml(labels.ticketsSoon)}</small></span>`;
@@ -609,10 +673,10 @@ function renderPublicEventCard(event, language, index = 0, labels = resolveEvent
     </a>
     <div class="public-event-card__body">
       <div class="public-event-card__heading"><p class="eyebrow">${escapeHtml(event.category)}</p><p class="public-event-card__date">${escapeHtml(formatEventDate(event.start_at, language))}</p></div>
-      <h2><a href="${escapeHtml(eventPath(event, language))}">${escapeHtml(event.title)}</a></h2>
-      ${event.performer_name ? `<p class="public-event-card__artist">${escapeHtml(labels.artist)} · ${escapeHtml(event.performer_name)}</p>` : ""}
+      <h2 class="word-safe-title${titleLengthClass(event.title)}"><a href="${escapeHtml(eventPath(event, language))}">${escapeHtml(event.title)}</a></h2>
+      <p class="public-event-card__artist">${escapeHtml(labels.artist)} · ${escapeHtml(event.performer_name || labels.artistPending)}</p>
       ${excerpt ? `<p class="public-event-card__excerpt">${escapeHtml(excerpt)}</p>` : ""}
-      <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language, labels))}</span></div>
+      <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language, labels))}</span><span>${Number(event.capacity_remaining || 0)} ${escapeHtml(labels.available)}</span></div>
       <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a>${renderEventCardAction(event, language, labels)}</div>
     </div>
   </article>`;
@@ -621,7 +685,7 @@ function renderPublicEventCard(event, language, index = 0, labels = resolveEvent
 function renderHomeEventShowcase(events, language, globalOverride = null) {
   const labels = resolveEventCopy(language, globalOverride);
   const cards = events.length
-    ? events.slice(0, 6).map((event, index) => renderPublicEventCard(event, language, index, labels)).join("")
+    ? events.slice(0, 30).map((event, index) => renderPublicEventCard(event, language, index, labels)).join("")
     : `<p class="event-empty-state">${escapeHtml(labels.noEvents)}</p>`;
   return `<section class="section home-event-showcase" id="upcoming-events">
     <div class="home-event-showcase__heading" data-reveal><div><p class="eyebrow">${escapeHtml(labels.homeEyebrow)}</p><h2>${escapeHtml(labels.homeTitle)}</h2></div><p>${escapeHtml(labels.homeLead)}</p></div>
@@ -654,6 +718,7 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
   <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
+  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   ${structuredData.map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
   <title>${escapeHtml(title)}</title>
@@ -797,6 +862,25 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
   </main>${renderFooter(copy, language)}</body></html>`;
 }
 
+function catalogStructuredData(item, kind, canonicalUrl) {
+  if (kind === "piano") return {
+    "@context": "https://schema.org", "@type": "Product", name: item.title, description: item.description || item.summary,
+    image: [item.image_url], brand: item.brand ? { "@type": "Brand", name: item.brand } : undefined,
+    model: item.model || undefined, url: canonicalUrl
+  };
+  return { "@context": "https://schema.org", "@type": "Service", name: item.title, description: item.description || item.summary, image: item.image_url, provider: { "@type": "Organization", name: "Klavierhaus" }, url: canonicalUrl };
+}
+
+function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, nonce, globalOverride = null }) {
+  const copy = globalOverride || getGlobal(language);
+  const isPiano = kind === "piano";
+  const currentPath = isPiano ? showroomPath(item, language) : servicePath(item, language);
+  const alternatePath = isPiano ? showroomPath({ ...item, slug: item.alternate_slug }, getAlternateLanguage(language)) : servicePath({ ...item, slug: item.alternate_slug }, getAlternateLanguage(language));
+  const canonicalUrl = pageUrl(baseUrl, currentPath);
+  const ctaLabel = language === "hu" ? (isPiano ? "Privát megtekintés egyeztetése" : "Személyes felmérés egyeztetése") : (isPiano ? "Arrange a private viewing" : "Arrange a private assessment");
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${item.title} | Klavierhaus`, description: item.summary || item.description || item.title, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<a class="button button--primary" href="${escapeHtml(getRoute("consultation", language))}">${escapeHtml(ctaLabel)} <span aria-hidden="true">↗</span></a></div></article></main>${renderFooter(copy, language)}</body></html>`;
+}
+
 function renderInvitation({ invitation, token, language, baseUrl, nonce, result = "", error = "", globalOverride = null }) {
   const copy = globalOverride || getGlobal(language);
   const brand = resolveBrand(copy);
@@ -843,6 +927,7 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   <meta name="theme-color" content="#080807">
   <meta name="robots" content="${robots}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
+  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   <title>${escapeHtml(copy.notFoundTitle)} | Klavierhaus</title>
 </head>
@@ -924,13 +1009,16 @@ function createApp(options = {}) {
       .flatMap((key) => [getRoute(key, "en"), getRoute(key, "hu")])
     const dynamicRoutes = [];
     if (eventClient.configured) {
-      try {
-        const [englishEvents, hungarianEvents] = await Promise.all([eventClient.list("en"), eventClient.list("hu")]);
-        dynamicRoutes.push(...englishEvents.map((event) => eventPath(event, "en")));
-        dynamicRoutes.push(...hungarianEvents.map((event) => eventPath(event, "hu")));
-      } catch (error) {
-        console.warn(`[website] Event sitemap feed unavailable: ${error.code || error.message}`);
-      }
+      const feeds = await Promise.allSettled([
+        eventClient.list("en"), eventClient.list("hu"), eventClient.showroomPianos("en"), eventClient.showroomPianos("hu"), eventClient.services("en"), eventClient.services("hu")
+      ]);
+      const values = feeds.map((result) => result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []);
+      dynamicRoutes.push(...values[0].map((event) => eventPath(event, "en")));
+      dynamicRoutes.push(...values[1].map((event) => eventPath(event, "hu")));
+      dynamicRoutes.push(...values[2].map((item) => showroomPath(item, "en")));
+      dynamicRoutes.push(...values[3].map((item) => showroomPath(item, "hu")));
+      dynamicRoutes.push(...values[4].map((item) => servicePath(item, "en")));
+      dynamicRoutes.push(...values[5].map((item) => servicePath(item, "hu")));
     }
     const urls = [...new Set([...staticRoutes, ...dynamicRoutes])]
       .map((route) => `<url><loc>${escapeHtml(pageUrl(baseUrl, route))}</loc></url>`).join("");
@@ -948,6 +1036,26 @@ function createApp(options = {}) {
       console.warn(`[website] Event listing fallback: ${error.code || error.message}`);
       next();
     }
+  });
+
+  app.get(["/pianos/:slug", "/hu/zongorak/:slug"], async (req, res, next) => {
+    if (!eventClient.configured) return next();
+    const language = req.path.startsWith("/hu/") ? "hu" : "en";
+    try {
+      const [item, globalContent] = await Promise.all([eventClient.showroomPiano(req.params.slug, language), eventClient.content("global", language).catch(() => null)]);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+      res.type("html").send(renderCatalogDetail({ item, kind: "piano", language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
+    } catch (error) { if (error.status === 404) return next(); next(error); }
+  });
+
+  app.get(["/services/:slug", "/hu/szolgaltatasok/:slug"], async (req, res, next) => {
+    if (!eventClient.configured) return next();
+    const language = req.path.startsWith("/hu/") ? "hu" : "en";
+    try {
+      const [item, globalContent] = await Promise.all([eventClient.service(req.params.slug, language), eventClient.content("global", language).catch(() => null)]);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+      res.type("html").send(renderCatalogDetail({ item, kind: "service", language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null }));
+    } catch (error) { if (error.status === 404) return next(); next(error); }
   });
 
   app.get(["/events/:slug", "/hu/esemenyek/:slug"], async (req, res, next) => {
@@ -1063,16 +1171,29 @@ function createApp(options = {}) {
     }
 
     let homeEvents = [];
+    let reviews = [];
+    let showroomPianos = [];
+    let websiteServices = [];
     let pageOverride = null;
     let globalOverride = null;
     if (eventClient.configured) {
-      const requests = [eventClient.content(route.key, route.language),eventClient.content("global",route.language), route.key === "home" ? eventClient.list(route.language) : Promise.resolve([])];
-      const [contentResult,globalResult,eventResult] = await Promise.allSettled(requests);
+      const requests = [
+        eventClient.content(route.key, route.language),
+        eventClient.content("global",route.language),
+        route.key === "home" ? eventClient.list(route.language) : Promise.resolve([]),
+        route.key === "home" ? eventClient.reviews(route.language) : Promise.resolve([]),
+        ["home","pianos"].includes(route.key) ? eventClient.showroomPianos(route.language) : Promise.resolve([]),
+        ["home","services"].includes(route.key) ? eventClient.services(route.language) : Promise.resolve([])
+      ];
+      const [contentResult,globalResult,eventResult,reviewResult,pianoResult,serviceResult] = await Promise.allSettled(requests);
       if (contentResult.status === "fulfilled") pageOverride = contentResult.value?.content || null;
       else console.warn(`[website] Page content fallback: ${contentResult.reason?.code || contentResult.reason?.message}`);
       if (globalResult.status === "fulfilled") globalOverride = globalResult.value?.content || null;
       if (eventResult.status === "fulfilled") homeEvents = eventResult.value;
       else if (route.key === "home") console.warn(`[website] Homepage event feed unavailable: ${eventResult.reason?.code || eventResult.reason?.message}`);
+      if (reviewResult.status === "fulfilled") reviews = reviewResult.value;
+      if (pianoResult.status === "fulfilled") showroomPianos = pianoResult.value;
+      if (serviceResult.status === "fulfilled") websiteServices = serviceResult.value;
     }
     res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
     res.type("html").send(renderDocument({
@@ -1081,6 +1202,9 @@ function createApp(options = {}) {
       allowIndexing,
       nonce: res.locals.cspNonce,
       homeEvents,
+      reviews,
+      showroomPianos,
+      websiteServices,
       pageOverride,
       globalOverride
     }));
