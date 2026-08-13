@@ -306,6 +306,14 @@ function runMigrations() {
     ensureColumn("financial_items", "source_type", "TEXT");
     ensureColumn("financial_items", "source_id", "TEXT");
 
+    // Public events and Stripe Sandbox. These nullable additions preserve every
+    // existing event and ticket while enabling cancellation and payment links.
+    ensureColumn("events", "cancellation_reason", "TEXT");
+    ensureColumn("events", "cancelled_at", "TEXT");
+    ensureColumn("events", "cancelled_by_user_id", "TEXT");
+    ensureColumn("event_tickets", "event_payment_id", "TEXT");
+    ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
+
     // Inventory.
     const inventoryColumns = {
       inventory_id: "TEXT", item_name: "TEXT", main_category: "TEXT", piano_part_category: "TEXT",
@@ -384,6 +392,11 @@ function runMigrations() {
   ensureIndex("idx_event_tickets_contact", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact ON event_tickets(lower(trim(contact_email)))");
   ensureIndex("idx_event_checkins_event_time", "CREATE INDEX IF NOT EXISTS idx_event_checkins_event_time ON event_checkins(event_id,created_at DESC)");
   ensureIndex("idx_event_refunds_event_status", "CREATE INDEX IF NOT EXISTS idx_event_refunds_event_status ON event_refund_requests(event_id,status,requested_at DESC)");
+  ensureIndex("idx_event_holds_event_status_expiry", "CREATE INDEX IF NOT EXISTS idx_event_holds_event_status_expiry ON event_checkout_holds(event_id,status,expires_at)");
+  ensureIndex("idx_event_holds_session", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_holds_session ON event_checkout_holds(stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL");
+  ensureIndex("idx_event_payments_event_status", "CREATE INDEX IF NOT EXISTS idx_event_payments_event_status ON event_payments(event_id,status,created_at DESC)");
+  ensureIndex("idx_event_tickets_payment", "CREATE INDEX IF NOT EXISTS idx_event_tickets_payment ON event_tickets(event_payment_id,ticket_sequence)");
+  ensureIndex("idx_stripe_webhook_status", "CREATE INDEX IF NOT EXISTS idx_stripe_webhook_status ON stripe_webhook_events(status,received_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
