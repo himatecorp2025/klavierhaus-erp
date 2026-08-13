@@ -6,7 +6,7 @@ const { inspectImageFile } = require("./upload-middleware");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
-const PUBLIC_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
+const PUBLIC_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"];
 const PUBLIC_LIST_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
 const ACTIVE_TICKET_STATUSES = ["VALID", "USED"];
 const REFUND_STATUSES = new Set(["REQUESTED", "APPROVED", "REJECTED", "PROCESSED"]);
@@ -169,6 +169,8 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfi
     capacity_total: Number(row.capacity_total),
     capacity_remaining: capacity.remaining,
     sold_out: capacity.remaining <= 0,
+    sold_out_at: row.sold_out_at || null,
+    repeat_interest_available: capacity.remaining <= 0 || ["COMPLETED", "CLOSED", "CANCELLED"].includes(row.status),
     price_cents: Number(row.price_cents || 0),
     currency: row.currency,
     sales_start_at: row.sales_start_at || null,
@@ -299,6 +301,7 @@ function createEventService({ db, qrSecret, activeHoldCount = () => 0 }) {
     const publicCode = crypto.randomBytes(18).toString("base64url");
     db.prepare(`INSERT INTO event_tickets(id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,created_by_user_id)
       VALUES(?,?,?,?,?,?,?,?, 'VALID',?,'USD',?)`).run(id, eventId, invitationId, sourceType, cleanText(buyerName, 200), cleanText(attendeeName, 200), normalizeEmail(contactEmail), publicCode, Number(priceCents || 0), userId);
+    if (capacity(eventId).remaining <= 0) db.prepare("UPDATE events SET sold_out_at=COALESCE(sold_out_at,CURRENT_TIMESTAMP) WHERE id=?").run(eventId);
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(id);
   }
 
