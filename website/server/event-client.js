@@ -65,6 +65,21 @@ function createEventClient(options = {}) {
     content(pageKey, language) {
       return request(`/api/public/website-content/${encodeURIComponent(pageKey)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
+    reviews(language) {
+      return request(`/api/public/website-reviews?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    showroomPianos(language) {
+      return request(`/api/public/showroom-pianos?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    showroomPiano(slug, language) {
+      return request(`/api/public/showroom-pianos/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    services(language) {
+      return request(`/api/public/website-services?lang=${language === "hu" ? "hu" : "en"}`);
+    },
+    service(slug, language) {
+      return request(`/api/public/website-services/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
+    },
     createCheckout(slug, language, quantity) {
       return request(`/api/public/events/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
