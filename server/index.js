@@ -14,11 +14,13 @@ const { createGoogleCalendarIntegration } = require("./google-calendar");
 const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
 const { registerEventRoutes } = require("./events");
+const { registerWebsiteContentRoutes } = require("./website-content");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const {
   createDocumentUpload,
   createBrandingUpload,
   createEventImageUpload,
+  createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
   uploadErrorHandler
@@ -43,6 +45,8 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 const EVENT_IMAGE_DIR=path.join(UPLOAD_DIR,"events");
 fs.mkdirSync(EVENT_IMAGE_DIR,{recursive:true});
+const WEBSITE_IMAGE_DIR=path.join(UPLOAD_DIR,"website");
+fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
@@ -220,6 +224,7 @@ app.post('/api/webhooks/resend',express.raw({type:'application/json',limit:'1mb'
 app.use(express.json({limit:"10mb"}));
 const brandingUpload=createBrandingUpload(UPLOAD_DIR);
 const eventImageUpload=createEventImageUpload(EVENT_IMAGE_DIR);
+const websiteImageUpload=createWebsiteImageUpload(WEBSITE_IMAGE_DIR);
 const clientImportUpload=createClientImportUpload();
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
@@ -681,6 +686,17 @@ registerEventRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   stripeSandbox
+});
+registerWebsiteContentRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  audit,
+  websiteImageUpload,
+  websiteImageDir:WEBSITE_IMAGE_DIR,
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
+  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
