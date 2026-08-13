@@ -18,7 +18,7 @@ function bool(value, fallback = false) {
 
 function imageUrl(value, erpBaseUrl) {
   const path = cleanText(value, 1000);
-  return path.startsWith("/") && erpBaseUrl ? `${erpBaseUrl}${path}` : path;
+  return path.startsWith("/uploads/") && erpBaseUrl ? `${erpBaseUrl}${path}` : path;
 }
 
 function localized(row, language, erpBaseUrl) {
