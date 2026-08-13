@@ -15,6 +15,7 @@ const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
 const { registerEventRoutes } = require("./events");
 const { registerWebsiteContentRoutes } = require("./website-content");
+const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const {
   createDocumentUpload,
@@ -266,13 +267,13 @@ app.use(express.static(path.join(__dirname, "..", "public"),{
   }
 }));
 // Global protection: only superadmin may call DELETE endpoints. The single
-// event-record route applies its stricter business rules itself: an admin may
-// delete only an event with no retained booking/payment history.
+// event-record and public-content catalog routes apply their own stricter
+// business rules. They are intentionally the only admin DELETE exceptions.
 app.use('/api',(req,res,next)=>{
   if(req.method!=='DELETE') return next();
   const h=req.headers.authorization||'';
   try{req.user=req.user||jwt.verify(h.startsWith('Bearer ')?h.slice(7):'',JWT_SECRET);}catch(e){return res.status(401).json({error:'AUTH_REQUIRED'});}
-  if(/^\/events\/[^/]+$/.test(req.path)) return next();
+  if(/^\/events\/[^/]+$/.test(req.path)||/^\/(?:website-reviews|website-services|showroom-pianos)\/[^/]+$/.test(req.path)) return next();
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'PERMISSION_DENIED'});
   next();
 });
@@ -696,6 +697,14 @@ registerWebsiteContentRoutes({
   websiteImageUpload,
   websiteImageDir:WEBSITE_IMAGE_DIR,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
+  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
+});
+registerWebsiteCatalogRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  audit,
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
 });
 setInterval(()=>{
