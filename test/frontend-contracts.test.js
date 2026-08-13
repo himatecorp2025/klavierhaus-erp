@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui9/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui10/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -78,7 +78,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui9/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui10/);
 });
 
 test("Landing Page Design exposes protected bilingual page, SEO, review, legal-copy and image publishing controls", () => {
@@ -95,7 +95,9 @@ test("Landing Page Design exposes protected bilingual page, SEO, review, legal-c
   assert.match(designSource, /Paragraphs','Bekezdések/);
   assert.match(designSource, /Link label','Linkfelirat/);
   assert.match(designSource, /website_image/);
-  assert.match(designSource, /Save and publish page','Oldal mentése és publikálása/);
+  assert.match(designSource, /Save draft','Piszkozat mentése/);
+  assert.match(designSource, /Preview draft','Piszkozat előnézete/);
+  assert.match(designSource, /Publish saved draft','Mentett piszkozat publikálása/);
   assert.match(designSource, /\/api\/website-content\/\$\{encodeURIComponent\(websiteDesignPage\)\}/);
   assert.match(styles, /\.website-design-editor/);
   assert.match(styles, /\.website-design-image-field img/);
