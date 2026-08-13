@@ -41,7 +41,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui7/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui8/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -78,7 +78,27 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui7/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui8/);
+});
+
+test("Landing Page Design exposes protected bilingual page, SEO, review, legal-copy and image publishing controls", () => {
+  const designStart = appSource.indexOf("let websiteDesignMeta=null");
+  const designEnd = appSource.indexOf("async function renderAuditLog", designStart);
+  const designSource = appSource.slice(designStart, designEnd);
+  assert.ok(designStart > 0);
+  assert.match(appSource, /else if\(v==="website_design"\) await renderWebsiteDesign\(\)/);
+  assert.match(appSource, /function ensureView\(id\)/);
+  assert.match(appSource, /\["website_design","Landing Page Design \/ Weboldal dizájn"\]/);
+  assert.match(designSource, /if\(!isAdmin\(\)\)return showError\('PERMISSION_DENIED'\)/);
+  assert.match(designSource, /Search appearance \(SEO\)','Keresési megjelenés \(SEO\)/);
+  assert.match(designSource, /Review \/ quotation','Vélemény \/ idézet/);
+  assert.match(designSource, /Paragraphs','Bekezdések/);
+  assert.match(designSource, /Link label','Linkfelirat/);
+  assert.match(designSource, /website_image/);
+  assert.match(designSource, /Save and publish page','Oldal mentése és publikálása/);
+  assert.match(designSource, /\/api\/website-content\/\$\{encodeURIComponent\(websiteDesignPage\)\}/);
+  assert.match(styles, /\.website-design-editor/);
+  assert.match(styles, /\.website-design-image-field img/);
 });
 
 test("Google Calendar UI is bilingual, range-limited and preserves status-color priority", () => {
