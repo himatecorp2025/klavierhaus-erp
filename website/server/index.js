@@ -190,9 +190,10 @@ function renderQuote(section) {
 function renderEditorial(section, language) {
   return `<section class="section section--editorial" id="${escapeHtml(section.id)}" data-reveal>
     <p class="eyebrow">${escapeHtml(section.eyebrow)}</p>
-    <div class="editorial-grid">
+    <div class="editorial-grid${section.image ? " editorial-grid--with-image" : ""}">
       <h2>${escapeHtml(section.title)}</h2>
-      <div>${renderParagraphs(section.body)}${renderTextLink(section.link, language)}</div>
+      <div class="editorial-grid__copy">${renderParagraphs(section.body)}${renderTextLink(section.link, language)}</div>
+      ${section.image ? renderPicture(section.image, section.imageAlt || "", "editorial-feature-image") : ""}
     </div>
   </section>`;
 }
@@ -419,6 +420,18 @@ const eventCopy = Object.freeze({
     buyTickets: "Buy tickets",
     reservePlace: "Reserve a place",
     ticketsSoon: "Tickets coming soon",
+    testMode: "TEST MODE",
+    testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
+    quantity: "Number of tickets",
+    attendeeName: "Full name",
+    attendeeEmail: "Email address",
+    continueToCheckout: "Continue to secure test checkout",
+    reservationSubmit: "Confirm complimentary reservation",
+    checkoutSuccess: "Your test payment was received. The ticket is issued after Stripe confirms the payment by webhook.",
+    checkoutCancelled: "Checkout was cancelled. The temporary place will be released automatically.",
+    checkoutError: "Checkout could not be started. Please try again.",
+    reservationSuccess: "Your complimentary reservation has been recorded.",
+    cancellationReason: "Organizer's notice",
     date: "Date",
     venue: "Venue",
     artist: "Artist",
@@ -457,6 +470,18 @@ const eventCopy = Object.freeze({
     buyTickets: "Jegyvásárlás",
     reservePlace: "Helyfoglalás",
     ticketsSoon: "Jegyek hamarosan",
+    testMode: "TESZTÜZEM",
+    testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
+    quantity: "Jegyek száma",
+    attendeeName: "Teljes név",
+    attendeeEmail: "E-mail-cím",
+    continueToCheckout: "Tovább a biztonságos tesztfizetéshez",
+    reservationSubmit: "Díjmentes helyfoglalás megerősítése",
+    checkoutSuccess: "A tesztfizetés beérkezett. A jegy a Stripe webhook-visszaigazolása után készül el.",
+    checkoutCancelled: "A fizetés megszakadt. Az ideiglenes helyfoglalás automatikusan felszabadul.",
+    checkoutError: "A fizetés nem indítható el. Kérjük, próbálja újra.",
+    reservationSuccess: "A díjmentes helyfoglalást rögzítettük.",
+    cancellationReason: "A szervező tájékoztatása",
     date: "Időpont",
     venue: "Helyszín",
     artist: "Művész",
@@ -526,10 +551,30 @@ function eventExcerpt(event, max = 190) {
   return `${candidate.slice(0, boundary > max * 0.65 ? boundary : max).trim()}…`;
 }
 
+function renderEventCardAction(event, language) {
+  const labels = eventCopy[language];
+  if (event.status === "CANCELLED") {
+    return `<span class="event-card-action event-card-action--cancelled" aria-disabled="true">${escapeHtml(labels.cancelled)}</span>`;
+  }
+  if (event.sold_out) {
+    return `<span class="event-card-action event-card-action--pending" aria-disabled="true">${escapeHtml(labels.soldOut)}</span>`;
+  }
+  if (event.checkout_available) {
+    return `<form class="event-card-checkout" method="post" action="${escapeHtml(eventPath(event, language))}/checkout">
+      <input type="hidden" name="quantity" value="1">
+      <button class="event-card-action event-card-action--checkout" type="submit"><span>${escapeHtml(labels.buyTickets)}</span><small>${escapeHtml(labels.testMode)}</small></button>
+    </form>`;
+  }
+  if (event.reservation_available) {
+    return `<a class="event-card-action event-card-action--checkout" href="${escapeHtml(eventPath(event, language))}#reservation">${escapeHtml(labels.reservePlace)}</a>`;
+  }
+  const ticketLabel = event.access_type === "PUBLIC_FREE" ? labels.reservePlace : labels.buyTickets;
+  return `<span class="event-card-action event-card-action--pending" aria-disabled="true"><span>${escapeHtml(ticketLabel)}</span><small>${escapeHtml(labels.ticketsSoon)}</small></span>`;
+}
+
 function renderPublicEventCard(event, language, index = 0) {
   const labels = eventCopy[language];
   const excerpt = eventExcerpt(event);
-  const ticketLabel = event.access_type === "PUBLIC_FREE" ? labels.reservePlace : labels.buyTickets;
   return `<article class="public-event-card" data-reveal data-event-index="${index + 1}">
     <a class="public-event-card__media" href="${escapeHtml(eventPath(event, language))}" aria-label="${escapeHtml(`${labels.details}: ${event.title}`)}">
       ${event.hero_image_url ? `<img src="${escapeHtml(event.hero_image_url)}" alt="${escapeHtml(event.title)}" loading="lazy" decoding="async">` : '<span class="public-event-card__ornament" aria-hidden="true">K</span>'}
@@ -541,7 +586,7 @@ function renderPublicEventCard(event, language, index = 0) {
       ${event.performer_name ? `<p class="public-event-card__artist">${escapeHtml(labels.artist)} · ${escapeHtml(event.performer_name)}</p>` : ""}
       ${excerpt ? `<p class="public-event-card__excerpt">${escapeHtml(excerpt)}</p>` : ""}
       <div class="public-event-card__facts"><span>${escapeHtml(event.venue?.name || event.venue?.city || "Klavierhaus")}</span><span>${escapeHtml(formatEventPrice(event, language))}</span></div>
-      <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a><span class="event-card-action event-card-action--pending" aria-disabled="true"><span>${escapeHtml(ticketLabel)}</span><small>${escapeHtml(labels.ticketsSoon)}</small></span></div>
+      <div class="public-event-card__actions"><a class="button button--ghost" href="${escapeHtml(eventPath(event, language))}">${escapeHtml(labels.details)} <span aria-hidden="true">↗</span></a>${renderEventCardAction(event, language)}</div>
     </div>
   </article>`;
 }
@@ -617,6 +662,18 @@ function eventStructuredData(event, baseUrl, language) {
   data.image = [event.hero_image_url || pageUrl(baseUrl, shared.salonImage)];
   if (event.performer_name) data.performer = { "@type": "Person", name: event.performer_name };
   if (event.previous_start_at) data.previousStartDate = event.previous_start_at;
+  if (["PUBLIC_PAID", "PUBLIC_FREE"].includes(event.access_type)) {
+    data.offers = {
+      "@type": "Offer",
+      url,
+      price: (Number(event.price_cents || 0) / 100).toFixed(2),
+      priceCurrency: event.currency || "USD",
+      availability: event.sold_out || event.status === "CANCELLED"
+        ? "https://schema.org/SoldOut"
+        : "https://schema.org/InStock",
+      validFrom: event.sales_start_at || event.published_at || event.start_at
+    };
+  }
   return data;
 }
 
@@ -646,7 +703,7 @@ function renderPublicEventList({ events, language, baseUrl, allowIndexing, nonce
   </main>${renderFooter(copy, language)}</body></html>`;
 }
 
-function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce }) {
+function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce, result = "" }) {
   const copy = getGlobal(language);
   const labels = eventCopy[language];
   const canonicalPath = eventPath(event, language);
@@ -654,6 +711,24 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
   const canonicalUrl = pageUrl(baseUrl, canonicalPath);
   const imageUrl = event.hero_image_url || pageUrl(baseUrl, shared.salonImage);
   const statusNotice = event.status === "CANCELLED" ? labels.cancelled : event.status === "RESCHEDULED" ? labels.rescheduled : "";
+  const resultNotice = ({ success: labels.checkoutSuccess, cancelled: labels.checkoutCancelled, error: labels.checkoutError, reserved: labels.reservationSuccess })[result] || "";
+  let ticketing = "";
+  if (event.status !== "CANCELLED" && !event.sold_out && event.checkout_available) {
+    ticketing = `<form class="event-order-form" method="post" action="${escapeHtml(canonicalPath)}/checkout">
+      <span class="test-mode-badge">${escapeHtml(labels.testMode)}</span><p>${escapeHtml(labels.testModeNote)}</p>
+      <label>${escapeHtml(labels.quantity)}<input name="quantity" type="number" inputmode="numeric" min="1" max="${escapeHtml(event.capacity_remaining)}" value="1" required></label>
+      <button class="button button--primary" type="submit">${escapeHtml(labels.continueToCheckout)}</button>
+    </form>`;
+  } else if (event.status !== "CANCELLED" && !event.sold_out && event.reservation_available) {
+    ticketing = `<form class="event-order-form" id="reservation" method="post" action="${escapeHtml(canonicalPath)}/reserve">
+      <label>${escapeHtml(labels.attendeeName)}<input name="attendee_name" type="text" maxlength="200" autocomplete="name" required></label>
+      <label>${escapeHtml(labels.attendeeEmail)}<input name="contact_email" type="email" maxlength="320" autocomplete="email" required></label>
+      <label>${escapeHtml(labels.quantity)}<input name="quantity" type="number" inputmode="numeric" min="1" max="${escapeHtml(event.capacity_remaining)}" value="1" required></label>
+      <button class="button button--primary" type="submit">${escapeHtml(labels.reservationSubmit)}</button>
+    </form>`;
+  } else if (event.status !== "CANCELLED") {
+    ticketing = `<p class="event-ticketing-notice">${escapeHtml(event.sold_out ? labels.soldOut : labels.ticketingSoon)}</p>`;
+  }
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({
     language,
     title: `${event.title} | Klavierhaus`,
@@ -674,7 +749,7 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
         <div class="event-detail-hero__copy" data-reveal><p class="eyebrow">${escapeHtml(event.category)}</p><h1>${escapeHtml(event.title)}</h1>${eventExcerpt(event,260)?`<p>${escapeHtml(eventExcerpt(event,260))}</p>`:""}</div>
       </header>
       <div class="event-detail-layout">
-        <section class="event-detail-narrative" data-reveal>${statusNotice ? `<p class="event-public-status">${escapeHtml(statusNotice)}</p>` : ""}${event.description?renderParagraphs(String(event.description).split(/\n+/).filter(Boolean)):""}</section>
+        <section class="event-detail-narrative" data-reveal>${resultNotice ? `<p class="event-public-status event-public-status--result">${escapeHtml(resultNotice)}</p>` : ""}${statusNotice ? `<p class="event-public-status">${escapeHtml(statusNotice)}</p>` : ""}${event.status === "CANCELLED" && event.cancellation_reason ? `<p><strong>${escapeHtml(labels.cancellationReason)}:</strong> ${escapeHtml(event.cancellation_reason)}</p>` : ""}${event.description?renderParagraphs(String(event.description).split(/\n+/).filter(Boolean)):""}</section>
         <aside class="event-facts" data-reveal>
           <dl>
             <div><dt>${escapeHtml(labels.date)}</dt><dd>${escapeHtml(formatEventDate(event.start_at, language))}</dd></div>
@@ -683,7 +758,7 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
             <div><dt>${escapeHtml(labels.capacity)}</dt><dd>${event.sold_out ? escapeHtml(labels.soldOut) : `${escapeHtml(event.capacity_remaining)} ${escapeHtml(labels.available)}`}</dd></div>
             <div><dt>${escapeHtml(labels.price)}</dt><dd>${escapeHtml(formatEventPrice(event, language))}</dd></div>
           </dl>
-          ${event.status !== "CANCELLED" ? `<p class="event-ticketing-notice">${escapeHtml(labels.ticketingSoon)}</p>` : ""}
+          ${ticketing}
         </aside>
       </div>
     </article>
@@ -776,7 +851,7 @@ function createApp(options = {}) {
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
-    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; font-src 'self'; form-action 'self' mailto:`);
+    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
     if (!allowIndexing) res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
     next();
   });
@@ -847,11 +922,45 @@ function createApp(options = {}) {
     try {
       const event = await eventClient.detail(req.params.slug, language);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-      res.type("html").send(renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce }));
+      const result = ["success", "cancelled", "error", "reserved"].includes(String(req.query.checkout || req.query.reservation || ""))
+        ? String(req.query.checkout || req.query.reservation)
+        : "";
+      res.type("html").send(renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, result }));
     } catch (error) {
       if (error.status === 404) return next();
       console.warn(`[website] Event detail unavailable: ${error.code || error.message}`);
       next();
+    }
+  });
+
+  app.post(["/events/:slug/checkout", "/hu/esemenyek/:slug/checkout"], async (req, res) => {
+    const language = req.path.startsWith("/hu/") ? "hu" : "en";
+    const detailPath = language === "hu" ? `/hu/esemenyek/${encodeURIComponent(req.params.slug)}` : `/events/${encodeURIComponent(req.params.slug)}`;
+    const quantity = Number(req.body?.quantity || 1);
+    try {
+      const checkout = await eventClient.createCheckout(req.params.slug, language, quantity);
+      const target = new URL(String(checkout.checkout_url || ""));
+      if (target.protocol !== "https:" || !/(^|\.)stripe\.com$/i.test(target.hostname)) throw new Error("INVALID_CHECKOUT_URL");
+      res.redirect(303, target.toString());
+    } catch (error) {
+      console.warn(`[website] Stripe Sandbox checkout unavailable: ${error.code || error.message}`);
+      res.redirect(303, `${detailPath}?checkout=error`);
+    }
+  });
+
+  app.post(["/events/:slug/reserve", "/hu/esemenyek/:slug/reserve"], async (req, res) => {
+    const language = req.path.startsWith("/hu/") ? "hu" : "en";
+    const detailPath = language === "hu" ? `/hu/esemenyek/${encodeURIComponent(req.params.slug)}` : `/events/${encodeURIComponent(req.params.slug)}`;
+    try {
+      await eventClient.reserve(req.params.slug, language, {
+        attendeeName: req.body?.attendee_name,
+        contactEmail: req.body?.contact_email,
+        quantity: Number(req.body?.quantity || 1)
+      });
+      res.redirect(303, `${detailPath}?reservation=reserved`);
+    } catch (error) {
+      console.warn(`[website] Complimentary reservation unavailable: ${error.code || error.message}`);
+      res.redirect(303, `${detailPath}?reservation=error`);
     }
   });
 
