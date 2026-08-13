@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createApp } = require("../server/index");
+const { getGlobal, getPage } = require("../server/site-content");
 
 async function withServer(options, callback) {
   const server = createApp(options).listen(0, "127.0.0.1");
@@ -57,6 +58,12 @@ function createFakeApi() {
       payload = { checkout_url: "https://checkout.stripe.com/c/pay/test", checkout_session_id: "cs_test_1", test_mode: true };
     } else if (parsed.pathname.endsWith("/reservations")) {
       payload = { ok: true, tickets: [{ ticket_code: "TEST-1" }] };
+    } else if (parsed.pathname === "/api/public/website-content/global") {
+      payload = { page_key: "global", language, source: "bundled", content: getGlobal(language) };
+    } else if (parsed.pathname === "/api/public/website-content/events") {
+      payload = { page_key: "events", language, source: "bundled", content: getPage("events", language) };
+    } else if (parsed.pathname === "/api/public/website-content/home") {
+      payload = { page_key: "home", language, source: "bundled", content: getPage("home", language) };
     } else if (parsed.pathname === "/api/public/events") {
       payload = [event(language)];
     } else if (parsed.pathname.startsWith("/api/public/events/")) {
@@ -154,11 +161,84 @@ test("homepage places the nearest public events in a bilingual three-column edit
     assert.match(english, /Enter the room where music becomes personal/);
     assert.match(english, /Golden Salon Evening/);
     assert.match(english, /View all events/);
+    assert.match(english, /class="event-carousel"/);
+    assert.match(english, /data-event-carousel-prev/);
+    assert.match(english, /data-event-carousel-next/);
+    assert.ok(english.indexOf('id="manifesto"') < english.indexOf('id="upcoming-events"'), "events must follow the artistic introduction");
+    assert.ok(english.indexOf('id="upcoming-events"') < english.indexOf('id="testimonial"'), "events must replace the old intimate-encounters position before testimonials");
+    assert.doesNotMatch(english, /id="salon"/);
     assert.doesNotMatch(english, /Arany szalonest/);
     assert.match(hungarian, /Lépjen be a térbe, ahol a zene személyessé válik/);
     assert.match(hungarian, /Arany szalonest/);
     assert.match(hungarian, /Összes esemény/);
     assert.doesNotMatch(hungarian, /Golden Salon Evening/);
+  });
+});
+
+test("Landing Page Design event labels are rendered on the public homepage without a redeploy", async () => {
+  const api = createFakeApi();
+  const originalFetch = api.fetchImpl;
+  api.fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname !== "/api/public/website-content/global") return originalFetch(url, options);
+    const language = parsed.searchParams.get("lang") === "hu" ? "hu" : "en";
+    const content = JSON.parse(JSON.stringify(getGlobal(language)));
+    content.eventLabels.homeTitle = language === "hu" ? "Szerkesztett eseményszínpad" : "Edited event stage";
+    content.eventLabels.buyTickets = language === "hu" ? "Szerkesztett jegygomb" : "Edited ticket button";
+    content.brand.wordmark = language === "hu" ? "SZERKESZTETT KLAVIERHAUS" : "EDITED KLAVIERHAUS";
+    content.brand.footerLocations = language === "hu" ? "Szerkesztett helyszín" : "Edited location";
+    return new Response(JSON.stringify({ page_key: "global", language, source: "database", version: 2, content }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  await withServer({
+    baseUrl: "https://klavierhaus.com",
+    allowIndexing: true,
+    eventApiBaseUrl: "https://erp.example.com",
+    fetchImpl: api.fetchImpl
+  }, async (origin) => {
+    const english = await (await fetch(`${origin}/`)).text();
+    const hungarian = await (await fetch(`${origin}/hu/`)).text();
+    assert.match(english, /Edited event stage/);
+    assert.match(english, /Edited ticket button/);
+    assert.match(english, /EDITED KLAVIERHAUS/);
+    assert.match(english, /Edited location/);
+    assert.doesNotMatch(english, /Szerkesztett eseményszínpad/);
+    assert.match(hungarian, /Szerkesztett eseményszínpad/);
+    assert.match(hungarian, /Szerkesztett jegygomb/);
+    assert.match(hungarian, /SZERKESZTETT KLAVIERHAUS/);
+    assert.match(hungarian, /Szerkesztett helyszín/);
+    assert.doesNotMatch(hungarian, /Edited event stage/);
+  });
+});
+
+test("cancelled public events remain visible, stop selling, and omit Offer structured data", async () => {
+  const api = createFakeApi();
+  const originalFetch = api.fetchImpl;
+  api.fetchImpl = async (url, options = {}) => {
+    const response = await originalFetch(url, options);
+    const parsed = new URL(url);
+    if (!parsed.pathname.startsWith("/api/public/events")) return response;
+    const payload = await response.json();
+    const cancel = (item) => ({ ...item, status: "CANCELLED", checkout_available: false, reservation_available: false });
+    return new Response(JSON.stringify(Array.isArray(payload) ? payload.map(cancel) : cancel(payload)), {
+      status: response.status,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  await withServer({
+    baseUrl: "https://klavierhaus.com",
+    allowIndexing: true,
+    eventApiBaseUrl: "https://erp.example.com",
+    fetchImpl: api.fetchImpl
+  }, async (origin) => {
+    const page = await (await fetch(`${origin}/events/golden-salon-evening`)).text();
+    assert.match(page, /This event has been canceled by the organizer\. Please contact our customer service team regarding your refund\./);
+    assert.doesNotMatch(page, /Continue to secure test checkout/);
+    assert.match(page, /"eventStatus":"https:\/\/schema\.org\/EventCancelled"/);
+    assert.doesNotMatch(page, /"@type":"Offer"/);
   });
 });
 
