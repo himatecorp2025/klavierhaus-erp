@@ -147,7 +147,7 @@ test("dynamic public programme renders one language, paired URLs, responsive car
   });
 });
 
-test("homepage places the nearest public events in a bilingual three-column editorial stream", async () => {
+test("homepage places the nearest public events directly after the artistic introduction in the responsive carousel", async () => {
   const api = createFakeApi();
   await withServer({
     baseUrl: "https://klavierhaus.com",
@@ -165,7 +165,7 @@ test("homepage places the nearest public events in a bilingual three-column edit
     assert.match(english, /data-event-carousel-prev/);
     assert.match(english, /data-event-carousel-next/);
     assert.ok(english.indexOf('id="manifesto"') < english.indexOf('id="upcoming-events"'), "events must follow the artistic introduction");
-    assert.ok(english.indexOf('id="upcoming-events"') < english.indexOf('id="testimonial"'), "events must replace the old intimate-encounters position before testimonials");
+    assert.ok(english.indexOf('id="upcoming-events"') < english.indexOf('id="reviews"'), "events must replace the old intimate-encounters position before reviews");
     assert.doesNotMatch(english, /id="salon"/);
     assert.doesNotMatch(english, /Arany szalonest/);
     assert.match(hungarian, /Lépjen be a térbe, ahol a zene személyessé válik/);
