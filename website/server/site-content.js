@@ -9,7 +9,7 @@
  * redesigning the public website.
  */
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 
 const routeDefinitions = Object.freeze({
   home: { en: "/", hu: "/hu/" },
@@ -39,7 +39,8 @@ const shared = Object.freeze({
   logo: "/assets/brand/klavierhaus-round-white.png",
   heroImage: "/assets/media/klavierhaus-hero.jpg",
   salonImage: "/assets/media/klavierhaus-salon.jpg",
-  craftImage: "/assets/media/klavierhaus-craft.jpg"
+  craftImage: "/assets/media/klavierhaus-craft.jpg",
+  artistSalonImage: "/assets/media/klavierhaus-artist-salon.png"
 });
 
 const globalCopy = Object.freeze({
@@ -179,6 +180,8 @@ const pages = Object.freeze({
           eyebrow: "Artists",
           title: "The instrument is complete only when an artist gives it breath.",
           body: ["Our artist pages will introduce the musicians, collaborators, and voices connected to the Klavierhaus cultural programme."],
+          image: shared.artistSalonImage,
+          imageAlt: "A pianist performing for an intimate audience in an elegant Klavierhaus salon",
           link: { label: "Meet the artists", key: "artists" }
         },
         {
@@ -358,15 +361,15 @@ const pages = Object.freeze({
       seo: { title: "Privacy | Klavierhaus", description: "Development-stage privacy information for the new Klavierhaus public website." },
       hero: { eyebrow: "Legal", title: "Privacy information", lead: "Development-stage notice for the temporary Klavierhaus public website." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Current development status", paragraphs: ["This temporary website does not currently provide account registration, ticket checkout, marketing analytics, or an active contact form.", "Standard technical server logs may process information required to deliver and protect the website, such as request time, requested resource, browser information, and network address."], list: ["A complete privacy notice will be published before analytics, forms, ticket sales, or marketing cookies are enabled.", "The public website remains marked noindex during development.", "Questions may be sent to info@klavierhaus.com."], note: "This development notice must receive legal review before the final klavierhaus.com launch." }
+        { id: "privacy-status", type: "legal", title: "Current development status", paragraphs: ["This temporary website provides only Stripe Sandbox test checkout; it does not currently provide account registration, live payment, marketing analytics, or an active contact form.", "Standard technical server logs may process information required to deliver and protect the website, such as request time, requested resource, browser information, and network address."], list: ["A complete privacy notice will be published before live payments, analytics, forms, or marketing cookies are enabled.", "The public website remains marked noindex during development.", "Questions may be sent to info@klavierhaus.com."], note: "This development notice must receive legal review before the final klavierhaus.com launch." }
       ]
     },
     ticketTerms: {
       template: "legal",
       seo: { title: "Ticket & Refund Terms | Klavierhaus", description: "Development draft of the Klavierhaus event ticket and refund rules." },
-      hero: { eyebrow: "Legal", title: "Ticket and refund terms", lead: "Development draft reflecting the agreed event rules. Ticket sales are not yet active." },
+      hero: { eyebrow: "Legal", title: "Ticket and refund terms", lead: "Development draft reflecting the agreed event rules. Checkout is available only in Stripe Sandbox test mode." },
       sections: [
-        { id: "terms-draft", type: "legal", title: "Agreed operating principles", paragraphs: ["Public paid tickets will become valid only after a successful Stripe payment. Cash and pay-at-the-door reservations are excluded.", "General admission capacity applies; there is no numbered seating plan."], list: ["If Klavierhaus cancels an event, the ticket price is refunded in full.", "If Klavierhaus reschedules an event, the ticket remains valid; a refund may be requested until more than 48 hours before the new start time.", "If the purchaser cancels more than 48 hours before the event, a refund is available.", "At exactly 48 hours or less before the event, purchaser cancellation and non-attendance are not refundable.", "Partial refunds are not offered.", "A ticket QR code permits one successful admission."], note: "This draft is not an active sales contract and must receive legal review before ticket sales are enabled." }
+        { id: "terms-draft", type: "legal", title: "Agreed operating principles", paragraphs: ["Public paid tickets will become valid only after a successful Stripe payment. Cash and pay-at-the-door reservations are excluded.", "General admission capacity applies; there is no numbered seating plan."], list: ["If Klavierhaus cancels an event, the ticket price is refunded in full.", "If Klavierhaus reschedules an event, the ticket remains valid; a refund may be requested until more than 48 hours before the new start time.", "If the purchaser cancels more than 48 hours before the event, a refund is available.", "At exactly 48 hours or less before the event, purchaser cancellation and non-attendance are not refundable.", "Partial refunds are not offered.", "A ticket QR code permits one successful admission."], note: "Stripe Sandbox transactions do not move real money. This draft must receive legal review before live ticket sales are enabled." }
       ]
     }
   }),
@@ -391,7 +394,7 @@ const pages = Object.freeze({
         { id: "salon", type: "visual", eyebrow: "Bensőséges találkozások", title: "A hallgatás művészete, távolság nélkül.", body: ["A Klavierhaus szalonja a művész, a hangszer és a vendég találkozása — nem egy távolról megfigyelt előadás."], image: shared.salonImage, imageAlt: "Bensőséges zongoraest kis közönséggel egy New York-i szalonban", link: { label: "Eseményeink", key: "events" } },
         { id: "testimonial", type: "quote", quote: "Számomra a Klavierhaus igazi zenei kincs.", attribution: "Richard Goode" },
         { id: "culture", type: "visual", reverse: true, eyebrow: "Kulturális küldetés", title: "Megőrizni a zene érzelmi nyelvét.", body: ["Egy rohanó világban a Klavierhaus védi azokat a ritka feltételeket, amelyek között a szépség teljességében hallható: egy kivételes hangszer, egy érzékeny művész és egy közönség, amely elég közel van minden színváltozás érzékeléséhez."], image: shared.heroImage, imageAlt: "Elegáns privát térben megvilágított koncertzongora", link: { label: "Kulturális küldetésünk", key: "mission" } },
-        { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk majd be."], link: { label: "Művészeink", key: "artists" } },
+        { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk majd be."], image: shared.artistSalonImage, imageAlt: "Zongoraművész bensőséges közönség előtt egy elegáns Klavierhaus szalonban", link: { label: "Művészeink", key: "artists" } },
         { id: "pianos", type: "cards", eyebrow: "Kivételes hangszerek", title: "Zongorák saját hanggal.", intro: "Fedezzen fel olyan hangszereket, amelyeket kifejező karakterük — és nem csupán nevük — alapján választottunk, építettünk újjá és készítettünk elő.", items: [
           { title: "Zongoragyűjtemény", body: "Gondosan válogatott hangszerek művészeknek, gyűjtőknek, otthonokba, stúdiókba és koncerttermekbe.", link: { label: "Zongorák felfedezése", key: "pianos" } },
           { title: "Steinway-zongorák", body: "New York-i és hamburgi Steinway hangszerek, a hangszín, az egyéniség és a kompromisszumok nélküli mesterség felől megközelítve.", link: { label: "Steinway-zongorák", key: "steinway" } }
@@ -546,15 +549,15 @@ const pages = Object.freeze({
       seo: { title: "Adatkezelés | Klavierhaus", description: "A Klavierhaus új nyilvános weboldalának fejlesztési adatkezelési tájékoztatója." },
       hero: { eyebrow: "Jogi információk", title: "Adatkezelési tájékoztató", lead: "Fejlesztési tájékoztató a Klavierhaus ideiglenes nyilvános weboldalához." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Jelenlegi fejlesztési állapot", paragraphs: ["Az ideiglenes weboldal jelenleg nem biztosít felhasználói regisztrációt, jegyvásárlást, marketinganalitikát vagy aktív kapcsolatfelvételi űrlapot.", "A weboldal működéséhez és védelméhez szükséges szabványos technikai szervernaplók kezelhetnek olyan adatokat, mint a kérés időpontja, a kért erőforrás, a böngésző adatai és a hálózati cím."], list: ["Az analitika, űrlapok, jegyértékesítés vagy marketingcookie-k aktiválása előtt teljes adatkezelési tájékoztató készül.", "A nyilvános weboldal a fejlesztés alatt noindex állapotban marad.", "Kérdés esetén az info@klavierhaus.com cím használható."], note: "A végleges klavierhaus.com indulása előtt ezt a fejlesztési tájékoztatót jogilag ellenőrizni kell." }
+        { id: "privacy-status", type: "legal", title: "Jelenlegi fejlesztési állapot", paragraphs: ["Az ideiglenes weboldal kizárólag Stripe Sandbox tesztfizetést biztosít; jelenleg nincs felhasználói regisztráció, valódi pénzmozgás, marketinganalitika vagy aktív kapcsolatfelvételi űrlap.", "A weboldal működéséhez és védelméhez szükséges szabványos technikai szervernaplók kezelhetnek olyan adatokat, mint a kérés időpontja, a kért erőforrás, a böngésző adatai és a hálózati cím."], list: ["Az éles fizetés, analitika, űrlapok vagy marketingcookie-k aktiválása előtt teljes adatkezelési tájékoztató készül.", "A nyilvános weboldal a fejlesztés alatt noindex állapotban marad.", "Kérdés esetén az info@klavierhaus.com cím használható."], note: "A végleges klavierhaus.com indulása előtt ezt a fejlesztési tájékoztatót jogilag ellenőrizni kell." }
       ]
     },
     ticketTerms: {
       template: "legal",
       seo: { title: "Jegyvásárlási és visszatérítési feltételek | Klavierhaus", description: "A Klavierhaus eseményjegyekre és visszatérítésre vonatkozó fejlesztési szabálytervezete." },
-      hero: { eyebrow: "Jogi információk", title: "Jegyvásárlási és visszatérítési feltételek", lead: "A megállapodott eseményszabályokat tükröző fejlesztési tervezet. Jegyértékesítés még nem aktív." },
+      hero: { eyebrow: "Jogi információk", title: "Jegyvásárlási és visszatérítési feltételek", lead: "A megállapodott eseményszabályokat tükröző fejlesztési tervezet. A fizetési folyamat kizárólag Stripe Sandbox tesztüzemben érhető el." },
       sections: [
-        { id: "terms-draft", type: "legal", title: "Elfogadott működési alapelvek", paragraphs: ["A nyilvános fizetős jegy kizárólag sikeres Stripe-fizetés után válik érvényessé. Készpénzes és helyszínen fizetendő foglalás nem lesz.", "Általános férőhelyes rendszer működik, számozott ülésrend nélkül."], list: ["Ha a Klavierhaus törli az eseményt, a teljes jegyár visszatérítésre kerül.", "Ha a Klavierhaus áthelyezi az eseményt, a jegy érvényes marad; visszatérítés az új kezdés előtt több mint 48 óráig kérhető.", "Ha a vásárló több mint 48 órával az esemény előtt mondja le, visszatérítés jár.", "Pontosan 48 órával vagy azon belül a vásárlói lemondás és a távolmaradás nem visszatéríthető.", "Részleges visszatérítés nincs.", "A jegy QR-kódja egyetlen sikeres beléptetésre használható."], note: "Ez a tervezet nem aktív értékesítési szerződés, és a jegyértékesítés indulása előtt jogi ellenőrzést igényel." }
+        { id: "terms-draft", type: "legal", title: "Elfogadott működési alapelvek", paragraphs: ["A nyilvános fizetős jegy kizárólag sikeres Stripe-fizetés után válik érvényessé. Készpénzes és helyszínen fizetendő foglalás nem lesz.", "Általános férőhelyes rendszer működik, számozott ülésrend nélkül."], list: ["Ha a Klavierhaus törli az eseményt, a teljes jegyár visszatérítésre kerül.", "Ha a Klavierhaus áthelyezi az eseményt, a jegy érvényes marad; visszatérítés az új kezdés előtt több mint 48 óráig kérhető.", "Ha a vásárló több mint 48 órával az esemény előtt mondja le, visszatérítés jár.", "Pontosan 48 órával vagy azon belül a vásárlói lemondás és a távolmaradás nem visszatéríthető.", "Részleges visszatérítés nincs.", "A jegy QR-kódja egyetlen sikeres beléptetésre használható."], note: "A Stripe Sandbox-tranzakciók nem mozgatnak valódi pénzt. Az éles jegyértékesítés előtt ez a tervezet jogi ellenőrzést igényel." }
       ]
     }
   })
