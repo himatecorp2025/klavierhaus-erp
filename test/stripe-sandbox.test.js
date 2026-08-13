@@ -52,6 +52,15 @@ function fakeStripe() {
 test("Stripe integration rejects live keys while Sandbox mode is enforced", () => {
   const { db, tempRoot } = createDatabase();
   assert.throws(() => createStripeSandbox({ db, secretKey: "sk_live_forbidden", webhookSecret: "whsec_test" }), /Live Stripe keys are not accepted/);
+  assert.throws(() => createStripeSandbox({ db, secretKey: "rk_live_forbidden", webhookSecret: "whsec_test" }), /Live Stripe keys are not accepted/);
+  const restrictedTestKey = createStripeSandbox({
+    db,
+    stripeClient: fakeStripe(),
+    secretKey: "rk_test_klavierhaus",
+    webhookSecret: "whsec_test"
+  });
+  assert.equal(restrictedTestKey.configuration().enabled, true);
+  assert.equal(restrictedTestKey.configuration().test_mode, true);
   db.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
