@@ -211,7 +211,7 @@ test("base URL normalization uses the actual Render host as safe fallback", () =
   assert.equal(normalizeBaseUrl("javascript:alert(1)"), "https://klavierhaus-home.onrender.com");
 });
 
-test("final luxury design contract keeps compact margins, safe titles, five-card desktop events and responsive inner scrolling", () => {
+test("final luxury design contract keeps compact margins, safe titles and five-three-one horizontal event navigation", () => {
   const websiteRoot = path.join(__dirname, "..");
   const css = fs.readFileSync(path.join(websiteRoot, "public", "design-v3.css"), "utf8");
   const browserSource = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
@@ -222,7 +222,10 @@ test("final luxury design contract keeps compact margins, safe titles, five-card
   assert.match(css, /@media\(max-width:760px\)/);
   assert.match(css, /word-break:keep-all!important/);
   assert.match(css, /border-radius:15px/);
-  assert.match(css, /overflow-y:auto/);
+  assert.match(css, /grid-auto-columns:calc\(\(100% - 2 \* var\(--kh-card-gap\)\)\/3\.2\)/);
+  assert.match(css, /grid-auto-columns:86%/);
+  assert.match(css, /overflow-x:auto/);
+  assert.match(css, /overflow-y:hidden/);
   assert.match(browserSource, /site-header\.is-hidden|classList\.add\("is-hidden"\)/);
   assert.match(browserSource, /data-ticket-quantity/);
   assert.match(browserSource, /data-review-carousel/);
@@ -233,4 +236,18 @@ test("final luxury design contract keeps compact margins, safe titles, five-card
   assert.match(serverSource, /renderServiceCollection/);
   assert.match(serverSource, /rel="canonical"/);
   assert.match(serverSource, /hreflang="x-default"/);
+});
+
+test("privacy copy matches the active enquiry forms and consent-gated measurement", async () => {
+  await withServer({ allowIndexing: false }, async (origin) => {
+    const english = await (await fetch(`${origin}/privacy`)).text();
+    const hungarian = await (await fetch(`${origin}/hu/adatkezeles`)).text();
+
+    assert.match(english, /Service enquiries and event-interest requests can be submitted/);
+    assert.match(english, /disabled until the visitor gives the corresponding consent/);
+    assert.doesNotMatch(english, /does not currently provide.*active contact form/);
+    assert.match(hungarian, /szolgáltatási érdeklődések és az események újraszervezésére vonatkozó kérések/);
+    assert.match(hungarian, /mindaddig kikapcsolva marad, amíg a látogató/);
+    assert.doesNotMatch(hungarian, /nincs.*aktív kapcsolatfelvételi űrlap/);
+  });
 });
