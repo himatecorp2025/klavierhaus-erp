@@ -45,6 +45,15 @@ function event(language = "en") {
   };
 }
 
+function showroomPianos(language = "en") {
+  const hu = language === "hu";
+  return [
+    { id: "PIANO-ST-B", slug: hu ? "steinway-b" : "steinway-model-b", alternate_slug: hu ? "steinway-model-b" : "steinway-b", brand: "Steinway & Sons", model: "Model B", title: hu ? "Steinway B-modell" : "Steinway Model B", summary: hu ? "New York-i koncertkarakter." : "A concert voice shaped in New York.", description: "", image_url: "https://images.example.com/steinway-b.jpg", image_alt: "Steinway Model B", availability_status: "AVAILABLE" },
+    { id: "PIANO-FA-212", slug: "fazioli-f212", alternate_slug: "fazioli-f212", brand: "Fazioli", model: "F212", title: "Fazioli F212", summary: hu ? "Olasz szín és tisztaság." : "Italian color and clarity.", description: "", image_url: "https://images.example.com/fazioli.jpg", image_alt: "Fazioli F212", availability_status: "AVAILABLE" },
+    { id: "PIANO-BO-214", slug: "bosendorfer-214vc", alternate_slug: "bosendorfer-214vc", brand: "Bösendorfer", model: "214VC", title: "Bösendorfer 214VC", summary: hu ? "Bécsi mélység és rezonancia." : "Viennese depth and resonance.", description: "", image_url: "https://images.example.com/bosendorfer.jpg", image_alt: "Bösendorfer 214VC", availability_status: "AVAILABLE" }
+  ];
+}
+
 function createFakeApi() {
   let invitationStatus = "PENDING";
   const calls = [];
@@ -64,6 +73,10 @@ function createFakeApi() {
       payload = { page_key: "events", language, source: "bundled", content: getPage("events", language) };
     } else if (parsed.pathname === "/api/public/website-content/home") {
       payload = { page_key: "home", language, source: "bundled", content: getPage("home", language) };
+    } else if (parsed.pathname === "/api/public/website-content/pianos") {
+      payload = { page_key: "pianos", language, source: "bundled", content: getPage("pianos", language) };
+    } else if (parsed.pathname === "/api/public/showroom-pianos") {
+      payload = showroomPianos(language);
     } else if (parsed.pathname === "/api/public/events") {
       payload = [event(language)];
     } else if (parsed.pathname.startsWith("/api/public/events/")) {
@@ -172,6 +185,26 @@ test("homepage places the nearest public events directly after the artistic intr
     assert.match(hungarian, /Arany szalonest/);
     assert.match(hungarian, /Összes esemény/);
     assert.doesNotMatch(hungarian, /Golden Salon Evening/);
+  });
+});
+
+test("showroom brand routes render filtered alternating instruments with canonical bilingual SEO", async () => {
+  const api = createFakeApi();
+  await withServer({ baseUrl: "https://klavierhaus.com", allowIndexing: true, eventApiBaseUrl: "https://erp.example.com", fetchImpl: api.fetchImpl }, async (origin) => {
+    const response = await fetch(`${origin}/pianos/steinway`);
+    const page = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(page, /Steinway Model B/);
+    assert.doesNotMatch(page, /Fazioli F212|Bösendorfer 214VC/);
+    assert.match(page, /class="piano-brand-instrument/);
+    assert.match(page, /rel="canonical" href="https:\/\/klavierhaus\.com\/pianos\/steinway"/);
+    assert.match(page, /hreflang="hu-HU" href="https:\/\/klavierhaus\.com\/hu\/zongorak\/steinway"/);
+    assert.match(page, /"@type":"ItemList"/);
+
+    const hungarian = await (await fetch(`${origin}/hu/zongorak/fazioli`)).text();
+    assert.match(hungarian, /Fazioli F212/);
+    assert.doesNotMatch(hungarian, /Steinway Model B|Bösendorfer 214VC/);
+    assert.match(hungarian, /A kiválasztás hallgatással kezdődik/);
   });
 });
 
