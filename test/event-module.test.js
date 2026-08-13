@@ -229,6 +229,20 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(publicHungarian.payload[0].title, "Privát szalonest");
   assert.equal(publicEnglish.payload[0].capacity_remaining, 2);
 
+  const workerCalendar = await request(baseUrl, "/api/calendar-events?from=2031-04-10T00:00&to=2031-04-11T00:00", { token: workerToken });
+  assert.equal(workerCalendar.status, 200, JSON.stringify(workerCalendar.payload));
+  assert.equal(workerCalendar.payload.length, 1);
+  assert.equal(workerCalendar.payload[0].calendar_entry_type, "KLAVIERHAUS_EVENT");
+  assert.equal(workerCalendar.payload[0].event_id, eventId);
+  assert.equal(workerCalendar.payload[0].google_sync_disabled, true);
+  assert.equal(Object.hasOwn(workerCalendar.payload[0], "assigned_to"), false, "a cultural event must never become a worker job");
+  const workerCalendarDetails = await request(baseUrl, `/api/calendar-events/${eventId}`, { token: workerToken });
+  assert.equal(workerCalendarDetails.status, 200);
+  assert.equal(workerCalendarDetails.payload.can_manage, false);
+  assert.equal(workerCalendarDetails.payload.google_sync_disabled, true);
+  const adminCalendarDetails = await request(baseUrl, `/api/calendar-events/${eventId}`, { token: adminToken });
+  assert.equal(adminCalendarDetails.payload.can_manage, true);
+
   const editedPublished = await request(baseUrl, `/api/events/${eventId}`, {
     token: adminToken,
     method: "PUT",
