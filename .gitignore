@@ -1,0 +1,16 @@
+node_modules/
+website/node_modules/
+.env
+.env.*
+!.env.example
+website/.env
+server/db/
+server/uploads/
+server/backups/
+uploads/
+backups/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+.DS_Store
