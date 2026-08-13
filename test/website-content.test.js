@@ -23,6 +23,17 @@ async function withContentServer(callback) {
       PRIMARY KEY(page_key, language),
       FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
+    CREATE TABLE website_content_versions (
+      id TEXT PRIMARY KEY,page_key TEXT NOT NULL,language TEXT NOT NULL,version INTEGER NOT NULL,
+      content_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'DRAFT',created_by_user_id TEXT,
+      published_by_user_id TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,published_at TEXT,
+      UNIQUE(page_key,language,version)
+    );
+    CREATE TABLE website_preview_tokens (
+      token_hash TEXT PRIMARY KEY,version_id TEXT NOT NULL,expires_at TEXT NOT NULL,
+      created_by_user_id TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(version_id) REFERENCES website_content_versions(id) ON DELETE CASCADE
+    );
     INSERT INTO users(id,name) VALUES('ADMIN-1','Website Admin');
   `);
   const auditCalls = [];
@@ -74,6 +85,7 @@ test("Landing Page Design content is atomically published and immediately expose
     assert.equal(publicCopy.content.seo.title, "Edited Klavierhaus SEO title");
     assert.equal(publicCopy.content.sections.find((section) => section.id === "testimonial").quote, "An edited review from the design console.");
     assert.equal(db.prepare("SELECT COUNT(*) count FROM website_content_pages").get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM website_content_versions").get().count, 1);
     assert.equal(auditCalls.length, 1);
 
     const resaved = await fetch(`${origin}/api/website-content/home`, {
@@ -83,6 +95,24 @@ test("Landing Page Design content is atomically published and immediately expose
     });
     assert.equal(resaved.status, 200);
     assert.equal((await resaved.json()).version, 2);
+
+    const versions = await (await fetch(`${origin}/api/website-content/home/versions?lang=en`)).json();
+    assert.equal(versions.length, 2);
+    assert.equal(versions[0].status, "PUBLISHED");
+    assert.equal(versions[1].status, "ARCHIVED");
+    const restoredResponse = await fetch(`${origin}/api/website-content/home/versions/${versions[1].id}/restore`, { method: "POST" });
+    assert.equal(restoredResponse.status, 201);
+    const restored = await restoredResponse.json();
+    assert.equal(restored.status, "DRAFT");
+    assert.equal(restored.version, 3);
+    const previewResponse = await fetch(`${origin}/api/website-content/home/versions/${restored.id}/preview-link`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hours: 1 })
+    });
+    assert.equal(previewResponse.status, 201);
+    const preview = await previewResponse.json();
+    const previewApi = await fetch(preview.api_url.replace("https://klavierhaus-erp.onrender.com", origin));
+    assert.equal(previewApi.status, 200);
+    assert.match(previewApi.headers.get("x-robots-tag"), /noindex/);
 
     const global = fallbackPage("global", "en");
     global.eventLabels.homeTitle = "An editable event-stage title.";
@@ -99,6 +129,10 @@ test("Landing Page Design content is atomically published and immediately expose
     assert.equal(savedGlobal.content.eventLabels.buyTickets, "Secure admission");
     assert.equal(savedGlobal.content.brand.wordmark, "EDITABLE KLAVIERHAUS");
     assert.equal(savedGlobal.content.brand.logoImage, "https://cdn.example.com/edited-logo.png");
+    db.prepare("UPDATE website_content_pages SET content_json=? WHERE page_key='global' AND language='en'")
+      .run(JSON.stringify({ ...savedGlobal.content, collectionLabels: undefined }));
+    const upgradedGlobal = await (await fetch(`${origin}/api/public/website-content/global?lang=en`)).json();
+    assert.equal(upgradedGlobal.content.collectionLabels.showroomDiscover, "Discover the instruments", "new editable defaults must merge into previously published content without overwriting it");
     assert.equal(db.prepare("SELECT COUNT(*) count FROM website_content_pages").get().count, 2);
     assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
     assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
