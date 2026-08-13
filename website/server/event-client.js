@@ -62,6 +62,9 @@ function createEventClient(options = {}) {
     detail(slug, language) {
       return request(`/api/public/events/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
+    content(pageKey, language) {
+      return request(`/api/public/website-content/${encodeURIComponent(pageKey)}?lang=${language === "hu" ? "hu" : "en"}`);
+    },
     createCheckout(slug, language, quantity) {
       return request(`/api/public/events/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
