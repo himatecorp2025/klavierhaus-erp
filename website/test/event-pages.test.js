@@ -35,6 +35,10 @@ function event(language = "en") {
     capacity_total: 40,
     capacity_remaining: 12,
     sold_out: false,
+    checkout_available: true,
+    reservation_available: false,
+    stripe_test_mode: true,
+    hold_minutes: 15,
     price_cents: 12500,
     currency: "USD"
   };
@@ -49,7 +53,11 @@ function createFakeApi() {
     const language = parsed.searchParams.get("lang") === "hu" ? "hu" : "en";
     let status = 200;
     let payload;
-    if (parsed.pathname === "/api/public/events") {
+    if (parsed.pathname.endsWith("/checkout")) {
+      payload = { checkout_url: "https://checkout.stripe.com/c/pay/test", checkout_session_id: "cs_test_1", test_mode: true };
+    } else if (parsed.pathname.endsWith("/reservations")) {
+      payload = { ok: true, tickets: [{ ticket_code: "TEST-1" }] };
+    } else if (parsed.pathname === "/api/public/events") {
       payload = [event(language)];
     } else if (parsed.pathname.startsWith("/api/public/events/")) {
       const expected = language === "hu" ? "arany-szalonest" : "golden-salon-evening";
@@ -96,6 +104,7 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     assert.match(englishList, /public-event-card__actions/);
     assert.match(englishList, /View details/);
     assert.match(englishList, /Buy tickets/);
+    assert.match(englishList, /TEST MODE/);
     assert.doesNotMatch(englishList, /Arany szalonest/);
     assert.match(hungarianList, /Arany szalonest/);
     assert.doesNotMatch(hungarianList, /Golden Salon Evening/);
@@ -108,6 +117,8 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     assert.match(detail, /"@type":"Event"/);
     assert.match(detail, /"startDate":"2031-04-10T23:00:00.000Z"/);
     assert.match(detail, /790 11th Avenue/);
+    assert.match(detail, /Continue to secure test checkout/);
+    assert.match(detail, /"@type":"Offer"/);
     assert.doesNotMatch(detail, /Meghitt zongoraest/);
 
     const sitemap = await (await fetch(`${origin}/sitemap.xml`)).text();
@@ -115,10 +126,21 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     assert.match(sitemap, /https:\/\/klavierhaus\.com\/hu\/esemenyek\/arany-szalonest/);
     assert.doesNotMatch(sitemap, /invitation|meghivas/);
     assert.doesNotMatch(sitemap, /klavierhaus-salon|klavierhaus-szalon/);
+
+    const checkout = await fetch(`${origin}/events/golden-salon-evening/checkout`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "quantity=2"
+    });
+    assert.equal(checkout.status, 303);
+    assert.equal(checkout.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+    const checkoutCall = api.calls.find((call) => call.url.endsWith("/checkout"));
+    assert.deepEqual(JSON.parse(checkoutCall.options.body), { language: "en", quantity: 2 });
   });
 });
 
-test("homepage places the nearest public events in a bilingual two-column editorial stream", async () => {
+test("homepage places the nearest public events in a bilingual three-column editorial stream", async () => {
   const api = createFakeApi();
   await withServer({
     baseUrl: "https://klavierhaus.com",
