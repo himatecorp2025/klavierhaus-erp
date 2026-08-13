@@ -70,10 +70,7 @@ document.querySelectorAll("[data-event-carousel]").forEach((carousel) => {
   const controls = carousel.parentElement?.querySelector(".event-carousel__controls");
   if (!track || !controls) return;
   const move = (direction) => {
-    const vertical = window.matchMedia("(max-width: 1100px)").matches;
-    track.scrollBy(vertical
-      ? { top: direction * Math.max(320, track.clientHeight * 0.85), behavior: reducedMotion ? "auto" : "smooth" }
-      : { left: direction * Math.max(280, track.clientWidth * 0.82), behavior: reducedMotion ? "auto" : "smooth" });
+    track.scrollBy({ left: direction * Math.max(280, track.clientWidth * 0.82), behavior: reducedMotion ? "auto" : "smooth" });
   };
   controls.querySelector("[data-event-carousel-previous]")?.addEventListener("click", () => move(-1));
   controls.querySelector("[data-event-carousel-next]")?.addEventListener("click", () => move(1));
@@ -138,3 +135,159 @@ if (reducedMotion || !("IntersectionObserver" in window)) {
 
   revealElements.forEach((element) => observer.observe(element));
 }
+
+const language = document.documentElement.lang === "hu" ? "hu" : "en";
+const privacyKey = "klavierhaus_privacy_v1";
+const deviceKey = "klavierhaus_device_v1";
+const consentBanner = document.querySelector("[data-consent-banner]");
+const consentDialog = document.querySelector("[data-consent-dialog]");
+
+function readPrivacyChoice() {
+  try { return JSON.parse(localStorage.getItem(privacyKey) || "null"); } catch (_error) { return null; }
+}
+
+function loadExternalScript(source, attributes = {}) {
+  if (document.querySelector(`script[data-consent-source="${source}"]`)) return;
+  const script = document.createElement("script");
+  script.src = source;
+  script.async = true;
+  script.dataset.consentSource = source;
+  Object.entries(attributes).forEach(([key, value]) => script.setAttribute(key, value));
+  document.head.append(script);
+}
+
+async function applyTrackingConsent(choice) {
+  if (!choice?.analytics) return;
+  try {
+    const response = await fetch("/api/site/tracking-config", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const config = await response.json();
+    if (config.ga4_measurement_id) {
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
+      window.gtag("js", new Date());
+      window.gtag("config", config.ga4_measurement_id, { anonymize_ip: true });
+      loadExternalScript(`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(config.ga4_measurement_id)}`);
+    }
+    if (config.clarity_project_id && choice.marketing) {
+      window.clarity = window.clarity || function clarity() { (window.clarity.q = window.clarity.q || []).push(arguments); };
+      loadExternalScript(`https://www.clarity.ms/tag/${encodeURIComponent(config.clarity_project_id)}`);
+    }
+  } catch (_error) {
+    // Measurement is optional and must never block the public experience.
+  }
+}
+
+function savePrivacyChoice(choice) {
+  const value = { essential: true, analytics: Boolean(choice.analytics), marketing: Boolean(choice.marketing), saved_at: new Date().toISOString() };
+  localStorage.setItem(privacyKey, JSON.stringify(value));
+  if (consentBanner) consentBanner.hidden = true;
+  applyTrackingConsent(value);
+}
+
+const initialPrivacyChoice = readPrivacyChoice();
+if (consentBanner) consentBanner.hidden = Boolean(initialPrivacyChoice);
+if (initialPrivacyChoice) applyTrackingConsent(initialPrivacyChoice);
+document.querySelector("[data-consent-essential]")?.addEventListener("click", () => savePrivacyChoice({ analytics: false, marketing: false }));
+document.querySelector("[data-consent-all]")?.addEventListener("click", () => savePrivacyChoice({ analytics: true, marketing: true }));
+document.querySelectorAll("[data-consent-settings], [data-privacy-settings]").forEach((button) => button.addEventListener("click", () => {
+  const current = readPrivacyChoice();
+  if (consentDialog) {
+    consentDialog.querySelector("[data-consent-analytics]").checked = Boolean(current?.analytics);
+    consentDialog.querySelector("[data-consent-marketing]").checked = Boolean(current?.marketing);
+    consentDialog.showModal();
+  }
+}));
+document.querySelector("[data-consent-save]")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  savePrivacyChoice({
+    analytics: consentDialog?.querySelector("[data-consent-analytics]")?.checked,
+    marketing: consentDialog?.querySelector("[data-consent-marketing]")?.checked
+  });
+  consentDialog?.close();
+});
+
+async function getDeviceToken() {
+  const stored = localStorage.getItem(deviceKey);
+  if (stored) return stored;
+  const response = await fetch("/api/site/device-token", { credentials: "same-origin" });
+  if (!response.ok) throw new Error("DEVICE_TOKEN_FAILED");
+  const payload = await response.json();
+  localStorage.setItem(deviceKey, payload.device_token);
+  return payload.device_token;
+}
+
+async function recordFirstPartyEvent(eventName, metadata = {}) {
+  const choice = readPrivacyChoice();
+  if (!choice?.analytics) return;
+  try {
+    await fetch("/api/site/track", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_name: eventName, metadata, source_path: location.pathname, language, device_token: await getDeviceToken(), analytics_consent: true, marketing_consent: Boolean(choice.marketing) })
+    });
+  } catch (_error) { /* Optional analytics must fail silently. */ }
+}
+
+const serviceDialog = document.querySelector("[data-service-dialog]");
+document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
+  if (!serviceDialog) return;
+  serviceDialog.querySelector('[name="service_id"]').value = button.dataset.serviceId || "";
+  serviceDialog.querySelector("[data-service-title]").textContent = button.dataset.serviceTitle || "";
+  serviceDialog.showModal();
+  recordFirstPartyEvent("service_enquiry_open", { service_id: button.dataset.serviceId || "" });
+}));
+document.querySelector("[data-service-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const result = form.querySelector("[data-service-result]");
+  const values = Object.fromEntries(new FormData(form).entries());
+  values.consent_contact = form.elements.consent_contact.checked;
+  values.consent_marketing = form.elements.consent_marketing.checked;
+  values.language = language;
+  values.source_path = location.pathname;
+  if (result) result.textContent = language === "hu" ? "Küldés…" : "Sending…";
+  try {
+    const response = await fetch("/api/site/contact-leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+    if (!response.ok) throw new Error("LEAD_FAILED");
+    if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan személyesen jelentkezünk." : "Thank you. We will contact you personally shortly.";
+    recordFirstPartyEvent("service_enquiry_submit", { service_id: values.service_id || "" });
+    form.reset();
+  } catch (_error) {
+    if (result) result.textContent = language === "hu" ? "A küldés nem sikerült. Kérjük, próbálja újra." : "We could not send your request. Please try again.";
+  }
+});
+
+const interestDialog = document.querySelector("[data-interest-dialog]");
+document.querySelectorAll("[data-interest-open]").forEach((button) => button.addEventListener("click", () => {
+  if (!interestDialog) return;
+  interestDialog.querySelector('[name="event_id"]').value = button.dataset.eventId || "";
+  interestDialog.querySelector("[data-interest-title]").textContent = button.dataset.eventTitle || "";
+  interestDialog.showModal();
+  recordFirstPartyEvent("event_repeat_interest_open", { event_id: button.dataset.eventId || "" });
+}));
+document.querySelector("[data-interest-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const result = form.querySelector("[data-interest-result]");
+  const eventId = form.elements.event_id.value;
+  if (result) result.textContent = language === "hu" ? "Rögzítés…" : "Saving…";
+  try {
+    const payload = {
+      email: form.elements.email.value, notify_event: form.elements.notify_event.checked,
+      marketing_consent: form.elements.marketing_consent.checked, language,
+      source_path: location.pathname, device_token: await getDeviceToken()
+    };
+    const response = await fetch(`/api/site/events/${encodeURIComponent(eventId)}/repeat-interest`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (response.status === 409) {
+      if (result) result.textContent = language === "hu" ? "Ezt az érdeklődést már rögzítettük ezen az eszközön." : "This request is already recorded for this device.";
+      return;
+    }
+    if (!response.ok) throw new Error("INTEREST_FAILED");
+    if (result) result.textContent = language === "hu" ? "Köszönjük. Értesítjük a következő alkalomról." : "Thank you. We will notify you about the next edition.";
+    recordFirstPartyEvent("event_repeat_interest_submit", { event_id: eventId });
+  } catch (_error) {
+    if (result) result.textContent = language === "hu" ? "A rögzítés nem sikerült. Kérjük, próbálja újra." : "We could not save your request. Please try again.";
+  }
+});
+
+document.querySelectorAll("[data-track-event]").forEach((element) => element.addEventListener("click", () => recordFirstPartyEvent(element.dataset.trackEvent, { id: element.dataset.trackId || "" })));
