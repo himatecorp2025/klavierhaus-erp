@@ -14,6 +14,7 @@ const { createGoogleCalendarIntegration } = require("./google-calendar");
 const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
 const { registerEventRoutes } = require("./events");
+const { createStripeSandbox } = require("./stripe-sandbox");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -48,6 +49,7 @@ db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
+const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -198,6 +200,7 @@ const upload=createDocumentUpload(UPLOAD_DIR);
 
 app.use(cors());
 app.use(compression({threshold:1024}));
+app.post('/api/webhooks/stripe',express.raw({type:'application/json',limit:'1mb'}),(req,res)=>stripeSandbox.handleWebhook(req,res));
 app.post('/api/webhooks/resend',express.raw({type:'application/json',limit:'1mb'}),(req,res)=>{
   try{
     const payload=Buffer.isBuffer(req.body)?req.body.toString('utf8'):String(req.body||'');
@@ -257,11 +260,14 @@ app.use(express.static(path.join(__dirname, "..", "public"),{
     if(/(?:index\.html|service-worker\.js|app\.js|styles\.css)$/i.test(filePath))res.setHeader("Cache-Control","no-cache");
   }
 }));
-// Global protection: only superadmin may call DELETE endpoints.
+// Global protection: only superadmin may call DELETE endpoints. The single
+// event-record route applies its stricter business rules itself: an admin may
+// delete only an event with no retained booking/payment history.
 app.use('/api',(req,res,next)=>{
   if(req.method!=='DELETE') return next();
   const h=req.headers.authorization||'';
   try{req.user=req.user||jwt.verify(h.startsWith('Bearer ')?h.slice(7):'',JWT_SECRET);}catch(e){return res.status(401).json({error:'AUTH_REQUIRED'});}
+  if(/^\/events\/[^/]+$/.test(req.path)) return next();
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'PERMISSION_DENIED'});
   next();
 });
@@ -673,8 +679,12 @@ registerEventRoutes({
   eventImageDir:EVENT_IMAGE_DIR,
   qrSecret:process.env.EVENT_QR_SECRET||JWT_SECRET,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
-  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
+  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
+  stripeSandbox
 });
+setInterval(()=>{
+  try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
+},60*1000).unref();
 function resolveActiveUser(userId, userName){
   if(userId){const byId=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(userId);if(byId)return byId;}
   if(userName){return db.prepare("SELECT id,name FROM users WHERE lower(trim(name))=lower(trim(?)) AND status='Active' LIMIT 1").get(userName)||null;}
