@@ -322,9 +322,17 @@ function runMigrations() {
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
+    ensureColumn("event_checkout_holds", "attendee_names_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn("website_reviews", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("website_showroom_pianos", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("website_services", "is_sample", "INTEGER DEFAULT 0");
+    ensureColumn("website_contact_leads", "piano_brand", "TEXT");
+    ensureColumn("website_contact_leads", "piano_model", "TEXT");
+    ensureColumn("website_contact_leads", "service_address", "TEXT");
+    ensureColumn("website_contact_leads", "preferred_time", "TEXT");
+    ensureColumn("website_contact_leads", "event_date", "TEXT");
+    ensureColumn("website_contact_leads", "event_venue", "TEXT");
+    ensureColumn("website_contact_leads", "instrument_requirements", "TEXT");
     ensureColumn("event_repeat_requests", "notified_at", "TEXT");
     ensureColumn("event_repeat_requests", "notification_event_id", "TEXT");
     ensureColumn("event_repeat_requests", "delivery_status", "TEXT");
