@@ -7,6 +7,7 @@ const path = require("node:path");
 const express = require("express");
 const Database = require("better-sqlite3");
 const { registerWebsitePlatformRoutes } = require("../server/website-platform");
+const { registerWebsiteCatalogRoutes } = require("../server/website-catalog");
 
 async function withPlatform(callback) {
   const app = express();
@@ -26,6 +27,7 @@ async function withPlatform(callback) {
     erpBaseUrl: "https://erp.example.com", websiteBaseUrl: "https://www.example.com", transactionalEmail: { configured: false },
     env: { JWT_SECRET: "website-platform-test-secret-longer-than-thirty-two" }
   });
+  registerWebsiteCatalogRoutes({ app, db, auth, permit: () => (_req, _res, next) => next(), audit: () => {}, erpBaseUrl: "https://erp.example.com" });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -48,6 +50,17 @@ test("website platform installs editable sample content once and publishes artis
     const artists = await request("/api/public/website-artists?lang=hu");
     assert.equal(artists.body.length, 3);
     assert.equal(artists.body[0].portrait_url.startsWith("https://www.example.com/assets/media/"), true, "bundled sample media must resolve on both the public site and ERP administration");
+    const services = await request("/api/public/website-services?lang=en");
+    const pianos = await request("/api/public/showroom-pianos?lang=en");
+    const reviews = await request("/api/public/website-reviews?lang=en");
+    assert.equal(services.status, 200);
+    assert.equal(services.body.length, 3, "all sample services must be public");
+    assert.equal(pianos.status, 200);
+    assert.equal(pianos.body.length, 6, "all sample showroom pianos must be public");
+    assert.deepEqual([...new Set(pianos.body.map((piano) => piano.brand))].sort(), ["Bösendorfer", "Fazioli", "Steinway & Sons"]);
+    assert.equal(reviews.status, 200);
+    assert.equal(reviews.body.length, 3, "all sample reviews must be public");
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM events WHERE is_sample=1 AND status='PUBLISHED' AND published_at IS NOT NULL").get().count, 3, "sample events must be published for the public event API");
     assert.equal(db.prepare("SELECT COUNT(*) count FROM pianos").get().count, 1, "sample showroom content must not touch customer pianos");
     const removed = await request("/api/demo-content", { method: "DELETE", headers: { "x-test-super": "1" } });
     assert.equal(removed.status, 200, JSON.stringify(removed.body));
@@ -63,6 +76,11 @@ test("contact leads, signed-device event interest, consent tracking and integrat
     assert.equal(invalidLead.status, 400);
     const lead = await request("/api/public/contact-leads", { method: "POST", body: JSON.stringify({ name: "Guest", email: "guest@example.com", consent_contact: true, service_id: null }) });
     assert.equal(lead.status, 201);
+    db.prepare(`INSERT INTO website_services(id,slug_en,slug_hu,title_en,title_hu,image_url,visible) VALUES('SERVICE-1','restoration','restauralas','Restoration','Restaurálás','/image.jpg',1)`).run();
+    assert.equal((await request("/api/public/contact-leads", { method: "POST", body: JSON.stringify({ name: "Piano Owner", email: "owner@example.com", consent_contact: true, service_id: "SERVICE-1" }) })).status, 400);
+    const serviceLead = await request("/api/public/contact-leads", { method: "POST", body: JSON.stringify({ name: "Piano Owner", email: "owner@example.com", phone: "+1 212 555 0100", service_id: "SERVICE-1", service_address: "790 11th Avenue, New York", piano_brand: "Steinway & Sons", piano_model: "Model B", consent_contact: true }) });
+    assert.equal(serviceLead.status, 201);
+    assert.equal(db.prepare("SELECT service_address FROM website_contact_leads WHERE id=?").get(serviceLead.body.id).service_address, "790 11th Avenue, New York");
     const device = await request("/api/public/device-token");
     const interest = await request("/api/public/events/EV-1/repeat-interest", { method: "POST", body: JSON.stringify({ email: "Guest@Example.com", device_token: device.body.device_token, notify_event: true, marketing_consent: false, language: "hu" }) });
     assert.equal(interest.status, 201, JSON.stringify(interest.body));
