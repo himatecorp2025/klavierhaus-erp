@@ -139,6 +139,8 @@ const globalCopy = Object.freeze({
       testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
       quantity: "Number of tickets",
       attendeeName: "Full name",
+      attendeeNames: "Guest names",
+      guestNumber: "Guest",
       attendeeEmail: "Email address",
       continueToCheckout: "Continue to secure test checkout",
       reservationSubmit: "Confirm complimentary reservation",
@@ -267,6 +269,8 @@ const globalCopy = Object.freeze({
       testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
       quantity: "Jegyek száma",
       attendeeName: "Teljes név",
+      attendeeNames: "Vendégek neve",
+      guestNumber: "Vendég",
       attendeeEmail: "E-mail-cím",
       continueToCheckout: "Tovább a biztonságos tesztfizetéshez",
       reservationSubmit: "Díjmentes helyfoglalás megerősítése",
@@ -316,8 +320,8 @@ const pages = Object.freeze({
         lead: "Exceptional pianos, artists, and intimate cultural encounters—shaped for those who still believe listening can change a room.",
         image: shared.heroImage,
         imageAlt: "A concert grand piano in an intimate, dark New York salon",
-        primary: { label: "Enter the world of Klavierhaus", key: "mission" },
-        secondary: { label: "Arrange a private visit", key: "consultation" }
+        primary: { label: "Enter the world of Klavierhaus", key: "events" },
+        secondary: { label: "Arrange a private visit", key: "services" }
       },
       sections: [
         {
@@ -545,7 +549,7 @@ const pages = Object.freeze({
       seo: { title: "Ticket & Refund Terms | Klavierhaus", description: "Development draft of the Klavierhaus event ticket and refund rules." },
       hero: { eyebrow: "Legal", title: "Ticket and refund terms", lead: "Development draft reflecting the agreed event rules. Checkout is available only in Stripe Sandbox test mode." },
       sections: [
-        { id: "terms-draft", type: "legal", title: "Agreed operating principles", paragraphs: ["Public paid tickets will become valid only after a successful Stripe payment. Cash and pay-at-the-door reservations are excluded.", "General admission capacity applies; there is no numbered seating plan."], list: ["If Klavierhaus cancels an event, the ticket price is refunded in full.", "If Klavierhaus reschedules an event, the ticket remains valid; a refund may be requested until more than 48 hours before the new start time.", "If the purchaser cancels more than 48 hours before the event, a refund is available.", "At exactly 48 hours or less before the event, purchaser cancellation and non-attendance are not refundable.", "Partial refunds are not offered.", "A ticket QR code permits one successful admission."], note: "Stripe Sandbox transactions do not move real money. This draft must receive legal review before live ticket sales are enabled." }
+        { id: "terms-draft", type: "legal", title: "Agreed operating principles", paragraphs: ["Public paid tickets will become valid only after a successful Stripe payment. Cash and pay-at-the-door reservations are excluded.", "General admission capacity applies; there is no numbered seating plan."], list: ["If Klavierhaus cancels an event, the ticket price is refunded in full.", "If Klavierhaus reschedules an event, the ticket remains valid; a refund may be requested until more than 48 hours before the new start time.", "If the purchaser cancels more than 48 hours before the event, a refund is available.", "At exactly 48 hours or less before the event, purchaser cancellation and non-attendance are not refundable.", "Partial refunds are not offered.", "Admission is managed from the protected guest list."], note: "Stripe Sandbox transactions do not move real money. This draft must receive legal review before live ticket sales are enabled." }
       ]
     }
   }),
@@ -562,8 +566,8 @@ const pages = Object.freeze({
         lead: "Kivételes zongorák, művészek és bensőséges kulturális találkozások azok számára, akik szerint a valódi figyelem egy egész termet képes megváltoztatni.",
         image: shared.heroImage,
         imageAlt: "Koncertzongora egy bensőséges, sötét New York-i szalonban",
-        primary: { label: "Belépés a Klavierhaus világába", key: "mission" },
-        secondary: { label: "Privát látogatás egyeztetése", key: "consultation" }
+        primary: { label: "Belépés a Klavierhaus világába", key: "events" },
+        secondary: { label: "Privát látogatás egyeztetése", key: "services" }
       },
       sections: [
         { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], image: shared.salonImage, imageAlt: "Zongoraművész és közönsége egy meghitt Klavierhaus eseményen", link: { label: "Történetünk", key: "story" } },
@@ -732,7 +736,7 @@ const pages = Object.freeze({
       seo: { title: "Jegyvásárlási és visszatérítési feltételek | Klavierhaus", description: "A Klavierhaus eseményjegyekre és visszatérítésre vonatkozó fejlesztési szabálytervezete." },
       hero: { eyebrow: "Jogi információk", title: "Jegyvásárlási és visszatérítési feltételek", lead: "A megállapodott eseményszabályokat tükröző fejlesztési tervezet. A fizetési folyamat kizárólag Stripe Sandbox tesztüzemben érhető el." },
       sections: [
-        { id: "terms-draft", type: "legal", title: "Elfogadott működési alapelvek", paragraphs: ["A nyilvános fizetős jegy kizárólag sikeres Stripe-fizetés után válik érvényessé. Készpénzes és helyszínen fizetendő foglalás nem lesz.", "Általános férőhelyes rendszer működik, számozott ülésrend nélkül."], list: ["Ha a Klavierhaus törli az eseményt, a teljes jegyár visszatérítésre kerül.", "Ha a Klavierhaus áthelyezi az eseményt, a jegy érvényes marad; visszatérítés az új kezdés előtt több mint 48 óráig kérhető.", "Ha a vásárló több mint 48 órával az esemény előtt mondja le, visszatérítés jár.", "Pontosan 48 órával vagy azon belül a vásárlói lemondás és a távolmaradás nem visszatéríthető.", "Részleges visszatérítés nincs.", "A jegy QR-kódja egyetlen sikeres beléptetésre használható."], note: "A Stripe Sandbox-tranzakciók nem mozgatnak valódi pénzt. Az éles jegyértékesítés előtt ez a tervezet jogi ellenőrzést igényel." }
+        { id: "terms-draft", type: "legal", title: "Elfogadott működési alapelvek", paragraphs: ["A nyilvános fizetős jegy kizárólag sikeres Stripe-fizetés után válik érvényessé. Készpénzes és helyszínen fizetendő foglalás nem lesz.", "Általános férőhelyes rendszer működik, számozott ülésrend nélkül."], list: ["Ha a Klavierhaus törli az eseményt, a teljes jegyár visszatérítésre kerül.", "Ha a Klavierhaus áthelyezi az eseményt, a jegy érvényes marad; visszatérítés az új kezdés előtt több mint 48 óráig kérhető.", "Ha a vásárló több mint 48 órával az esemény előtt mondja le, visszatérítés jár.", "Pontosan 48 órával vagy azon belül a vásárlói lemondás és a távolmaradás nem visszatéríthető.", "Részleges visszatérítés nincs.", "A beléptetés a védett vendéglista alapján történik."], note: "A Stripe Sandbox-tranzakciók nem mozgatnak valódi pénzt. Az éles jegyértékesítés előtt ez a tervezet jogi ellenőrzést igényel." }
       ]
     }
   })
