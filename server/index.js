@@ -65,7 +65,7 @@ const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
     WORKER:[...commonView]
   };
@@ -684,7 +684,6 @@ registerEventRoutes({
   transactionalEmail,
   eventImageUpload,
   eventImageDir:EVENT_IMAGE_DIR,
-  qrSecret:process.env.EVENT_QR_SECRET||JWT_SECRET,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   stripeSandbox
@@ -2289,7 +2288,7 @@ app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{co
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
-  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'];
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
@@ -2395,7 +2394,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.checkin','events.refunds'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
         WORKER:[...commonView]
       };
