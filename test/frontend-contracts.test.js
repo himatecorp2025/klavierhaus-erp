@@ -59,8 +59,8 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(eventSource, /Nyilvános, meghívásos és belső kulturális programok/);
   assert.match(eventSource, /createEventInvitation/);
   assert.match(eventSource, /createComplimentaryTicket/);
-  assert.match(eventSource, /submitEventCheckIn/);
-  assert.match(eventSource, /revertEventCheckIn/);
+  assert.match(eventSource, /downloadGuestListPdf/);
+  assert.doesNotMatch(eventSource, /submitEventCheckIn|revertEventCheckIn|openEventQr/);
   assert.match(eventSource, /resolveEventRefund/);
   assert.match(eventSource, /closeEventRecord/);
   assert.match(eventSource, /deleteEventRecord/);
