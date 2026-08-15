@@ -79,7 +79,30 @@ document.querySelectorAll("[data-event-carousel]").forEach((carousel) => {
 document.querySelectorAll("[data-ticket-quantity]").forEach((control) => {
   const input = control.querySelector('input[name="quantity"]');
   const output = control.querySelector("[data-ticket-total]");
+  const attendeeContainer = control.closest("form")?.querySelector("[data-attendee-names]");
   if (!input) return;
+  const syncAttendeeNames = () => {
+    if (!attendeeContainer) return;
+    const count = Number(input.value || 1);
+    const previousValues = [...attendeeContainer.querySelectorAll('input[name="attendee_names"]')].map((field) => field.value);
+    const labelText = attendeeContainer.dataset.attendeeLabel || "Guest";
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < count; index += 1) {
+      const label = document.createElement("label");
+      const title = document.createElement("span");
+      const field = document.createElement("input");
+      title.textContent = `${labelText} ${index + 1}`;
+      field.name = "attendee_names";
+      field.type = "text";
+      field.maxLength = 200;
+      field.autocomplete = index === 0 ? "name" : "off";
+      field.required = true;
+      field.value = previousValues[index] || "";
+      label.append(title, field);
+      fragment.append(label);
+    }
+    attendeeContainer.replaceChildren(attendeeContainer.querySelector("legend"), fragment);
+  };
   const clamp = (value) => Math.max(Number(input.min || 1), Math.min(Number(input.max || Number.MAX_SAFE_INTEGER), Math.trunc(Number(value) || 1)));
   const update = (value) => {
     input.value = String(clamp(value));
@@ -89,6 +112,7 @@ document.querySelectorAll("[data-ticket-quantity]").forEach((control) => {
       const label = output.querySelector("small")?.textContent || "";
       output.innerHTML = `<small>${label}</small> ${formatted}`;
     }
+    syncAttendeeNames();
   };
   control.querySelector("[data-quantity-minus]")?.addEventListener("click", () => update(Number(input.value) - 1));
   control.querySelector("[data-quantity-plus]")?.addEventListener("click", () => update(Number(input.value) + 1));
@@ -233,6 +257,10 @@ document.querySelectorAll("[data-service-request]").forEach((button) => button.a
   if (!serviceDialog) return;
   serviceDialog.querySelector('[name="service_id"]').value = button.dataset.serviceId || "";
   serviceDialog.querySelector("[data-service-title]").textContent = button.dataset.serviceTitle || "";
+  const image = serviceDialog.querySelector("[data-service-image]");
+  if (image) { image.src = button.dataset.serviceImage || ""; image.alt = button.dataset.serviceTitle || "Klavierhaus service"; image.hidden = !button.dataset.serviceImage; }
+  const concertService = /concert|koncert/i.test(button.dataset.serviceTitle || "");
+  serviceDialog.querySelectorAll("[data-concert-field]").forEach((field) => { field.hidden = !concertService; });
   serviceDialog.showModal();
   recordFirstPartyEvent("service_enquiry_open", { service_id: button.dataset.serviceId || "" });
 }));
