@@ -115,12 +115,20 @@ function createStripeSandbox(options = {}) {
     return Math.max(0, Number(event.capacity_total || 0) - eventTicketCount(event.id) - activeHoldCount(event.id, now));
   }
 
-  async function createCheckout({ event, language = "en", quantity = 1 }) {
+  async function createCheckout({ event, language = "en", quantity = 1, attendeeNames = [] }) {
     requireConfigured();
     expireStaleHolds();
     const count = Number(quantity);
     if (!Number.isInteger(count) || count < 1 || count > Number(event.capacity_total || 0)) {
       const error = new Error("INVALID_TICKET_QUANTITY");
+      error.status = 400;
+      throw error;
+    }
+    const names = (Array.isArray(attendeeNames) ? attendeeNames : [attendeeNames])
+      .map((name) => cleanText(name, 200))
+      .filter(Boolean);
+    if (names.length !== count) {
+      const error = new Error("VALID_ATTENDEE_NAMES_REQUIRED");
       error.status = 400;
       throw error;
     }
@@ -139,13 +147,14 @@ function createStripeSandbox(options = {}) {
         error.status = 409;
         throw error;
       }
-      db.prepare(`INSERT INTO event_checkout_holds(id,event_id,quantity,status,expires_at,language,currency,amount_total,test_mode)
-        VALUES(?,?,?,'PENDING',?,?,?, ?,1)`).run(
+      db.prepare(`INSERT INTO event_checkout_holds(id,event_id,quantity,status,expires_at,language,attendee_names_json,currency,amount_total,test_mode)
+        VALUES(?,?,?,'PENDING',?,?,?,?, ?,1)`).run(
         holdId,
         event.id,
         count,
         expiresAt,
         language === "hu" ? "hu" : "en",
+        JSON.stringify(names),
         String(event.currency || "USD").toUpperCase(),
         Number(event.price_cents) * count
       );
@@ -247,10 +256,12 @@ function createStripeSandbox(options = {}) {
         paymentIntent,
         1
       );
+      let attendeeNames = [];
+      try { attendeeNames = JSON.parse(hold.attendee_names_json || "[]"); } catch (_error) { attendeeNames = []; }
       for (let sequence = 1; sequence <= Number(hold.quantity); sequence += 1) {
         const ticketId = newId("EVTKT");
         const publicCode = crypto.randomBytes(18).toString("base64url");
-        const attendeeName = Number(hold.quantity) === 1 ? customer.name : `${customer.name} · ${sequence}/${hold.quantity}`;
+        const attendeeName = cleanText(attendeeNames[sequence - 1] || customer.name, 200);
         db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence)
           VALUES(?,?,'PURCHASE',?,?,?,?, 'VALID',?,'USD',?,?)`).run(
           ticketId,
