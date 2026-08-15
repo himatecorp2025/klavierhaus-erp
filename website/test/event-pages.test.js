@@ -151,12 +151,12 @@ test("dynamic public programme renders one language, paired URLs, responsive car
       method: "POST",
       redirect: "manual",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "quantity=2"
+      body: "quantity=2&attendee_names=Ada+Artist&attendee_names=Bela+Benefactor"
     });
     assert.equal(checkout.status, 303);
     assert.equal(checkout.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
     const checkoutCall = api.calls.find((call) => call.url.endsWith("/checkout"));
-    assert.deepEqual(JSON.parse(checkoutCall.options.body), { language: "en", quantity: 2 });
+    assert.deepEqual(JSON.parse(checkoutCall.options.body), { language: "en", quantity: 2, attendee_names: ["Ada Artist", "Bela Benefactor"] });
   });
 });
 
