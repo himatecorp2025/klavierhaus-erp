@@ -217,12 +217,12 @@ test("final luxury design contract keeps compact margins, safe titles and five-t
   const browserSource = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
   const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
   assert.match(css, /--kh-gutter:clamp\(/);
-  assert.match(css, /grid-auto-columns:calc\(\(100% - 4 \* var\(--kh-card-gap\)\)\/5\.32\)/);
+  assert.match(css, /grid-auto-columns:calc\(\(100% - 2 \* var\(--kh-card-gap\)\)\/3\.18\)/);
   assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css, /@media\(max-width:760px\)/);
   assert.match(css, /word-break:keep-all!important/);
   assert.match(css, /border-radius:15px/);
-  assert.match(css, /grid-auto-columns:calc\(\(100% - 2 \* var\(--kh-card-gap\)\)\/3\.2\)/);
+  assert.match(css, /grid-auto-columns:calc\(\(100% - var\(--kh-card-gap\)\)\/2\.12\)/);
   assert.match(css, /grid-auto-columns:86%/);
   assert.match(css, /overflow-x:auto/);
   assert.match(css, /overflow-y:hidden/);
