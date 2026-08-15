@@ -1,8 +1,8 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const QRCode = require("qrcode");
 const { inspectImageFile } = require("./upload-middleware");
+const { generateGuestListPdf } = require("./guest-list-pdf");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
@@ -23,6 +23,12 @@ function normalizeEmail(value) {
 
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+}
+
+function attendeeNames(value, quantity) {
+  const source = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  const names = source.map((name) => cleanText(name, 200)).filter(Boolean);
+  return names.length === Number(quantity) ? names : [];
 }
 
 function slugify(value) {
@@ -61,16 +67,6 @@ function newId(prefix) {
 
 function tokenHash(value) {
   return crypto.createHash("sha256").update(String(value || "")).digest("hex");
-}
-
-function fingerprint(value) {
-  return tokenHash(value).slice(0, 16);
-}
-
-function timingSafeEqualText(left, right) {
-  const a = Buffer.from(String(left || ""));
-  const b = Buffer.from(String(right || ""));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function formatInTimeZone(date, timeZone = NY_TIME_ZONE) {
@@ -183,7 +179,7 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfi
   };
 }
 
-function createEventService({ db, qrSecret, activeHoldCount = () => 0 }) {
+function createEventService({ db, activeHoldCount = () => 0 }) {
   const selectEventSql = `SELECT e.*,c.code AS category_code,c.name_en AS category_name_en,c.name_hu AS category_name_hu
     FROM events e JOIN event_categories c ON c.id=e.category_id`;
 
@@ -305,22 +301,6 @@ function createEventService({ db, qrSecret, activeHoldCount = () => 0 }) {
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(id);
   }
 
-  function qrToken(ticket) {
-    const body = `KH1.${ticket.public_code}`;
-    const signature = crypto.createHmac("sha256", qrSecret).update(body).digest("base64url");
-    return `${body}.${signature}`;
-  }
-
-  function verifyQrToken(value) {
-    const match = cleanText(value, 400).match(/^KH1\.([A-Za-z0-9_-]{20,80})\.([A-Za-z0-9_-]{30,80})$/);
-    if (!match) return null;
-    const [, publicCode, suppliedSignature] = match;
-    const body = `KH1.${publicCode}`;
-    const expected = crypto.createHmac("sha256", qrSecret).update(body).digest("base64url");
-    if (!timingSafeEqualText(suppliedSignature, expected)) return null;
-    return db.prepare("SELECT * FROM event_tickets WHERE public_code=?").get(publicCode) || null;
-  }
-
   function refundEligibility(event, requestedAt = new Date()) {
     if (event.status === "CANCELLED") return { eligible: true, code: "EVENT_CANCELLED" };
     const deadline = new Date(event.start_at).getTime() - REFUND_WINDOW_MS;
@@ -328,16 +308,14 @@ function createEventService({ db, qrSecret, activeHoldCount = () => 0 }) {
     return { eligible: false, code: "WITHIN_48_HOURS" };
   }
 
-  return { selectEventSql, eventById, eventResponse, validateEventInput, uniqueSlug, capacity, ticketCounts, createTicket, qrToken, verifyQrToken, refundEligibility };
+  return { selectEventSql, eventById, eventResponse, validateEventInput, uniqueSlug, capacity, ticketCounts, createTicket, refundEligibility };
 }
 
 function registerEventRoutes(options) {
   const { app, db, auth, permit, audit, transactionalEmail, eventImageUpload, eventImageDir, stripeSandbox } = options;
-  const qrSecret = String(options.qrSecret || "");
-  if (qrSecret.length < 32) throw new Error("EVENT_QR_SECRET must be at least 32 characters long");
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
-  const service = createEventService({ db, qrSecret, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
+  const service = createEventService({ db, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
   const admin = permit("ADMIN");
   const requireSuperadmin = permit("SUPERADMIN");
   const eventImage = eventImageUpload ? eventImageUpload.single("event_image") : (_req, _res, next) => next();
@@ -468,7 +446,11 @@ function registerEventRoutes(options) {
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     if (!stripeSandbox?.createCheckout) return res.status(503).json({ error: "STRIPE_SANDBOX_NOT_CONFIGURED" });
     try {
-      const result = await stripeSandbox.createCheckout({ event, language, quantity: req.body?.quantity });
+      const quantity = Number(req.body?.quantity || 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(event.capacity_total)) return res.status(400).json({ error: "INVALID_TICKET_QUANTITY" });
+      const names = attendeeNames(req.body?.attendee_names, quantity);
+      if (!names.length) return res.status(400).json({ error: "VALID_ATTENDEE_NAMES_REQUIRED" });
+      const result = await stripeSandbox.createCheckout({ event, language, quantity, attendeeNames: names });
       res.status(201).json(result);
     } catch (error) { sendError(res, error, "STRIPE_CHECKOUT_FAILED"); }
   });
@@ -479,18 +461,18 @@ function registerEventRoutes(options) {
     const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     if (event.access_type !== "PUBLIC_FREE" || !["PUBLISHED", "RESCHEDULED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
-    const attendeeName = cleanText(req.body?.attendee_name, 200);
     const contactEmail = normalizeEmail(req.body?.contact_email);
     const quantity = Number(req.body?.quantity || 1);
-    if (!attendeeName || !validEmail(contactEmail)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(event.capacity_total)) return res.status(400).json({ error: "INVALID_TICKET_QUANTITY" });
+    const names = attendeeNames(req.body?.attendee_names ?? req.body?.attendee_name, quantity);
+    if (!names.length || !validEmail(contactEmail)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
     try {
       const tickets = db.transaction(() => {
         if (service.capacity(event.id).remaining < quantity) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
         const created = [];
         for (let sequence = 1; sequence <= quantity; sequence += 1) {
-          const name = quantity === 1 ? attendeeName : `${attendeeName} · ${sequence}/${quantity}`;
-          created.push(service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", buyerName: attendeeName, attendeeName: name, contactEmail }));
+          const name = names[sequence - 1];
+          created.push(service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", buyerName: names[0], attendeeName: name, contactEmail }));
         }
         return created;
       })();
@@ -759,8 +741,8 @@ function registerEventRoutes(options) {
           net_cents: Number(paymentSummary.gross_cents || 0) - Number(paymentSummary.refunded_cents || 0),
           currency: event.currency || "USD"
         },
-        attended: counts.used,
-        no_show: counts.valid,
+        guest_list_total: Number(counts.valid || 0) + Number(counts.used || 0),
+        attendance_tracking: "PAPER_GUEST_LIST",
         test_mode: true,
         finance_connected: false
       };
@@ -848,7 +830,7 @@ function registerEventRoutes(options) {
     if (!attendeeName || !validEmail(email)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
     try {
       const ticket = db.transaction(() => service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", attendeeName, contactEmail: email, userId: req.user.id }))();
-      res.status(201).json({ ...ticket, qr_token: service.qrToken(ticket) });
+      res.status(201).json(ticket);
     } catch (error) { sendError(res, error); }
   });
 
@@ -856,64 +838,23 @@ function registerEventRoutes(options) {
     res.json(db.prepare("SELECT id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY attendee_name").all(req.params.id));
   });
 
-  app.get("/api/events/tickets/:id/qr.svg", auth, admin, async (req, res) => {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    const admissionUrl = `${erpBaseUrl}/?eventCheckIn=${encodeURIComponent(service.qrToken(ticket))}`;
-    const svg = await QRCode.toString(admissionUrl, { type: "svg", errorCorrectionLevel: "M", margin: 2, color: { dark: "#080807", light: "#f7f3e8" } });
-    res.setHeader("Cache-Control", "private, no-store");
-    res.type("image/svg+xml").send(svg);
-  });
-
-  app.post("/api/events/check-in", auth, admin, (req, res) => {
-    const rawToken = cleanText(req.body?.qr_token, 400);
-    const scannedTicket = service.verifyQrToken(rawToken);
+  app.get("/api/events/:id/guest-list.pdf", auth, admin, (req, res) => {
+    const event = service.eventById(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    const guests = db.prepare(`SELECT attendee_name FROM event_tickets
+      WHERE event_id=? AND status IN ('VALID','USED') ORDER BY lower(attendee_name),created_at`).all(event.id);
+    const language = req.query.lang === "hu" ? "hu" : "en";
+    const title = language === "hu" ? event.title_hu : event.title_en;
+    const dateLabel = new Intl.DateTimeFormat(language === "hu" ? "hu-HU" : "en-US", {
+      timeZone: event.timezone || NY_TIME_ZONE, dateStyle: "long", timeStyle: "short"
+    }).format(new Date(event.start_at));
     try {
-      const result = db.transaction(() => {
-        const ticket = scannedTicket ? db.prepare("SELECT * FROM event_tickets WHERE id=?").get(scannedTicket.id) : null;
-        if (!ticket) {
-          db.prepare("INSERT INTO event_checkins(id,result,token_fingerprint,performed_by_user_id,details) VALUES(?,'INVALID',?,?,?)")
-            .run(newId("EVCHK"), fingerprint(rawToken), req.user.id, "Unknown or invalid QR token");
-          return { accepted: false, result: "INVALID" };
-        }
-        if (ticket.status === "USED") {
-          db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,token_fingerprint,performed_by_user_id,details) VALUES(?,?,?,'ALREADY_USED',?,?,?)")
-            .run(newId("EVCHK"), ticket.event_id, ticket.id, fingerprint(rawToken), req.user.id, ticket.checked_in_at || "");
-          return { accepted: false, result: "ALREADY_USED", ticket };
-        }
-        if (ticket.status !== "VALID") {
-          db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,token_fingerprint,performed_by_user_id,details) VALUES(?,?,?,'VOID',?,?,?)")
-            .run(newId("EVCHK"), ticket.event_id, ticket.id, fingerprint(rawToken), req.user.id, ticket.status);
-          return { accepted: false, result: "VOID", ticket };
-        }
-        const event = service.eventById(ticket.event_id);
-        if (!event || event.status === "CANCELLED") {
-          db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,token_fingerprint,performed_by_user_id,details) VALUES(?,?,?,'VOID',?,?,?)")
-            .run(newId("EVCHK"), ticket.event_id, ticket.id, fingerprint(rawToken), req.user.id, "EVENT_CANCELLED");
-          return { accepted: false, result: "VOID", ticket };
-        }
-        db.prepare("UPDATE event_tickets SET status='USED',checked_in_at=CURRENT_TIMESTAMP,checked_in_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='VALID'").run(req.user.id, ticket.id);
-        db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,token_fingerprint,performed_by_user_id,details) VALUES(?,?,?,'ACCEPTED',?,?,?)")
-          .run(newId("EVCHK"), ticket.event_id, ticket.id, fingerprint(rawToken), req.user.id, "First successful admission");
-        return { accepted: true, result: "ACCEPTED", ticket: db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id) };
-      })();
-      res.status(result.accepted ? 200 : 409).json(result);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/tickets/:id/revert-check-in", auth, admin, (req, res) => {
-    const before = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
-    if (!before) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (before.status !== "USED") return res.status(409).json({ error: "TICKET_NOT_CHECKED_IN" });
-    const reason = cleanText(req.body?.reason, 1000) || "Administrative correction";
-    db.transaction(() => {
-      db.prepare("UPDATE event_tickets SET status='VALID',checked_in_at=NULL,checked_in_by_user_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='USED'").run(before.id);
-      db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,performed_by_user_id,details) VALUES(?,?,?,'REVERTED',?,?)")
-        .run(newId("EVCHK"), before.event_id, before.id, req.user.id, reason);
-    })();
-    const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(before.id);
-    audit(req, "REVERT_CHECK_IN", "events", before.event_id, before, after, 1, reason);
-    res.json({ ok: true, ticket: after });
+      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language });
+      const safeName = slugify(title) || "event";
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}-guest-list.pdf"`);
+      res.type("application/pdf").send(pdf);
+    } catch (error) { sendError(res, Object.assign(error, { status: 500 }), "GUEST_LIST_PDF_FAILED"); }
   });
 
   app.get("/api/events/:id/refund-requests", auth, admin, (req, res) => {
