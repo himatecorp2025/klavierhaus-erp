@@ -77,7 +77,7 @@ test("Stripe Sandbox holds capacity, fulfills exactly once, and refunds the full
   });
 
   assert.deepEqual(sandbox.configuration(), { enabled: true, test_mode: true, hold_minutes: HOLD_MINUTES, live_keys_accepted: false });
-  const checkout = await sandbox.createCheckout({ event: db.prepare("SELECT * FROM events WHERE id='EV-STRIPE'").get(), language: "en", quantity: 2 });
+  const checkout = await sandbox.createCheckout({ event: db.prepare("SELECT * FROM events WHERE id='EV-STRIPE'").get(), language: "en", quantity: 2, attendeeNames: ["Ada Artist", "Bela Benefactor"] });
   assert.equal(checkout.test_mode, true);
   assert.equal(checkout.checkout_session_id, "cs_test_klavierhaus");
   assert.equal(sandbox.activeHoldCount("EV-STRIPE"), 2);
@@ -107,6 +107,7 @@ test("Stripe Sandbox holds capacity, fulfills exactly once, and refunds the full
   assert.equal(duplicate.duplicate, true);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM event_payments").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM event_tickets WHERE source_type='PURCHASE'").get().count, 2);
+  assert.deepEqual(db.prepare("SELECT attendee_name FROM event_tickets WHERE source_type='PURCHASE' ORDER BY ticket_sequence").all().map((row) => row.attendee_name), ["Ada Artist", "Bela Benefactor"]);
   assert.equal(sandbox.activeHoldCount("EV-STRIPE"), 0);
 
   const ticket = db.prepare("SELECT * FROM event_tickets WHERE source_type='PURCHASE' LIMIT 1").get();
