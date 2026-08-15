@@ -211,15 +211,26 @@ function registerWebsitePlatformRoutes(options) {
     const body = req.body || {};
     const name = clean(body.name, 200); const email = clean(body.email, 320).toLowerCase();
     if (!name || !EMAIL_PATTERN.test(email) || !flag(body.consent_contact)) return res.status(400).json({ error: "VALID_CONTACT_AND_CONSENT_REQUIRED" });
+    const serviceId = clean(body.service_id, 120) || null;
+    const phone = clean(body.phone, 80);
+    const serviceAddress = clean(body.service_address, 1000);
+    if (serviceId) {
+      if (!db.prepare("SELECT 1 FROM website_services WHERE id=? AND visible=1").get(serviceId)) return res.status(400).json({ error: "WEBSITE_SERVICE_NOT_AVAILABLE" });
+      if (!phone || !serviceAddress) return res.status(400).json({ error: "SERVICE_PHONE_AND_ADDRESS_REQUIRED" });
+    }
     const row = {
       id: identifier("LEAD"), lead_type: clean(body.lead_type || "SERVICE_CALLBACK", 40).toUpperCase(), name, email,
-      phone: clean(body.phone, 80), service_id: clean(body.service_id, 120) || null, message: clean(body.message, 5000),
+      phone, service_id: serviceId, message: clean(body.message, 5000),
+      piano_brand: clean(body.piano_brand, 160), piano_model: clean(body.piano_model, 160),
+      service_address: serviceAddress, preferred_time: clean(body.preferred_time, 240),
+      event_date: clean(body.event_date, 80), event_venue: clean(body.event_venue, 1000),
+      instrument_requirements: clean(body.instrument_requirements, 3000),
       preferred_contact: ["EMAIL", "PHONE", "EITHER"].includes(clean(body.preferred_contact, 20).toUpperCase()) ? clean(body.preferred_contact, 20).toUpperCase() : "EMAIL",
       language: body.language === "hu" ? "hu" : "en", consent_contact: 1, consent_marketing: flag(body.consent_marketing),
       source_path: clean(body.source_path, 1000), utm_source: clean(body.utm_source, 500), utm_medium: clean(body.utm_medium, 500), utm_campaign: clean(body.utm_campaign, 500)
     };
-    db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
-      VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
+    db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
+      VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@piano_brand,@piano_model,@service_address,@preferred_time,@event_date,@event_venue,@instrument_requirements,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
     res.status(201).json({ ok: true, id: row.id });
   });
   app.get("/api/website-contact-leads", auth, admin, (req, res) => {
