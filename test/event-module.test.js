@@ -87,7 +87,7 @@ function eventForm(overrides = {}) {
   return form;
 }
 
-test("event module enforces roles, capacity, invitation, QR admission, refunds, retention, and one-time closure", async (t) => {
+test("event module enforces roles, capacity, invitations, printable guest lists, refunds, retention, and one-time closure", async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kh-event-api-"));
   const dbPath = path.join(tempRoot, "events.sqlite");
   const backupDir = path.join(tempRoot, "backups");
@@ -120,7 +120,6 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
       BACKUP_DIR: backupDir,
       UPLOAD_DIR: uploadDir,
       JWT_SECRET: jwtSecret,
-      EVENT_QR_SECRET: jwtSecret,
       WEBSITE_BASE_URL: "https://klavierhaus-home.onrender.com"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -289,7 +288,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
     body: { attendee_name: "Honorary Guest", contact_email: "honorary@example.com" }
   });
   assert.equal(complimentary.status, 201, JSON.stringify(complimentary.payload));
-  assert.match(complimentary.payload.qr_token, /^KH1\./);
+  assert.equal(Object.hasOwn(complimentary.payload, "qr_token"), false);
 
   const soldOut = await request(baseUrl, `/api/events/${eventId}/complimentary-tickets`, {
     token: adminToken,
@@ -299,22 +298,14 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
   assert.equal(soldOut.status, 409);
   assert.equal(soldOut.payload.error, "EVENT_SOLD_OUT");
 
-  const firstAdmission = await request(baseUrl, "/api/events/check-in", { token: adminToken, method: "POST", body: { qr_token: complimentary.payload.qr_token } });
-  assert.equal(firstAdmission.status, 200);
-  assert.equal(firstAdmission.payload.result, "ACCEPTED");
-  const secondAdmission = await request(baseUrl, "/api/events/check-in", { token: adminToken, method: "POST", body: { qr_token: complimentary.payload.qr_token } });
-  assert.equal(secondAdmission.status, 409);
-  assert.equal(secondAdmission.payload.result, "ALREADY_USED");
-
-  const reverted = await request(baseUrl, `/api/events/tickets/${complimentary.payload.id}/revert-check-in`, {
-    token: adminToken,
-    method: "POST",
-    body: { reason: "Scanner correction" }
-  });
-  assert.equal(reverted.status, 200);
-  assert.equal(reverted.payload.ticket.status, "VALID");
-  const readmitted = await request(baseUrl, "/api/events/check-in", { token: adminToken, method: "POST", body: { qr_token: complimentary.payload.qr_token } });
-  assert.equal(readmitted.status, 200);
+  const guestList = await fetch(`${baseUrl}/api/events/${eventId}/guest-list.pdf?lang=hu`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  assert.equal(guestList.status, 200);
+  assert.match(guestList.headers.get("content-type") || "", /application\/pdf/);
+  const guestListBytes = Buffer.from(await guestList.arrayBuffer());
+  assert.equal(guestListBytes.subarray(0, 5).toString("ascii"), "%PDF-");
+  assert.ok(guestListBytes.length > 100000, "the print PDF must embed its Unicode font and premium visual assets");
+  const removedCheckIn = await fetch(`${baseUrl}/api/events/check-in`, { method: "POST", headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" }, body: "{}" });
+  assert.equal(removedCheckIn.status, 404);
 
   const refund = await request(baseUrl, "/api/public/event-refund-requests", {
     method: "POST",
@@ -379,7 +370,7 @@ test("event module enforces roles, capacity, invitation, QR admission, refunds, 
 
   const auditDb = new Database(dbPath, { readonly: true });
   assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM event_closures WHERE event_id=?").get(past.payload.id).count, 1);
-  assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM audit_log WHERE action='REVERT_CHECK_IN' AND record_id=?").get(eventId).count, 1);
+  assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM event_checkins WHERE event_id=?").get(eventId).count, 0, "legacy check-in storage must remain inert");
   assert.equal(auditDb.prepare("SELECT COUNT(*) count FROM audit_log WHERE action='CREATE_AND_PUBLISH'").get().count, 1);
   assert.equal(auditDb.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
   assert.equal(auditDb.prepare("PRAGMA foreign_key_check").all().length, 0);
@@ -438,7 +429,7 @@ test("event invitation email is bilingual, escapes guest content, and explains c
 
 test("refund eligibility treats exactly 48 hours as non-refundable and cancellations as refundable", () => {
   const db = new Database(":memory:");
-  const service = createEventService({ db, qrSecret: "refund-test-secret-longer-than-thirty-two-characters" });
+  const service = createEventService({ db });
   const now = new Date("2031-01-01T12:00:00.000Z");
   const exactly48Hours = { status: "PUBLISHED", start_at: new Date(now.getTime() + REFUND_WINDOW_MS).toISOString() };
   const moreThan48Hours = { status: "PUBLISHED", start_at: new Date(now.getTime() + REFUND_WINDOW_MS + 1).toISOString() };
