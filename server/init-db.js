@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { backfillUserCalendarColors } = require("./calendar-colors");
+const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -112,8 +113,74 @@ function migrationRequiresBackup() {
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
   const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
+  const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || sampleFlagsMissing;
+  const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing;
+}
+
+function migrateWebsiteContactLeadStatuses() {
+  const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='website_contact_leads'").get()?.sql || "");
+  const normalizedSql = sql.toUpperCase();
+  if (!normalizedSql.includes("'QUALIFIED'") && !normalizedSql.includes("'CONVERTED'")) return;
+  log("Migrating website contact leads to the approved six-stage workflow");
+  db.transaction(() => {
+    db.exec(`CREATE TABLE website_contact_leads_new (
+      id TEXT PRIMARY KEY,lead_type TEXT NOT NULL DEFAULT 'SERVICE_CALLBACK' CHECK(lead_type IN ('SERVICE_CALLBACK','PRIVATE_CONSULTATION','GENERAL_CONTACT','EVENT_INTEREST')),
+      name TEXT NOT NULL,email TEXT NOT NULL,phone TEXT,service_id TEXT,piano_brand TEXT,piano_model TEXT,service_address TEXT,preferred_time TEXT,event_date TEXT,event_venue TEXT,instrument_requirements TEXT,rental_duration TEXT,message TEXT,
+      preferred_contact TEXT NOT NULL DEFAULT 'EMAIL' CHECK(preferred_contact IN ('EMAIL','PHONE','EITHER')),language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+      consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),consent_marketing INTEGER NOT NULL DEFAULT 0 CHECK(consent_marketing IN (0,1)),source_path TEXT,utm_source TEXT,utm_medium TEXT,utm_campaign TEXT,
+      status TEXT NOT NULL DEFAULT 'NEW' CHECK(status IN ('NEW','CONTACTED','IN_DISCUSSION','APPOINTMENT_SCHEDULED','CLOSED','REJECTED')),assigned_user_id TEXT,internal_notes TEXT,contact_date TEXT,agreed_appointment_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+    )`);
+    db.exec(`INSERT INTO website_contact_leads_new SELECT id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,rental_duration,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign,
+      CASE status WHEN 'QUALIFIED' THEN 'IN_DISCUSSION' WHEN 'CONVERTED' THEN 'APPOINTMENT_SCHEDULED' ELSE status END,assigned_user_id,internal_notes,contact_date,agreed_appointment_at,created_at,updated_at FROM website_contact_leads`);
+    db.exec("DROP TABLE website_contact_leads");
+    db.exec("ALTER TABLE website_contact_leads_new RENAME TO website_contact_leads");
+  })();
+}
+
+function migrateEventArtistForeignKey() {
+  const hasArtistForeignKey = db.prepare("PRAGMA foreign_key_list(events)").all()
+    .some((row) => row.from === "artist_id" && row.table === "website_artists");
+  if (hasArtistForeignKey) return;
+  log("Adding the stable events.artist_id foreign-key relation while preserving event records");
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE events_new (
+        id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,category_id TEXT NOT NULL,
+        access_type TEXT NOT NULL CHECK(access_type IN ('PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL')),
+        status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),
+        slug_en TEXT NOT NULL UNIQUE,slug_hu TEXT NOT NULL UNIQUE,title_en TEXT NOT NULL,title_hu TEXT NOT NULL,
+        short_description_en TEXT,short_description_hu TEXT,description_en TEXT,description_hu TEXT,artist_id TEXT,performer_name TEXT,
+        hero_image_url TEXT,hero_image_alt_en TEXT,hero_image_alt_hu TEXT,gallery_json TEXT DEFAULT '[]',venue_name TEXT NOT NULL,
+        venue_street TEXT NOT NULL,venue_city TEXT NOT NULL,venue_region TEXT NOT NULL,venue_postal_code TEXT NOT NULL,
+        venue_country TEXT NOT NULL DEFAULT 'US',timezone TEXT NOT NULL DEFAULT 'America/New_York',start_at TEXT NOT NULL,end_at TEXT NOT NULL,
+        previous_start_at TEXT,cancellation_reason TEXT,cancelled_at TEXT,cancelled_by_user_id TEXT,
+        capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
+        currency TEXT NOT NULL DEFAULT 'USD',sales_start_at TEXT,sales_end_at TEXT,refund_policy_version TEXT NOT NULL DEFAULT 'KH-48H-V1',
+        published_at TEXT,closed_at TEXT,closed_by_user_id TEXT,closure_snapshot_json TEXT,sold_out_at TEXT,
+        is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),relaunch_source_event_id TEXT,created_by_user_id TEXT,updated_by_user_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(category_id) REFERENCES event_categories(id),FOREIGN KEY(artist_id) REFERENCES website_artists(id) ON DELETE SET NULL,
+        FOREIGN KEY(cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY(relaunch_source_event_id) REFERENCES events_new(id) ON DELETE SET NULL
+      )`);
+      db.exec(`INSERT INTO events_new SELECT e.id,e.event_key,e.category_id,e.access_type,e.status,e.slug_en,e.slug_hu,e.title_en,e.title_hu,
+        e.short_description_en,e.short_description_hu,e.description_en,e.description_hu,
+        CASE WHEN a.id IS NULL THEN NULL ELSE e.artist_id END,e.performer_name,e.hero_image_url,e.hero_image_alt_en,
+        e.hero_image_alt_hu,e.gallery_json,e.venue_name,e.venue_street,e.venue_city,e.venue_region,e.venue_postal_code,e.venue_country,e.timezone,e.start_at,e.end_at,
+        e.previous_start_at,e.cancellation_reason,e.cancelled_at,e.cancelled_by_user_id,e.capacity_total,e.price_cents,e.currency,e.sales_start_at,e.sales_end_at,
+        e.refund_policy_version,e.published_at,e.closed_at,e.closed_by_user_id,e.closure_snapshot_json,e.sold_out_at,e.is_sample,e.relaunch_source_event_id,
+        e.created_by_user_id,e.updated_by_user_id,e.created_at,e.updated_at FROM events e LEFT JOIN website_artists a ON a.id=e.artist_id`);
+      db.exec("DROP TABLE events");
+      db.exec("ALTER TABLE events_new RENAME TO events");
+    })();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 function createPreMigrationBackup() {
@@ -320,6 +387,7 @@ function runMigrations() {
     ensureColumn("events", "sold_out_at", "TEXT");
     ensureColumn("events", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
+    ensureColumn("events", "artist_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
     ensureColumn("event_checkout_holds", "attendee_names_json", "TEXT NOT NULL DEFAULT '[]'");
@@ -333,6 +401,9 @@ function runMigrations() {
     ensureColumn("website_contact_leads", "event_date", "TEXT");
     ensureColumn("website_contact_leads", "event_venue", "TEXT");
     ensureColumn("website_contact_leads", "instrument_requirements", "TEXT");
+    ensureColumn("website_contact_leads", "rental_duration", "TEXT");
+    ensureColumn("website_contact_leads", "contact_date", "TEXT");
+    ensureColumn("website_contact_leads", "agreed_appointment_at", "TEXT");
     ensureColumn("event_repeat_requests", "notified_at", "TEXT");
     ensureColumn("event_repeat_requests", "notification_event_id", "TEXT");
     ensureColumn("event_repeat_requests", "delivery_status", "TEXT");
@@ -362,6 +433,8 @@ function runMigrations() {
   });
 
   migrateColumns();
+  migrateWebsiteContactLeadStatuses();
+  migrateEventArtistForeignKey();
   migrateUsersRoleConstraint();
   backfillUserCalendarColors(db, log);
 
@@ -409,6 +482,7 @@ function runMigrations() {
   ensureIndex("idx_activation_email_log_provider_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_activation_email_log_provider_id ON activation_email_log(provider_message_id) WHERE provider_message_id IS NOT NULL AND trim(provider_message_id)<>''");
   ensureIndex("idx_events_public_schedule", "CREATE INDEX IF NOT EXISTS idx_events_public_schedule ON events(access_type,status,published_at,start_at)");
   ensureIndex("idx_events_category_schedule", "CREATE INDEX IF NOT EXISTS idx_events_category_schedule ON events(category_id,start_at)");
+  ensureIndex("idx_events_artist_schedule", "CREATE INDEX IF NOT EXISTS idx_events_artist_schedule ON events(artist_id,start_at)");
   ensureIndex("idx_event_invitations_event_status", "CREATE INDEX IF NOT EXISTS idx_event_invitations_event_status ON event_invitations(event_id,status,created_at)");
   ensureIndex("idx_event_invitations_email", "CREATE INDEX IF NOT EXISTS idx_event_invitations_email ON event_invitations(lower(trim(guest_email)))");
   ensureIndex("idx_event_tickets_event_status", "CREATE INDEX IF NOT EXISTS idx_event_tickets_event_status ON event_tickets(event_id,status,source_type)");
@@ -473,7 +547,14 @@ function runMigrations() {
     throw new Error(`SQLite integrity check failed: ${JSON.stringify(integrity)}`);
   }
   log("SQLite integrity and foreign-key checks passed");
-  // Intentionally no user, customer, piano, job, or other demo/business record is seeded.
+  const autoInstallSamples = process.env.WEBSITE_AUTO_INSTALL_SAMPLES === undefined
+    ? Boolean(String(process.env.WEBSITE_BASE_URL || "").trim())
+    : String(process.env.WEBSITE_AUTO_INSTALL_SAMPLES).toLowerCase() !== "false";
+  if (autoInstallSamples) {
+    const sampleResult = installSampleContent({ db, publicWebsiteUrl: process.env.WEBSITE_BASE_URL, updatedBy: "SYSTEM" });
+    log(sampleResult.alreadyInstalled ? "Editable public sample content already present" : `Editable public sample content installed: ${JSON.stringify(sampleResult.installed)}`);
+  }
+  // No user, customer piano, job, inventory or financial demo record is seeded.
   const users = db.prepare("SELECT id,email,is_superadmin,status FROM users ORDER BY created_at").all();
   const superadmins = users.filter((user) => Number(user.is_superadmin || 0) === 1 && user.status === "Active");
   log(`Initialization preserved ${users.length} existing user account(s), including ${superadmins.length} active superadmin account(s)`);
