@@ -2,6 +2,11 @@ const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
 
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp"]);
+const IMAGE_MIMES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic", "image/heif", "image/tiff", "image/bmp"]);
+function imageExtension(file){const ext=path.extname(file.originalname||"").toLowerCase();return IMAGE_EXTENSIONS.has(ext)?ext:"";}
+function isSupportedImage(file){return IMAGE_MIMES.has(String(file.mimetype||"").toLowerCase())&&Boolean(imageExtension(file));}
+
 function createDocumentUpload(uploadDir){
   return multer({
     dest: uploadDir,
@@ -33,14 +38,13 @@ function createEventImageUpload(uploadDir){
     storage:multer.diskStorage({
       destination:(_req,_file,cb)=>cb(null,uploadDir),
       filename:(_req,file,cb)=>{
-        const extension=/\.png$/i.test(file.originalname||"")?".png":".jpg";
+        const extension=imageExtension(file)||".jpg";
         cb(null,`event-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`);
       }
     }),
     limits:{fileSize:12*1024*1024,files:1},
     fileFilter:(_req,file,cb)=>{
-      const mime=String(file.mimetype||"").toLowerCase();
-      const ok=["image/png","image/jpeg","image/jpg"].includes(mime)&&/\.(png|jpe?g)$/i.test(file.originalname||"");
+      const ok=isSupportedImage(file);
       cb(ok?null:new Error("INVALID_EVENT_IMAGE_TYPE"),ok);
     }
   });
@@ -51,14 +55,13 @@ function createWebsiteImageUpload(uploadDir){
     storage:multer.diskStorage({
       destination:(_req,_file,cb)=>cb(null,uploadDir),
       filename:(_req,file,cb)=>{
-        const extension=/\.png$/i.test(file.originalname||"")?".png":".jpg";
+        const extension=imageExtension(file)||".jpg";
         cb(null,`website-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`);
       }
     }),
     limits:{fileSize:12*1024*1024,files:1},
     fileFilter:(_req,file,cb)=>{
-      const mime=String(file.mimetype||"").toLowerCase();
-      const ok=["image/png","image/jpeg","image/jpg"].includes(mime)&&/\.(png|jpe?g)$/i.test(file.originalname||"");
+      const ok=isSupportedImage(file);
       cb(ok?null:new Error("INVALID_WEBSITE_IMAGE_TYPE"),ok);
     }
   });
@@ -84,6 +87,20 @@ function inspectImageFile(filePath){
       offset+=length;
     }
   }
+  if(buffer.length>=30&&buffer.toString("ascii",0,4)==="RIFF"&&buffer.toString("ascii",8,12)==="WEBP"){
+    if(buffer.toString("ascii",12,16)==="VP8X") return {type:"image/webp",width:1+(buffer[24]|buffer[25]<<8|buffer[26]<<16),height:1+(buffer[27]|buffer[28]<<8|buffer[29]<<16)};
+    if(buffer.toString("ascii",12,16)==="VP8 "){const width=buffer.readUInt16LE(26)&0x3fff,height=buffer.readUInt16LE(28)&0x3fff;return {type:"image/webp",width,height};}
+  }
+  if(buffer.length>=10&&buffer.toString("ascii",0,3)==="GIF") return {type:"image/gif",width:buffer.readUInt16LE(6),height:buffer.readUInt16LE(8)};
+  if(buffer.length>=26&&buffer.toString("ascii",0,2)==="BM") return {type:"image/bmp",width:Math.abs(buffer.readInt32LE(18)),height:Math.abs(buffer.readInt32LE(22))};
+  if(buffer.length>=16&&buffer.toString("ascii",4,8)==="ftyp"){
+    const major=buffer.toString("ascii",8,12).toLowerCase();
+    const type=/heic|heix|hevc|hevx|mif1|msf1/.test(major)?"image/heic":"image/avif";
+    for(let offset=0;offset+12<=buffer.length;offset+=4){if(buffer.toString("ascii",offset,offset+4)==="ispe"&&offset+16<=buffer.length)return {type,width:buffer.readUInt32BE(offset+8),height:buffer.readUInt32BE(offset+12)};}
+    return {type,width:0,height:0};
+  }
+  if(buffer.length>=12&&(buffer.toString("ascii",0,4)==="II*\\0"||buffer.toString("ascii",0,4)==="MM\\0*")){
+    const little=buffer.toString("ascii",0,2)==="II", read16=(o)=>little?buffer.readUInt16LE(o):buffer.readUInt16BE(o), read32=(o)=>little?buffer.readUInt32LE(o):buffer.readUInt32BE(o); let width=0,height=0; const ifd=read32(4); if(ifd+2<=buffer.length){const count=read16(ifd);for(let i=0;i<count;i++){const pos=ifd+2+i*12;if(pos+12>buffer.length)break;const tag=read16(pos),type=read16(pos+2);if((tag===256||tag===257)&&type===3){const value=little?buffer.readUInt16LE(pos+8):buffer.readUInt16BE(pos+8);if(tag===256)width=value;else height=value;} } if(width&&height)return {type:"image/tiff",width,height};}}
   return null;
 }
 
