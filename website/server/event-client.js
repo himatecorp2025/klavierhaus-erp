@@ -65,6 +65,12 @@ function createEventClient(options = {}) {
     content(pageKey, language) {
       return request(`/api/public/website-content/${encodeURIComponent(pageKey)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
+    pageSettings() {
+      return request("/api/public/website-page-settings");
+    },
+    designSettings() {
+      return request("/api/public/website-design-settings");
+    },
     reviews(language) {
       return request(`/api/public/website-reviews?lang=${language === "hu" ? "hu" : "en"}`);
     },
