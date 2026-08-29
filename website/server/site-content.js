@@ -40,7 +40,7 @@ const shared = Object.freeze({
   heroImage: "/assets/media/klavierhaus-hero.jpg",
   salonImage: "/assets/media/klavierhaus-salon.jpg",
   craftImage: "/assets/media/klavierhaus-craft.jpg",
-  artistSalonImage: "/assets/media/klavierhaus-artists-salon.jpg"
+  artistSalonImage: "/assets/media/klavierhaus-artist-salon.png"
 });
 
 const globalCopy = Object.freeze({
@@ -90,12 +90,12 @@ const globalCopy = Object.freeze({
     footerPrivacy: "Privacy",
     footerTerms: "Ticket & refund terms",
     rights: "All rights reserved.",
-    imageCredit: "Editorial imagery is replaceable through the future publishing system.",
+    imageCredit: "Editorial imagery is maintained by authorized Klavierhaus administrators.",
     backHome: "Return home",
     notFoundEyebrow: "404",
     notFoundTitle: "This room is not part of the house.",
     notFoundBody: "The requested page could not be found. Return to the Klavierhaus experience or choose a destination from the menu.",
-    soonLabel: "Programme in preparation",
+    soonLabel: "Current programme",
     collectionLabels: {
       reviewsEyebrow: "Reflections",
       reviewsTitle: "The memory of music remains.",
@@ -129,12 +129,12 @@ const globalCopy = Object.freeze({
       homeEyebrow: "The next encounters",
       homeTitle: "Enter the room where music becomes personal.",
       homeLead: "A curated sequence of intimate performances and cultural gatherings at Klavierhaus.",
-      noEvents: "The next programme is being prepared. Please return soon.",
+      noEvents: "No upcoming event is currently published.",
       details: "View details",
       viewAll: "View all events",
       buyTickets: "Buy tickets",
       reservePlace: "Reserve a place",
-      ticketsSoon: "Tickets coming soon",
+      ticketsSoon: "Ticketing is currently unavailable",
       testMode: "TEST MODE",
       testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
       quantity: "Number of tickets",
@@ -157,7 +157,7 @@ const globalCopy = Object.freeze({
       soldOut: "Sold out",
       price: "Admission",
       complimentary: "Complimentary",
-      ticketingSoon: "Online ticketing will open soon. No reservation has been created yet.",
+      ticketingSoon: "Ticketing is currently unavailable for this event. No reservation has been created.",
       cancelled: "This event has been canceled by the organizer. Please contact our customer service team regarding your refund.",
       rescheduled: "This event has been rescheduled.",
       invitationEyebrow: "Private invitation",
@@ -220,12 +220,12 @@ const globalCopy = Object.freeze({
     footerPrivacy: "Adatkezelés",
     footerTerms: "Jegyvásárlási és visszatérítési feltételek",
     rights: "Minden jog fenntartva.",
-    imageCredit: "A szerkesztőségi képek a későbbi publikációs rendszerből cserélhetők.",
+    imageCredit: "A szerkesztőségi képeket a Klavierhaus jogosult adminisztrátorai kezelik.",
     backHome: "Vissza a főoldalra",
     notFoundEyebrow: "404",
     notFoundTitle: "Ez a terem nem része a háznak.",
     notFoundBody: "A kért oldal nem található. Térjen vissza a Klavierhaus világába, vagy válasszon a menüből.",
-    soonLabel: "A program előkészítés alatt",
+    soonLabel: "Aktuális program",
     collectionLabels: {
       reviewsEyebrow: "Vélemények",
       reviewsTitle: "A zene emléke tovább él.",
@@ -259,12 +259,12 @@ const globalCopy = Object.freeze({
       homeEyebrow: "A következő találkozások",
       homeTitle: "Lépjen be a térbe, ahol a zene személyessé válik.",
       homeLead: "Meghitt előadások és kulturális találkozások gondosan válogatott sora a Klavierhausban.",
-      noEvents: "A következő program előkészítés alatt áll. Kérjük, látogasson vissza hamarosan.",
+      noEvents: "Jelenleg nincs közzétett közelgő esemény.",
       details: "Részletek",
       viewAll: "Összes esemény",
       buyTickets: "Jegyvásárlás",
       reservePlace: "Helyfoglalás",
-      ticketsSoon: "Jegyek hamarosan",
+      ticketsSoon: "A jegyvásárlás jelenleg nem érhető el",
       testMode: "TESZTÜZEM",
       testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
       quantity: "Jegyek száma",
@@ -287,7 +287,7 @@ const globalCopy = Object.freeze({
       soldOut: "Megtelt",
       price: "Belépőjegy",
       complimentary: "Díjmentes",
-      ticketingSoon: "Az online jegyvásárlás hamarosan megnyílik. Helyfoglalás még nem történt.",
+      ticketingSoon: "Ehhez az eseményhez jelenleg nem érhető el jegyvásárlás. Helyfoglalás nem történt.",
       cancelled: "Az eseményt a szervező törölte. A visszatérítéssel kapcsolatban kérjük, forduljon ügyfélszolgálatunkhoz.",
       rescheduled: "Az esemény új időpontra került.",
       invitationEyebrow: "Személyes meghívó",
@@ -359,7 +359,7 @@ const pages = Object.freeze({
           type: "editorial",
           eyebrow: "Artists",
           title: "The instrument is complete only when an artist gives it breath.",
-          body: ["Our artist pages will introduce the musicians, collaborators, and voices connected to the Klavierhaus cultural programme."],
+          body: ["Our artist pages introduce the musicians, collaborators, and voices connected to the Klavierhaus cultural programme."],
           image: shared.artistSalonImage,
           imageAlt: "A pianist performing for an intimate audience in an elegant Klavierhaus salon",
           link: { label: "Meet the artists", key: "artists" }
@@ -409,12 +409,12 @@ const pages = Object.freeze({
       seo: { title: "Exceptional Pianos | Klavierhaus New York", description: "Explore Klavierhaus pianos selected and prepared for exceptional tone, touch, character, and musical expression." },
       hero: { eyebrow: "Pianos", title: "Choose a voice, not merely an instrument.", lead: "Every piano begins a different conversation with the room, the player, and the music.", image: shared.heroImage, imageAlt: "Black concert grand piano in a private salon" },
       sections: [
-        { id: "selection", type: "cards", eyebrow: "The collection", title: "Instruments considered individually.", intro: "Current inventory will later be published directly from the Klavierhaus admin system.", items: [
+        { id: "selection", type: "cards", eyebrow: "The collection", title: "Instruments considered individually.", intro: "Browse the currently published instruments and arrange a private listening appointment.", items: [
           { title: "Steinway", body: "New York and Hamburg instruments, including exceptional rebuilt and performance-quality pianos.", link: { label: "Explore Steinway", key: "steinway" } },
           { title: "Restored instruments", body: "Pianos rebuilt to recover tonal color, responsiveness, and a deeply personal musical identity.", link: { label: "The restoration atelier", key: "restoration" } },
           { title: "Private selection", body: "A personal process guided by the pianist, the room, and the character of sound being sought.", link: { label: "Arrange a consultation", key: "consultation" } }
         ] },
-        { id: "inventory", type: "notice", eyebrow: "Current inventory", title: "The digital showroom is being curated.", body: "Verified instruments, specifications, imagery, and availability will appear here when the inventory publishing module is connected." }
+        { id: "inventory", type: "notice", eyebrow: "Current inventory", title: "Browse the published showroom.", body: "Verified instruments, specifications, imagery, and availability are shown in the live catalogue above." }
       ]
     },
     steinway: {
@@ -475,7 +475,7 @@ const pages = Object.freeze({
       seo: { title: "Artists | Klavierhaus", description: "Meet the artists, collaborators, and musical voices connected to the evolving Klavierhaus cultural programme." },
       hero: { eyebrow: "Artists", title: "The people who make an instrument speak.", lead: "Klavierhaus is shaped by musicians who listen deeply—to repertoire, to one another, and to the individual character of a piano.", image: shared.salonImage, imageAlt: "Anonymous pianist performing for an intimate audience" },
       sections: [
-        { id: "artist-directory", type: "notice", eyebrow: "Artist profiles", title: "A curated artist directory is in preparation.", body: "Only verified artists, approved biographies, portraits, programmes, and links will be published through the future administration system." },
+        { id: "artist-directory", type: "notice", eyebrow: "Artist profiles", title: "Meet the artists of the Klavierhaus programme.", body: "Published profiles bring together approved biographies, portraits, programmes, and related events." },
         { id: "invitation", type: "cta", eyebrow: "Artistic dialogue", title: "A house becomes cultural through the people it welcomes.", body: "For artistic and programme enquiries, contact Klavierhaus.", link: { label: "Start a conversation", key: "contact" } }
       ]
     },
@@ -484,8 +484,8 @@ const pages = Object.freeze({
       seo: { title: "Events | Klavierhaus New York", description: "Discover intimate Klavierhaus concerts, artist encounters, masterclasses, and cultural events in New York." },
       hero: { eyebrow: "Events", title: "Closer to the music. Closer to the artist.", lead: "Klavierhaus events are conceived for intimacy: carefully chosen programmes, exceptional instruments, and a room where every detail can be heard.", image: shared.salonImage, imageAlt: "An intimate salon concert at night" },
       sections: [
-        { id: "programme", type: "event", status: "Programme in preparation", title: "The Klavierhaus Salon", meta: "New York · Dates to be announced", body: "An evolving series of intimate performances and conversations shaped around artists, instruments, and the art of close listening.", image: shared.salonImage, imageAlt: "A pianist performing in a private salon", link: { label: "Discover the salon", key: "salon" } },
-        { id: "future-events", type: "notice", eyebrow: "Upcoming programme", title: "Verified event details will appear here.", body: "Dates, artists, capacity, pricing, and availability will be published from the event administration module. No ticket sale is currently active on this development website." }
+        { id: "programme", type: "event", status: "Klavierhaus cultural programme", title: "The Klavierhaus Salon", meta: "New York", body: "An evolving series of intimate performances and conversations shaped around artists, instruments, and the art of close listening.", image: shared.salonImage, imageAlt: "A pianist performing in a private salon", link: { label: "Discover the salon", key: "salon" } },
+        { id: "future-events", type: "notice", eyebrow: "Upcoming programme", title: "Published event details are listed above.", body: "Dates, artists, capacity, pricing, and availability are maintained in the protected event administration workspace." }
       ]
     },
     salon: {
@@ -493,7 +493,7 @@ const pages = Object.freeze({
       seo: { title: "The Klavierhaus Salon | Events", description: "A preview of the evolving Klavierhaus Salon: intimate music, conversation, and exceptional instruments in New York." },
       hero: { eyebrow: "Programme series", title: "The Klavierhaus Salon", lead: "A private-scale cultural format bringing artist, instrument, and audience into one attentive room.", image: shared.salonImage, imageAlt: "A small audience listening to a salon piano recital" },
       sections: [
-        { id: "status", type: "notice", eyebrow: "Programme in preparation", title: "Dates and artists have not yet been published.", body: "This page reserves the final event-detail experience. Verified schedules, capacity, pricing, availability, artist information, and ticket access will appear only after publication from the administration system." },
+        { id: "status", type: "notice", eyebrow: "Published programme", title: "Event details are maintained in the published programme.", body: "Verified schedules, capacity, pricing, availability, artist information, and ticket access are displayed directly from the administration system." },
         { id: "principle", type: "statement", eyebrow: "The idea", title: "A performance that feels encountered, not consumed.", body: ["The salon format values proximity, attention, and a sense of shared discovery. It is deliberately different from a large auditorium experience."] }
       ]
     },
@@ -529,7 +529,7 @@ const pages = Object.freeze({
           { title: "Restoration", body: "Discuss the instrument's condition, history, musical potential, and an appropriate scope of work." },
           { title: "Concert & culture", body: "Consider artist needs, venue acoustics, programme intentions, and the form of the encounter." }
         ] },
-        { id: "arrange", type: "contact", eyebrow: "Arrange your visit", title: "Klavierhaus New York", body: "Contact us directly. The future administration module will add a dedicated consultation request form.", details: [
+        { id: "arrange", type: "contact", eyebrow: "Arrange your visit", title: "Klavierhaus New York", body: "Contact us directly to arrange a private consultation.", details: [
           { label: "Telephone", value: shared.phoneDisplay, href: shared.phoneHref },
           { label: "Email", value: shared.emailDisplay, href: shared.emailHref },
           { label: "Address", value: "790 11th Avenue\nNew York, NY 10019" }
@@ -573,7 +573,7 @@ const pages = Object.freeze({
         { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], image: shared.salonImage, imageAlt: "Zongoraművész és közönsége egy meghitt Klavierhaus eseményen", link: { label: "Történetünk", key: "story" } },
         { id: "testimonial", type: "quote", quote: "Számomra a Klavierhaus igazi zenei kincs.", attribution: "Richard Goode" },
         { id: "culture", type: "visual", reverse: true, eyebrow: "Kulturális küldetés", title: "Megőrizni a zene érzelmi nyelvét.", body: ["Egy rohanó világban a Klavierhaus védi azokat a ritka feltételeket, amelyek között a szépség teljességében hallható: egy kivételes hangszer, egy érzékeny művész és egy közönség, amely elég közel van minden színváltozás érzékeléséhez."], image: shared.heroImage, imageAlt: "Elegáns privát térben megvilágított koncertzongora", link: { label: "Kulturális küldetésünk", key: "mission" } },
-        { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk majd be."], image: shared.artistSalonImage, imageAlt: "Zongoraművész bensőséges közönség előtt egy elegáns Klavierhaus szalonban", link: { label: "Művészeink", key: "artists" } },
+        { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk be."], image: shared.artistSalonImage, imageAlt: "Zongoraművész bensőséges közönség előtt egy elegáns Klavierhaus szalonban", link: { label: "Művészeink", key: "artists" } },
         { id: "pianos", type: "cards", eyebrow: "Kivételes hangszerek", title: "Zongorák saját hanggal.", intro: "Fedezzen fel olyan hangszereket, amelyeket kifejező karakterük — és nem csupán nevük — alapján választottunk, építettünk újjá és készítettünk elő.", items: [
           { title: "Zongoragyűjtemény", body: "Gondosan válogatott hangszerek művészeknek, gyűjtőknek, otthonokba, stúdiókba és koncerttermekbe.", link: { label: "Zongorák felfedezése", key: "pianos" } },
           { title: "Steinway-zongorák", body: "New York-i és hamburgi Steinway hangszerek, a hangszín, az egyéniség és a kompromisszumok nélküli mesterség felől megközelítve.", link: { label: "Steinway-zongorák", key: "steinway" } }
@@ -596,12 +596,12 @@ const pages = Object.freeze({
       seo: { title: "Kivételes zongorák | Klavierhaus New York", description: "Fedezze fel a Klavierhaus hangszereit, amelyeket kivételes hang, billentés, karakter és zenei kifejezés alapján választunk és készítünk elő." },
       hero: { eyebrow: "Zongorák", title: "Ne csupán hangszert, hanem hangot válasszon.", lead: "Minden zongora más beszélgetést kezd a térrel, a zongoristával és a zenével.", image: shared.heroImage, imageAlt: "Fekete koncertzongora egy privát szalonban" },
       sections: [
-        { id: "selection", type: "cards", eyebrow: "A gyűjtemény", title: "Egyedileg megismert hangszerek.", intro: "Az aktuális készletet később közvetlenül a Klavierhaus adminrendszeréből publikáljuk.", items: [
+        { id: "selection", type: "cards", eyebrow: "A gyűjtemény", title: "Egyedileg megismert hangszerek.", intro: "Böngésszen a jelenleg publikált hangszerek között, és egyeztessen privát meghallgatást.", items: [
           { title: "Steinway", body: "New York-i és hamburgi hangszerek, köztük kivételesen újjáépített és koncertminőségű zongorák.", link: { label: "Steinway-zongorák", key: "steinway" } },
           { title: "Restaurált hangszerek", body: "A hangszín, az érzékenység és a személyes zenei karakter visszanyerésére újjáépített zongorák.", link: { label: "A restaurátorműhely", key: "restoration" } },
           { title: "Privát kiválasztás", body: "Személyes folyamat, amelyet a zongorista, a tér és a keresett hang karaktere vezet.", link: { label: "Konzultáció egyeztetése", key: "consultation" } }
         ] },
-        { id: "inventory", type: "notice", eyebrow: "Aktuális készlet", title: "A digitális bemutatóterem összeállítás alatt áll.", body: "Ellenőrzött hangszerek, műszaki adatok, képek és elérhetőség kerül majd ide, amikor a készletpublikációs modul csatlakozik." }
+        { id: "inventory", type: "notice", eyebrow: "Aktuális készlet", title: "Böngésszen a publikált bemutatóteremben.", body: "A fenti katalógusban ellenőrzött hangszerek, műszaki adatok, képek és elérhetőség látható." }
       ]
     },
     steinway: {
@@ -662,7 +662,7 @@ const pages = Object.freeze({
       seo: { title: "Művészek | Klavierhaus", description: "Ismerje meg a Klavierhaus folyamatosan épülő kulturális programjához kapcsolódó művészeket, alkotótársakat és zenei hangokat." },
       hero: { eyebrow: "Művészek", title: "Az emberek, akik megszólaltatják a hangszert.", lead: "A Klavierhaust olyan zenészek formálják, akik mélyen figyelnek a repertoárra, egymásra és minden zongora egyedi karakterére.", image: shared.salonImage, imageAlt: "Névtelen zongorista bensőséges közönség előtt" },
       sections: [
-        { id: "artist-directory", type: "notice", eyebrow: "Művészprofilok", title: "A gondosan válogatott művészjegyzék előkészítés alatt áll.", body: "Kizárólag ellenőrzött művészek, jóváhagyott életrajzok, portrék, programok és hivatkozások kerülnek majd publikálásra az adminisztrációs rendszerből." },
+        { id: "artist-directory", type: "notice", eyebrow: "Művészprofilok", title: "Ismerje meg a Klavierhaus programjának művészeit.", body: "A publikált profilokon jóváhagyott életrajzok, portrék, programok és kapcsolódó események jelennek meg." },
         { id: "invitation", type: "cta", eyebrow: "Művészeti párbeszéd", title: "Egy házat azok az emberek tesznek kulturálissá, akiket befogad.", body: "Művészeti és programmegkeresésekkel forduljon a Klavierhaushoz.", link: { label: "Beszélgetés indítása", key: "contact" } }
       ]
     },
@@ -671,8 +671,8 @@ const pages = Object.freeze({
       seo: { title: "Események | Klavierhaus New York", description: "Fedezze fel a Klavierhaus bensőséges koncertjeit, művészeti találkozásait, mesterkurzusait és kulturális eseményeit New Yorkban." },
       hero: { eyebrow: "Események", title: "Közelebb a zenéhez. Közelebb a művészhez.", lead: "A Klavierhaus eseményei a közelségre épülnek: gondosan választott programok, kivételes hangszerek és egy tér, ahol minden részlet hallható.", image: shared.salonImage, imageAlt: "Bensőséges esti szalonkoncert" },
       sections: [
-        { id: "programme", type: "event", status: "A program előkészítés alatt", title: "A Klavierhaus Szalon", meta: "New York · Időpontok hamarosan", body: "Bensőséges előadások és beszélgetések folyamatosan alakuló sorozata a művészek, a hangszerek és az elmélyült hallgatás művészete köré építve.", image: shared.salonImage, imageAlt: "Zongorista egy privát szalonban", link: { label: "A szalon felfedezése", key: "salon" } },
-        { id: "future-events", type: "notice", eyebrow: "Közelgő program", title: "Az ellenőrzött eseményadatok itt jelennek majd meg.", body: "A dátumokat, művészeket, férőhelyet, árat és elérhetőséget az eseménykezelő modulból publikáljuk. Ezen a fejlesztési oldalon jelenleg nincs aktív jegyértékesítés." }
+        { id: "programme", type: "event", status: "Klavierhaus kulturális program", title: "A Klavierhaus Szalon", meta: "New York", body: "Bensőséges előadások és beszélgetések folyamatosan alakuló sorozata a művészek, a hangszerek és az elmélyült hallgatás művészete köré építve.", image: shared.salonImage, imageAlt: "Zongorista egy privát szalonban", link: { label: "A szalon felfedezése", key: "salon" } },
+        { id: "future-events", type: "notice", eyebrow: "Közelgő program", title: "A publikált eseményadatok fent láthatók.", body: "A dátumokat, művészeket, férőhelyet, árat és elérhetőséget a védett eseménykezelő munkaterület tartja karban." }
       ]
     },
     salon: {
@@ -680,7 +680,7 @@ const pages = Object.freeze({
       seo: { title: "A Klavierhaus Szalon | Események", description: "A formálódó Klavierhaus Szalon előzetese: bensőséges zene, beszélgetés és kivételes hangszerek New Yorkban." },
       hero: { eyebrow: "Programsorozat", title: "A Klavierhaus Szalon", lead: "Privát léptékű kulturális forma, amely egyetlen figyelmes térben kapcsolja össze a művészt, a hangszert és a közönséget.", image: shared.salonImage, imageAlt: "Kis közönség egy szalonzongora-est előadásán" },
       sections: [
-        { id: "status", type: "notice", eyebrow: "A program előkészítés alatt", title: "Az időpontok és művészek még nem kerültek publikálásra.", body: "Ez az oldal a végleges eseményrészletező helyét biztosítja. Ellenőrzött időpontok, férőhelyek, árak, elérhetőség, művészadatok és jegyvásárlás kizárólag az adminrendszerből történő publikálás után jelennek meg." },
+        { id: "status", type: "notice", eyebrow: "Publikált program", title: "Az esemény részletei a közzétett programban láthatók.", body: "Az ellenőrzött időpontok, férőhelyek, árak, elérhetőség, művészadatok és jegyvásárlás közvetlenül az adminrendszerből jelennek meg." },
         { id: "principle", type: "statement", eyebrow: "Az alapgondolat", title: "Egy előadás, amelyet nem elfogyasztunk, hanem megtapasztalunk.", body: ["A szalonforma a közelséget, a figyelmet és a közös felfedezés élményét helyezi előtérbe. Tudatosan különbözik a nagyszínházi élménytől."] }
       ]
     },
@@ -716,7 +716,7 @@ const pages = Object.freeze({
           { title: "Restaurálás", body: "A hangszer állapotának, történetének, zenei lehetőségeinek és a megfelelő munkatartalomnak az átbeszélése." },
           { title: "Koncert és kultúra", body: "A művészi igények, a helyszín akusztikája, a program szándéka és a találkozás formájának megtervezése." }
         ] },
-        { id: "arrange", type: "contact", eyebrow: "Időpont-egyeztetés", title: "Klavierhaus New York", body: "Keressen minket közvetlenül. A későbbi adminmodul külön konzultációs űrlapot biztosít majd.", details: [
+        { id: "arrange", type: "contact", eyebrow: "Időpont-egyeztetés", title: "Klavierhaus New York", body: "Keressen minket közvetlenül. Csapatunk személyesen egyezteti a konzultáció részleteit.", details: [
           { label: "Telefon", value: shared.phoneDisplay, href: shared.phoneHref },
           { label: "E-mail", value: shared.emailDisplay, href: shared.emailHref },
           { label: "Cím", value: "790 11th Avenue\nNew York, NY 10019" }
