@@ -26,6 +26,7 @@ test("health endpoint identifies stage-one public website", async () => {
       status: "ok",
       service: "klavierhaus-public-website",
       version: "1.2.0",
+      commit: "unknown",
       indexing: "disabled",
       event_api: "not-configured"
     });
@@ -168,7 +169,7 @@ test("brand and editorial assets are locally served and optimized", async () => 
     "public/media/klavierhaus-hero.jpg",
     "public/media/klavierhaus-salon.jpg",
     "public/media/klavierhaus-craft.jpg",
-    "public/media/klavierhaus-artists-salon.jpg"
+    "public/media/klavierhaus-artist-salon.png"
   ];
 
   for (const relativePath of expectedFiles) {
