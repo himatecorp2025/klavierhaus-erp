@@ -9,6 +9,9 @@ const { pages, routeDefinitions, globalCopy } = require("../website/server/site-
 const LANGUAGES = new Set(["en", "hu"]);
 const PAGE_KEYS = new Set(["global", ...Object.keys(routeDefinitions)]);
 const MAX_DOCUMENT_BYTES = 300000;
+const PAGE_ROUTE_SETTINGS_KEY = "website_page_route_settings";
+const WEBSITE_DESIGN_SETTINGS_KEY = "website_design_settings";
+const DESIGN_COLOR_KEYS = ["black", "ivory", "cream", "gold", "gold_bright", "muted", "line"];
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -28,6 +31,40 @@ function mergeContentDefaults(defaultValue, storedValue) {
 
 function normalizeLanguage(value) {
   return value === "hu" ? "hu" : "en";
+}
+
+function normalizeRoute(value, fallback) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+  if (normalized.includes("//") || normalized.includes("?") || normalized.includes("#") || normalized.includes("..")) throw new Error("INVALID_WEBSITE_ROUTE");
+  return normalized === "/hu" ? "/hu/" : normalized.replace(/\/$/, "") || "/";
+}
+
+function defaultPageRoutes() {
+  return Object.fromEntries(Object.entries(routeDefinitions).map(([key, routes]) => [key, { en: routes.en, hu: routes.hu }]));
+}
+
+function parsePageRoutes(raw) {
+  const defaults = defaultPageRoutes();
+  if (!raw) return defaults;
+  try {
+    const parsed = JSON.parse(raw);
+    for (const [key, routes] of Object.entries(defaults)) {
+      defaults[key] = { en: normalizeRoute(parsed?.[key]?.en, routes.en), hu: normalizeRoute(parsed?.[key]?.hu, routes.hu) };
+    }
+  } catch (_error) { /* bundled routes remain the safe fallback */ }
+  return defaults;
+}
+
+function defaultWebsiteDesignSettings() {
+  return { black: "#080807", ivory: "#f2efe8", cream: "#e8e1d5", gold: "#b79a60", gold_bright: "#d9bd7a", muted: "#aaa49a", line: "rgba(183,154,96,.28)", display: "Cormorant Garamond", sans: "Inter", logo_url: "" };
+}
+
+function parseDesignSettings(raw) {
+  const value = defaultWebsiteDesignSettings();
+  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed.logo_url || ""))) value.logo_url = String(parsed.logo_url); } catch (_error) { /* defaults */ }
+  return value;
 }
 
 function fallbackPage(pageKey, language) {
@@ -70,6 +107,11 @@ function registerWebsiteContentRoutes(options) {
   function pageRow(pageKey, language) {
     return db.prepare("SELECT * FROM website_content_pages WHERE page_key=? AND language=?").get(pageKey, language) || null;
   }
+
+  function pageRoutes() {
+    return parsePageRoutes(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(PAGE_ROUTE_SETTINGS_KEY)?.setting_value);
+  }
+  function designSettings() { return parseDesignSettings(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(WEBSITE_DESIGN_SETTINGS_KEY)?.setting_value); }
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
@@ -139,11 +181,38 @@ function registerWebsiteContentRoutes(options) {
       website_base_url: websiteBaseUrl,
       pages: [...PAGE_KEYS].filter((pageKey) => fallbackPage(pageKey, "en") || fallbackPage(pageKey, "hu")).map((pageKey) => ({
         page_key: pageKey,
-        routes: routeDefinitions[pageKey] || { en: "/", hu: "/hu/" },
+        routes: pageRoutes()[pageKey] || routeDefinitions[pageKey] || { en: "/", hu: "/hu/" },
         title_en: pageKey === "global" ? "Global navigation & footer" : (fallbackPage(pageKey, "en")?.seo?.title || pageKey),
         title_hu: pageKey === "global" ? "Globális navigáció és lábléc" : (fallbackPage(pageKey, "hu")?.seo?.title || pageKey)
       }))
     });
+  });
+
+  app.get("/api/public/website-page-settings", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
+    res.json({ routes: pageRoutes() });
+  });
+  app.get("/api/public/website-design-settings", (_req, res) => { res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60"); res.json(designSettings()); });
+  app.get("/api/website-design-settings", auth, admin, (_req, res) => res.json(designSettings()));
+  app.put("/api/website-design-settings", auth, admin, (req, res) => {
+    const before = designSettings(); const candidate = { ...before, ...req.body };
+    const after = parseDesignSettings(JSON.stringify(candidate));
+    db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(WEBSITE_DESIGN_SETTINGS_KEY, JSON.stringify(after), req.user.name || req.user.id);
+    audit(req, "UPDATE_WEBSITE_DESIGN", "website", WEBSITE_DESIGN_SETTINGS_KEY, before, after, 1, "Website visual settings updated"); res.json(after);
+  });
+
+  app.put("/api/website-content/:pageKey/routes", auth, admin, (req, res) => {
+    const pageKey = String(req.params.pageKey || "");
+    if (!PAGE_KEYS.has(pageKey) || pageKey === "global") return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
+    const current = pageRoutes();
+    try {
+      const routes = { en: normalizeRoute(req.body?.en, current[pageKey]?.en), hu: normalizeRoute(req.body?.hu, current[pageKey]?.hu) };
+      for (const [key, value] of Object.entries(current)) if (key !== pageKey && (value.en === routes.en || value.hu === routes.hu || value.en === routes.hu || value.hu === routes.en)) throw new Error("WEBSITE_ROUTE_ALREADY_USED");
+      const before = current[pageKey]; current[pageKey] = routes;
+      db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(PAGE_ROUTE_SETTINGS_KEY, JSON.stringify(current), req.user.name || req.user.id);
+      audit(req, "UPDATE_WEBSITE_ROUTE", "website", pageKey, before, routes, 1, "Public website route updated");
+      res.json({ page_key: pageKey, routes });
+    } catch (error) { res.status(400).json({ error: String(error.message || "INVALID_WEBSITE_ROUTE") }); }
   });
 
   app.get("/api/website-content/:pageKey", auth, admin, (req, res) => {
@@ -236,8 +305,15 @@ function registerWebsiteContentRoutes(options) {
 
 module.exports = {
   PAGE_KEYS,
+  PAGE_ROUTE_SETTINGS_KEY,
+  WEBSITE_DESIGN_SETTINGS_KEY,
   fallbackPage,
+  defaultPageRoutes,
+  defaultWebsiteDesignSettings,
   normalizeLanguage,
+  normalizeRoute,
+  parsePageRoutes,
+  parseDesignSettings,
   parseStoredPage,
   registerWebsiteContentRoutes,
   sanitizeContent
