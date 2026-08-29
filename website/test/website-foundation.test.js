@@ -252,3 +252,15 @@ test("privacy copy matches the active enquiry forms and consent-gated measuremen
     assert.doesNotMatch(hungarian, /nincs.*aktív kapcsolatfelvételi űrlap/);
   });
 });
+
+test("standalone private consultation is deleted and replaced by modal triggers", async () => {
+  assert.equal(routeDefinitions.consultation, undefined);
+  await withServer({ allowIndexing: false }, async (origin) => {
+    const response = await fetch(`${origin}/private-consultation`);
+    assert.equal(response.status, 410);
+    assert.match(await response.text(), /permanently removed/i);
+  });
+  const source = fs.readFileSync(path.join(__dirname, "..", "server", "index.js"), "utf8");
+  assert.match(source, /data-private-viewing-open/);
+  assert.match(source, /renderPrivateViewingDialog/);
+});
