@@ -25,7 +25,6 @@ const routeDefinitions = Object.freeze({
   salon: { en: "/events/klavierhaus-salon", hu: "/hu/esemenyek/klavierhaus-szalon" },
   mission: { en: "/cultural-mission", hu: "/hu/kulturalis-kuldetes" },
   contact: { en: "/contact", hu: "/hu/kapcsolat" },
-  consultation: { en: "/private-consultation", hu: "/hu/privat-konzultacio" },
   privacy: { en: "/privacy", hu: "/hu/adatkezeles" },
   ticketTerms: { en: "/ticket-terms", hu: "/hu/jegyvasarlasi-feltetelek" }
 });
@@ -519,23 +518,6 @@ const pages = Object.freeze({
         { id: "consultation", type: "cta", eyebrow: "Private appointment", title: "Give the conversation the time it deserves.", body: "Arrange an individual visit or consultation with Klavierhaus.", link: { label: "Private consultation", key: "consultation" } }
       ]
     },
-    consultation: {
-      template: "contact",
-      seo: { title: "Private Consultation | Klavierhaus", description: "Arrange a private Klavierhaus consultation for piano selection, restoration, concert services, or cultural collaboration in New York." },
-      hero: { eyebrow: "Private consultation", title: "An individual encounter with sound, craft, and possibility.", lead: "The right instrument or collaboration is rarely found through specifications alone. A private consultation begins with listening—to you, to the room, and to the piano.", image: shared.heroImage, imageAlt: "Concert grand piano prepared for a private consultation" },
-      sections: [
-        { id: "what-to-expect", type: "cards", eyebrow: "A considered process", title: "Designed around the reason for your visit.", intro: "Consultations may concern piano selection, restoration, concert requirements, or a cultural collaboration.", items: [
-          { title: "Piano selection", body: "Explore touch, tone, scale, room, repertoire, and the emotional character you are seeking." },
-          { title: "Restoration", body: "Discuss the instrument's condition, history, musical potential, and an appropriate scope of work." },
-          { title: "Concert & culture", body: "Consider artist needs, venue acoustics, programme intentions, and the form of the encounter." }
-        ] },
-        { id: "arrange", type: "contact", eyebrow: "Arrange your visit", title: "Klavierhaus New York", body: "Contact us directly to arrange a private consultation.", details: [
-          { label: "Telephone", value: shared.phoneDisplay, href: shared.phoneHref },
-          { label: "Email", value: shared.emailDisplay, href: shared.emailHref },
-          { label: "Address", value: "790 11th Avenue\nNew York, NY 10019" }
-        ] }
-      ]
-    },
     privacy: {
       template: "legal",
       seo: { title: "Privacy | Klavierhaus", description: "Development-stage privacy information for the new Klavierhaus public website." },
@@ -704,23 +686,6 @@ const pages = Object.freeze({
           { label: "E-mail", value: shared.emailDisplay, href: shared.emailHref }
         ] },
         { id: "consultation", type: "cta", eyebrow: "Privát időpont", title: "Adjuk meg a beszélgetésnek a szükséges időt.", body: "Egyeztessen egyéni látogatást vagy konzultációt a Klavierhausszal.", link: { label: "Privát konzultáció", key: "consultation" } }
-      ]
-    },
-    consultation: {
-      template: "contact",
-      seo: { title: "Privát konzultáció | Klavierhaus", description: "Egyeztessen privát Klavierhaus-konzultációt zongoraválasztáshoz, restauráláshoz, koncertszolgáltatáshoz vagy kulturális együttműködéshez New Yorkban." },
-      hero: { eyebrow: "Privát konzultáció", title: "Személyes találkozás a hanggal, a mesterséggel és a lehetőségekkel.", lead: "A megfelelő hangszer vagy együttműködés ritkán található meg pusztán műszaki adatokból. A privát konzultáció az Ön, a tér és a zongora meghallgatásával kezdődik.", image: shared.heroImage, imageAlt: "Privát konzultációra előkészített koncertzongora" },
-      sections: [
-        { id: "what-to-expect", type: "cards", eyebrow: "Átgondolt folyamat", title: "A látogatás céljához igazítva.", intro: "A konzultáció zongoraválasztásra, restaurálásra, koncertigényre vagy kulturális együttműködésre is irányulhat.", items: [
-          { title: "Zongoraválasztás", body: "Billentés, hangszín, méret, tér, repertoár és a keresett érzelmi karakter közös felfedezése." },
-          { title: "Restaurálás", body: "A hangszer állapotának, történetének, zenei lehetőségeinek és a megfelelő munkatartalomnak az átbeszélése." },
-          { title: "Koncert és kultúra", body: "A művészi igények, a helyszín akusztikája, a program szándéka és a találkozás formájának megtervezése." }
-        ] },
-        { id: "arrange", type: "contact", eyebrow: "Időpont-egyeztetés", title: "Klavierhaus New York", body: "Keressen minket közvetlenül. Csapatunk személyesen egyezteti a konzultáció részleteit.", details: [
-          { label: "Telefon", value: shared.phoneDisplay, href: shared.phoneHref },
-          { label: "E-mail", value: shared.emailDisplay, href: shared.emailHref },
-          { label: "Cím", value: "790 11th Avenue\nNew York, NY 10019" }
-        ] }
       ]
     },
     privacy: {
