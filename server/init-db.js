@@ -310,10 +310,23 @@ function neutralizeDuplicateImportReferences(tableName) {
   })();
 }
 
+function removeRetiredPrivateConsultationPage() {
+  const hasPages = tableExists("website_content_pages");
+  const hasVersions = tableExists("website_content_versions");
+  if (!hasPages && !hasVersions) return;
+  db.transaction(() => {
+    if (tableExists("website_preview_tokens") && hasVersions) db.prepare("DELETE FROM website_preview_tokens WHERE version_id IN (SELECT id FROM website_content_versions WHERE page_key='consultation')").run();
+    if (hasVersions) db.prepare("DELETE FROM website_content_versions WHERE page_key='consultation'").run();
+    if (hasPages) db.prepare("DELETE FROM website_content_pages WHERE page_key='consultation'").run();
+  })();
+  log("Removed retired standalone Private Consultation website content");
+}
+
 function runMigrations() {
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  removeRetiredPrivateConsultationPage();
 
   const migrateColumns = db.transaction(() => {
     // Users. No user account is created here.
