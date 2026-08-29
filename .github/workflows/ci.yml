@@ -22,6 +22,12 @@ jobs:
         run: npm run check:manifests
       - name: Install locked dependencies
         run: npm ci
+      - name: Verify bundled public assets
+        run: npm run check:assets
+      - name: Verify rendered public asset HTTP responses
+        run: npm run check:assets:http
+      - name: Run migration smoke test
+        run: npm run check:migration
       - name: Check JavaScript syntax
         run: npm run check
       - name: Run automated tests
@@ -47,6 +53,8 @@ jobs:
         run: npm ci
       - name: Check website JavaScript syntax
         run: npm run check
+      - name: Verify website assets
+        run: npm run check:assets
       - name: Run website automated tests
         run: npm test
       - name: Check website production dependencies
