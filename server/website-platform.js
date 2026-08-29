@@ -5,10 +5,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { normalizeEventTimes, slugify } = require("./events");
+const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
-const LEAD_STATUSES = new Set(["NEW", "CONTACTED", "QUALIFIED", "CONVERTED", "CLOSED"]);
+const LEAD_STATUSES = new Set(["NEW", "CONTACTED", "IN_DISCUSSION", "APPOINTMENT_SCHEDULED", "CLOSED", "REJECTED"]);
 
 function clean(value, max = 20000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -25,6 +26,21 @@ function flag(value, fallback = false) {
 
 function parseJson(value, fallback = {}) {
   try { return JSON.parse(value || ""); } catch (_error) { return fallback; }
+}
+
+function normalizeGallery(value, maxItems = 12) {
+  const source = Array.isArray(value) ? value : parseJson(value, []);
+  if (!Array.isArray(source)) return [];
+  return source.slice(0, maxItems).map((item) => {
+    const entry = typeof item === "string" ? { url: item } : (item && typeof item === "object" ? item : {});
+    const url = clean(entry.url || entry.image_url, 1000);
+    if (!url || (!/^https?:\/\//i.test(url) && !url.startsWith("/"))) return null;
+    return { url, alt_en: clean(entry.alt_en, 500), alt_hu: clean(entry.alt_hu, 500) };
+  }).filter(Boolean);
+}
+
+function localizedGallery(value, language, fallbackAlt) {
+  return normalizeGallery(value).map((item) => ({ url: item.url, alt: item[language === "hu" ? "alt_hu" : "alt_en"] || fallbackAlt }));
 }
 
 function absoluteAsset(value, erpBaseUrl) {
@@ -51,7 +67,7 @@ function localizedArtist(row, language, baseUrl) {
     biography: row[`biography_${lang}`] || "",
     portrait_url: absoluteAsset(row.portrait_url, baseUrl),
     portrait_alt: row[`portrait_alt_${lang}`] || row.name,
-    gallery: parseJson(row.gallery_json, []),
+    gallery: localizedGallery(row.gallery_json, lang, row.name),
     featured: Number(row.featured) === 1
   };
 }
@@ -118,7 +134,7 @@ function registerWebsitePlatformRoutes(options) {
     const row = db.prepare(`SELECT * FROM website_artists WHERE ${column}=? AND published=1`).get(req.params.slug);
     if (!row) return res.status(404).json({ error: "WEBSITE_ARTIST_NOT_FOUND" });
     const events = db.prepare(`SELECT id,slug_en,slug_hu,title_en,title_hu,start_at,status FROM events
-      WHERE performer_name=? AND published_at IS NOT NULL ORDER BY start_at`).all(row.name);
+      WHERE (artist_id=? OR (artist_id IS NULL AND performer_name=?)) AND published_at IS NOT NULL ORDER BY start_at`).all(row.id, row.name);
     res.json({ ...localizedArtist(row, language, baseUrl), events: events.map((event) => ({ id: event.id, slug: event[`slug_${language}`], title: event[`title_${language}`], start_at: event.start_at, status: event.status })) });
   });
 
@@ -136,10 +152,11 @@ function registerWebsitePlatformRoutes(options) {
       role_en: clean(body.role_en, 500), role_hu: clean(body.role_hu, 500),
       biography_en: clean(body.biography_en), biography_hu: clean(body.biography_hu),
       portrait_url: portrait, portrait_alt_en: clean(body.portrait_alt_en, 500), portrait_alt_hu: clean(body.portrait_alt_hu, 500),
+      gallery_json: JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)),
       featured: flag(body.featured), published: flag(body.published, true), sort_order: Number(body.sort_order || 0), user_id: req.user.id
     };
-    db.prepare(`INSERT INTO website_artists(id,slug_en,slug_hu,name,role_en,role_hu,biography_en,biography_hu,portrait_url,portrait_alt_en,portrait_alt_hu,featured,published,sort_order,created_by_user_id,updated_by_user_id)
-      VALUES(@id,@slug_en,@slug_hu,@name,@role_en,@role_hu,@biography_en,@biography_hu,@portrait_url,@portrait_alt_en,@portrait_alt_hu,@featured,@published,@sort_order,@user_id,@user_id)`).run(value);
+    db.prepare(`INSERT INTO website_artists(id,slug_en,slug_hu,name,role_en,role_hu,biography_en,biography_hu,portrait_url,portrait_alt_en,portrait_alt_hu,gallery_json,featured,published,sort_order,created_by_user_id,updated_by_user_id)
+      VALUES(@id,@slug_en,@slug_hu,@name,@role_en,@role_hu,@biography_en,@biography_hu,@portrait_url,@portrait_alt_en,@portrait_alt_hu,@gallery_json,@featured,@published,@sort_order,@user_id,@user_id)`).run(value);
     const row = db.prepare("SELECT * FROM website_artists WHERE id=?").get(value.id);
     audit(req, "CREATE", "website_artists", row.id, null, row, 1, "Public artist created");
     res.status(201).json(row);
@@ -152,8 +169,8 @@ function registerWebsitePlatformRoutes(options) {
     if (!clean(body.name) || !clean(body.portrait_url)) return res.status(400).json({ error: "ARTIST_NAME_AND_IMAGE_REQUIRED" });
     const slugEn = before.name === body.name ? before.slug_en : uniqueSlug(db, "website_artists", "slug_en", body.name, before.id);
     const slugHu = before.name === body.name ? before.slug_hu : uniqueSlug(db, "website_artists", "slug_hu", body.name, before.id);
-    db.prepare(`UPDATE website_artists SET slug_en=?,slug_hu=?,name=?,role_en=?,role_hu=?,biography_en=?,biography_hu=?,portrait_url=?,portrait_alt_en=?,portrait_alt_hu=?,featured=?,published=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .run(slugEn, slugHu, clean(body.name, 200), clean(body.role_en, 500), clean(body.role_hu, 500), clean(body.biography_en), clean(body.biography_hu), clean(body.portrait_url, 1000), clean(body.portrait_alt_en, 500), clean(body.portrait_alt_hu, 500), flag(body.featured), flag(body.published, true), Number(body.sort_order || 0), req.user.id, before.id);
+    db.prepare(`UPDATE website_artists SET slug_en=?,slug_hu=?,name=?,role_en=?,role_hu=?,biography_en=?,biography_hu=?,portrait_url=?,portrait_alt_en=?,portrait_alt_hu=?,gallery_json=?,featured=?,published=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(slugEn, slugHu, clean(body.name, 200), clean(body.role_en, 500), clean(body.role_hu, 500), clean(body.biography_en), clean(body.biography_hu), clean(body.portrait_url, 1000), clean(body.portrait_alt_en, 500), clean(body.portrait_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), flag(body.featured), flag(body.published, true), Number(body.sort_order || 0), req.user.id, before.id);
     const after = db.prepare("SELECT * FROM website_artists WHERE id=?").get(before.id);
     audit(req, "UPDATE", "website_artists", before.id, before, after, 1, "Public artist updated");
     res.json(after);
@@ -215,8 +232,13 @@ function registerWebsitePlatformRoutes(options) {
     const phone = clean(body.phone, 80);
     const serviceAddress = clean(body.service_address, 1000);
     if (serviceId) {
-      if (!db.prepare("SELECT 1 FROM website_services WHERE id=? AND visible=1").get(serviceId)) return res.status(400).json({ error: "WEBSITE_SERVICE_NOT_AVAILABLE" });
-      if (!phone || !serviceAddress) return res.status(400).json({ error: "SERVICE_PHONE_AND_ADDRESS_REQUIRED" });
+      const service = db.prepare("SELECT slug_en,slug_hu,title_en,title_hu FROM website_services WHERE id=? AND visible=1").get(serviceId);
+      if (!service) return res.status(400).json({ error: "WEBSITE_SERVICE_NOT_AVAILABLE" });
+      if (!phone || !serviceAddress || !clean(body.preferred_time, 240)) return res.status(400).json({ error: "SERVICE_PHONE_ADDRESS_AND_TIME_REQUIRED" });
+      const concertService = /concert|koncert/i.test(`${service.slug_en} ${service.slug_hu} ${service.title_en} ${service.title_hu}`);
+      if (concertService && [body.event_date, body.event_venue, body.instrument_requirements, body.rental_duration].some((value) => !clean(value, 3000))) {
+        return res.status(400).json({ error: "CONCERT_SERVICE_DETAILS_REQUIRED" });
+      }
     }
     const row = {
       id: identifier("LEAD"), lead_type: clean(body.lead_type || "SERVICE_CALLBACK", 40).toUpperCase(), name, email,
@@ -225,12 +247,13 @@ function registerWebsitePlatformRoutes(options) {
       service_address: serviceAddress, preferred_time: clean(body.preferred_time, 240),
       event_date: clean(body.event_date, 80), event_venue: clean(body.event_venue, 1000),
       instrument_requirements: clean(body.instrument_requirements, 3000),
+      rental_duration: clean(body.rental_duration, 300),
       preferred_contact: ["EMAIL", "PHONE", "EITHER"].includes(clean(body.preferred_contact, 20).toUpperCase()) ? clean(body.preferred_contact, 20).toUpperCase() : "EMAIL",
       language: body.language === "hu" ? "hu" : "en", consent_contact: 1, consent_marketing: flag(body.consent_marketing),
       source_path: clean(body.source_path, 1000), utm_source: clean(body.utm_source, 500), utm_medium: clean(body.utm_medium, 500), utm_campaign: clean(body.utm_campaign, 500)
     };
-    db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
-      VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@piano_brand,@piano_model,@service_address,@preferred_time,@event_date,@event_venue,@instrument_requirements,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
+    db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,rental_duration,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
+      VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@piano_brand,@piano_model,@service_address,@preferred_time,@event_date,@event_venue,@instrument_requirements,@rental_duration,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
     res.status(201).json({ ok: true, id: row.id });
   });
   app.get("/api/website-contact-leads", auth, admin, (req, res) => {
@@ -240,12 +263,17 @@ function registerWebsitePlatformRoutes(options) {
   app.put("/api/website-contact-leads/:id", auth, admin, (req, res) => {
     const before = db.prepare("SELECT * FROM website_contact_leads WHERE id=?").get(req.params.id);
     if (!before) return res.status(404).json({ error: "WEBSITE_LEAD_NOT_FOUND" });
-    const status = clean(req.body?.status || before.status, 20).toUpperCase();
+    const status = clean(req.body?.status || before.status, 40).toUpperCase();
     if (!LEAD_STATUSES.has(status)) return res.status(400).json({ error: "INVALID_LEAD_STATUS" });
     const assignee = clean(req.body?.assigned_user_id, 120) || null;
     if (assignee && !db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assignee)) return res.status(400).json({ error: "INVALID_LEAD_ASSIGNEE" });
-    db.prepare("UPDATE website_contact_leads SET status=?,assigned_user_id=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(status, assignee, clean(req.body?.internal_notes, 10000), before.id);
+    const contactDate = clean(req.body?.contact_date, 40) || null;
+    const appointment = clean(req.body?.agreed_appointment_at, 40) || null;
+    if (contactDate && Number.isNaN(new Date(contactDate).getTime())) return res.status(400).json({ error: "INVALID_LEAD_CONTACT_DATE" });
+    if (appointment && Number.isNaN(new Date(appointment).getTime())) return res.status(400).json({ error: "INVALID_LEAD_APPOINTMENT" });
+    if (status === "APPOINTMENT_SCHEDULED" && !appointment) return res.status(400).json({ error: "LEAD_APPOINTMENT_REQUIRED" });
+    db.prepare("UPDATE website_contact_leads SET status=?,assigned_user_id=?,internal_notes=?,contact_date=?,agreed_appointment_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(status, assignee, clean(req.body?.internal_notes, 10000), contactDate, appointment, before.id);
     const after = db.prepare("SELECT * FROM website_contact_leads WHERE id=?").get(before.id);
     audit(req, "UPDATE", "website_leads", before.id, before, after, 1, "Website lead updated");
     res.json(after);
@@ -313,14 +341,14 @@ function registerWebsitePlatformRoutes(options) {
       id, event_key: `EV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`, category_id: source.category_id, access_type: source.access_type,
       slug_en: uniqueSlug(db, "events", "slug_en", `${source.title_en}-new-date`), slug_hu: uniqueSlug(db, "events", "slug_hu", `${source.title_hu}-uj-idopont`),
       title_en: source.title_en, title_hu: source.title_hu, short_description_en: source.short_description_en, short_description_hu: source.short_description_hu,
-      description_en: source.description_en, description_hu: source.description_hu, performer_name: source.performer_name, hero_image_url: source.hero_image_url,
+      description_en: source.description_en, description_hu: source.description_hu, artist_id: source.artist_id, performer_name: source.performer_name, hero_image_url: source.hero_image_url,
       hero_image_alt_en: source.hero_image_alt_en, hero_image_alt_hu: source.hero_image_alt_hu, gallery_json: source.gallery_json || "[]", venue_name: source.venue_name,
       venue_street: source.venue_street, venue_city: source.venue_city, venue_region: source.venue_region, venue_postal_code: source.venue_postal_code,
       venue_country: source.venue_country, timezone: source.timezone, start_at: times.startAt, end_at: times.endAt, capacity_total: source.capacity_total,
       price_cents: source.price_cents, currency: source.currency, refund_policy_version: source.refund_policy_version, user_id: req.user.id
     };
-    db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,refund_policy_version,relaunch_source_event_id,created_by_user_id,updated_by_user_id)
-      VALUES(@id,@event_key,@category_id,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@refund_policy_version,@source_event_id,@user_id,@user_id)`).run({ ...value, source_event_id: source.id });
+    db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,refund_policy_version,relaunch_source_event_id,created_by_user_id,updated_by_user_id)
+      VALUES(@id,@event_key,@category_id,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@refund_policy_version,@source_event_id,@user_id,@user_id)`).run({ ...value, source_event_id: source.id });
     const created = db.prepare("SELECT * FROM events WHERE id=?").get(id);
     audit(req, "RELAUNCH_DRAFT", "events", id, { source_event_id: source.id }, created, 1, "New event draft created from audience demand");
     res.status(201).json(created);
@@ -519,45 +547,10 @@ function registerWebsitePlatformRoutes(options) {
   });
 
   app.post("/api/demo-content/install", auth, admin, (req, res) => {
-    if (db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_sample_content_v1'").get()) return res.status(409).json({ error: "SAMPLE_CONTENT_ALREADY_INSTALLED" });
-    const userId = req.user.id;
-    const installed = db.transaction(() => {
-      const artists = [
-        ["SAMPLE-ARTIST-1", "elena-varga", "elena-varga", "Elena Varga", "Concert Pianist", "Koncertzongorista", sampleAsset("klavierhaus-artists-salon.jpg")],
-        ["SAMPLE-ARTIST-2", "julian-moreau", "julian-moreau", "Julian Moreau", "Pianist & Curator", "Zongoraművész és kurátor", sampleAsset("klavierhaus-salon.jpg")],
-        ["SAMPLE-ARTIST-3", "marcus-lee", "marcus-lee", "Marcus Lee", "Artist in Residence", "Rezidens művész", sampleAsset("klavierhaus-craft.jpg")]
-      ];
-      for (const row of artists) db.prepare(`INSERT INTO website_artists(id,slug_en,slug_hu,name,role_en,role_hu,biography_en,biography_hu,portrait_url,featured,published,sort_order,is_sample,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?,?,?,?, ?,?,1,1,?,1,?,?)`).run(...row.slice(0, 6), `${row[3]} brings rare intimacy and color to every Klavierhaus encounter.`, `${row[3]} minden Klavierhaus-találkozásba kivételes intimitást és színt hoz.`, row[6], artists.indexOf(row) + 1, userId, userId);
-      const services = [
-        ["SAMPLE-SERVICE-1", "rebuilding-restoration", "ujjaepites-restauralas", "Rebuilding & Restoration", "Újjáépítés és restaurálás"],
-        ["SAMPLE-SERVICE-2", "tuning-technical-care", "hangolas-technikai-gondoskodas", "Tuning & Technical Care", "Hangolás és technikai gondoskodás"],
-        ["SAMPLE-SERVICE-3", "concert-piano-services", "koncertzongora-szolgaltatas", "Concert Piano Services", "Koncertzongora-szolgáltatás"]
-      ];
-      for (const row of services) db.prepare(`INSERT INTO website_services(id,slug_en,slug_hu,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,visible,featured,sort_order,is_sample,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,1,1,?,1,?,?)`).run(...row, "Private, instrument-led care shaped around sound, room, and artist.", "Személyes, hangszerközpontú gondoskodás a hanghoz, térhez és művészhez igazítva.", "A private consultation begins every engagement.", "Minden együttműködés személyes konzultációval kezdődik.", sampleAsset(row[0].endsWith("1") ? "klavierhaus-craft.jpg" : row[0].endsWith("2") ? "klavierhaus-hero.jpg" : "klavierhaus-salon.jpg"), services.indexOf(row) + 1, userId, userId);
-      const pianos = [
-        ["SAMPLE-PIANO-1", "steinway-model-b-new-york", "steinway-b-new-york", "Steinway & Sons", "Model B", "Steinway Model B · New York", "Steinway B-modell · New York"],
-        ["SAMPLE-PIANO-2", "steinway-model-d-hamburg", "steinway-d-hamburg", "Steinway & Sons", "Model D", "Steinway Model D · Hamburg", "Steinway D-modell · Hamburg"],
-        ["SAMPLE-PIANO-3", "fazioli-f212", "fazioli-f212", "Fazioli", "F212", "Fazioli F212", "Fazioli F212"],
-        ["SAMPLE-PIANO-4", "fazioli-f278", "fazioli-f278", "Fazioli", "F278", "Fazioli F278", "Fazioli F278"],
-        ["SAMPLE-PIANO-5", "bosendorfer-214vc", "bosendorfer-214vc", "Bösendorfer", "214VC", "Bösendorfer 214VC", "Bösendorfer 214VC"],
-        ["SAMPLE-PIANO-6", "bosendorfer-280vc", "bosendorfer-280vc", "Bösendorfer", "280VC", "Bösendorfer 280VC", "Bösendorfer 280VC"]
-      ];
-      for (const row of pianos) db.prepare(`INSERT INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,availability_status,featured,published,sort_order,is_sample,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'AVAILABLE',1,1,?,1,?,?)`).run(...row, "A singular showroom instrument selected for tone, touch, and character.", "Egyedi bemutatótermi hangszer, hangszín, érintés és karakter alapján válogatva.", "Available for a private listening appointment.", "Privát meghallgatásra elérhető.", sampleAsset(pianos.indexOf(row) % 2 ? "klavierhaus-salon.jpg" : "klavierhaus-hero.jpg"), pianos.indexOf(row) + 1, userId, userId);
-      const reviews = [["SAMPLE-REVIEW-1", "Amelia Grant", "Private collector", "Magángyűjtő"], ["SAMPLE-REVIEW-2", "Daniel Kovács", "Concert artist", "Koncertművész"], ["SAMPLE-REVIEW-3", "Claire Morel", "Cultural patron", "Kulturális mecénás"]];
-      for (const row of reviews) db.prepare(`INSERT INTO website_reviews(id,person_name,role_en,role_hu,quote_en,quote_hu,portrait_url,visible,sort_order,is_sample,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?,?,?,?,1,?,1,?,?)`).run(...row, "Klavierhaus turns listening into a deeply personal encounter.", "A Klavierhaus a zenehallgatást mélyen személyes találkozássá formálja.", sampleAsset("klavierhaus-artists-salon.jpg"), reviews.indexOf(row) + 1, userId, userId);
-      const category = db.prepare("SELECT id FROM event_categories ORDER BY sort_order LIMIT 1").get();
-      const dates = [["2027-10-15T23:00:00.000Z", "2027-10-16T01:00:00.000Z"], ["2027-11-12T00:00:00.000Z", "2027-11-12T02:00:00.000Z"], ["2027-12-04T23:30:00.000Z", "2027-12-05T01:30:00.000Z"]];
-      for (let index = 0; index < 3; index += 1) db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,description_en,description_hu,performer_name,hero_image_url,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,published_at,is_sample,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?, 'PUBLISHED',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'USD',CURRENT_TIMESTAMP,1,?,?)`).run(`SAMPLE-EVENT-${index + 1}`, `SAMPLE-EV-${index + 1}`, category.id, index === 2 ? "PUBLIC_FREE" : "PUBLIC_PAID", `klavierhaus-salon-${index + 1}`, `klavierhaus-szalon-${index + 1}`, ["An Evening of Ravel", "The Art of the Singing Line", "Young Artists Salon"][index], ["Ravel estje", "Az éneklő dallam művészete", "Fiatal művészek szalonja"][index], "An intimate Klavierhaus salon shaped around tone, conversation, and presence.", "Intim Klavierhaus-szalon a hang, a párbeszéd és a jelenlét köré formálva.", artists[index][3], sampleAsset(index === 0 ? "klavierhaus-salon.jpg" : index === 1 ? "klavierhaus-artists-salon.jpg" : "klavierhaus-hero.jpg"), "Klavierhaus", "790 11th Avenue", "New York", "NY", "10019", "US", "America/New_York", dates[index][0], dates[index][1], 40, index === 2 ? 0 : 12500, userId, userId);
-      db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('website_sample_content_v1','1',?,CURRENT_TIMESTAMP)").run(req.user.name || req.user.id);
-      return { artists: artists.length, services: services.length, pianos: pianos.length, reviews: reviews.length, events: 3 };
-    })();
-    audit(req, "INSTALL", "website_sample_content", "v1", null, installed, 1, "One-time editable sample content installed");
-    res.status(201).json({ ok: true, installed });
+    const sharedInstall = installSampleContent({ db, userId: req.user.id, updatedBy: req.user.name || req.user.id, publicWebsiteUrl });
+    if (sharedInstall.alreadyInstalled) return res.status(409).json({ error: "SAMPLE_CONTENT_ALREADY_INSTALLED" });
+    audit(req, "INSTALL", "website_sample_content", "v2", null, sharedInstall.installed, 1, "Editable bilingual public sample content installed");
+    return res.status(201).json({ ok: true, installed: sharedInstall.installed });
   });
 
   app.delete("/api/demo-content", auth, requireSuperadmin, (req, res) => {
@@ -571,6 +564,7 @@ function registerWebsitePlatformRoutes(options) {
       result.services = db.prepare("DELETE FROM website_services WHERE is_sample=1").run().changes;
       result.reviews = db.prepare("DELETE FROM website_reviews WHERE is_sample=1").run().changes;
       db.prepare("DELETE FROM app_settings WHERE setting_key='website_sample_content_v1'").run();
+      db.prepare("DELETE FROM app_settings WHERE setting_key=?").run(SAMPLE_VERSION_KEY);
       return result;
     })();
     res.json({ ok: true, removed });
