@@ -33,6 +33,8 @@ require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3030;
+const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
+const DEPLOYMENT_COMMIT = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown";
 const VAPID_PUBLIC_KEY=process.env.VAPID_PUBLIC_KEY||"";
 const VAPID_PRIVATE_KEY=process.env.VAPID_PRIVATE_KEY||"";
 const VAPID_SUBJECT=process.env.VAPID_SUBJECT||"mailto:admin@klavierhaus.com";
@@ -257,6 +259,13 @@ function bumpBrandingVersion(userName=''){
   setSetting('branding_version',String(Date.now()),userName);
 }
 app.get('/api/public/branding',(_req,res)=>res.json(getBranding()));
+app.get('/health',(_req,res)=>res.status(200).json({
+  status:'ok',
+  service:'klavierhaus-erp',
+  version:VERSION,
+  commit:DEPLOYMENT_COMMIT,
+  database:db.open?'connected':'closed'
+}));
 app.get('/manifest.webmanifest',(_req,res)=>{const b=getBranding();res.type('application/manifest+json').send(JSON.stringify({name:b.company_name,short_name:b.short_name,start_url:'/',display:'standalone',background_color:'#07101d',theme_color:'#07101d',icons:[{src:`${b.logo_url}${b.logo_url.includes('?')?'&':'?'}v=${b.branding_version}`,sizes:'192x192 512x512',type:/\.jpe?g(?:$|\?)/i.test(b.logo_url)?'image/jpeg':'image/png',purpose:'any maskable'}]},null,2));});
 app.use("/uploads", express.static(UPLOAD_DIR,{etag:true,lastModified:true,maxAge:"5m"}));
 app.use(express.static(path.join(__dirname, "..", "public"),{
