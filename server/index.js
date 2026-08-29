@@ -63,6 +63,11 @@ const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:proce
 // The application process does not create users, demo data, tables, columns, or indexes.
 
 const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
+const ADMIN_MODULES = Object.freeze([
+  { key: "website_events", group: "Website & Events", label_en: "Website & Events", label_hu: "Weboldal és események" },
+  { key: "marketing", group: "Marketing", label_en: "Marketing", label_hu: "Marketing" },
+  { key: "technical", group: "Technical Operations", label_en: "Technical Operations", label_hu: "Technikai működés" }
+]);
 
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
@@ -2271,6 +2276,18 @@ app.get('/api/my-permissions',auth,(req,res)=>{
   if(isSuperadminUser(req.user)) return res.json({all:true,permissions:[]});
   const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
   res.json({all:false,permissions});
+});
+app.get('/api/admin/modules',auth,permit('ADMIN'),(req,res)=>{
+  let settings={};
+  try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
+  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:isSuperadminUser(req.user)})),superadmin_visible:isSuperadminUser(req.user)});
+});
+app.put('/api/admin/modules/:moduleKey',auth,(req,res)=>{
+  if(!isSuperadminUser(req.user)) return res.status(403).json({error:'SUPERADMIN_REQUIRED'});
+  const module=ADMIN_MODULES.find(item=>item.key===req.params.moduleKey); if(!module)return res.status(404).json({error:'MODULE_NOT_FOUND'});
+  let settings={}; try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
+  settings[module.key]=Boolean(req.body?.enabled); setSetting('admin_module_settings',JSON.stringify(settings),req.user.name||'SUPERADMIN');
+  res.json({key:module.key,enabled:settings[module.key]});
 });
 app.get('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>res.json(getBranding()));
 app.put('/api/settings/branding',auth,permit('ADMIN'),(req,res)=>{
