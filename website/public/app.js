@@ -253,17 +253,32 @@ async function recordFirstPartyEvent(eventName, metadata = {}) {
 }
 
 const serviceDialog = document.querySelector("[data-service-dialog]");
+let serviceDialogTrigger = null;
+document.querySelectorAll("[data-service-card]").forEach((card) => {
+  const open = () => card.querySelector("[data-service-request]")?.click();
+  card.addEventListener("click", (event) => { if (!event.target.closest("a,button")) open(); });
+  card.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+});
 document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
   if (!serviceDialog) return;
+  serviceDialogTrigger = button;
   serviceDialog.querySelector('[name="service_id"]').value = button.dataset.serviceId || "";
   serviceDialog.querySelector("[data-service-title]").textContent = button.dataset.serviceTitle || "";
   const image = serviceDialog.querySelector("[data-service-image]");
   if (image) { image.src = button.dataset.serviceImage || ""; image.alt = button.dataset.serviceTitle || "Klavierhaus service"; image.hidden = !button.dataset.serviceImage; }
   const concertService = /concert|koncert/i.test(button.dataset.serviceTitle || "");
-  serviceDialog.querySelectorAll("[data-concert-field]").forEach((field) => { field.hidden = !concertService; });
+  serviceDialog.querySelectorAll("[data-concert-field]").forEach((field) => {
+    field.hidden = !concertService;
+    field.querySelectorAll("input, textarea, select").forEach((control) => { control.required = concertService; });
+  });
   serviceDialog.showModal();
+  serviceDialog.querySelector('input[name="name"]')?.focus();
   recordFirstPartyEvent("service_enquiry_open", { service_id: button.dataset.serviceId || "" });
 }));
+serviceDialog?.addEventListener("click", (event) => {
+  if (event.target === serviceDialog) serviceDialog.close("cancel");
+});
+serviceDialog?.addEventListener("close", () => serviceDialogTrigger?.focus());
 document.querySelector("[data-service-form]")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -319,3 +334,10 @@ document.querySelector("[data-interest-form]")?.addEventListener("submit", async
 });
 
 document.querySelectorAll("[data-track-event]").forEach((element) => element.addEventListener("click", () => recordFirstPartyEvent(element.dataset.trackEvent, { id: element.dataset.trackId || "" })));
+
+// A removed or unavailable optional gallery image must not leave a broken tile behind.
+document.querySelectorAll("[data-gallery-image]").forEach((image) => image.addEventListener("error", () => {
+  const gallery = image.closest(".detail-gallery");
+  image.closest("figure")?.remove();
+  if (gallery && !gallery.querySelector("img")) gallery.remove();
+}, { once: true }));
