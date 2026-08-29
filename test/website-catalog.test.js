@@ -44,7 +44,7 @@ test("website catalog CRUD publishes bilingual services and keeps showroom piano
     const piano = await request("/api/showroom-pianos", { method: "POST", body: JSON.stringify({
       brand: "Steinway & Sons", model: "D-274", title_en: "Concert grand", title_hu: "Koncertzongora",
       summary_en: "Available by private appointment.", summary_hu: "Privát időpontban megtekinthető.",
-      image_url: "/uploads/website/steinway.jpg", published: true, featured: true
+      image_url: "/uploads/website/steinway.jpg", gallery: [{ url: "/uploads/website/steinway-detail.jpg", alt_en: "Steinway detail", alt_hu: "Steinway részlet" }], published: true, featured: true
     }) });
     assert.equal(piano.status, 201, JSON.stringify(piano.body));
     assert.equal(piano.body.slug_en, "concert-grand");
@@ -54,8 +54,13 @@ test("website catalog CRUD publishes bilingual services and keeps showroom piano
     assert.equal(publicHu.status, 200);
     assert.equal(publicHu.body[0].title, "Koncertzongora");
     assert.equal(publicHu.body[0].image_url, "https://klavierhaus-erp.onrender.com/uploads/website/steinway.jpg");
+    assert.deepEqual(publicHu.body[0].gallery, [{ url: "https://klavierhaus-erp.onrender.com/uploads/website/steinway-detail.jpg", alt: "Steinway részlet" }]);
     assert.equal(Object.hasOwn(publicHu.body[0], "created_by_user_id"), false, "public catalog responses must not expose internal editor IDs");
     assert.equal(Object.hasOwn(publicHu.body[0], "updated_at"), false, "public catalog responses must not expose audit metadata");
+
+    const reordered = await request(`/api/showroom-pianos/${piano.body.id}`, { method: "PUT", body: JSON.stringify({ ...piano.body, gallery: [{ url: "/uploads/website/steinway-second.jpg", alt_en: "Second view", alt_hu: "Második nézet" }, { url: "/uploads/website/steinway-detail.jpg", alt_en: "Steinway detail", alt_hu: "Steinway részlet" }] }) });
+    assert.equal(reordered.status, 200, JSON.stringify(reordered.body));
+    assert.deepEqual(JSON.parse(db.prepare("SELECT gallery_json FROM website_showroom_pianos WHERE id=?").get(piano.body.id).gallery_json).map((item) => item.url), ["/uploads/website/steinway-second.jpg", "/uploads/website/steinway-detail.jpg"]);
 
     const service = await request("/api/website-services", { method: "POST", body: JSON.stringify({
       title_en: "Concert preparation", title_hu: "Koncert-előkészítés", summary_en: "Private assessment.", summary_hu: "Személyes felmérés.", image_url: "/uploads/website/service.jpg"
