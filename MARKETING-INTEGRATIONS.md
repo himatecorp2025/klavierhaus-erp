@@ -15,7 +15,7 @@ WEBSITE_DEVICE_SECRET=legalább-32-karakteres-külön-véletlen-titok
 MARKETING_TOKEN_ENCRYPTION_KEY=legalább-32-karakteres-külön-véletlen-titok
 ```
 
-Az utolsó két érték ne egyezzen a `JWT_SECRET`, az `EVENT_QR_SECRET` vagy egymás értékével. Mentéskor válaszd a **Save, rebuild, and deploy** lehetőséget.
+Az utolsó két érték ne egyezzen a `JWT_SECRET` vagy egymás értékével. Mentéskor válaszd a **Save, rebuild, and deploy** lehetőséget.
 
 ### Website Web Service (`klavierhaus-home`)
 
