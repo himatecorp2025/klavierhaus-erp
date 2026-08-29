@@ -220,8 +220,7 @@ function renderEditorial(section, language) {
 }
 
 function renderCards(section, language) {
-  const items = section.items.map((item, index) => `<article class="luxury-card" data-reveal>
-    <span class="card-number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
+  const items = section.items.map((item) => `<article class="luxury-card" data-reveal>
     <h3>${escapeHtml(item.title)}</h3>
     <p>${escapeHtml(item.body)}</p>
     ${renderTextLink(item.link, language, "card-link")}
@@ -235,6 +234,11 @@ function renderCards(section, language) {
     </div>
     <div class="card-grid">${items}</div>
   </section>`;
+}
+
+function renderGallery(items, label) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<section class="detail-gallery" aria-label="${escapeHtml(label)}">${items.map((item) => `<figure><img data-gallery-image src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || label)}" loading="lazy" decoding="async"></figure>`).join("")}</section>`;
 }
 
 function renderCta(section, language) {
@@ -447,12 +451,12 @@ function renderShowroomCollection(items, language, options = {}) {
 function renderServiceCollection(items, language, options = {}) {
   if (!items.length) return "";
   const labels = (options.copy || getGlobal(language)).collectionLabels || {};
-  const cards = items.map((item) => `<article class="catalog-card service-catalog-card" data-reveal>
+  const cards = items.map((item) => `<article class="catalog-card service-catalog-card" data-reveal data-service-card tabindex="0" role="button" aria-label="${escapeHtml(item.title)}">
     <a class="catalog-card__image" href="${escapeHtml(servicePath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
     <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h3 class="word-safe-title">${escapeHtml(item.title)}</h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<button class="text-link" type="button" data-service-request data-service-id="${escapeHtml(item.id)}" data-service-title="${escapeHtml(item.title)}" data-service-image="${escapeHtml(item.image_url || "")}"><span>${escapeHtml(labels.serviceAssessment || (language === "hu" ? "Személyes felmérés egyeztetése" : "Arrange a private assessment"))}</span><span aria-hidden="true">↗</span></button></div>
   </article>`).join("");
   const hu = language === "hu";
-  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.servicesEyebrow || (hu ? "Személyre szabott gondoskodás" : "Bespoke care"))}</p><h2>${escapeHtml(labels.servicesTitle || (hu ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention."))}</h2><p>${escapeHtml(labels.servicesLead || (hu ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument."))}</p></div><div class="catalog-grid">${cards}</div></section><dialog class="service-dialog" data-service-dialog><form method="dialog" data-service-form><button class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><img class="service-dialog__image" data-service-image alt=""><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h2>${hu ? "Személyes konzultáció" : "Private consultation"}</h2><p data-service-title></p><input type="hidden" name="service_id"><div class="service-form-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label>${hu ? "Kapcsolatfelvétel ideje" : "Preferred time to contact"}<input name="preferred_time" maxlength="240"></label><label>${hu ? "Zongora márkája" : "Piano brand"}<input name="piano_brand" maxlength="160"></label><label>${hu ? "Zongora modellje" : "Piano model"}<input name="piano_model" maxlength="160"></label><label class="service-field-wide">${hu ? "Helyszín / cím" : "Service address"}<input name="service_address" maxlength="1000" autocomplete="street-address" required></label><label data-concert-field>${hu ? "Rendezvény dátuma" : "Event date"}<input name="event_date" type="date"></label><label data-concert-field>${hu ? "Rendezvény helyszíne" : "Event venue"}<input name="event_venue" maxlength="1000"></label><label class="service-field-wide" data-concert-field>${hu ? "Hangszerigény" : "Instrument requirements"}<textarea name="instrument_requirements" maxlength="3000" rows="3"></textarea></label><label class="service-field-wide">${hu ? "A zongora állapota és a kérés részletei" : "Piano condition and enquiry details"}<textarea name="message" maxlength="5000" rows="4"></textarea></label><label>${hu ? "Kapcsolattartás módja" : "Preferred contact"}<select name="preferred_contact"><option value="EMAIL">Email</option><option value="PHONE">${hu ? "Telefon" : "Phone"}</option><option value="EITHER">${hu ? "Bármelyik" : "Either"}</option></select></label></div><label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${hu ? "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot." : "I consent to being contacted about this enquiry."}</label><label class="checkbox-row"><input name="consent_marketing" type="checkbox"> ${hu ? "Külön hozzájárulok kulturális hírekhez." : "I separately consent to cultural news."}</label><button class="button button--primary" type="submit">${hu ? "Visszahívást kérek" : "Request a callback"}</button><p class="form-result" data-service-result aria-live="polite"></p></form></dialog>`;
+  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.servicesEyebrow || (hu ? "Személyre szabott gondoskodás" : "Bespoke care"))}</p><h2>${escapeHtml(labels.servicesTitle || (hu ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention."))}</h2><p>${escapeHtml(labels.servicesLead || (hu ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument."))}</p></div><div class="catalog-grid">${cards}</div></section><dialog class="service-dialog" data-service-dialog aria-labelledby="service-dialog-title"><form method="dialog" data-service-form><button class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><img class="service-dialog__image" data-service-image alt=""><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h2 id="service-dialog-title">${hu ? "Személyes konzultáció" : "Private consultation"}</h2><p data-service-title></p><input type="hidden" name="service_id"><div class="service-form-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label>${hu ? "Kapcsolatfelvétel ideje" : "Preferred time to contact"}<input name="preferred_time" maxlength="240" required></label><label>${hu ? "Zongora márkája" : "Piano brand"}<input name="piano_brand" maxlength="160"></label><label>${hu ? "Zongora modellje" : "Piano model"}<input name="piano_model" maxlength="160"></label><label class="service-field-wide">${hu ? "Helyszín / cím" : "Service address"}<input name="service_address" maxlength="1000" autocomplete="street-address" required></label><label data-concert-field>${hu ? "Rendezvény dátuma" : "Event date"}<input name="event_date" type="date"></label><label data-concert-field>${hu ? "Rendezvény helyszíne" : "Event venue"}<input name="event_venue" maxlength="1000"></label><label data-concert-field>${hu ? "Bérlés időtartama" : "Rental duration"}<input name="rental_duration" maxlength="240"></label><label class="service-field-wide" data-concert-field>${hu ? "Hangszerigény" : "Instrument requirements"}<textarea name="instrument_requirements" maxlength="3000" rows="3"></textarea></label><label class="service-field-wide">${hu ? "A zongora állapota és a kérés részletei" : "Piano condition and enquiry details"}<textarea name="message" maxlength="5000" rows="4"></textarea></label><label>${hu ? "Kapcsolattartás módja" : "Preferred contact"}<select name="preferred_contact"><option value="EMAIL">Email</option><option value="PHONE">${hu ? "Telefon" : "Phone"}</option><option value="EITHER">${hu ? "Bármelyik" : "Either"}</option></select></label></div><label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${hu ? "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot." : "I consent to being contacted about this enquiry."}</label><label class="checkbox-row"><input name="consent_marketing" type="checkbox"> ${hu ? "Külön hozzájárulok kulturális hírekhez." : "I separately consent to cultural news."}</label><button class="button button--primary" type="submit">${hu ? "Visszahívást kérek" : "Request a callback"}</button><p class="form-result" data-service-result aria-live="polite"></p></form></dialog>`;
 }
 
 function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], artists = [], pageOverride = null, globalOverride = null }) {
@@ -529,19 +533,19 @@ const eventCopy = Object.freeze({
     homeEyebrow: "The next encounters",
     homeTitle: "Enter the room where music becomes personal.",
     homeLead: "A curated sequence of intimate performances and cultural gatherings at Klavierhaus.",
-    noEvents: "The next programme is being prepared. Please return soon.",
+    noEvents: "No upcoming event is currently published.",
     details: "View details",
     viewAll: "View all events",
     buyTickets: "Buy tickets",
     reservePlace: "Reserve a place",
-    ticketsSoon: "Tickets coming soon",
+    ticketsSoon: "Ticketing unavailable",
     testMode: "TEST MODE",
     testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
     quantity: "Number of tickets",
     total: "Total",
     decreaseQuantity: "Remove one ticket",
     increaseQuantity: "Add one ticket",
-    artistPending: "Artist to be announced",
+    artistPending: "Artist details pending",
     attendeeName: "Full name",
     attendeeNames: "Guest names",
     guestNumber: "Guest",
@@ -562,7 +566,7 @@ const eventCopy = Object.freeze({
     repeatEvent: "I’d like this event to return",
     price: "Admission",
     complimentary: "Complimentary",
-    ticketingSoon: "Online ticketing will open in the next release. No reservation has been created yet.",
+    ticketingSoon: "Ticketing is currently unavailable for this event. No reservation has been created.",
     cancelled: "This event has been canceled by the organizer. Please contact our customer service team regarding your refund.",
     rescheduled: "This event has been rescheduled.",
     invitationEyebrow: "Private invitation",
@@ -586,19 +590,19 @@ const eventCopy = Object.freeze({
     homeEyebrow: "A következő találkozások",
     homeTitle: "Lépjen be a térbe, ahol a zene személyessé válik.",
     homeLead: "Meghitt előadások és kulturális találkozások gondosan válogatott sora a Klavierhausban.",
-    noEvents: "A következő program előkészítés alatt áll. Kérjük, látogasson vissza hamarosan.",
+    noEvents: "Jelenleg nincs közzétett közelgő esemény.",
     details: "Részletek",
     viewAll: "Összes esemény",
     buyTickets: "Jegyvásárlás",
     reservePlace: "Helyfoglalás",
-    ticketsSoon: "Jegyek hamarosan",
+    ticketsSoon: "A jegyvásárlás nem érhető el",
     testMode: "TESZTÜZEM",
     testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
     quantity: "Jegyek száma",
     total: "Összesen",
     decreaseQuantity: "Egy jegy eltávolítása",
     increaseQuantity: "Egy jegy hozzáadása",
-    artistPending: "A művész hamarosan",
+    artistPending: "A művész adatai még nem érhetők el",
     attendeeName: "Teljes név",
     attendeeNames: "Vendégek neve",
     guestNumber: "Vendég",
@@ -619,7 +623,7 @@ const eventCopy = Object.freeze({
     repeatEvent: "Szeretném újra ezt az eseményt",
     price: "Belépőjegy",
     complimentary: "Díjmentes",
-    ticketingSoon: "Az online jegyvásárlás a következő fejlesztési szakaszban nyílik meg. Helyfoglalás még nem történt.",
+    ticketingSoon: "Ehhez az eseményhez jelenleg nem érhető el jegyvásárlás. Helyfoglalás nem történt.",
     cancelled: "Az eseményt a szervező törölte. A visszatérítéssel kapcsolatban kérjük, forduljon ügyfélszolgálatunkhoz.",
     rescheduled: "Az esemény új időpontra került.",
     invitationEyebrow: "Személyes meghívó",
@@ -942,7 +946,8 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
   const alternatePath = isPiano ? showroomPath({ ...item, slug: item.alternate_slug }, getAlternateLanguage(language)) : servicePath({ ...item, slug: item.alternate_slug }, getAlternateLanguage(language));
   const canonicalUrl = pageUrl(baseUrl, currentPath);
   const ctaLabel = language === "hu" ? (isPiano ? "Privát megtekintés egyeztetése" : "Személyes felmérés egyeztetése") : (isPiano ? "Arrange a private viewing" : "Arrange a private assessment");
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${item.title} | Klavierhaus`, description: item.summary || item.description || item.title, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<a class="button button--primary" href="${escapeHtml(getRoute("consultation", language))}">${escapeHtml(ctaLabel)} <span aria-hidden="true">↗</span></a></div></article></main>${renderFooter(copy, language)}</body></html>`;
+  const galleryLabel = language === "hu" ? `${item.title} galériája` : `${item.title} gallery`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${item.title} | Klavierhaus`, description: item.summary || item.description || item.title, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<a class="button button--primary" href="${escapeHtml(getRoute("consultation", language))}">${escapeHtml(ctaLabel)} <span aria-hidden="true">↗</span></a></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}</body></html>`;
 }
 
 function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, globalOverride = null }) {
@@ -976,7 +981,8 @@ function renderArtistDetail({ artist, language, baseUrl, allowIndexing, nonce, g
   const canonicalUrl = pageUrl(baseUrl, currentPath);
   const personSchema = { "@context": "https://schema.org", "@type": "Person", name: artist.name, description: artist.biography || artist.role, image: artist.portrait_url, url: canonicalUrl };
   const events = Array.isArray(artist.events) && artist.events.length ? `<section class="artist-related-events"><p class="eyebrow">${escapeHtml(language === "hu" ? "Kapcsolódó események" : "Related events")}</p>${artist.events.map((event) => `<a href="${escapeHtml(language === "hu" ? `/hu/esemenyek/${event.slug}` : `/events/${event.slug}`)}"><span>${escapeHtml(event.title)}</span><span>${escapeHtml(formatEventDate(event.start_at, language, { dateOnly: true }))} ↗</span></a>`).join("")}</section>` : "";
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${artist.name} | Klavierhaus`, description: artist.biography || artist.role || artist.name, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: artist.portrait_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), personSchema], globalCopyOverride: copy })}</head><body class="template-artist-detail" data-language="${escapeHtml(language)}" data-page="artists">${renderHeader({ copy, language, currentKey: "artists", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="artist-detail"><div class="artist-detail__portrait"><img src="${escapeHtml(artist.portrait_url)}" alt="${escapeHtml(artist.portrait_alt || artist.name)}" fetchpriority="high" decoding="async"></div><div class="artist-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(artist.role || (language === "hu" ? "Művész" : "Artist"))}</p><h1>${escapeHtml(artist.name)}</h1>${artist.biography ? renderParagraphs(String(artist.biography).split(/\n+/).filter(Boolean)) : ""}${events}</div></article></main>${renderFooter(copy, language)}</body></html>`;
+  const galleryLabel = language === "hu" ? `${artist.name} galériája` : `${artist.name} gallery`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title: `${artist.name} | Klavierhaus`, description: artist.biography || artist.role || artist.name, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: artist.portrait_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), personSchema], globalCopyOverride: copy })}</head><body class="template-artist-detail" data-language="${escapeHtml(language)}" data-page="artists">${renderHeader({ copy, language, currentKey: "artists", alternateRouteOverride: alternatePath })}<main id="main-content"><article class="artist-detail"><div class="artist-detail__portrait"><img src="${escapeHtml(artist.portrait_url)}" alt="${escapeHtml(artist.portrait_alt || artist.name)}" fetchpriority="high" decoding="async"></div><div class="artist-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(artist.role || (language === "hu" ? "Művész" : "Artist"))}</p><h1>${escapeHtml(artist.name)}</h1>${artist.biography ? renderParagraphs(String(artist.biography).split(/\n+/).filter(Boolean)) : ""}${events}</div></article>${renderGallery(artist.gallery, galleryLabel)}</main>${renderFooter(copy, language)}</body></html>`;
 }
 
 function renderInvitation({ invitation, token, language, baseUrl, nonce, result = "", error = "", globalOverride = null }) {
@@ -1086,6 +1092,7 @@ function createApp(options = {}) {
       status: "ok",
       service: "klavierhaus-public-website",
       version: VERSION,
+      commit: String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown",
       indexing: allowIndexing ? "enabled" : "disabled",
       event_api: eventClient.configured ? "configured" : "not-configured"
     });
