@@ -3,6 +3,21 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
+async function applyPublishedDesignSettings() {
+  try {
+    const response = await fetch("/api/site/design-settings", { cache: "no-store" });
+    if (!response.ok) return;
+    const settings = await response.json();
+    const root = document.documentElement;
+    const variables = { black: "--black", ivory: "--ivory", cream: "--ivory-soft", gold: "--gold", gold_bright: "--gold-bright", muted: "--ivory-muted", line: "--line" };
+    Object.entries(variables).forEach(([key, variable]) => { if (/^#[0-9a-f]{6}$/i.test(String(settings[key] || ""))) root.style.setProperty(variable, settings[key]); });
+    if (settings.display) root.style.setProperty("--display", settings.display);
+    if (settings.sans) root.style.setProperty("--sans", settings.sans);
+    if (settings.logo_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.logo_url)) document.querySelectorAll(".brand-logo").forEach(image => { image.src = settings.logo_url; });
+  } catch (_error) { /* design settings are optional and must not block rendering */ }
+}
+applyPublishedDesignSettings();
+
 document.querySelectorAll("[data-current-year]").forEach((element) => {
   element.textContent = String(new Date().getFullYear());
 });
@@ -298,6 +313,42 @@ document.querySelector("[data-service-form]")?.addEventListener("submit", async 
   } catch (_error) {
     if (result) result.textContent = language === "hu" ? "A küldés nem sikerült. Kérjük, próbálja újra." : "We could not send your request. Please try again.";
   }
+});
+
+const privateViewingDialog = document.querySelector("[data-private-viewing-dialog]");
+let privateViewingTrigger = null;
+document.querySelectorAll("[data-private-viewing-open]").forEach((button) => button.addEventListener("click", () => {
+  if (!privateViewingDialog) return;
+  privateViewingTrigger = button;
+  const form = privateViewingDialog.querySelector("[data-private-viewing-form]");
+  if (form) {
+    form.reset();
+    form.elements.piano_brand.value = button.dataset.pianoBrand || "";
+    form.elements.piano_model.value = button.dataset.pianoModel || "";
+    form.elements.service_id.value = button.dataset.serviceId || "";
+  }
+  const context = privateViewingDialog.querySelector("[data-private-viewing-context]");
+  if (context) context.textContent = button.dataset.pianoModel ? `${button.dataset.pianoBrand || ""} ${button.dataset.pianoModel}`.trim() : "";
+  privateViewingDialog.showModal();
+  form?.querySelector('[name="name"]')?.focus();
+}));
+privateViewingDialog?.addEventListener("click", (event) => { if (event.target === privateViewingDialog) privateViewingDialog.close("cancel"); });
+privateViewingDialog?.addEventListener("close", () => privateViewingTrigger?.focus());
+privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const result = form.querySelector("[data-private-viewing-result]");
+  const values = Object.fromEntries(new FormData(form).entries());
+  values.consent_contact = form.elements.consent_contact.checked;
+  values.language = language;
+  values.source_path = location.pathname;
+  if (result) result.textContent = language === "hu" ? "Küldés…" : "Sending…";
+  try {
+    const response = await fetch("/api/site/contact-leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+    if (!response.ok) throw new Error("LEAD_FAILED");
+    if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan jelentkezünk." : "Thank you. We will contact you shortly.";
+    form.reset();
+  } catch (_error) { if (result) result.textContent = language === "hu" ? "A küldés nem sikerült." : "We could not send your request."; }
 });
 
 const interestDialog = document.querySelector("[data-interest-dialog]");
