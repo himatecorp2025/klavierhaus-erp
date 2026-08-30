@@ -227,6 +227,8 @@ test("final luxury design contract keeps compact margins, safe titles and five-t
   assert.match(css, /grid-auto-columns:86%/);
   assert.match(css, /overflow-x:auto/);
   assert.match(css, /overflow-y:hidden/);
+  assert.match(css, /\.statement-copy\{max-width:48rem;margin-inline:auto;text-align:center\}/);
+  assert.match(css, /\.home-event-showcase\{box-sizing:border-box;width:100vw;max-width:none/);
   assert.match(browserSource, /site-header\.is-hidden|classList\.add\("is-hidden"\)/);
   assert.match(browserSource, /data-ticket-quantity/);
   assert.match(browserSource, /data-review-carousel/);
@@ -235,6 +237,13 @@ test("final luxury design contract keeps compact margins, safe titles and five-t
   assert.match(serverSource, /renderReviewShowcase\(reviews/);
   assert.match(serverSource, /renderShowroomCollection/);
   assert.match(serverSource, /renderServiceCollection/);
+  assert.match(serverSource, /class="catalog-card artist-profile-card"/);
+  assert.match(serverSource, /class="button button--ghost"/);
+  assert.match(serverSource, /<button type="button" class="dialog-close"/);
+  assert.match(browserSource, /button\.closest\("dialog"\)\?\.close\("cancel"\)/);
+  assert.match(browserSource, /serviceDialog\.close\("success"\)/);
+  assert.match(browserSource, /privateViewingDialog\.close\("success"\)/);
+  assert.match(browserSource, /interestDialog\.close\("success"\)/);
   assert.match(serverSource, /rel="canonical"/);
   assert.match(serverSource, /hreflang="x-default"/);
 });
