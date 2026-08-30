@@ -68,6 +68,38 @@ const ADMIN_MODULES = Object.freeze([
   { key: "marketing", group: "Marketing", label_en: "Marketing", label_hu: "Marketing" },
   { key: "technical", group: "Technical Operations", label_en: "Technical Operations", label_hu: "Technikai működés" }
 ]);
+const ADMIN_MODULE_CARDS = Object.freeze([
+  { key: "website_design", group_key: "website_events", label_en: "Landing Page Design", label_hu: "Landing Page dizájn" },
+  { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
+  { key: "website_services", group_key: "website_events", label_en: "Services", label_hu: "Szolgáltatások" },
+  { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
+  { key: "website_artists", group_key: "website_events", label_en: "Artists", label_hu: "Művészek" },
+  { key: "media_library", group_key: "website_events", label_en: "Media Library", label_hu: "Médiatár" },
+  { key: "events", group_key: "website_events", label_en: "Events", label_hu: "Események" },
+  { key: "event_tickets", group_key: "website_events", label_en: "Tickets & Reservations", label_hu: "Jegyek és foglalások" },
+  { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
+  { key: "event_guest_list", group_key: "website_events", label_en: "Guest List", label_hu: "Vendéglista" },
+  { key: "website_contacts", group_key: "website_events", label_en: "Contacts", label_hu: "Kapcsolatfelvételek" },
+  { key: "publish_preview", group_key: "website_events", label_en: "Publish & Preview", label_hu: "Publikálás és előnézet" },
+  { key: "marketing_overview", group_key: "marketing", label_en: "Marketing Overview", label_hu: "Marketing áttekintő" },
+  { key: "website_reviews", group_key: "marketing", label_en: "Reviews", label_hu: "Vélemények" },
+  { key: "campaigns_utm", group_key: "marketing", label_en: "Campaigns & UTM", label_hu: "Kampányok és UTM-kódok" },
+  { key: "leads", group_key: "marketing", label_en: "Leads", label_hu: "Érdeklődők" },
+  { key: "tracking_cookies", group_key: "marketing", label_en: "Tracking & Cookies", label_hu: "Követési és cookie-beállítások" },
+  { key: "scheduler", group_key: "technical", label_en: "Scheduler", label_hu: "Naptár" },
+  { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
+  { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
+  { key: "pianos", group_key: "technical", label_en: "Client Pianos", label_hu: "Ügyfélzongorák" },
+  { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
+  { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
+  { key: "knowledge_base", group_key: "technical", label_en: "Invoices & Documents", label_hu: "Számlák és dokumentumok" },
+  { key: "finance", group_key: "technical", label_en: "Finance", label_hu: "Pénzügy" },
+  { key: "income_statement", group_key: "technical", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
+  { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
+  { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
+  { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
+  { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" }
+]);
 
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
@@ -2280,11 +2312,12 @@ app.get('/api/my-permissions',auth,(req,res)=>{
 app.get('/api/admin/modules',auth,permit('ADMIN'),(req,res)=>{
   let settings={};
   try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
-  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:isSuperadminUser(req.user)})),superadmin_visible:isSuperadminUser(req.user)});
+  const canToggle=isSuperadminUser(req.user);
+  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:canToggle})),cards:ADMIN_MODULE_CARDS.map(card=>({...card,enabled:settings[card.key]!==false,can_toggle:canToggle})),superadmin_visible:canToggle});
 });
 app.put('/api/admin/modules/:moduleKey',auth,(req,res)=>{
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'SUPERADMIN_REQUIRED'});
-  const module=ADMIN_MODULES.find(item=>item.key===req.params.moduleKey); if(!module)return res.status(404).json({error:'MODULE_NOT_FOUND'});
+  const module=ADMIN_MODULES.find(item=>item.key===req.params.moduleKey)||ADMIN_MODULE_CARDS.find(item=>item.key===req.params.moduleKey); if(!module)return res.status(404).json({error:'MODULE_NOT_FOUND'});
   let settings={}; try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
   settings[module.key]=Boolean(req.body?.enabled); setSetting('admin_module_settings',JSON.stringify(settings),req.user.name||'SUPERADMIN');
   res.json({key:module.key,enabled:settings[module.key]});
