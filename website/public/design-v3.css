@@ -104,6 +104,12 @@ body[data-page="consultation"] .hero h1{max-width:22ch;font-size:clamp(1.8rem,3.
   .consent-banner{grid-template-columns:1fr}.consent-actions{justify-content:flex-start}
 }
 @media(prefers-reduced-motion:reduce){.site-header,.catalog-card__image img,.public-event-card{transition:none!important}.site-header.is-hidden{transform:none}}
-.service-dialog__image{width:100%;max-height:16rem;object-fit:cover;border-radius:15px}.service-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.service-field-wide{grid-column:1/-1}.service-dialog [hidden]{display:none!important}.artist-profile-card__copy small{display:-webkit-box;overflow:hidden;color:var(--muted);font-size:.9rem;line-height:1.55;-webkit-box-orient:vertical;-webkit-line-clamp:3}.catalog-card__image{position:relative}.catalog-card__image::after,.artist-profile-card__media::after{position:absolute;inset:auto 0 0;height:52%;content:"";background:linear-gradient(transparent,rgba(8,8,7,.98));pointer-events:none}.artist-profile-card__media{position:relative}
+.service-dialog__image{width:100%;max-height:16rem;object-fit:cover;border-radius:15px}.service-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.service-field-wide{grid-column:1/-1}.service-dialog [hidden]{display:none!important}.catalog-card__image{position:relative}.catalog-card__image::after{position:absolute;inset:auto 0 0;height:52%;content:"";background:linear-gradient(transparent,rgba(8,8,7,.98));pointer-events:none}.catalog-card__image img{position:relative;z-index:0}.catalog-card .button{width:100%;margin-top:.35rem}.catalog-card__body>p:not(.eyebrow){min-height:3.1em}.artist-profile-card .catalog-card__image{aspect-ratio:4/3}.artist-profile-card .catalog-card__body{min-height:12rem}
 .hero.dynamic-event-hero{padding-top:calc(var(--header-height) + 5rem);padding-bottom:clamp(5rem,8vw,8.5rem)}.dynamic-event-list>.section-heading{text-align:center}.dynamic-event-list>.section-heading h2{margin-inline:auto}
 @media(max-width:680px){.service-form-grid{grid-template-columns:1fr}.service-field-wide{grid-column:auto}}
+
+/* Final shared public card and dialog contract */
+.statement-copy{max-width:48rem;margin-inline:auto;text-align:center}
+.home-event-showcase{box-sizing:border-box;width:100vw;max-width:none;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)}
+.catalog-card .button,.public-event-card .button{font-family:var(--font-sans,var(--sans));}
+.dialog-close{z-index:2}
