@@ -98,6 +98,9 @@ function createEventClient(options = {}) {
     trackingConfig() {
       return request("/api/public/tracking-config");
     },
+    seoConfig() {
+      return request("/api/public/website-seo");
+    },
     track(event) {
       return request("/api/public/tracking-events", { method: "POST", body: JSON.stringify(event) });
     },
