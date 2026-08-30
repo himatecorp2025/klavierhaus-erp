@@ -45,18 +45,22 @@ const navs={
 };
 
 const adminNavGroups=[
- {id:"website_events",label:["Website & Events","Weboldal és események"],items:[
-  ["website_design","Landing Page Design","Landing Page dizájn"],["pages_content","Pages & Content","Oldalak és tartalmak"],["website_services","Services","Szolgáltatások"],["showroom_pianos","Showroom Pianos","Bemutatott zongorák"],["website_artists","Artists","Művészek"],["media_library","Media Library","Médiatár"],["events","Events","Események"],["event_tickets","Tickets & Reservations","Jegyek és foglalások"],["event_invitations","Invitations","Meghívások"],["event_guest_list","Guest List","Vendéglista"],["website_contacts","Contacts","Kapcsolatfelvételek"],["publish_preview","Publish & Preview","Publikálás és előnézet"]
+ {id:"website_events",icon:"◈",label:["Website & Events","Weboldal és események"],items:[
+  ["website_design","Landing Page Design","Landing Page dizájn","✦"],["pages_content","Pages & Content","Oldalak és tartalmak","▤"],["website_services","Services","Szolgáltatások","♟"],["showroom_pianos","Showroom Pianos","Bemutatott zongorák","♬"],["website_artists","Artists","Művészek","◉"],["media_library","Media Library","Médiatár","▧"],["events","Events","Események","🎟"],["event_tickets","Tickets & Reservations","Jegyek és foglalások","🎫"],["event_invitations","Invitations","Meghívások","✉"],["event_guest_list","Guest List","Vendéglista","📋"],["website_contacts","Contacts","Kapcsolatfelvételek","⌂"],["publish_preview","Publish & Preview","Publikálás és előnézet","◌"]
  ]},
- {id:"marketing",label:["Marketing","Marketing"],items:[
-  ["marketing_overview","Marketing Overview","Marketing áttekintő"],["website_reviews","Reviews","Vélemények"],["campaigns_utm","Campaigns & UTM","Kampányok és UTM-kódok"],["leads","Leads","Érdeklődők"],["tracking_cookies","Tracking & Cookies","Követési és cookie-beállítások"]
+ {id:"marketing",icon:"✦",label:["Marketing","Marketing"],items:[
+  ["marketing_overview","Marketing Overview","Marketing áttekintő","◫"],["website_reviews","Reviews","Vélemények","❝"],["campaigns_utm","Campaigns & UTM","Kampányok és UTM-kódok","⌁"],["leads","Leads","Érdeklődők","♧"],["tracking_cookies","Tracking & Cookies","Követési és cookie-beállítások","◍"]
  ]},
- {id:"technical",label:["Technical Operations","Technikai működés"],items:[
-  ["planned_jobs","Planned Jobs","Tervezett munkák"],["contacts","Clients","Ügyfelek"],["pianos","Client Pianos","Ügyfélzongorák"],["inventory","Inventory","Leltár"],["closed_jobs","Closed Jobs","Lezárt munkák"],["knowledge_base","Invoices & Documents","Számlák és dokumentumok"],["finance","Finance","Pénzügy"],["income_statement","Income Statement","Eredménykimutatás"],["users","Users","Felhasználók"],["audit_log","Audit Log","Módosítási napló"],["backups","Backups","Biztonsági mentések"],["settings","Settings","Beállítások"]
+ {id:"technical",icon:"⚙",label:["Technical Operations","Technikai működés"],items:[
+  ["scheduler","Scheduler","Naptár","📅"],["planned_jobs","Planned Jobs","Tervezett munkák","🗂"],["contacts","Clients","Ügyfelek","👥"],["pianos","Client Pianos","Ügyfélzongorák","🎹"],["inventory","Inventory","Leltár","📦"],["closed_jobs","Closed Jobs","Lezárt munkák","✅"],["knowledge_base","Invoices & Documents","Számlák és dokumentumok","🧾"],["finance","Finance","Pénzügy","💵"],["income_statement","Income Statement","Eredménykimutatás","📊"],["users","Users","Felhasználók","👤"],["audit_log","Audit Log","Módosítási napló","🧾"],["backups","Backups","Biztonsági mentések","⛁"],["settings","Settings","Beállítások","⚙"]
  ]}
 ];
 const adminNavigationItems=adminNavGroups.flatMap(group=>group.items.map(([view,en,hu])=>[view,`${en} / ${hu}`]));
-const adminNavigationLabels=Object.fromEntries(adminNavigationItems.map(([view,label])=>[view,label]));
+const adminNavigationLabels=Object.fromEntries([
+ ...adminNavGroups.map(group=>[group.id,`${group.label[0]} / ${group.label[1]}`]),
+ ...adminNavigationItems
+]);
+const adminNavigationIcons=Object.fromEntries(adminNavGroups.flatMap(group=>group.items.map(([view,en,hu,icon])=>[view,icon])));
 
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["billing_address","Billing address / Számlázási cím"],["has_piano","Has piano? / Van zongorája?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interested_buying","Interested in buying? / Vásárlási érdeklődő?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interest_brand","Interested brand / Érdeklődött márka"],["interest_model","Interested model / Érdeklődött modell"],["interest_budget","Budget / Keretösszeg","number"],["interest_timeline","Timeline / Várható vásárlási idő"],["interest_notes","Purchase interest notes / Vásárlási érdeklődés megjegyzés","textarea"],["owner","Relationship owner / Kapcsolattartó gazda"],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["customer_status_icon","name","phone","email","address","last_contact","next_step"]},
@@ -91,6 +95,7 @@ const staticTranslations={
 };
 let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
 let adminModuleState={};
+let adminCardState={};
 let currentAuditType='WORK';
 let viewHistory=[];
 function userLangKey(){return user?.id ? `kh_lang_${user.id}` : "kh_lang_guest";}
@@ -112,32 +117,23 @@ function navItemAllowed(view){
  return userPermissions.all||userPermissions.permissions.includes(`${view}.view`);
 }
 function visibleNavigationItems(){
- if(isAdmin())return [["scheduler","Scheduler / Naptár"],...adminNavigationItems];
+ if(isAdmin())return adminNavGroups.filter(group=>adminModuleState[group.id]!==false||isSuperadmin()).map(group=>[group.id,`${group.label[0]} / ${group.label[1]}`]);
  return (navs[user?.role]||navs.WORKER).filter(([view])=>navItemAllowed(view));
 }
-function adminNavGroupMarkup(group){
-  const active=group.items.some(([view])=>view===currentView);
- const saved=JSON.parse(localStorage.getItem("kh_admin_nav_groups")||"{}");
- const open=saved[group.id]!==undefined?Boolean(saved[group.id]):active||group.id==="website_events";
- if(adminModuleState[group.id]===false && !isSuperadmin()) return '';
- return `<section class="nav-group ${open?'open':''}" data-nav-section="${group.id}"><button type="button" class="nav-group-toggle" data-nav-group="${group.id}" aria-expanded="${open?'true':'false'}"><span>${htmlText(currentLang==='hu'?group.label[1]:group.label[0])}</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button><div class="nav-group-items">${group.items.map(([view,en,hu])=>`<button class="nav-btn nav-sub-btn ${view===currentView?'active':''}" data-v="${view}">${htmlText(currentLang==='hu'?hu:en)}</button>`).join('')}</div></section>`;
+function adminGroupButtonMarkup(group){
+ const label=currentLang==='hu'?group.label[1]:group.label[0],disabled=adminModuleState[group.id]===false;
+ return `<button type="button" class="nav-btn admin-group-btn ${currentView===group.id?'active':''} ${disabled?'is-disabled':''}" data-v="${group.id}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span class="nav-icon" aria-hidden="true">${group.icon}</span><span class="nav-label">${htmlText(label)}</span>${disabled?'<span class="nav-disabled-dot" aria-hidden="true">•</span>':''}</button>`;
 }
 
-async function loadAdminModuleState(){try{const payload=await api('/api/admin/modules');adminModuleState=Object.fromEntries((payload.modules||[]).map(item=>[item.key,Boolean(item.enabled)]));window.__adminModules=payload;}catch(_error){adminModuleState={};}}
+async function loadAdminModuleState(){try{const payload=await api('/api/admin/modules');adminModuleState=Object.fromEntries((payload.modules||[]).map(item=>[item.key,Boolean(item.enabled)]));adminCardState=Object.fromEntries((payload.cards||[]).map(item=>[item.key,Boolean(item.enabled)]));window.__adminModules=payload;}catch(_error){adminModuleState={};adminCardState={};}}
 function renderNavigation(){
   if(!token || !user || !document.getElementById("nav")) return;
   const navEl=document.getElementById("nav");
   if(isAdmin()){
-   navEl.innerHTML=`<button class="nav-btn nav-calendar-btn ${currentView==='scheduler'?'active':''}" data-v="scheduler">${navLabel('scheduler')}</button>${adminNavGroups.map(adminNavGroupMarkup).join('')}`;
+   navEl.innerHTML=adminNavGroups.filter(group=>adminModuleState[group.id]!==false||isSuperadmin()).map(adminGroupButtonMarkup).join('');
    return;
   }
   navEl.innerHTML=visibleNavigationItems().map(n=>`<button class="nav-btn ${n[0]===currentView?"active":""}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
-}
-function toggleAdminNavGroup(id){
- const section=document.querySelector(`[data-nav-section="${id}"]`);if(!section)return;
- const open=!section.classList.contains('open');section.classList.toggle('open',open);
- section.querySelector('.nav-group-toggle')?.setAttribute('aria-expanded',String(open));
- const saved=JSON.parse(localStorage.getItem('kh_admin_nav_groups')||'{}');saved[id]=open;localStorage.setItem('kh_admin_nav_groups',JSON.stringify(saved));
 }
 function updateStaticChromeLanguage(){
   const logout=document.getElementById("logoutBtn"); if(logout) logout.textContent=tr("logout");
@@ -883,6 +879,7 @@ async function boot(){
  document.body.classList.add("sidebar-collapsed");
  const sb=document.getElementById("sidebarToggle");
  if(sb) sb.onclick=toggleSidebar;
+ updateSidebarToggle();
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
  try{userPermissions=await api("/api/my-permissions");}catch(e){userPermissions={all:isSuperadmin(),permissions:[]};}
  await loadAdminModuleState();
@@ -894,7 +891,6 @@ async function boot(){
  $("#nav").onclick=e=>{
    let b=e.target.closest("button");
    if(!b)return;
-   if(b.dataset.navGroup){toggleAdminNavGroup(b.dataset.navGroup);return;}
    if(!b.dataset.v)return;
    document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));
    b.classList.add("active");
@@ -917,7 +913,15 @@ async function boot(){
  }
  applyLanguageToDOM();
 }
-function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed")}
+function updateSidebarToggle(){
+ const button=document.getElementById("sidebarToggle");
+ if(!button)return;
+ const collapsed=document.body.classList.contains("sidebar-collapsed");
+ button.textContent=collapsed?"☰":"×";
+ button.setAttribute("aria-expanded",String(!collapsed));
+ button.setAttribute("aria-label",collapsed?"Open menu":"Close menu");
+}
+function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed");updateSidebarToggle();}
 function money(n){return "$"+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0})}
 function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge ${c}">${v||""}</span>`}
 function fmtDate(d){return d.toISOString().slice(0,10)}
@@ -1213,6 +1217,7 @@ async function render(v,opts={}){
   else if(v==="finance") await renderFinance();
   else if(v==="inventory") await renderInventory();
   else if(v==="events") await renderEvents();
+  else if(adminNavGroups.some(group=>group.id===v)) await renderAdminGroupLanding(v);
   else if(v==="website_design"||v==="pages_content") await renderWebsiteDesign(v);
   else if(v==="website_services") await renderWebsiteServices();
   else if(v==="showroom_pianos") await renderShowroomPianos();
@@ -1263,14 +1268,13 @@ function closeMobileMore(){ const sheet=document.getElementById("mobileMoreSheet
 function openMobileMore(){
   const sheet=document.getElementById("mobileMoreSheet"), items=document.getElementById("mobileMoreItems"); if(!sheet||!items)return;
   const all=visibleNavigationItems().filter(n=>!['contacts','pianos'].includes(n[0]));
-  const top=`<button type="button" class="mobile-more-item ${currentView==='scheduler'?'active':''}" data-more-view="scheduler"><span>📅</span><b>${tr('calendar')}</b></button>`;
-  items.innerHTML=top+all.filter(n=>n[0]!=="scheduler").map(n=>`<button type="button" class="mobile-more-item ${currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
+  items.innerHTML=all.map(n=>`<button type="button" class="mobile-more-item ${currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
   sheet.classList.remove("hidden");sheet.setAttribute("aria-hidden","false");document.body.classList.add("mobile-sheet-open");
   items.querySelectorAll("[data-more-view]").forEach(btn=>btn.onclick=()=>{closeMobileMore();render(btn.dataset.moreView);});
   const profile=document.getElementById("mobileProfileBtn"); if(profile) profile.onclick=()=>{closeMobileMore();openMyProfile();};
   const logout=document.getElementById("mobileLogoutBtn"); if(logout) logout.onclick=()=>logoutNow();
 }
-function mobileViewIcon(view){ return ({planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",event_tickets:"🎫",event_invitations:"✉️",event_guest_list:"📋",website_design:"✦",pages_content:"▤",website_services:"♟",showroom_pianos:"♬",website_reviews:"❝",marketing_overview:"◫",users:"👤",audit_log:"🧾",backups:"⛁",settings:"⚙️",notifications:"🔔",scheduler:"📅"})[view]||"•"; }
+function mobileViewIcon(view){ return ({website_events:"◈",marketing:"✦",technical:"⚙",planned_jobs:"🗂",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",event_tickets:"🎫",event_invitations:"✉️",event_guest_list:"📋",website_design:"✦",pages_content:"▤",website_services:"♟",showroom_pianos:"♬",website_reviews:"❝",marketing_overview:"◫",users:"👤",audit_log:"🧾",backups:"⛁",settings:"⚙️",scheduler:"📅"})[view]||adminNavigationIcons[view]||"•"; }
 function initMobileAppShell(){
   const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
   nav.querySelectorAll("[data-mobile-view]").forEach(btn=>btn.onclick=()=>render(btn.dataset.mobileView));
@@ -3407,7 +3411,7 @@ async function renderMarketingOverview(){
  const metrics=data.metrics||[],leadTotal=(data.leads||[]).reduce((sum,row)=>sum+Number(row.count||0),0),moduleCards=(window.__adminModules?.modules||[]).map(module=>`<article class="admin-module-card"><div><p class="event-kicker">${htmlText(module.group)}</p><h3>${htmlText(currentLang==='hu'?module.label_hu:module.label_en)}</h3><span class="integration-status ${module.enabled?'connected':'disconnected'}">${module.enabled?bi('Enabled','Bekapcsolva'):bi('Disabled','Kikapcsolva')}</span></div>${isSuperadmin()?`<button type="button" class="small ${module.enabled?'danger-btn':'ghost-btn'}" onclick="toggleAdminModule('${htmlText(module.key)}',${module.enabled?'false':'true'})">${module.enabled?bi('Disable','Kikapcsolás'):bi('Enable','Bekapcsolás')}</button>`:''}</article>`).join('');
  box.innerHTML=`${mobileBackHeader(bi('Marketing Overview','Marketing áttekintő'))}<div class="panel marketing-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Verified data only','Csak ellenőrzött adatok')}</p><h2>${bi('Marketing Overview','Marketing áttekintő')}</h2><p class="muted">${bi('Disconnected providers remain visibly disconnected; this dashboard never invents performance data.','A nem csatlakoztatott szolgáltatók láthatóan leválasztva maradnak; ez az áttekintő nem talál ki teljesítményadatokat.')}</p></div><div class="actions"><button class="ghost-btn" onclick="installWebsiteSamples()">${bi('Install editable samples','Szerkeszthető minták telepítése')}</button>${isSuperadmin()?`<button class="danger-btn" onclick="removeWebsiteSamples()">${bi('Remove sample content','Mintatartalom eltávolítása')}</button>`:''}</div></div><section class="admin-module-grid">${moduleCards}</section><div class="marketing-kpis"><article><small>${bi('Website leads','Weboldali érdeklődők')}</small><strong>${leadTotal}</strong></article><article><small>${bi('Event return requests','Esemény-újraigénylések')}</small><strong>${Number(data.event_interest?.requests||0)}</strong></article><article><small>${bi('Consented measured actions','Hozzájárult mért műveletek')}</small><strong>${metrics.reduce((sum,row)=>sum+Number(row.count||0),0)}</strong></article></div><div class="integration-admin-grid">${(data.integrations||[]).map(integrationCard).join('')}</div><div class="table-wrap"><table><thead><tr><th>${bi('Measured action','Mért művelet')}</th><th>${bi('Count','Darab')}</th><th>${bi('Anonymous sessions','Anonim munkamenetek')}</th></tr></thead><tbody>${metrics.map(row=>`<tr><td>${htmlText(row.event_name)}</td><td>${Number(row.count||0)}</td><td>${Number(row.unique_sessions||0)}</td></tr>`).join('')||`<tr><td colspan="3">${bi('No consented first-party measurements yet.','Még nincs hozzájárult belső mérési adat.')}</td></tr>`}</tbody></table></div></div>`;applyLanguageToDOM(box);
 }
-async function toggleAdminModule(key,enabled){if(!isSuperadmin())return showError('SUPERADMIN_REQUIRED');try{await api(`/api/admin/modules/${encodeURIComponent(key)}`,{method:'PUT',body:JSON.stringify({enabled})});await loadAdminModuleState();renderNavigation();await renderMarketingOverview();}catch(error){showError(error)}}
+async function toggleAdminModule(key,enabled){if(!isSuperadmin())return showError('SUPERADMIN_REQUIRED');try{await api(`/api/admin/modules/${encodeURIComponent(key)}`,{method:'PUT',body:JSON.stringify({enabled})});await loadAdminModuleState();renderNavigation();await render(currentView,{noHistory:true});}catch(error){showError(error)}}
 async function installWebsiteSamples(){try{const result=await api('/api/demo-content/install',{method:'POST',body:'{}'});showToast(`${bi('Samples installed','Minták telepítve')}: ${Object.values(result.installed||{}).reduce((sum,value)=>sum+Number(value||0),0)}`,'success');await renderMarketingOverview();}catch(error){showError(error)}}
 async function removeWebsiteSamples(){if(!await appConfirm(bi('Remove only the marked sample website records? Customer pianos and real ERP data remain untouched.','Csak a megjelölt weboldali mintarecordokat távolítsuk el? Az ügyfélzongorák és a valós ERP-adatok érintetlenek maradnak.'),{type:'error',confirmText:bi('Remove samples','Minták eltávolítása')}))return;try{await api('/api/demo-content',{method:'DELETE'});showToast(bi('Sample content removed.','A mintatartalom eltávolítva.'),'success');await renderMarketingOverview();}catch(error){showError(error)}}
 async function renderMarketingIntegrations(){if(!isAdmin())return showError('PERMISSION_DENIED');const rows=await api('/api/marketing/integrations'),box=$('#tracking_cookies');window.__marketingIntegrations=rows;box.innerHTML=`${mobileBackHeader(bi('Tracking & Cookies','Követési és cookie-beállítások'))}<div class="panel"><div class="toolbar"><div><p class="event-kicker">${bi('Consent-first integrations','Hozzájárulás-alapú integrációk')}</p><h2>${bi('Tracking & provider connections','Követés és szolgáltatói kapcsolatok')}</h2><p class="muted">${bi('Public tracking scripts load only after the visitor’s explicit choice. Secret configuration is restricted to the superadmin.','A nyilvános mérőkódok csak a látogató kifejezett választása után töltődnek be. Titkos beállítást kizárólag a szuperadmin módosíthat.')}</p></div></div><div class="integration-admin-grid">${rows.map(integrationCard).join('')}</div></div>`;applyLanguageToDOM(box)}
@@ -3456,13 +3460,54 @@ async function renderEventWorkspace(view){
   const count=(event.tickets||[]).filter(ticket=>['VALID','USED'].includes(ticket.status)).length;return `<tr ${common}><td>${htmlText(titleText)}</td><td>${htmlText(eventDateLabel(event.start_at))}</td><td>${count}</td><td>${htmlText(event.status)}</td><td><button class="small" onclick="openEventDetails('${htmlText(event.id)}')">${bi('Open list','Lista megnyitása')}</button> <button class="small ghost-btn" onclick="downloadGuestListPdf('${htmlText(event.id)}')">${bi('Export PDF','PDF export')}</button></td></tr>`;
  }).join('');
  const heads=view==='event_tickets'?[bi('Event','Esemény'),bi('Guest','Vendég'),'Email',bi('Source','Forrás'),bi('Status','Állapot'),bi('Actions','Műveletek')]:view==='event_invitations'?[bi('Event','Esemény'),bi('Guest','Vendég'),'Email',bi('Status','Állapot'),bi('Delivery','Kézbesítés'),bi('Actions','Műveletek')]:[bi('Event','Esemény'),bi('Date','Dátum'),bi('Guests','Vendégek'),bi('Status','Állapot'),bi('Actions','Műveletek')];
- box.innerHTML=`${mobileBackHeader(bi(title[0],title[1]))}<div class="panel event-admin-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Website & events','Weboldal és események')}</p><h2>${bi(title[0],title[1])}</h2><p class="muted">${bi('Search, filter and manage operational records directly.','Keresd, szűrd és kezeld közvetlenül az operatív rekordokat.')}</p></div></div><div class="form-grid compact event-workspace-filters"><div class="field"><label>${bi('Search','Keresés')}</label><input id="${view}Search" type="search" oninput="filterEventWorkspaceRows('${view}')"></div><div class="field"><label>${bi('Event','Esemény')}</label><select id="${view}Event" onchange="filterEventWorkspaceRows('${view}')"><option value="">${bi('All events','Minden esemény')}</option>${eventOptions}</select></div><div class="field"><label>${bi('Status','Állapot')}</label><select id="${view}Status" onchange="filterEventWorkspaceRows('${view}')"><option value="">${bi('All statuses','Minden állapot')}</option>${statuses.map(status=>`<option value="${htmlText(status)}">${htmlText(status)}</option>`).join('')}</select></div></div><div class="table-wrap"><table><thead><tr>${heads.map(head=>`<th>${htmlText(head)}</th>`).join('')}</tr></thead><tbody id="${view}Rows">${tableRows||`<tr><td colspan="${heads.length}">${bi('No records match this workspace.','Nincs rekord ebben a munkaterületben.')}</td></tr>`}</tbody></table></div><p class="empty-state hidden" id="${view}FilteredEmpty">${bi('No records match the selected filters.','Nincs a szűrésnek megfelelő rekord.')}</p></div>`;enhanceCustomSelects(box);
+ const exportAction=view==='event_guest_list'?`<button type="button" class="ghost-btn" data-guest-list-export onclick="exportGuestListFromWorkspace('${view}')">${bi('Export PDF','PDF export')}</button>`:'';
+ box.innerHTML=`${mobileBackHeader(bi(title[0],title[1]))}<div class="panel event-admin-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Website & events','Weboldal és események')}</p><h2>${bi(title[0],title[1])}</h2><p class="muted">${bi('Search, filter and manage operational records directly.','Keresd, szűrd és kezeld közvetlenül az operatív rekordokat.')}</p></div><div class="toolbar-actions">${exportAction}</div></div><div class="form-grid compact event-workspace-filters"><div class="field"><label>${bi('Search','Keresés')}</label><input id="${view}Search" type="search" oninput="filterEventWorkspaceRows('${view}')"></div><div class="field"><label>${bi('Event','Esemény')}</label><select id="${view}Event" onchange="filterEventWorkspaceRows('${view}')"><option value="">${bi('All events','Minden esemény')}</option>${eventOptions}</select></div><div class="field"><label>${bi('Status','Állapot')}</label><select id="${view}Status" onchange="filterEventWorkspaceRows('${view}')"><option value="">${bi('All statuses','Minden állapot')}</option>${statuses.map(status=>`<option value="${htmlText(status)}">${htmlText(status)}</option>`).join('')}</select></div></div><div class="table-wrap"><table><thead><tr>${heads.map(head=>`<th>${htmlText(head)}</th>`).join('')}</tr></thead><tbody id="${view}Rows">${tableRows||`<tr><td colspan="${heads.length}">${bi('No records match this workspace.','Nincs rekord ebben a munkaterületben.')}</td></tr>`}</tbody></table></div><p class="empty-state hidden" id="${view}FilteredEmpty">${bi('No records match the selected filters.','Nincs a szűrésnek megfelelő rekord.')}</p></div>`;enhanceCustomSelects(box);
+}
+function exportGuestListFromWorkspace(view='event_guest_list'){
+ const eventId=$(`#${view}Event`)?.value||'';
+ if(!eventId)return showToast(bi('Select an event before exporting the guest list.','Export előtt válassz ki egy eseményt.'),'error');
+ return downloadGuestListPdf(eventId);
 }
 function filterEventWorkspaceRows(view){const search=String($(`#${view}Search`)?.value||'').toLowerCase().trim(),eventId=$(`#${view}Event`)?.value||'',status=$(`#${view}Status`)?.value||'';let visible=0;document.querySelectorAll(`#${view}Rows .event-workspace-row`).forEach(row=>{const show=(!search||row.dataset.search.includes(search))&&(!eventId||row.dataset.event===eventId)&&(!status||row.dataset.status===status);row.classList.toggle('hidden',!show);if(show)visible+=1});$(`#${view}FilteredEmpty`)?.classList.toggle('hidden',visible>0)}
 async function editWorkspaceGuestName(ticketId,currentName,view){const attendee_name=await appPrompt(bi('Correct guest name','Vendégnév javítása'),{initialValue:currentName});if(!attendee_name||attendee_name.trim()===currentName.trim())return;try{await api(`/api/events/tickets/${encodeURIComponent(ticketId)}`,{method:'PUT',body:JSON.stringify({attendee_name})});showToast(bi('Guest name updated.','A vendégnév frissült.'),'success');await renderEventWorkspace(view);}catch(error){showError(error)}}
 async function revokeWorkspaceInvitation(invitationId,view){if(!await appConfirm(bi('Revoke this invitation?','Visszavonjuk ezt a meghívást?')))return;try{await api(`/api/events/invitations/${encodeURIComponent(invitationId)}/revoke`,{method:'POST',body:'{}'});showToast(bi('Invitation revoked.','Meghívás visszavonva.'),'success');await renderEventWorkspace(view);}catch(error){showError(error)}}
 async function renderBackupsView(){
  if(!isAdmin())return showError('PERMISSION_DENIED');const rows=await api('/api/backups'),box=$('#backups');box.innerHTML=`${mobileBackHeader(bi('Backups','Biztonsági mentések'))}<div class="panel"><div class="toolbar"><h2>${bi('Backups','Biztonsági mentések')}</h2>${isSuperadmin()?`<button onclick="createBackupNow()">${bi('Create backup now','Mentés készítése most')}</button>`:''}</div><p class="muted">${isSuperadmin()?bi('Creation, download and restore are restricted to the superadmin.','A létrehozás, letöltés és visszaállítás kizárólag a szuperadmin joga.'):bi('Administrators can view the backup register only.','Az adminok kizárólag a mentési listát tekinthetik meg.')}</p><div class="table-wrap"><table><thead><tr><th>${bi('Created','Létrehozva')}</th><th>${bi('File','Fájl')}</th><th>${bi('Status','Állapot')}</th><th>${bi('Actions','Műveletek')}</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${htmlText(row.created_at||'')}</td><td>${htmlText(row.file_name||'')}</td><td>${htmlText(row.status||'')}</td><td>${isSuperadmin()?`<button class="small" onclick="downloadBackup('${htmlText(row.id)}')">${bi('Download','Letöltés')}</button> <button class="small danger-btn" onclick="restoreBackup('${htmlText(row.id)}')">${bi('Restore','Visszaállítás')}</button>`:bi('View only','Csak megtekintés')}</td></tr>`).join('')||`<tr><td colspan="4">${bi('No backups yet.','Még nincs biztonsági mentés.')}</td></tr>`}</tbody></table></div></div>`;
+}
+function adminCardIsEnabled(groupId,key){return adminModuleState[groupId]!==false&&adminCardState[key]!==false;}
+function bindAdminGroupLanding(box){
+ const search=box.querySelector("[data-admin-card-search]");
+ const filter=()=>{
+  const query=String(search?.value||"").trim().toLowerCase();
+  box.querySelectorAll("[data-admin-card]").forEach(card=>card.classList.toggle("hidden",Boolean(query)&&!card.dataset.search.includes(query)));
+ };
+ search?.addEventListener("input",filter);
+ box.querySelectorAll("[data-admin-card]").forEach(card=>{
+  const open=()=>{if(card.dataset.enabled==="true")render(card.dataset.view);};
+  card.addEventListener("click",event=>{if(event.target.closest("button"))return;open();});
+  card.addEventListener("keydown",event=>{if((event.key==="Enter"||event.key===" ")&&!event.target.closest("button")){event.preventDefault();open();}});
+ });
+ box.querySelectorAll("[data-admin-card-open]").forEach(button=>button.addEventListener("click",()=>{if(button.dataset.enabled==="true")render(button.dataset.view);}));
+ box.querySelectorAll("[data-admin-card-toggle]").forEach(button=>button.addEventListener("click",async event=>{
+  event.stopPropagation();
+  await toggleAdminModule(button.dataset.moduleKey,button.dataset.enabled!=="true");
+ }));
+ box.querySelectorAll("[data-admin-group-toggle]").forEach(button=>button.addEventListener("click",async event=>{
+  event.stopPropagation();
+  await toggleAdminModule(button.dataset.moduleKey,button.dataset.enabled!=="true");
+ }));
+}
+async function renderAdminGroupLanding(groupId){
+ if(!isAdmin())return showError('PERMISSION_DENIED');
+ const group=adminNavGroups.find(item=>item.id===groupId); if(!group)return showError('MODULE_NOT_FOUND');
+ const box=ensureView(groupId),groupEnabled=adminModuleState[group.id]!==false;
+ const label=currentLang==='hu'?group.label[1]:group.label[0];
+ const cards=group.items.map(([view,en,hu,icon])=>{
+  const enabled=adminCardIsEnabled(group.id,view),cardLabel=currentLang==='hu'?hu:en;
+  return `<article class="admin-ia-card ${enabled?'':'is-disabled'}" data-admin-card data-view="${view}" data-enabled="${enabled}" data-search="${htmlText(`${en} ${hu}`.toLowerCase())}" tabindex="0" role="button" aria-disabled="${enabled?'false':'true'}"><div class="admin-ia-card__head"><span class="admin-ia-card__icon" aria-hidden="true">${icon}</span><div><p class="event-kicker">${htmlText(label)}</p><h3>${htmlText(cardLabel)}</h3></div></div><p class="admin-ia-card__description">${enabled?bi('Open this workspace','Munkaterület megnyitása'):bi('This card is disabled by the superadmin.','Ezt a kártyát a szuperadmin kikapcsolta.')}</p><div class="admin-ia-card__actions"><button type="button" class="small admin-ia-open" data-admin-card-open data-view="${view}" data-enabled="${enabled}" ${enabled?'':'disabled'}>${bi('Open','Megnyitás')}</button>${isSuperadmin()?`<button type="button" class="small ${enabled?'danger-btn':'ghost-btn'}" data-admin-card-toggle data-module-key="${view}" data-enabled="${enabled}">${enabled?bi('Disable card','Kártya kikapcsolása'):bi('Enable card','Kártya bekapcsolása')}</button>`:''}</div></article>`;
+ }).join('');
+ box.innerHTML=`${mobileBackHeader(label)}<div class="panel admin-ia-shell"><div class="admin-ia-heading"><div><p class="event-kicker">${bi('Admin workspace','Admin munkaterület')}</p><h2>${htmlText(label)}</h2><p class="muted">${bi('Choose a workspace from the cards below. The sidebar contains only the three primary areas.','Válassz munkaterületet az alábbi kártyák közül. Az oldalsáv kizárólag a három fő területet tartalmazza.')}</p></div>${isSuperadmin()?`<button type="button" class="${groupEnabled?'danger-btn':'ghost-btn'}" data-admin-group-toggle data-module-key="${group.id}" data-enabled="${groupEnabled}">${groupEnabled?bi('Disable area','Terület kikapcsolása'):bi('Enable area','Terület bekapcsolása')}</button>`:''}</div><div class="admin-ia-controls"><label class="admin-ia-search"><span>${bi('Search workspaces','Munkaterületek keresése')}</span><input type="search" data-admin-card-search placeholder="${bi('Search by name…','Keresés név alapján…')}" autocomplete="off"></label><span class="admin-ia-status ${groupEnabled?'':'is-disabled'}">${groupEnabled?bi('Area enabled','Terület bekapcsolva'):bi('Area disabled','Terület kikapcsolva')}</span></div><div class="admin-card-grid">${cards}</div></div>`;
+ bindAdminGroupLanding(box);
 }
 async function renderAdminModuleOverview(view){
  if(!isAdmin())return showError('PERMISSION_DENIED');const box=$(`#${view}`),label=navLabel(view),isMarketing=adminNavGroups[1].items.some(item=>item[0]===view),websiteBase=websiteDesignMeta?.website_base_url||'';
