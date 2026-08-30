@@ -113,3 +113,16 @@ body[data-page="consultation"] .hero h1{max-width:22ch;font-size:clamp(1.8rem,3.
 .home-event-showcase{box-sizing:border-box;width:100vw;max-width:none;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)}
 .catalog-card .button,.public-event-card .button{font-family:var(--font-sans,var(--sans));}
 .dialog-close{z-index:2}
+.artist-collection{display:grid;gap:clamp(1.5rem,3vw,2.5rem)}
+.piano-brand-instrument__actions,.catalog-detail__actions{display:flex;gap:.7rem;align-items:stretch;flex-wrap:wrap}
+.piano-brand-instrument__actions .text-link,.piano-brand-instrument__actions .button{flex:1 1 12rem;min-width:0}
+.catalog-detail__actions .button{flex:1 1 13rem;min-width:0}
+.hero.dynamic-event-hero{min-height:min(76svh,56rem);padding-top:calc(var(--header-height) + 5rem);padding-bottom:clamp(5rem,8vw,8.5rem)}
+.artist-detail-hero{min-height:min(76svh,56rem)}
+.artist-detail{width:min(100%,86rem);margin:0 auto;padding:var(--kh-section-space) var(--kh-gutter)}
+.artist-detail__copy{max-width:52rem;margin-inline:auto;color:var(--muted);font-size:clamp(1rem,1.5vw,1.2rem);line-height:1.75}
+.artist-related-events{display:grid;gap:.7rem;margin-top:2rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+.artist-related-events a{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--line);color:var(--cream);text-decoration:none}
+body[data-page="mission"] .section--statement .statement-lower{display:block;width:min(100%,56rem);margin-inline:auto}
+body[data-page="mission"] .section--statement .statement-copy{text-align:center;margin-inline:auto}
+@media(max-width:680px){.piano-brand-instrument__actions,.catalog-detail__actions{display:grid;grid-template-columns:1fr}.artist-related-events a{display:grid;gap:.3rem}}
