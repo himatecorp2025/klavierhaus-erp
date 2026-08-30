@@ -66,7 +66,7 @@ const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
 const ADMIN_MODULES = Object.freeze([
   { key: "website_events", group: "Website & Events", label_en: "Website & Events", label_hu: "Weboldal és események" },
   { key: "marketing", group: "Marketing", label_en: "Marketing", label_hu: "Marketing" },
-  { key: "technical", group: "Technical Operations", label_en: "Technical Operations", label_hu: "Technikai működés" }
+  { key: "technical", group: "Technical Operation", label_en: "Technical Operation", label_hu: "Technikai működés" }
 ]);
 const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "website_design", group_key: "website_events", label_en: "Landing Page Design", label_hu: "Landing Page dizájn" },
@@ -86,6 +86,8 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "campaigns_utm", group_key: "marketing", label_en: "Campaigns & UTM", label_hu: "Kampányok és UTM-kódok" },
   { key: "leads", group_key: "marketing", label_en: "Leads", label_hu: "Érdeklődők" },
   { key: "tracking_cookies", group_key: "marketing", label_en: "Tracking & Cookies", label_hu: "Követési és cookie-beállítások" },
+  { key: "seo_keywords", group_key: "marketing", label_en: "SEO & Keywords", label_hu: "SEO és kulcsszavak" },
+  { key: "heatmap", group_key: "marketing", label_en: "Consent Heatmap", label_hu: "Hozzájárulásos hőtérkép" },
   { key: "scheduler", group_key: "technical", label_en: "Scheduler", label_hu: "Naptár" },
   { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
   { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
