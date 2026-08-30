@@ -269,6 +269,7 @@ async function recordFirstPartyEvent(eventName, metadata = {}) {
 
 const serviceDialog = document.querySelector("[data-service-dialog]");
 let serviceDialogTrigger = null;
+document.querySelectorAll(".dialog-close").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close("cancel")));
 document.querySelectorAll("[data-service-card]").forEach((card) => {
   const open = () => card.querySelector("[data-service-request]")?.click();
   card.addEventListener("click", (event) => { if (!event.target.closest("a,button")) open(); });
@@ -310,6 +311,7 @@ document.querySelector("[data-service-form]")?.addEventListener("submit", async 
     if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan személyesen jelentkezünk." : "Thank you. We will contact you personally shortly.";
     recordFirstPartyEvent("service_enquiry_submit", { service_id: values.service_id || "" });
     form.reset();
+    window.setTimeout(() => { if (serviceDialog?.open) serviceDialog.close("success"); }, 850);
   } catch (_error) {
     if (result) result.textContent = language === "hu" ? "A küldés nem sikerült. Kérjük, próbálja újra." : "We could not send your request. Please try again.";
   }
@@ -348,6 +350,7 @@ privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventList
     if (!response.ok) throw new Error("LEAD_FAILED");
     if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan jelentkezünk." : "Thank you. We will contact you shortly.";
     form.reset();
+    window.setTimeout(() => { if (privateViewingDialog?.open) privateViewingDialog.close("success"); }, 850);
   } catch (_error) { if (result) result.textContent = language === "hu" ? "A küldés nem sikerült." : "We could not send your request."; }
 });
 
@@ -379,6 +382,7 @@ document.querySelector("[data-interest-form]")?.addEventListener("submit", async
     if (!response.ok) throw new Error("INTEREST_FAILED");
     if (result) result.textContent = language === "hu" ? "Köszönjük. Értesítjük a következő alkalomról." : "Thank you. We will notify you about the next edition.";
     recordFirstPartyEvent("event_repeat_interest_submit", { event_id: eventId });
+    window.setTimeout(() => { if (interestDialog?.open) interestDialog.close("success"); }, 850);
   } catch (_error) {
     if (result) result.textContent = language === "hu" ? "A rögzítés nem sikerült. Kérjük, próbálja újra." : "We could not save your request. Please try again.";
   }
