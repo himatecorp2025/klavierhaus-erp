@@ -10,6 +10,14 @@ const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content")
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
 const LEAD_STATUSES = new Set(["NEW", "CONTACTED", "IN_DISCUSSION", "APPOINTMENT_SCHEDULED", "CLOSED", "REJECTED"]);
+const SEO_PAGE_KEYS = Object.freeze(["home", "story", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy", "ticketTerms"]);
+const DEFAULT_SEO_SETTINGS = Object.freeze({
+  enabled: true,
+  global_keywords_en: ["Klavierhaus", "piano restoration", "piano tuning", "concert piano services", "piano showroom New York", "Steinway pianos New York", "Fazioli pianos New York", "intimate classical music events"],
+  global_keywords_hu: ["Klavierhaus", "zongorafelújítás", "zongorahangolás", "koncertzongora szolgáltatás", "zongorabemutatóterem New York", "Steinway zongorák", "Fazioli zongorák", "bensőséges kulturális események"],
+  page_keywords_en: {},
+  page_keywords_hu: {}
+});
 
 function clean(value, max = 20000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -26,6 +34,30 @@ function flag(value, fallback = false) {
 
 function parseJson(value, fallback = {}) {
   try { return JSON.parse(value || ""); } catch (_error) { return fallback; }
+}
+
+function normalizeKeywordList(value, maxItems = 40) {
+  const source = Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]/);
+  const seen = new Set();
+  return source.map((item) => clean(item, 120)).filter((item) => {
+    const key = item.toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, maxItems);
+}
+
+function normalizeSeoSettings(value, includeDefaults = true) {
+  const source = value && typeof value === "object" ? value : {};
+  const base = includeDefaults ? DEFAULT_SEO_SETTINGS : { enabled: true, global_keywords_en: [], global_keywords_hu: [], page_keywords_en: {}, page_keywords_hu: {} };
+  const normalizePages = (input, fallback) => Object.fromEntries(SEO_PAGE_KEYS.map((key) => [key, normalizeKeywordList(input?.[key] ?? fallback?.[key] ?? [])]));
+  return {
+    enabled: source.enabled !== false,
+    global_keywords_en: normalizeKeywordList(source.global_keywords_en ?? base.global_keywords_en),
+    global_keywords_hu: normalizeKeywordList(source.global_keywords_hu ?? base.global_keywords_hu),
+    page_keywords_en: normalizePages(source.page_keywords_en, base.page_keywords_en),
+    page_keywords_hu: normalizePages(source.page_keywords_hu, base.page_keywords_hu)
+  };
 }
 
 function normalizeGallery(value, maxItems = 12) {
@@ -396,6 +428,12 @@ function registerWebsitePlatformRoutes(options) {
     res.json(output);
   });
 
+  app.get("/api/public/website-seo", (_req, res) => {
+    const row = db.prepare("SELECT setting_value,updated_at FROM app_settings WHERE setting_key='website_seo_settings'").get();
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    res.json({ ...normalizeSeoSettings(parseJson(row?.setting_value, {})), updated_at: row?.updated_at || null });
+  });
+
   app.get("/api/marketing/overview", auth, admin, (_req, res) => {
     const integrations = db.prepare("SELECT provider,status,public_config_json,last_tested_at,last_sync_at,last_error,updated_at FROM website_integration_settings ORDER BY provider").all().map((row) => ({ ...row, public_config: parseJson(row.public_config_json) }));
     const metrics = db.prepare(`SELECT event_name,COUNT(*) AS count,COUNT(DISTINCT anonymous_session_hash) AS unique_sessions FROM website_tracking_events
@@ -403,6 +441,74 @@ function registerWebsitePlatformRoutes(options) {
     const leads = db.prepare("SELECT status,COUNT(*) AS count FROM website_contact_leads GROUP BY status").all();
     const eventInterest = db.prepare("SELECT COUNT(*) AS requests,COUNT(DISTINCT email_normalized) AS unique_emails FROM event_repeat_requests").get();
     res.json({ integrations, metrics, leads, event_interest: eventInterest, note: "Only consented first-party measurements are shown. Disconnected providers never return fabricated data." });
+  });
+
+  app.get("/api/marketing/seo", auth, admin, (_req, res) => {
+    const row = db.prepare("SELECT setting_value,updated_at,updated_by FROM app_settings WHERE setting_key='website_seo_settings'").get();
+    res.json({ ...normalizeSeoSettings(parseJson(row?.setting_value, {})), updated_at: row?.updated_at || null, updated_by: row?.updated_by || null });
+  });
+
+  app.put("/api/marketing/seo", auth, requireSuperadmin, (req, res) => {
+    const beforeRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_seo_settings'").get();
+    const next = normalizeSeoSettings(req.body || {}, false);
+    db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at)
+      VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,
+      updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
+      .run("website_seo_settings", JSON.stringify(next), req.user.name || req.user.id || "SUPERADMIN");
+    audit(req, "UPDATE", "marketing_seo", "website", parseJson(beforeRow?.setting_value, {}), next, 1, "Website SEO keywords and page targeting updated");
+    const saved = db.prepare("SELECT setting_value,updated_at,updated_by FROM app_settings WHERE setting_key='website_seo_settings'").get();
+    res.json({ ...normalizeSeoSettings(parseJson(saved?.setting_value, {}), false), updated_at: saved?.updated_at || null, updated_by: saved?.updated_by || null });
+  });
+
+  app.get("/api/marketing/heatmap", auth, admin, (req, res) => {
+    const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days, 10) || 30));
+    const sourcePath = clean(req.query.path, 1000);
+    const where = ["event_name='heatmap_batch'", "created_at>=datetime('now', ?)"];
+    const params = [`-${days} days`];
+    if (sourcePath) { where.push("source_path=?"); params.push(sourcePath); }
+    const rows = db.prepare(`SELECT source_path,anonymous_session_hash,metadata_json,created_at FROM website_tracking_events WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 5000`).all(...params);
+    const cells = new Map();
+    const exitCells = new Map();
+    const sessions = new Set();
+    let pointerSamples = 0;
+    let clicks = 0;
+    let maxScroll = 0;
+    let totalDuration = 0;
+    let durationSamples = 0;
+    const addCell = (collection, x, y, value) => {
+      const safeX = Math.min(23, Math.max(0, Number.parseInt(x, 10) || 0));
+      const safeY = Math.min(31, Math.max(0, Number.parseInt(y, 10) || 0));
+      const key = `${safeX}:${safeY}`;
+      collection.set(key, (collection.get(key) || 0) + Math.min(1000, Math.max(0, Number(value) || 0)));
+    };
+    rows.forEach((row) => {
+      sessions.add(row.anonymous_session_hash);
+      const metadata = parseJson(row.metadata_json, {});
+      pointerSamples += Math.min(100000, Math.max(0, Number(metadata.pointer_samples) || 0));
+      clicks += Math.min(100000, Math.max(0, Number(metadata.clicks) || 0));
+      const scroll = Math.min(1, Math.max(0, Number(metadata.max_scroll_ratio) || 0));
+      maxScroll = Math.max(maxScroll, scroll);
+      const duration = Math.min(86400000, Math.max(0, Number(metadata.duration_ms) || 0));
+      if (duration) { totalDuration += duration; durationSamples += 1; }
+      Object.entries(metadata.cells && typeof metadata.cells === "object" ? metadata.cells : {}).slice(0, 500).forEach(([key, value]) => {
+        const [x, y] = String(key).split(":");
+        const move = typeof value === "object" ? value.move : value;
+        const click = typeof value === "object" ? value.click : 0;
+        addCell(cells, x, y, move);
+        if (click) addCell(cells, x, y, click * 3);
+      });
+      const exit = metadata.exit_cell && typeof metadata.exit_cell === "object" ? metadata.exit_cell : null;
+      if (exit) addCell(exitCells, exit.x, exit.y, 1);
+    });
+    const paths = db.prepare("SELECT source_path,COUNT(*) AS batches,COUNT(DISTINCT anonymous_session_hash) AS unique_sessions FROM website_tracking_events WHERE event_name='heatmap_batch' AND created_at>=datetime('now', ?) GROUP BY source_path ORDER BY batches DESC LIMIT 100").all(`-${days} days`);
+    res.json({
+      days,
+      path: sourcePath,
+      paths,
+      cells: [...cells.entries()].map(([key, value]) => { const [x, y] = key.split(":"); return { x: Number(x), y: Number(y), value }; }),
+      exit_cells: [...exitCells.entries()].map(([key, value]) => { const [x, y] = key.split(":"); return { x: Number(x), y: Number(y), value }; }),
+      totals: { batches: rows.length, unique_sessions: sessions.size, pointer_samples: pointerSamples, clicks, max_scroll_ratio: maxScroll, average_duration_ms: durationSamples ? Math.round(totalDuration / durationSamples) : 0 }
+    });
   });
 
   app.get("/api/marketing/integrations", auth, admin, (_req, res) => res.json(PROVIDERS.size ? [...PROVIDERS].map((provider) => {
