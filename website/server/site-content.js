@@ -118,7 +118,8 @@ const globalCopy = Object.freeze({
       brandPrivateSelection: "Private selection",
       brandCtaTitle: "Meet the instrument before making a decision.",
       brandCta: "Arrange a private appointment",
-      brandInstrumentDetails: "Explore the instrument"
+      brandInstrumentDetails: "Explore the instrument",
+      brandInstrumentViewing: "Arrange a private viewing"
     },
     eventLabels: {
       listEyebrow: "Klavierhaus programme",
@@ -248,7 +249,8 @@ const globalCopy = Object.freeze({
       brandPrivateSelection: "Személyes kiválasztás",
       brandCtaTitle: "Találkozzon a hangszerrel, mielőtt döntést hoz.",
       brandCta: "Privát időpont egyeztetése",
-      brandInstrumentDetails: "A hangszer részletei"
+      brandInstrumentDetails: "A hangszer részletei",
+      brandInstrumentViewing: "Privát megtekintés egyeztetése"
     },
     eventLabels: {
       listEyebrow: "Klavierhaus program",
