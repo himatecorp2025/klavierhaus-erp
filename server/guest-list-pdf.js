@@ -187,10 +187,12 @@ function pageContent({ event, names, language, pageNumber, pageCount, metrics })
   names.forEach((name) => {
     commands.push(`${MUTED_GOLD} RG .45 w 54 ${pdfNumber(y - 8)} 487 28 re S\n`);
     commands.push(textCommand(truncateToWidth(name, 365, 11, metrics), 66, y, 11, CREAM));
-    commands.push(`${GOLD} RG 1 w 500 ${pdfNumber(y - 4)} 13 13 re S\n`);
+    // The checklist box is centered against the full guest row, not the text baseline.
+    commands.push(`${GOLD} RG 1 w 500 ${pdfNumber(y - 0.5)} 13 13 re S\n`);
     y -= 28;
   });
-  commands.push(textCommand(hu ? `Oldal ${pageNumber} / ${pageCount}` : `Page ${pageNumber} / ${pageCount}`, 250, 43, 8.5, GOLD));
+  // Keep pagination as plain ASCII so every PDF viewer renders the same `1 / 1` form.
+  commands.push(textCommand(`${pageNumber} / ${pageCount}`, 288, 43, 8.5, GOLD));
   commands.push(textCommand("KLAVIERHAUS · NEW YORK | FRANCE", 54, 43, 8.5, CREAM));
   return commands.join("");
 }
@@ -200,7 +202,7 @@ function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPa
   const safeNames = names.length ? names : [language === "hu" ? "Nincs rögzített vendég" : "No registered guests"];
   const rowsPerPage = 18;
   const pageCount = Math.max(1, Math.ceil(safeNames.length / rowsPerPage));
-  const labels = [event.title, event.dateLabel, ...safeNames, "GUEST LIST", "VENDÉGLISTA", "ARRIVED", "MEGÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
+  const labels = [event.title, event.dateLabel, ...safeNames, "0123456789", "GUEST LIST", "VENDÉGLISTA", "ARRIVED", "MEGÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
   const font = fs.readFileSync(fontPath || path.join(__dirname, "assets", "DejaVuSans.ttf"));
   const metrics = createFontMetrics(font);
   const codes = usedCodePoints(labels);
