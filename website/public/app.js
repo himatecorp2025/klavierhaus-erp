@@ -6,7 +6,7 @@ document.documentElement.classList.add("js");
 async function applyPublishedDesignSettings() {
   try {
     const response = await fetch("/api/site/design-settings", { cache: "no-store" });
-    if (!response.ok) return;
+    if (!response.ok) { startHeatmapTracking(); return; }
     const settings = await response.json();
     const root = document.documentElement;
     const variables = { black: "--black", ivory: "--ivory", cream: "--ivory-soft", gold: "--gold", gold_bright: "--gold-bright", muted: "--ivory-muted", line: "--line" };
@@ -215,6 +215,7 @@ async function applyTrackingConsent(choice) {
   } catch (_error) {
     // Measurement is optional and must never block the public experience.
   }
+  startHeatmapTracking();
 }
 
 function savePrivacyChoice(choice) {
@@ -267,6 +268,47 @@ async function recordFirstPartyEvent(eventName, metadata = {}) {
   } catch (_error) { /* Optional analytics must fail silently. */ }
 }
 
+let heatmapTrackingStarted = false;
+let heatmapFlushTimer = null;
+let heatmapStartedAt = 0;
+let heatmapLastCell = "";
+let heatmapMaxScroll = 0;
+let heatmapPointerSamples = 0;
+let heatmapClicks = 0;
+const heatmapCells = new Map();
+function heatmapCellForEvent(event) {
+  const width = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+  const pageHeight = Math.max(window.innerHeight || 1, document.documentElement.scrollHeight || 1);
+  return { x: Math.min(23, Math.max(0, Math.floor((event.clientX / width) * 24))), y: Math.min(31, Math.max(0, Math.floor(((event.clientY + window.scrollY) / pageHeight) * 32))) };
+}
+function recordHeatmapCell(event, type = "move") {
+  const cell = heatmapCellForEvent(event);
+  const key = `${cell.x}:${cell.y}`;
+  const value = heatmapCells.get(key) || { move: 0, click: 0 };
+  value[type] = Math.min(1000, value[type] + 1);
+  heatmapCells.set(key, value);
+  return cell;
+}
+async function flushHeatmap(keepalive = false) {
+  const choice = readPrivacyChoice();
+  if (!choice?.analytics || !heatmapCells.size) return;
+  const cells = Object.fromEntries([...heatmapCells.entries()].slice(0, 500));
+  const exitCell = heatmapLastCell.split(":");
+  const metadata = { grid_columns: 24, grid_rows: 32, cells, exit_cell: exitCell.length === 2 ? { x: Number(exitCell[0]), y: Number(exitCell[1]) } : null, pointer_samples: heatmapPointerSamples, clicks: heatmapClicks, max_scroll_ratio: heatmapMaxScroll, duration_ms: Math.min(86400000, Math.max(0, Date.now() - heatmapStartedAt)), viewport_width: Math.min(10000, window.innerWidth || 0), viewport_height: Math.min(10000, window.innerHeight || 0) };
+  heatmapCells.clear();heatmapPointerSamples = 0;heatmapClicks = 0;
+  try { await fetch("/api/site/track", { method: "POST", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event_name: "heatmap_batch", metadata, source_path: location.pathname, language, device_token: await getDeviceToken(), analytics_consent: true, marketing_consent: Boolean(choice.marketing) }) }); } catch (_error) { /* Optional heatmap measurement must fail silently. */ }
+}
+function startHeatmapTracking() {
+  if (heatmapTrackingStarted || !readPrivacyChoice()?.analytics) return;
+  heatmapTrackingStarted = true;heatmapStartedAt = Date.now();
+  const onPointerMove = (event) => { if (event.pointerType === "touch") return;const cell = heatmapCellForEvent(event);const key = `${cell.x}:${cell.y}`;if (key === heatmapLastCell) return;heatmapLastCell = key;recordHeatmapCell(event);heatmapPointerSamples += 1; };
+  const onClick = (event) => { recordHeatmapCell(event, "click");heatmapClicks += 1; };
+  const onScroll = () => { const maximum = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);heatmapMaxScroll = Math.max(heatmapMaxScroll, Math.min(1, window.scrollY / maximum)); };
+  document.addEventListener("pointermove", onPointerMove, { passive: true });document.addEventListener("click", onClick, { passive: true });window.addEventListener("scroll", onScroll, { passive: true });
+  heatmapFlushTimer = window.setInterval(() => flushHeatmap(false), 15000);
+  window.addEventListener("pagehide", () => flushHeatmap(true), { once: true });document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushHeatmap(true); });getDeviceToken().catch(() => {});
+}
+
 const serviceDialog = document.querySelector("[data-service-dialog]");
 let serviceDialogTrigger = null;
 document.querySelectorAll(".dialog-close").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close("cancel")));
@@ -278,6 +320,8 @@ document.querySelectorAll("[data-service-card]").forEach((card) => {
 document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
   if (!serviceDialog) return;
   serviceDialogTrigger = button;
+  const form = serviceDialog.querySelector("[data-service-form]");
+  form?.reset();
   serviceDialog.querySelector('[name="service_id"]').value = button.dataset.serviceId || "";
   serviceDialog.querySelector("[data-service-title]").textContent = button.dataset.serviceTitle || "";
   const image = serviceDialog.querySelector("[data-service-image]");
@@ -287,6 +331,8 @@ document.querySelectorAll("[data-service-request]").forEach((button) => button.a
     field.hidden = !concertService;
     field.querySelectorAll("input, textarea, select").forEach((control) => { control.required = concertService; });
   });
+  const message = form?.elements.message;
+  if (message) message.value = language === "hu" ? `A(z) ${button.dataset.serviceTitle || "kiválasztott"} szolgáltatás iránt érdeklődöm.` : `I would like to enquire about the ${button.dataset.serviceTitle || "selected"} service.`;
   serviceDialog.showModal();
   serviceDialog.querySelector('input[name="name"]')?.focus();
   recordFirstPartyEvent("service_enquiry_open", { service_id: button.dataset.serviceId || "" });
