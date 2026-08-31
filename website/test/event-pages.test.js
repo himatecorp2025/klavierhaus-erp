@@ -121,6 +121,8 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     const hungarianList = await (await fetch(`${origin}/hu/esemenyek`)).text();
     assert.match(englishList, /Golden Salon Evening/);
     assert.match(englishList, /public-event-grid/);
+    assert.match(englishList, /<section class="hero hero--inner hero--with-image"/);
+    assert.doesNotMatch(englishList, /dynamic-event-hero/);
     assert.match(englishList, /public-event-card__actions/);
     assert.match(englishList, /View details/);
     assert.match(englishList, /Buy tickets/);
@@ -132,6 +134,8 @@ test("dynamic public programme renders one language, paired URLs, responsive car
     const detailResponse = await fetch(`${origin}/events/golden-salon-evening`);
     const detail = await detailResponse.text();
     assert.equal(detailResponse.status, 200);
+    assert.match(detail, /<section class="hero hero--inner hero--with-image"/);
+    assert.doesNotMatch(detail, /event-detail-hero/);
     assert.match(detail, /<html lang="en-US"/);
     assert.match(detail, /href="\/hu\/esemenyek\/arany-szalonest"/);
     assert.match(detail, /"@type":"Event"/);
@@ -195,6 +199,8 @@ test("showroom brand routes render filtered alternating instruments with canonic
     const page = await response.text();
     assert.equal(response.status, 200);
     assert.match(page, /Steinway Model B/);
+    assert.match(page, /<section class="hero hero--inner hero--with-image"/);
+    assert.doesNotMatch(page, /piano-brand-hero/);
     assert.doesNotMatch(page, /Fazioli F212|Bösendorfer 214VC/);
     assert.match(page, /class="piano-brand-instrument/);
     assert.match(page, /rel="canonical" href="https:\/\/klavierhaus\.com\/pianos\/steinway"/);
