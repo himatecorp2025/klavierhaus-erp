@@ -448,7 +448,7 @@ function registerWebsitePlatformRoutes(options) {
     res.json({ ...normalizeSeoSettings(parseJson(row?.setting_value, {})), updated_at: row?.updated_at || null, updated_by: row?.updated_by || null });
   });
 
-  app.put("/api/marketing/seo", auth, requireSuperadmin, (req, res) => {
+  app.put("/api/marketing/seo", auth, admin, (req, res) => {
     const beforeRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_seo_settings'").get();
     const next = normalizeSeoSettings(req.body || {}, false);
     db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at)
