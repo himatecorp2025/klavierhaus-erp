@@ -117,7 +117,7 @@ body[data-page="consultation"] .hero h1{max-width:22ch;font-size:clamp(1.8rem,3.
 .piano-brand-instrument__actions,.catalog-detail__actions{display:flex;gap:.7rem;align-items:stretch;flex-wrap:wrap}
 .piano-brand-instrument__actions .text-link,.piano-brand-instrument__actions .button{flex:1 1 12rem;min-width:0}
 .catalog-detail__actions .button{flex:1 1 13rem;min-width:0}
-.hero.dynamic-event-hero{min-height:min(76svh,56rem);padding-top:calc(var(--header-height) + 5rem);padding-bottom:clamp(5rem,8vw,8.5rem)}
+.hero.dynamic-event-hero{min-height:var(--kh-public-hero-height);padding-top:calc(var(--header-height) + 5rem);padding-bottom:clamp(5rem,8vw,8.5rem)}
 .artist-detail-hero{min-height:min(76svh,56rem)}
 .artist-detail{width:min(100%,86rem);margin:0 auto;padding:var(--kh-section-space) var(--kh-gutter)}
 .artist-detail__copy{max-width:52rem;margin-inline:auto;color:var(--muted);font-size:clamp(1rem,1.5vw,1.2rem);line-height:1.75}
