@@ -126,3 +126,13 @@ body[data-page="consultation"] .hero h1{max-width:22ch;font-size:clamp(1.8rem,3.
 body[data-page="mission"] .section--statement .statement-lower{display:block;width:min(100%,56rem);margin-inline:auto}
 body[data-page="mission"] .section--statement .statement-copy{text-align:center;margin-inline:auto}
 @media(max-width:680px){.piano-brand-instrument__actions,.catalog-detail__actions{display:grid;grid-template-columns:1fr}.artist-related-events a{display:grid;gap:.3rem}}
+
+/* Events and artist heroes use the landing-page vertical reference. */
+body[data-page="events"] .dynamic-event-hero,
+body[data-page="artists"] .hero--inner,
+body[data-page="artists"] .artist-detail-hero{min-height:min(92svh,65rem)}
+@media(max-width:760px){
+ body[data-page="events"] .dynamic-event-hero,
+ body[data-page="artists"] .hero--inner,
+ body[data-page="artists"] .artist-detail-hero{min-height:min(90svh,52rem)}
+}
