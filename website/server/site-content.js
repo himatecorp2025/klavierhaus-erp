@@ -9,7 +9,7 @@
  * redesigning the public website.
  */
 
-const VERSION = "1.2.1";
+const VERSION = "1.2.2";
 
 const routeDefinitions = Object.freeze({
   home: { en: "/", hu: "/hu/" },
