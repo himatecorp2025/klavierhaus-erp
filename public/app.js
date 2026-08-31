@@ -869,6 +869,10 @@ function initNotificationActivationGate(){
  window.addEventListener('focus',recheck);
  window.addEventListener('pageshow',recheck);
 }
+function initBrandHomeButton(){
+ const button=document.getElementById('brandHomeButton');
+ if(button)button.onclick=()=>{closeModal();render('scheduler');};
+}
 
 async function boot(){
  if(!token)return;
@@ -880,6 +884,7 @@ async function boot(){
  document.body.classList.add("sidebar-collapsed");
  const sb=document.getElementById("sidebarToggle");
  if(sb) sb.onclick=toggleSidebar;
+ initBrandHomeButton();
  updateSidebarToggle();
  $("#userInfo").textContent=`${user.name} · ${user.role}`;
  try{userPermissions=await api("/api/my-permissions");}catch(e){userPermissions={all:isSuperadmin(),permissions:[]};}
@@ -3643,12 +3648,12 @@ function seoKeywordText(value){return (Array.isArray(value)?value:[]).join('\n')
 async function renderMarketingSeo(){
  if(!isAdmin())return showError('PERMISSION_DENIED');
  const settings=await api('/api/marketing/seo'),box=$('#seo_keywords');window.__marketingSeo=settings;
- const disabled=isSuperadmin()?'':' disabled';
+ const disabled='';
  const pageFields=marketingSeoPages.map(([key,en,hu])=>`<div class="field seo-page-keywords"><label>${bi(en,hu)}</label><textarea name="page_en_${key}" rows="3"${disabled}>${htmlText(seoKeywordText(settings.page_keywords_en?.[key]))}</textarea><small>English</small><textarea name="page_hu_${key}" rows="3"${disabled}>${htmlText(seoKeywordText(settings.page_keywords_hu?.[key]))}</textarea><small>Magyar</small></div>`).join('');
  box.innerHTML=`${mobileBackHeader(bi('SEO & Keywords','SEO és kulcsszavak'))}<div class="panel marketing-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Search visibility controls','Keresési láthatóság beállításai')}</p><h2>${bi('SEO & Keywords','SEO és kulcsszavak')}</h2><p class="muted">${bi('Set the phrases the website should target by language and page. The public renderer keeps visible copy natural and publishes the targets through page metadata and structured data.','Állítsd be nyelvenként és oldalonként azokat a kifejezéseket, amelyekre a weboldal célozzon. A nyilvános renderer természetes szöveget tart meg, a célokat pedig oldalmetaadatban és strukturált adatokban publikálja.')}</p></div><span class="integration-status connected">${settings.enabled?bi('Enabled','Bekapcsolva'):bi('Disabled','Kikapcsolva')}</span></div><form class="seo-settings-form" data-seo-form><div class="form-grid"><div class="field full"><label>${bi('Global English keywords — one phrase per line','Globális angol kulcsszavak — soronként egy kifejezés')}</label><textarea name="global_keywords_en" rows="5"${disabled}>${htmlText(seoKeywordText(settings.global_keywords_en))}</textarea></div><div class="field full"><label>${bi('Global Hungarian keywords — one phrase per line','Globális magyar kulcsszavak — soronként egy kifejezés')}</label><textarea name="global_keywords_hu" rows="5"${disabled}>${htmlText(seoKeywordText(settings.global_keywords_hu))}</textarea></div><label class="check-row"><input name="enabled" type="checkbox" ${settings.enabled?'checked':''}${disabled}> ${bi('Publish SEO targets','SEO-célok publikálása')}</label></div><h3>${bi('Optional page-specific targets','Opcionális oldalankénti célok')}</h3><p class="muted">${bi('Page keywords are added to the global list for that page. Do not repeat phrases unnaturally in visible copy.','Az oldalankénti kulcsszavak az adott oldal globális listájához adódnak. Ne ismételd őket természetellenesen a látható szövegben.')}</p><div class="seo-page-grid">${pageFields}</div><div class="actions"><button type="submit"${disabled}>${bi('Save SEO settings','SEO-beállítások mentése')}</button></div></form><aside class="seo-guidance"><strong>${bi('Important: Google does not rank pages because of a keyword list alone.','Fontos: a Google önmagában egy kulcsszólista miatt nem sorolja előre az oldalt.')}</strong><span>${bi('Ranking depends on useful content, technical accessibility, relevance, links, speed and search intent. This module keeps title, description, headings and structured data aligned with your chosen targets without keyword stuffing.','A helyezést a hasznos tartalom, a technikai elérhetőség, a relevancia, a hivatkozások, a sebesség és a keresési szándék együtt határozza meg. Ez a modul a címet, leírást, címsorokat és strukturált adatokat hangolja össze a választott célokkal, kulcsszóhalmozás nélkül.')}</span></aside></div>`;
  applyLanguageToDOM(box);
  box.querySelector('[data-seo-form]')?.addEventListener('submit',async event=>{
-  event.preventDefault();if(!isSuperadmin())return showError('SUPERADMIN_REQUIRED');
+  event.preventDefault();if(!isAdmin())return showError('PERMISSION_DENIED');
   const data=new FormData(event.currentTarget),body={enabled:data.has('enabled'),global_keywords_en:String(data.get('global_keywords_en')||''),global_keywords_hu:String(data.get('global_keywords_hu')||''),page_keywords_en:{},page_keywords_hu:{}};
   marketingSeoPages.forEach(([key])=>{body.page_keywords_en[key]=String(data.get(`page_en_${key}`)||'');body.page_keywords_hu[key]=String(data.get(`page_hu_${key}`)||'')});
   try{await api('/api/marketing/seo',{method:'PUT',body:JSON.stringify(body)});showToast(bi('SEO settings saved.','A SEO-beállítások mentve.'),'success');await renderMarketingSeo();}catch(error){showError(error)}
