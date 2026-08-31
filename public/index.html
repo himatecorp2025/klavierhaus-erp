@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -59,13 +60,13 @@
     <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle menu">☰</button>
     <button id="mobileGlobalNotificationBell" class="notification-bell mobile-global-notification-bell hidden" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button>
     <aside class="sidebar">
-      <div class="brand">
+      <button id="brandHomeButton" class="brand brand-home-button" type="button" aria-label="Open Scheduler / Naptár megnyitása">
         <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
         <div>
           <h2 data-brand-name>Klavierhaus</h2>
           <small id="userInfo"></small>
         </div>
-      </div>
+      </button>
       <nav id="nav" class="nav"></nav>
       <button id="deleteEverythingBtn" class="delete-everything-btn hidden" type="button" onclick="deleteEverything()">Delete Everything / Mindent töröl</button>
       <button id="logoutBtn" class="logout-btn">Logout / Kilépés</button>
