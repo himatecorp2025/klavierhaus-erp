@@ -25,7 +25,7 @@ test("health endpoint identifies stage-one public website", async () => {
     assert.deepEqual(await response.json(), {
       status: "ok",
       service: "klavierhaus-public-website",
-      version: "1.2.1",
+      version: "1.2.2",
       commit: "unknown",
       indexing: "disabled",
       event_api: "not-configured"
