@@ -18,6 +18,7 @@ const { registerWebsiteContentRoutes } = require("./website-content");
 const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
+const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -57,7 +58,8 @@ db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
-const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL});
+const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env});
+const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -80,6 +82,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
   { key: "event_guest_list", group_key: "website_events", label_en: "Guest List", label_hu: "Vendéglista" },
   { key: "website_contacts", group_key: "website_events", label_en: "Contacts", label_hu: "Kapcsolatfelvételek" },
+  { key: "customer_inbox", group_key: "website_events", label_en: "Customer Inbox", label_hu: "Ügyfélüzenetek" },
   { key: "publish_preview", group_key: "website_events", label_en: "Publish & Preview", label_hu: "Publikálás és előnézet" },
   { key: "marketing_overview", group_key: "marketing", label_en: "Marketing Overview", label_hu: "Marketing áttekintő" },
   { key: "website_reviews", group_key: "marketing", label_en: "Reviews", label_hu: "Vélemények" },
@@ -100,7 +103,8 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
-  { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" }
+  { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" },
+  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" }
 ]);
 
 function seedDefaultPermissions(){
@@ -730,6 +734,7 @@ registerEventRoutes({
   requireSuperadmin,
   audit,
   transactionalEmail,
+  onTicketsIssued: businessDocuments.sendTicketDocuments,
   eventImageUpload,
   eventImageDir:EVENT_IMAGE_DIR,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
@@ -768,6 +773,18 @@ registerWebsitePlatformRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   transactionalEmail,
   env:process.env
+});
+registerBusinessOperationsRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  audit,
+  transactionalEmail,
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
+  uploadDir:UPLOAD_DIR,
+  env:process.env,
+  documentService:businessDocuments
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
@@ -2406,6 +2423,9 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "event_tickets",
       "event_invitations",
       "event_closures",
+      "customer_messages",
+      "customer_conversations",
+      "communication_deliveries",
       "events",
       "event_categories",
       "journal_lines",
