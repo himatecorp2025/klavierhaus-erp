@@ -442,3 +442,88 @@ document.querySelectorAll("[data-gallery-image]").forEach((image) => image.addEv
   image.closest("figure")?.remove();
   if (gallery && !gallery.querySelector("img")) gallery.remove();
 }, { once: true }));
+
+// The public contact widget uses an unguessable, local-storage token. No
+// visitor identity or message body is sent to analytics, and the ERP stores
+// only the token hash.
+const customerChat = document.querySelector("[data-customer-chat]");
+const customerChatToggle = customerChat?.querySelector("[data-chat-toggle]");
+const customerChatPanel = customerChat?.querySelector("[data-chat-panel]");
+const customerChatForm = customerChat?.querySelector("[data-chat-form]");
+const customerChatResult = customerChat?.querySelector("[data-chat-result]");
+const customerChatMessages = customerChat?.querySelector("[data-chat-messages]");
+const customerConversationKey = "klavierhaus_customer_conversation_v1";
+let customerConversationToken = "";
+
+function renderCustomerMessages(messages = []) {
+  if (!customerChatMessages) return;
+  customerChatMessages.replaceChildren();
+  messages.forEach((message) => {
+    const item = document.createElement("p");
+    item.className = `customer-chat__message customer-chat__message--${message.direction === "STAFF" ? "staff" : "customer"}`;
+    item.textContent = `${message.sender_name || "Klavierhaus"}: ${message.body || ""}`;
+    customerChatMessages.append(item);
+  });
+  customerChatMessages.scrollTop = customerChatMessages.scrollHeight;
+}
+
+async function loadCustomerConversation(token) {
+  if (!token) return;
+  try {
+    const response = await fetch(`/api/site/customer-conversations/${encodeURIComponent(token)}`, { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error("CONVERSATION_NOT_FOUND");
+    const conversation = await response.json();
+    customerConversationToken = token;
+    renderCustomerMessages(conversation.messages || []);
+    if (customerChatResult) customerChatResult.textContent = language === "hu" ? "A beszélgetés betöltve." : "Conversation loaded.";
+    const name = customerChatForm?.elements.name;
+    const email = customerChatForm?.elements.email;
+    if (name) name.value = conversation.name || "";
+    if (email) email.value = conversation.email || "";
+    if (name) name.closest("label")?.setAttribute("hidden", "hidden");
+    if (email) email.closest("label")?.setAttribute("hidden", "hidden");
+    const consent = customerChatForm?.elements.consent_contact;
+    if (consent) consent.closest("label")?.setAttribute("hidden", "hidden");
+  } catch (_error) {
+    localStorage.removeItem(customerConversationKey);
+  }
+}
+
+if (customerChat && customerChatToggle && customerChatPanel && customerChatForm) {
+  customerChatToggle.addEventListener("click", () => {
+    const open = customerChatToggle.getAttribute("aria-expanded") === "true";
+    customerChatToggle.setAttribute("aria-expanded", String(!open));
+    customerChatPanel.hidden = open;
+  });
+  try { customerConversationToken = localStorage.getItem(customerConversationKey) || new URLSearchParams(location.search).get("conversation") || ""; } catch (_error) { customerConversationToken = ""; }
+  loadCustomerConversation(customerConversationToken);
+  window.setInterval(() => {
+    if (customerConversationToken) loadCustomerConversation(customerConversationToken);
+  }, 20000);
+  customerChatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(customerChatForm);
+    const message = String(data.get("message") || "").trim();
+    if (!message) return;
+    if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Küldés…" : "Sending…";
+    try {
+      const endpoint = customerConversationToken ? `/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/messages` : "/api/site/customer-conversations";
+      const payload = customerConversationToken
+        ? { message }
+        : { name: String(data.get("name") || ""), email: String(data.get("email") || ""), category: String(data.get("category") || "GENERAL"), message, consent_contact: data.get("consent_contact") === "on", language, source_path: location.pathname };
+      const response = await fetch(endpoint, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "CONVERSATION_FAILED");
+      if (result.access_token) {
+        customerConversationToken = result.access_token;
+        localStorage.setItem(customerConversationKey, customerConversationToken);
+      }
+      const conversation = result.conversation || result;
+      renderCustomerMessages(conversation.messages || []);
+      customerChatForm.elements.message.value = "";
+      if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Köszönjük, üzenetét rögzítettük." : "Thank you, your message has been received.";
+    } catch (error) {
+      if (customerChatResult) customerChatResult.textContent = language === "hu" ? "A küldés nem sikerült." : "We could not send your message.";
+    }
+  });
+}
