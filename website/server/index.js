@@ -194,7 +194,23 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
         <button class="header-consultation" type="button" data-private-viewing-open>${escapeHtml(copy.consultationLabel)} <span aria-hidden="true">↗</span></button>
       </div>
     </div>
-  </header>`;
+  </header>
+  <aside class="customer-chat" data-customer-chat data-language="${escapeHtml(language)}">
+    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel">${language === "hu" ? "Kapcsolat" : "Contact"}</button>
+    <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
+      <div class="customer-chat__heading"><p class="eyebrow">Klavierhaus</p><h2>${language === "hu" ? "Miben segíthetünk?" : "How can we help?"}</h2><p>${language === "hu" ? "Írjon nekünk, és csapata rövidesen válaszol." : "Send us a message and our team will reply shortly."}</p></div>
+      <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
+      <form data-chat-form>
+        <label>${language === "hu" ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label>
+        <label>${language === "hu" ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
+        <label>${language === "hu" ? "Téma" : "Topic"}<select name="category"><option value="GENERAL">${language === "hu" ? "Általános" : "General"}</option><option value="SERVICE">${language === "hu" ? "Szolgáltatás" : "Service"}</option><option value="PIANO">${language === "hu" ? "Zongora" : "Piano"}</option><option value="EVENT">${language === "hu" ? "Esemény" : "Event"}</option><option value="REFUND">${language === "hu" ? "Visszatérítés" : "Refund"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát konzultáció" : "Private consultation"}</option></select></label>
+        <label>${language === "hu" ? "Üzenet" : "Message"}<textarea name="message" maxlength="5000" rows="3" required></textarea></label>
+        <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${language === "hu" ? "Hozzájárulok a kapcsolatfelvételhez." : "I consent to being contacted."}</label>
+        <button class="button button--primary" type="submit">${language === "hu" ? "Üzenet küldése" : "Send message"}</button>
+        <p class="form-result" data-chat-result aria-live="polite"></p>
+      </form>
+    </div>
+  </aside>`;
 }
 
 function renderHero(page, language, globalCopyOverride = null) {
@@ -1272,6 +1288,18 @@ function createApp(options = {}) {
   app.post("/api/site/contact-leads", async (req, res) => {
     try { const result = await eventClient.createLead(req.body || {}); res.status(201).json(result); }
     catch (error) { res.status(error.status || 400).json({ error: error.code || "CONTACT_REQUEST_FAILED" }); }
+  });
+  app.post("/api/site/customer-conversations", async (req, res) => {
+    try { const result = await eventClient.createCustomerConversation(req.body || {}); res.status(201).json(result); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "CONVERSATION_REQUEST_FAILED" }); }
+  });
+  app.get("/api/site/customer-conversations/:token", async (req, res) => {
+    try { res.setHeader("Cache-Control", "no-store"); res.json(await eventClient.customerConversation(req.params.token)); }
+    catch (error) { res.status(error.status || 404).json({ error: error.code || "CONVERSATION_NOT_FOUND" }); }
+  });
+  app.post("/api/site/customer-conversations/:token/messages", async (req, res) => {
+    try { res.status(201).json(await eventClient.customerConversationMessage(req.params.token, req.body || {})); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "MESSAGE_SEND_FAILED" }); }
   });
   app.post("/api/site/events/:eventId/repeat-interest", async (req, res) => {
     try { const result = await eventClient.repeatInterest(req.params.eventId, req.body || {}); res.status(201).json(result); }
