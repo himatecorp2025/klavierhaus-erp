@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { generateGuestListPdf } = require("./guest-list-pdf");
+const { nextTicketCode } = require("./ticket-code");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
@@ -311,9 +312,10 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     const cap = capacity(eventId);
     if (cap.remaining < 1) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
     const id = newId("EVTKT");
-    const publicCode = crypto.randomBytes(18).toString("base64url");
-    db.prepare(`INSERT INTO event_tickets(id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,created_by_user_id)
-      VALUES(?,?,?,?,?,?,?,?, 'VALID',?,'USD',?)`).run(id, eventId, invitationId, sourceType, cleanText(buyerName, 200), cleanText(attendeeName, 200), normalizeEmail(contactEmail), publicCode, Number(priceCents || 0), userId);
+    const sequence = Number(db.prepare("SELECT COALESCE(MAX(ticket_sequence),0)+1 AS next FROM event_tickets WHERE event_id=?").get(eventId)?.next || 1);
+    const ticketCode = nextTicketCode(db, event, sourceType, sequence);
+    db.prepare(`INSERT INTO event_tickets(id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,ticket_sequence,created_by_user_id)
+      VALUES(?,?,?,?,?,?,?,?, 'VALID',?,'USD',?,?)`).run(id, eventId, invitationId, sourceType, cleanText(buyerName, 200), cleanText(attendeeName, 200), normalizeEmail(contactEmail), ticketCode.code, Number(priceCents || 0), ticketCode.sequence, userId);
     if (capacity(eventId).remaining <= 0) db.prepare("UPDATE events SET sold_out_at=COALESCE(sold_out_at,CURRENT_TIMESTAMP) WHERE id=?").run(eventId);
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(id);
   }
