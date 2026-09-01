@@ -484,6 +484,74 @@ CREATE TABLE IF NOT EXISTS event_closures (
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Operational extensions for manual attendance, customer conversations and
+-- auditable transactional document delivery. Public conversation access is
+-- token based; only a keyed hash is stored in the ERP database.
+CREATE TABLE IF NOT EXISTS customer_conversations (
+  id TEXT PRIMARY KEY,
+  public_token_hash TEXT NOT NULL UNIQUE,
+  public_token_encrypted TEXT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','GENERAL')),
+  service_id TEXT,
+  piano_id TEXT,
+  event_id TEXT,
+  ticket_id TEXT,
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
+  assigned_user_id TEXT,
+  consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),
+  source_path TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  last_message_at TEXT,
+  closed_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
+  FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS customer_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK(direction IN ('CUSTOMER','STAFF')),
+  sender_name TEXT NOT NULL,
+  sender_email TEXT,
+  sender_user_id TEXT,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'UNREAD' CHECK(status IN ('UNREAD','READ')),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(sender_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS communication_deliveries (
+  id TEXT PRIMARY KEY,
+  event_key TEXT NOT NULL UNIQUE,
+  delivery_type TEXT NOT NULL,
+  recipient_email TEXT,
+  event_id TEXT,
+  payment_id TEXT,
+  ticket_id TEXT,
+  conversation_id TEXT,
+  status TEXT NOT NULL CHECK(status IN ('PENDING','SENT','FAILED','NOT_CONFIGURED')),
+  provider TEXT,
+  provider_message_id TEXT,
+  error_code TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  sent_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
+  FOREIGN KEY(payment_id) REFERENCES event_payments(id) ON DELETE SET NULL,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE
+);
+
 INSERT OR IGNORE INTO event_categories(id,code,name_en,name_hu,sort_order) VALUES
  ('EVC-PIANO-CONCERT','PIANO_CONCERT','Piano Concert','Zongorahangverseny',10),
  ('EVC-ARTIST-PERFORMANCE','ARTIST_PERFORMANCE','Artist Performance','Művészi előadás',20),
