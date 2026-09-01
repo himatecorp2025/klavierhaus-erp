@@ -129,6 +129,18 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
    same hero component and vertical rhythm as the Artists page. */
 :root{--kh-public-hero-height:min(92svh,65rem)}
 .hero--home,.hero--inner{min-height:var(--kh-public-hero-height)}
+.header-consultation{position:relative;overflow:hidden;background:linear-gradient(120deg,rgba(201,169,94,.82),rgba(92,76,42,.96) 48%,rgba(201,169,94,.82));background-size:220% 100%;color:#080807;border-color:var(--gold-bright);box-shadow:inset 0 0 0 1px rgba(255,247,219,.12);animation:kh-consultation-glow 6s ease-in-out infinite}
+.header-consultation:hover{background-position:100% 0;color:#080807}
+@keyframes kh-consultation-glow{0%,100%{background-position:0 0}50%{background-position:100% 0}}
+.customer-chat{position:fixed;z-index:1050;left:var(--kh-gutter);bottom:1.2rem;display:grid;justify-items:start;gap:.65rem}
+.customer-chat__toggle{padding:.75rem 1rem;border:1px solid var(--gold-bright);border-radius:999px;background:#0b0a09;color:var(--gold-bright);font:600 .72rem var(--sans);letter-spacing:.12em;text-transform:uppercase;cursor:pointer;box-shadow:0 .8rem 2rem rgba(0,0,0,.35)}
+.customer-chat__toggle[aria-expanded="true"]{background:var(--gold-bright);color:#080807}
+.customer-chat__panel{width:min(22rem,calc(100vw - 2rem));max-height:min(75vh,42rem);overflow:auto;padding:1.15rem;border:1px solid rgba(201,169,94,.58);border-radius:15px;background:rgba(8,8,7,.98);box-shadow:0 1.5rem 4rem rgba(0,0,0,.6);backdrop-filter:blur(14px)}
+.customer-chat__panel[hidden]{display:none}
+.customer-chat__heading h2{margin:.25rem 0;font-family:var(--font-display);font-size:1.7rem}.customer-chat__heading p:not(.eyebrow){margin:.35rem 0 1rem;color:var(--muted);font-size:.84rem;line-height:1.5}
+.customer-chat__panel form{display:grid;gap:.65rem}.customer-chat__panel label{display:grid;gap:.3rem;color:var(--gold-bright);font-size:.7rem;letter-spacing:.04em}.customer-chat__panel input,.customer-chat__panel textarea,.customer-chat__panel select{box-sizing:border-box;width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px;background:#060605;color:var(--cream);font:inherit}.customer-chat__panel .checkbox-row{display:grid;grid-template-columns:auto 1fr;align-items:start}.customer-chat__panel .checkbox-row input{width:auto;margin-top:.15rem}.customer-chat__messages{display:grid;gap:.4rem;max-height:10rem;overflow:auto;margin-bottom:.75rem}.customer-chat__message{margin:0;padding:.55rem .65rem;border-left:2px solid var(--gold-dark);background:rgba(255,255,255,.04);color:var(--cream);font-size:.78rem;line-height:1.45}.customer-chat__message--staff{border-left-color:var(--gold-bright)}
+@media(prefers-reduced-motion:reduce){.header-consultation{animation:none}}
 @media(max-width:760px){
  :root{--kh-public-hero-height:min(90svh,52rem)}
+ .customer-chat{left:1rem;bottom:max(1rem,env(safe-area-inset-bottom))}
 }
