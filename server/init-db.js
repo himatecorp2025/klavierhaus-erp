@@ -500,6 +500,7 @@ function runMigrations() {
   ensureIndex("idx_event_invitations_email", "CREATE INDEX IF NOT EXISTS idx_event_invitations_email ON event_invitations(lower(trim(guest_email)))");
   ensureIndex("idx_event_tickets_event_status", "CREATE INDEX IF NOT EXISTS idx_event_tickets_event_status ON event_tickets(event_id,status,source_type)");
   ensureIndex("idx_event_tickets_contact", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact ON event_tickets(lower(trim(contact_email)))");
+  ensureColumn("customer_conversations", "public_token_encrypted", "TEXT");
   ensureIndex("idx_event_checkins_event_time", "CREATE INDEX IF NOT EXISTS idx_event_checkins_event_time ON event_checkins(event_id,created_at DESC)");
   ensureIndex("idx_event_refunds_event_status", "CREATE INDEX IF NOT EXISTS idx_event_refunds_event_status ON event_refund_requests(event_id,status,requested_at DESC)");
   ensureIndex("idx_event_holds_event_status_expiry", "CREATE INDEX IF NOT EXISTS idx_event_holds_event_status_expiry ON event_checkout_holds(event_id,status,expires_at)");
@@ -520,6 +521,10 @@ function runMigrations() {
   ensureIndex("idx_event_repeat_requests", "CREATE INDEX IF NOT EXISTS idx_event_repeat_requests ON event_repeat_requests(event_id,created_at DESC)");
   ensureIndex("idx_marketing_campaigns_active", "CREATE INDEX IF NOT EXISTS idx_marketing_campaigns_active ON marketing_campaigns(active,updated_at DESC)");
   ensureIndex("idx_website_tracking_events", "CREATE INDEX IF NOT EXISTS idx_website_tracking_events ON website_tracking_events(event_name,created_at DESC)");
+  ensureIndex("idx_customer_conversations_status", "CREATE INDEX IF NOT EXISTS idx_customer_conversations_status ON customer_conversations(status,updated_at DESC)");
+  ensureIndex("idx_customer_conversations_email", "CREATE INDEX IF NOT EXISTS idx_customer_conversations_email ON customer_conversations(lower(trim(email)),updated_at DESC)");
+  ensureIndex("idx_customer_messages_conversation", "CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation ON customer_messages(conversation_id,created_at)");
+  ensureIndex("idx_communication_deliveries_status", "CREATE INDEX IF NOT EXISTS idx_communication_deliveries_status ON communication_deliveries(status,updated_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
