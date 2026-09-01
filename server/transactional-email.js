@@ -130,6 +130,31 @@ function buildConversationReplyEmail({ name, message, conversationUrl, language 
   };
 }
 
+function buildConversationAutoReplyEmail({ name, conversationUrl, language = "en", supportHours = "09:00–17:00 New York time" }) {
+  const safeName = escapeHtml(name || (language === "hu" ? "Ügyfelünk" : "our guest"));
+  const leadEn = `Thank you, ${name || "our guest"}. We have received your Klavierhaus message outside our live support hours.`;
+  const leadHu = `Köszönjük, ${name || "Ügyfelünk"}. A Klavierhaus rögzítette a munkaidőn kívül érkezett üzenetét.`;
+  const hoursEn = `Our team will reply by email as soon as possible. Live support hours: ${supportHours}.`;
+  const hoursHu = `Munkatársaink e-mailben a lehető leghamarabb válaszolnak. Élő ügyfélszolgálat: New York-i idő szerint ${supportHours}.`;
+  return {
+    subject: "Klavierhaus message received / Üzenetét fogadtuk",
+    text: `${leadEn}\n${hoursEn}\n${conversationUrl}\n\n${leadHu}\n${hoursHu}\n${conversationUrl}`,
+    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><p>${escapeHtml(leadEn)}</p><p style="color:#d9d1c1">${escapeHtml(hoursEn)}</p><hr style="margin:26px 0;border:0;border-top:1px solid #3b3428"><p>${escapeHtml(leadHu)}</p><p style="color:#d9d1c1">${escapeHtml(hoursHu)}</p><p><a href="${escapeHtml(conversationUrl)}" style="color:#d7b66b">Open conversation / Beszélgetés megnyitása</a></p></div>`
+  };
+}
+
+function buildInvoiceEmail({ purchaserName, event, invoiceNumber, payment, conversationUrl = "" }) {
+  const amount = `${String(payment.currency || "USD").toUpperCase()} ${(Number(payment.amount_total || 0) / 100).toFixed(2)}`;
+  const title = event.title_en || "Klavierhaus event";
+  const titleHu = event.title_hu || title;
+  const text = [`Hello ${purchaserName || "Guest"},`, `Your Klavierhaus invoice ${invoiceNumber} for ${title} is attached.`, `Amount paid: ${amount}.`, conversationUrl, "", `Kedves ${purchaserName || "Vendég"}!`, `A ${invoiceNumber} számú Klavierhaus-számlát mellékletben küldjük: ${titleHu}.`, `Fizetett összeg: ${amount}.`, conversationUrl].filter(Boolean).join("\n");
+  return {
+    subject: `Klavierhaus invoice · ${invoiceNumber}`,
+    text,
+    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS · NEW YORK</p><h1 style="font-family:Georgia,serif">Invoice ${escapeHtml(invoiceNumber)}</h1><p>Hello ${escapeHtml(purchaserName || "Guest")},</p><p>Your invoice for <strong>${escapeHtml(title)}</strong> is attached.</p><p style="color:#d9d1c1"><strong>${escapeHtml(amount)}</strong> · PAID</p><hr style="margin:26px 0;border:0;border-top:1px solid #3b3428"><h2 style="font-family:Georgia,serif">Számla · ${escapeHtml(invoiceNumber)}</h2><p>Kedves ${escapeHtml(purchaserName || "Vendég")}! A számla mellékletben található.</p></div>`
+  };
+}
+
 function safeProviderCode(error) {
   const candidate = String(error?.name || error?.code || "EMAIL_DELIVERY_FAILED").toUpperCase();
   return /^[A-Z0-9_-]{2,80}$/.test(candidate) ? candidate : "EMAIL_DELIVERY_FAILED";
@@ -238,10 +263,24 @@ function createTransactionalEmail(env = process.env) {
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
+    async sendInvoiceDocument({ to, purchaserName, event, payment, invoiceNumber, invoicePdf, idempotencyKey }) {
+      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildInvoiceEmail({ purchaserName, event, invoiceNumber, payment });
+      const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: `klavierhaus-invoice-${invoiceNumber}.pdf`, content: invoicePdf }], tags: [{ name: "category", value: "event_invoice" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
     async sendCustomerConversationReply({ to, name, message, conversationUrl, language, idempotencyKey }) {
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildConversationReplyEmail({ name, message, conversationUrl, language });
       const { data, error } = await resend.emails.send({ from, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "customer_conversation" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
+    async sendCustomerConversationAutoReply({ to, name, conversationUrl, language, supportHours, idempotencyKey }) {
+      if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildConversationAutoReplyEmail({ name, conversationUrl, language, supportHours });
+      const { data, error } = await resend.emails.send({ from, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "customer_conversation_auto_reply" }] }, { idempotencyKey });
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
@@ -262,4 +301,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, buildInvoiceEmail, createTransactionalEmail };
