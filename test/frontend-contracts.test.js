@@ -7,6 +7,7 @@ const projectRoot = path.join(__dirname, "..");
 const appSource = fs.readFileSync(path.join(projectRoot, "public", "app.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(projectRoot, "public", "index.html"), "utf8");
 const styles = fs.readFileSync(path.join(projectRoot, "public", "styles.css"), "utf8");
+const websiteStyles = fs.readFileSync(path.join(projectRoot, "website", "public", "design-v3.css"), "utf8");
 const serviceWorker = fs.readFileSync(path.join(projectRoot, "public", "service-worker.js"), "utf8");
 const serverSource = fs.readFileSync(path.join(projectRoot, "server", "index.js"), "utf8");
 
@@ -256,6 +257,23 @@ test("administrator navigation has three primary areas and card-first workspaces
   assert.match(appSource, /renderWebsiteReviews/);
   assert.match(appSource, /showroom deletion must not touch client pianos|ERP client pianos were not touched|elkülönülnek az ügyfélzongoráktól/);
   assert.match(styles, /\.website-catalog-admin-grid/);
+});
+
+test("attendance, helpdesk, notification audit and document actions are wired in the admin UI", () => {
+  assert.match(serverSource, /digital_attendance/);
+  assert.match(serverSource, /helpdesk/);
+  assert.match(serverSource, /notification_audit/);
+  assert.match(appSource, /adminCardDescriptions/);
+  assert.match(appSource, /renderDigitalAttendance/);
+  assert.match(appSource, /editEventGuestName/);
+  assert.match(appSource, /attendance-ticket-actions/);
+  assert.match(appSource, /downloadPaymentInvoice/);
+  assert.match(appSource, /resendInvoiceDocument/);
+  assert.match(appSource, /renderNotificationAcknowledgements/);
+  assert.match(appSource, /downloadCustomerConversationReport/);
+  assert.doesNotMatch(appSource, /notification-detail-close/);
+  assert.match(websiteStyles, /\.customer-chat\{[^}]*right:/);
+  assert.match(websiteStyles, /\.customer-chat__toggle\{[^}]*border-radius:3px[^}]*color:#f2eee4/);
 });
 
 test("guest list provides a toolbar export action and uses the authenticated PDF endpoint", () => {
