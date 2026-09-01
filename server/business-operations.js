@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { generateTicketPdf, generateInvoicePdf } = require("./document-pdf");
+const { generateTicketPdf, generateInvoicePdf, normalizeTicketSide } = require("./document-pdf");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "TECHNICAL", "GENERAL"]);
@@ -99,9 +99,13 @@ function saveCompanyData(db, data, userName) {
 
 function resolveCompanyLogoPath(logoUrl, uploadDir) {
   const value = clean(logoUrl, 1000);
-  if (value.startsWith("/uploads/") && uploadDir) return path.join(uploadDir, path.basename(value));
-  if (value.startsWith("/icons/")) return path.join(__dirname, "..", "public", value.slice(1));
-  return path.join(__dirname, "assets", "klavierhaus-logo-black.jpg");
+  const officialLogo = path.join(__dirname, "assets", "klavierhaus-logo-white.png");
+  if (!value || value === "/icons/icon-512.png") return officialLogo;
+  let candidate = "";
+  if (value.startsWith("/uploads/") && uploadDir) candidate = path.join(uploadDir, path.basename(value));
+  else if (value.startsWith("/icons/")) candidate = path.join(__dirname, "..", "public", value.slice(1));
+  if (candidate && fs.existsSync(candidate)) return candidate;
+  return officialLogo;
 }
 
 function formatEventDate(event, language = "en") {
@@ -155,13 +159,13 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     if (!event || !tickets.length) throw new Error("EVENT_TICKETS_NOT_READY");
     return { payment, event: documentEvent(event), tickets, company: readCompanyData(db) };
   }
-  function ticketPdfForTicket(ticketId, language = "en") {
+  function ticketPdfForTicket(ticketId, language = "en", side = "both") {
     const { ticket, event, company } = ticketContext(ticketId);
-    return generateTicketPdf({ event: documentEvent(event, language), tickets: [ticket], language, logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    return generateTicketPdf({ event: documentEvent(event, language), tickets: [ticket], language, side: normalizeTicketSide(side, "both"), logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
   }
-  function ticketPdfForPayment(paymentId, language = "en") {
+  function ticketPdfForPayment(paymentId, language = "en", side = "both") {
     const { event, tickets, company } = paymentContext(paymentId);
-    return generateTicketPdf({ event: documentEvent(event, language), tickets, language, logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    return generateTicketPdf({ event: documentEvent(event, language), tickets, language, side: normalizeTicketSide(side, "both"), logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
   }
   function invoicePdfForPayment(paymentId, language = "en") {
     const { payment, event, tickets, company } = paymentContext(paymentId);
@@ -200,7 +204,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const { event, tickets, company } = context;
     const invoice = invoiceNumber(payment, company);
     const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-    const ticketPdf = generateTicketPdf({ event, tickets, language: "en", logoPath });
+    const ticketPdf = generateTicketPdf({ event, tickets, language: "en", side: "front", logoPath });
     const invoicePdf = generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath });
     const ticketPath = artifactPath("tickets", payment.id); const invoicePath = artifactPath("invoice", payment.id);
     if (!fs.existsSync(ticketPath) || resend) fs.writeFileSync(ticketPath, ticketPdf);
@@ -232,7 +236,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const first = tickets[0];
     const key = `${deliveryType.toLowerCase()}:${first.id}`;
     beginDelivery({ eventKey: key, deliveryType, recipientEmail: first.contact_email, eventId, ticketId: first.id });
-    const pdf = generateTicketPdf({ event: documentEvent(event), tickets, language: "en", logoPath: resolveCompanyLogoPath(readCompanyData(db).logo_url, uploadDir) });
+    const pdf = generateTicketPdf({ event: documentEvent(event), tickets, language: "en", side: "front", logoPath: resolveCompanyLogoPath(readCompanyData(db).logo_url, uploadDir) });
     const ticketPath = artifactPath("tickets", `${eventId}-${first.id}`);
     fs.writeFileSync(ticketPath, pdf);
     if (!transactionalEmail?.sendEventTicketDocuments) {
@@ -253,7 +257,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const { ticket, event, company } = ticketContext(ticketId);
     const key = `event-ticket-document:${ticket.id}`;
     const ticketPath = artifactPath("ticket", ticket.id);
-    const pdf = generateTicketPdf({ event, tickets: [ticket], language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    const pdf = generateTicketPdf({ event, tickets: [ticket], language: "en", side: "front", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
     if (!fs.existsSync(ticketPath) || resend) fs.writeFileSync(ticketPath, pdf);
     beginDelivery({ eventKey: key, deliveryType: "EVENT_TICKET_DOCUMENT", recipientEmail: ticket.contact_email, eventId: event.id, ticketId: ticket.id });
     if (!transactionalEmail?.sendEventTicketDocuments) {
@@ -445,20 +449,25 @@ function registerBusinessOperationsRoutes(options) {
 
   app.get("/api/events/tickets/:id.pdf", auth, admin, (req, res) => {
     try {
-      const pdf = documentService.ticketPdfForTicket(req.params.id, req.query.language === "hu" ? "hu" : "en");
-      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-ticket-${String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf"`).send(pdf);
+      const side = normalizeTicketSide(req.query.side, "both");
+      const pdf = documentService.ticketPdfForTicket(req.params.id, req.query.language === "hu" ? "hu" : "en", side);
+      const suffix = side === "front" ? "front" : side === "back" ? "back" : "two-sided";
+      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-ticket-${String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "_")}-${suffix}.pdf"`).send(pdf);
     } catch (error) { sendError(res, error); }
   });
 
   app.get("/api/event-payments/:id/documents", auth, admin, (req, res) => {
     const payment = db.prepare("SELECT id,event_id,status,purchaser_name,purchaser_email,amount_total,currency FROM event_payments WHERE id=?").get(req.params.id);
     if (!payment) return res.status(404).json({ error: "EVENT_PAYMENT_NOT_FOUND" });
-    res.json({ payment, delivery: documentService.deliveryRow(`event-purchase-documents:${payment.id}`), invoice_delivery: documentService.deliveryRow(`event-invoice-document:${payment.id}`), documents: db.prepare("SELECT id,title,content_type,stored_path,invoice_number,amount,created_at FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? ORDER BY created_at DESC").all(`%${payment.id}%`), downloads: { tickets: `/api/event-payments/${encodeURIComponent(payment.id)}/tickets.pdf`, invoice: `/api/event-payments/${encodeURIComponent(payment.id)}/invoice.pdf` } });
+    const paymentId = encodeURIComponent(payment.id);
+    res.json({ payment, delivery: documentService.deliveryRow(`event-purchase-documents:${payment.id}`), invoice_delivery: documentService.deliveryRow(`event-invoice-document:${payment.id}`), documents: db.prepare("SELECT id,title,content_type,stored_path,invoice_number,amount,created_at FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? ORDER BY created_at DESC").all(`%${payment.id}%`), downloads: { tickets: `/api/event-payments/${paymentId}/tickets.pdf?side=both`, tickets_front: `/api/event-payments/${paymentId}/tickets.pdf?side=front`, tickets_back: `/api/event-payments/${paymentId}/tickets.pdf?side=back`, invoice: `/api/event-payments/${paymentId}/invoice.pdf` } });
   });
   app.get("/api/event-payments/:id/tickets.pdf", auth, admin, (req, res) => {
     try {
-      const pdf = documentService.ticketPdfForPayment(req.params.id, req.query.language === "hu" ? "hu" : "en");
-      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-tickets-${String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf"`).send(pdf);
+      const side = normalizeTicketSide(req.query.side, "both");
+      const pdf = documentService.ticketPdfForPayment(req.params.id, req.query.language === "hu" ? "hu" : "en", side);
+      const suffix = side === "front" ? "front" : side === "back" ? "back" : "two-sided";
+      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-tickets-${String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "_")}-${suffix}.pdf"`).send(pdf);
     } catch (error) { sendError(res, error); }
   });
   app.get("/api/event-payments/:id/invoice.pdf", auth, admin, (req, res) => {
