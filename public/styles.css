@@ -650,6 +650,7 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
 .event-image-field{display:grid;gap:10px}.event-image-preview,.event-image-placeholder{display:grid;width:min(100%,760px);aspect-ratio:16/9;border:1px solid var(--line);border-radius:15px;object-fit:cover;background:linear-gradient(145deg,var(--panel2),var(--panel));overflow:hidden}.event-image-placeholder{place-items:center;padding:24px;color:var(--muted);text-align:center}.event-image-field small{display:block;color:var(--muted);line-height:1.5}
 .event-operation-card .actions,.event-toolbar{display:flex;gap:9px;flex-wrap:wrap}
 .event-operation-card .actions button,.event-toolbar button{white-space:normal}
+.ticket-export-actions{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:top}
 
 @media(max-width:900px){
   .event-detail-grid,.event-form-grid{grid-template-columns:1fr}
