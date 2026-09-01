@@ -122,9 +122,20 @@ function normalizeEventTimes(startValue, endValue) {
 
 function normalizeOptionalDate(value) {
   if (value === null || value === undefined || String(value).trim() === "") return { value: null };
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return { error: "INVALID_SALES_TIME" };
+  const raw = cleanText(value, 40);
+  const date = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw) ? localNewYorkToUtc(raw) : new Date(raw);
+  if (!date || Number.isNaN(date.getTime())) return { error: "INVALID_SALES_TIME" };
   return { value: date.toISOString() };
+}
+
+function salesWindowState(event, now = new Date()) {
+  const time = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (!Number.isFinite(time)) return { open: false, code: "INVALID_CURRENT_TIME" };
+  const start = event?.sales_start_at ? new Date(event.sales_start_at).getTime() : null;
+  const end = event?.sales_end_at ? new Date(event.sales_end_at).getTime() : null;
+  if (Number.isFinite(start) && time < start) return { open: false, code: "SALES_NOT_OPEN", sales_start_at: event.sales_start_at };
+  if (Number.isFinite(end) && time >= end) return { open: false, code: "SALES_CLOSED", sales_end_at: event.sales_end_at };
+  return { open: true, code: "SALES_OPEN", sales_start_at: event?.sales_start_at || null, sales_end_at: event?.sales_end_at || null };
 }
 
 function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfiguration = {}) {
@@ -173,8 +184,9 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfi
     sales_start_at: row.sales_start_at || null,
     sales_end_at: row.sales_end_at || null,
     published_at: row.published_at,
-    checkout_available: Boolean(paymentConfiguration.enabled && row.access_type === "PUBLIC_PAID" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0),
-    reservation_available: Boolean(row.access_type === "PUBLIC_FREE" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0),
+    sales_window: salesWindowState(row),
+    checkout_available: Boolean(paymentConfiguration.enabled && row.access_type === "PUBLIC_PAID" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0 && salesWindowState(row).open),
+    reservation_available: Boolean(row.access_type === "PUBLIC_FREE" && ["PUBLISHED", "RESCHEDULED"].includes(row.status) && capacity.remaining > 0 && salesWindowState(row).open),
     stripe_test_mode: Boolean(paymentConfiguration.test_mode),
     hold_minutes: Number(paymentConfiguration.hold_minutes || 15)
   };
@@ -267,6 +279,7 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     const salesEnd = normalizeOptionalDate(merged.sales_end_at);
     if (salesStart.error || salesEnd.error) return { error: "INVALID_SALES_TIME" };
     if (salesStart.value && salesEnd.value && new Date(salesEnd.value).getTime() <= new Date(salesStart.value).getTime()) return { error: "INVALID_SALES_TIME_RANGE" };
+    if (salesStart.value && new Date(salesStart.value).getTime() >= new Date(times.startAt).getTime()) return { error: "SALES_START_AFTER_EVENT_START" };
     if (salesEnd.value && new Date(salesEnd.value).getTime() > new Date(times.startAt).getTime()) return { error: "SALES_END_AFTER_EVENT_START" };
     const artistId = cleanText(merged.artist_id, 100) || null;
     const artist = artistId ? db.prepare("SELECT id,name FROM website_artists WHERE id=?").get(artistId) : null;
@@ -316,7 +329,7 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
 }
 
 function registerEventRoutes(options) {
-  const { app, db, auth, permit, audit, transactionalEmail, eventImageUpload, eventImageDir, stripeSandbox } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, onTicketsIssued, eventImageUpload, eventImageDir, stripeSandbox } = options;
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
   const service = createEventService({ db, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
@@ -459,12 +472,14 @@ function registerEventRoutes(options) {
     } catch (error) { sendError(res, error, "STRIPE_CHECKOUT_FAILED"); }
   });
 
-  app.post("/api/public/events/:slug/reservations", (req, res) => {
+  app.post("/api/public/events/:slug/reservations", async (req, res) => {
     const language = req.body?.language === "hu" ? "hu" : "en";
     const column = language === "hu" ? "slug_hu" : "slug_en";
     const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     if (event.access_type !== "PUBLIC_FREE" || !["PUBLISHED", "RESCHEDULED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    const salesWindow = salesWindowState(event);
+    if (!salesWindow.open) return res.status(409).json({ error: salesWindow.code, sales_start_at: salesWindow.sales_start_at || null, sales_end_at: salesWindow.sales_end_at || null });
     const contactEmail = normalizeEmail(req.body?.contact_email);
     const quantity = Number(req.body?.quantity || 1);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(event.capacity_total)) return res.status(400).json({ error: "INVALID_TICKET_QUANTITY" });
@@ -480,7 +495,12 @@ function registerEventRoutes(options) {
         }
         return created;
       })();
-      res.status(201).json({ ok: true, tickets: tickets.map((ticket) => ({ ticket_code: ticket.public_code })) });
+      let delivery = { status: "NOT_CONFIGURED" };
+      if (onTicketsIssued) {
+        try { delivery = await onTicketsIssued({ eventId: event.id, ticketIds: tickets.map((ticket) => ticket.id), deliveryType: "EVENT_FREE_TICKETS" }); }
+        catch (_error) { delivery = { status: "FAILED" }; }
+      }
+      res.status(201).json({ ok: true, tickets: tickets.map((ticket) => ({ ticket_code: ticket.public_code })), delivery });
     } catch (error) { sendError(res, error); }
   });
 
@@ -492,7 +512,7 @@ function registerEventRoutes(options) {
     res.json({ ...invitation, start_local: formatInTimeZone(new Date(invitation.start_at)), end_local: formatInTimeZone(new Date(invitation.end_at)) });
   });
 
-  app.post("/api/public/event-invitations/:token/respond", (req, res) => {
+  app.post("/api/public/event-invitations/:token/respond", async (req, res) => {
     const decision = cleanText(req.body?.decision, 20).toUpperCase();
     if (!["ACCEPT", "DECLINE"].includes(decision)) return res.status(400).json({ error: "INVALID_INVITATION_DECISION" });
     try {
@@ -508,8 +528,14 @@ function registerEventRoutes(options) {
         }
         const ticket = service.createTicket({ eventId: event.id, invitationId: invitation.id, sourceType: "INVITATION", attendeeName: invitation.guest_name, contactEmail: invitation.guest_email });
         db.prepare("UPDATE event_invitations SET status='ACCEPTED',accepted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'").run(invitation.id);
-        return { status: "ACCEPTED", ticket_code: ticket.public_code };
+        return { status: "ACCEPTED", ticket_code: ticket.public_code, ticket_id: ticket.id, event_id: event.id };
       })();
+      if (result.status === "ACCEPTED" && onTicketsIssued) {
+        try { result.delivery = await onTicketsIssued({ eventId: result.event_id, ticketIds: [result.ticket_id], deliveryType: "EVENT_INVITATION_TICKET" }); }
+        catch (_error) { result.delivery = { status: "FAILED" }; }
+        delete result.ticket_id;
+        delete result.event_id;
+      }
       res.json(result);
     } catch (error) { sendError(res, error); }
   });
@@ -843,7 +869,7 @@ function registerEventRoutes(options) {
     res.json({ ok: true, status: "REVOKED" });
   });
 
-  app.post("/api/events/:id/complimentary-tickets", auth, admin, (req, res) => {
+  app.post("/api/events/:id/complimentary-tickets", auth, admin, async (req, res) => {
     const event = service.eventById(req.params.id);
     if (!ensureMutable(event, res)) return;
     const attendeeName = cleanText(req.body?.attendee_name, 200);
@@ -851,7 +877,12 @@ function registerEventRoutes(options) {
     if (!attendeeName || !validEmail(email)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
     try {
       const ticket = db.transaction(() => service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", attendeeName, contactEmail: email, userId: req.user.id }))();
-      res.status(201).json(ticket);
+      let delivery = { status: "NOT_CONFIGURED" };
+      if (onTicketsIssued) {
+        try { delivery = await onTicketsIssued({ eventId: event.id, ticketIds: [ticket.id], deliveryType: "EVENT_COMPLIMENTARY_TICKET" }); }
+        catch (_error) { delivery = { status: "FAILED" }; }
+      }
+      res.status(201).json({ ...ticket, delivery });
     } catch (error) { sendError(res, error); }
   });
 
