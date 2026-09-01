@@ -494,7 +494,7 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','GENERAL')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
   service_id TEXT,
   piano_id TEXT,
   event_id TEXT,
