@@ -104,6 +104,15 @@ function createEventClient(options = {}) {
     track(event) {
       return request("/api/public/tracking-events", { method: "POST", body: JSON.stringify(event) });
     },
+    createCustomerConversation(conversation) {
+      return request("/api/public/customer-conversations", { method: "POST", body: JSON.stringify(conversation) });
+    },
+    customerConversation(token) {
+      return request(`/api/public/customer-conversations/${encodeURIComponent(token)}`);
+    },
+    customerConversationMessage(token, message) {
+      return request(`/api/public/customer-conversations/${encodeURIComponent(token)}/messages`, { method: "POST", body: JSON.stringify(message) });
+    },
     createLead(lead) {
       return request("/api/public/contact-leads", { method: "POST", body: JSON.stringify(lead) });
     },
