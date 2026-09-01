@@ -96,6 +96,40 @@ function buildEventReturnAnnouncement({ event, language = "en", websiteBaseUrl =
   return { subject, text, html };
 }
 
+function buildEventPurchaseEmail({ purchaserName, event, payment, invoiceNumber, company, websiteBaseUrl = "" }) {
+  const titleEn = event.title_en || "Klavierhaus event";
+  const titleHu = event.title_hu || titleEn;
+  const amount = `${String(payment.currency || "USD").toUpperCase()} ${(Number(payment.amount_total || 0) / 100).toFixed(2)}`;
+  const safeName = escapeHtml(purchaserName || "Guest");
+  const safeTitle = escapeHtml(titleEn);
+  const safeTitleHu = escapeHtml(titleHu);
+  const safeInvoice = escapeHtml(invoiceNumber);
+  const eventUrl = `${String(websiteBaseUrl || "").replace(/\/$/, "")}/events/${encodeURIComponent(event.slug_en || "")}`;
+  return {
+    subject: `Klavierhaus ticket confirmation · ${titleEn}`,
+    text: [`Hello ${purchaserName || "Guest"},`, `Thank you for your purchase for ${titleEn}.`, `Invoice: ${invoiceNumber}`, `Amount paid: ${amount}`, `Your ticket PDF is attached.`, eventUrl, "", `Kedves ${purchaserName || "Vendég"}!`, `Köszönjük a vásárlást: ${titleHu}.`, `Számla: ${invoiceNumber}`, `A jegyeket PDF-mellékletben küldjük.`].join("\n"),
+    html: `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">Thank you, ${safeName}</h1><p>Your place for <strong>${safeTitle}</strong> is recorded. The ticket PDF and invoice are attached.</p><p style="color:#d9d1c1"><strong>${safeInvoice}</strong> · ${escapeHtml(amount)}</p><p><a href="${escapeHtml(eventUrl)}" style="color:#d7b66b">View event</a></p><hr style="margin:30px 0;border:0;border-top:1px solid #3b3428"><h2 style="font-family:Georgia,serif">${safeTitleHu}</h2><p>Köszönjük a vásárlást. A PDF-jegyet és a bizonylatot mellékletben találja.</p></div></div></body></html>`
+  };
+}
+
+function buildTicketDocumentsEmail({ name, event, language = "en" }) {
+  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
+  return {
+    subject: language === "hu" ? `Klavierhaus jegyek · ${title}` : `Klavierhaus tickets · ${title}`,
+    text: language === "hu" ? `Kedves ${name || "Vendég"}! A ${title} eseményhez tartozó PDF-jegyet mellékletben küldjük.` : `Hello ${name || "Guest"}, your PDF ticket for ${title} is attached.`,
+    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(language === "hu" ? "A PDF-jegyet mellékletben küldjük." : "Your PDF ticket is attached.")}</p></div>`
+  };
+}
+
+function buildConversationReplyEmail({ name, message, conversationUrl, language = "en" }) {
+  const lead = language === "hu" ? `A Klavierhaus csapata válaszolt a megkeresésére, ${name || "Ügyfelünk"}.` : `The Klavierhaus team replied to your enquiry, ${name || "our guest"}.`;
+  return {
+    subject: language === "hu" ? "Új Klavierhaus válasz" : "New Klavierhaus reply",
+    text: `${lead}\n\n${message}\n\n${conversationUrl}`,
+    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><p>${escapeHtml(lead)}</p><blockquote style="border-left:2px solid #c9a45d;padding-left:14px">${escapeHtml(message)}</blockquote><p><a href="${escapeHtml(conversationUrl)}" style="color:#d7b66b">${escapeHtml(language === "hu" ? "Beszélgetés megnyitása" : "Open conversation")}</a></p></div>`
+  };
+}
+
 function safeProviderCode(error) {
   const candidate = String(error?.name || error?.code || "EMAIL_DELIVERY_FAILED").toUpperCase();
   return /^[A-Z0-9_-]{2,80}$/.test(candidate) ? candidate : "EMAIL_DELIVERY_FAILED";
@@ -190,6 +224,27 @@ function createTransactionalEmail(env = process.env) {
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
+    async sendEventPurchaseConfirmation({ to, purchaserName, event, payment, invoiceNumber, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey }) {
+      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildEventPurchaseEmail({ purchaserName, event, payment, invoiceNumber, company, websiteBaseUrl });
+      const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }, { filename: `klavierhaus-invoice-${invoiceNumber}.pdf`, content: invoicePdf }], tags: [{ name: "category", value: "event_purchase" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
+    async sendEventTicketDocuments({ to, event, tickets, ticketPdf, language, idempotencyKey }) {
+      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildTicketDocumentsEmail({ name: tickets?.[0]?.buyer_name || tickets?.[0]?.attendee_name, event, language });
+      const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }], tags: [{ name: "category", value: "event_ticket" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
+    async sendCustomerConversationReply({ to, name, message, conversationUrl, language, idempotencyKey }) {
+      if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content = buildConversationReplyEmail({ name, message, conversationUrl, language });
+      const { data, error } = await resend.emails.send({ from, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "customer_conversation" }] }, { idempotencyKey });
+      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
+      return { providerMessageId: String(data.id) };
+    },
     verifyWebhook({ payload, id, timestamp, signature }) {
       if (!webhookSecret) {
         const error = new Error("EMAIL_WEBHOOK_NOT_CONFIGURED");
@@ -205,4 +260,6 @@ function createTransactionalEmail(env = process.env) {
   };
 }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, createTransactionalEmail };
+function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
+
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, createTransactionalEmail };

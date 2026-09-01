@@ -47,6 +47,8 @@ function createStripeSandbox(options = {}) {
   const secretKey = cleanText(options.secretKey ?? env.STRIPE_SECRET_KEY, 500);
   const webhookSecret = cleanText(options.webhookSecret ?? env.STRIPE_WEBHOOK_SECRET, 500);
   const websiteBaseUrl = normalizeBaseUrl(options.websiteBaseUrl ?? env.WEBSITE_BASE_URL, "https://klavierhaus-home.onrender.com");
+  const onPaymentFulfilled = typeof options.onPaymentFulfilled === "function" ? options.onPaymentFulfilled : null;
+  const onPaymentRefunded = typeof options.onPaymentRefunded === "function" ? options.onPaymentRefunded : null;
 
   if (LIVE_SECRET_PREFIXES.some((prefix) => secretKey.startsWith(prefix))) {
     throw new Error("Live Stripe keys are not accepted while Stripe Sandbox mode is enforced");
@@ -137,6 +139,13 @@ function createStripeSandbox(options = {}) {
       error.status = 409;
       throw error;
     }
+    const now = Date.now();
+    if (event.sales_start_at && now < new Date(event.sales_start_at).getTime()) {
+      const error = new Error("SALES_NOT_OPEN"); error.status = 409; throw error;
+    }
+    if (event.sales_end_at && now >= new Date(event.sales_end_at).getTime()) {
+      const error = new Error("SALES_CLOSED"); error.status = 409; throw error;
+    }
 
     const holdId = newId("EVHOLD");
     const expiresAt = new Date(Date.now() + HOLD_MS).toISOString();
@@ -180,6 +189,7 @@ function createStripeSandbox(options = {}) {
         client_reference_id: holdId,
         metadata: { hold_id: holdId, event_id: event.id, test_mode: "true" },
         payment_intent_data: { metadata: { hold_id: holdId, event_id: event.id, test_mode: "true" } },
+        customer_creation: "always",
         name_collection: { individual: { enabled: true, optional: false } },
         locale: language === "hu" ? "hu" : "en",
         submit_type: "book",
@@ -279,6 +289,16 @@ function createStripeSandbox(options = {}) {
       db.prepare(`UPDATE event_checkout_holds SET status='PAID',stripe_payment_intent_id=?,purchaser_name=?,purchaser_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(paymentIntent, customer.name, customer.email, hold.id);
     })();
+    if (onPaymentFulfilled) {
+      try {
+        await onPaymentFulfilled({ paymentId, eventId: event.id, ticketIds: createdTickets, session });
+      } catch (error) {
+        // Ticket/payment fulfilment is already committed. Document delivery can
+        // be retried from the admin payment workspace without rolling back a
+        // valid purchase because an external provider or PDF write failed.
+        console.warn(`[stripe-sandbox] Purchase documents were not delivered for ${paymentId}: ${error.message}`);
+      }
+    }
     return { paid: true, hold_id: hold.id, payment_id: paymentId, ticket_ids: createdTickets };
   }
 
@@ -300,8 +320,13 @@ function createStripeSandbox(options = {}) {
       } else if (["refund.created", "refund.updated", "refund.failed"].includes(event.type)) {
         const refund = event.data.object;
         const status = refund.status === "succeeded" ? "REFUNDED" : refund.status === "failed" ? "REFUND_FAILED" : "REFUND_PENDING";
+        const paymentIntentId = typeof refund.payment_intent === "string" ? refund.payment_intent : refund.payment_intent?.id || "";
         db.prepare("UPDATE event_payments SET status=?,stripe_refund_id=COALESCE(stripe_refund_id,?),updated_at=CURRENT_TIMESTAMP WHERE stripe_payment_intent_id=?")
-          .run(status, refund.id, typeof refund.payment_intent === "string" ? refund.payment_intent : refund.payment_intent?.id || "");
+          .run(status, refund.id, paymentIntentId);
+        if (status === "REFUNDED" && onPaymentRefunded) {
+          const payment = db.prepare("SELECT id,event_id FROM event_payments WHERE stripe_payment_intent_id=?").get(paymentIntentId);
+          if (payment) await onPaymentRefunded({ paymentId: payment.id, eventId: payment.event_id, refund });
+        }
         result = { refund_status: status };
       }
       db.prepare("UPDATE stripe_webhook_events SET status='PROCESSED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
@@ -348,6 +373,7 @@ function createStripeSandbox(options = {}) {
       db.prepare("UPDATE event_checkout_holds SET status='REFUNDED',updated_at=CURRENT_TIMESTAMP WHERE id=(SELECT hold_id FROM event_payments WHERE id=?)")
         .run(ticket.payment_id);
     })();
+    if (onPaymentRefunded && refund.status === "succeeded") await onPaymentRefunded({ paymentId: ticket.payment_id, eventId: ticket.event_id, refund });
     return db.prepare("SELECT * FROM event_payments WHERE id=?").get(ticket.payment_id);
   }
 
