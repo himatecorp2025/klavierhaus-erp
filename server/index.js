@@ -78,6 +78,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "website_artists", group_key: "website_events", label_en: "Artists", label_hu: "Művészek" },
   { key: "media_library", group_key: "website_events", label_en: "Media Library", label_hu: "Médiatár" },
   { key: "events", group_key: "website_events", label_en: "Events", label_hu: "Események" },
+  { key: "digital_attendance", group_key: "website_events", label_en: "Digital Attendance", label_hu: "Digitális jelenlét" },
   { key: "event_tickets", group_key: "website_events", label_en: "Tickets & Reservations", label_hu: "Jegyek és foglalások" },
   { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
   { key: "event_guest_list", group_key: "website_events", label_en: "Guest List", label_hu: "Vendéglista" },
@@ -104,7 +105,9 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
   { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" },
-  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" }
+  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
+  { key: "helpdesk", group_key: "technical", label_en: "Helpdesk", label_hu: "Ügyfélszolgálat" },
+  { key: "notification_audit", group_key: "technical", label_en: "Notification Acknowledgements", label_hu: "Értesítési nyugtázások" }
 ]);
 
 function seedDefaultPermissions(){
@@ -2332,7 +2335,7 @@ app.get('/api/admin/modules',auth,permit('ADMIN'),(req,res)=>{
   let settings={};
   try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
   const canToggle=isSuperadminUser(req.user);
-  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:canToggle})),cards:ADMIN_MODULE_CARDS.map(card=>({...card,enabled:settings[card.key]!==false,can_toggle:canToggle})),superadmin_visible:canToggle});
+  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:canToggle})),cards:ADMIN_MODULE_CARDS.map(card=>({...card,enabled:settings[card.key]!==false,can_toggle:canToggle})).sort((a,b)=>a.group_key.localeCompare(b.group_key)||a.label_en.localeCompare(b.label_en)),superadmin_visible:canToggle});
 });
 app.put('/api/admin/modules/:moduleKey',auth,(req,res)=>{
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'SUPERADMIN_REQUIRED'});
