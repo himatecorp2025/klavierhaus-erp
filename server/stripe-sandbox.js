@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const Stripe = require("stripe");
+const { nextTicketCode } = require("./ticket-code");
 
 const HOLD_MINUTES = 15;
 const HOLD_MS = HOLD_MINUTES * 60 * 1000;
@@ -270,7 +271,7 @@ function createStripeSandbox(options = {}) {
       try { attendeeNames = JSON.parse(hold.attendee_names_json || "[]"); } catch (_error) { attendeeNames = []; }
       for (let sequence = 1; sequence <= Number(hold.quantity); sequence += 1) {
         const ticketId = newId("EVTKT");
-        const publicCode = crypto.randomBytes(18).toString("base64url");
+        const ticketCode = nextTicketCode(db, event, "PURCHASE", sequence);
         const attendeeName = cleanText(attendeeNames[sequence - 1] || customer.name, 200);
         db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence)
           VALUES(?,?,'PURCHASE',?,?,?,?, 'VALID',?,'USD',?,?)`).run(
@@ -279,10 +280,10 @@ function createStripeSandbox(options = {}) {
           customer.name,
           attendeeName,
           customer.email,
-          publicCode,
+          ticketCode.code,
           Number(event.price_cents),
           paymentId,
-          sequence
+          ticketCode.sequence
         );
         createdTickets.push(ticketId);
       }
