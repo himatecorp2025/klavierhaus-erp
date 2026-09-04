@@ -167,7 +167,7 @@ function textCommand(text, x, y, size, color = CREAM) {
   return `${color} rg BT /F1 ${pdfNumber(size)} Tf 1 0 0 1 ${pdfNumber(x)} ${pdfNumber(y)} Tm <${unicodeHex(text)}> Tj ET\n`;
 }
 
-function pageContent({ event, names, language, pageNumber, pageCount, metrics }) {
+function pageContent({ event, guests, language, pageNumber, pageCount, metrics, closed = false }) {
   const hu = language === "hu";
   const width = A4.width;
   const height = A4.height;
@@ -180,16 +180,35 @@ function pageContent({ event, names, language, pageNumber, pageCount, metrics })
     textCommand(truncateToWidth(event.title, 487, 20, metrics), 54, 668, 20, CREAM),
     textCommand(event.dateLabel || "", 54, 645, 10, CREAM),
     `${MUTED_GOLD} RG .8 w 54 624 487 0 re S\n`,
-    textCommand(hu ? "VENDÉG NEVE" : "GUEST NAME", 66, 605, 9, GOLD),
-    textCommand(hu ? "MEGÉRKEZETT" : "ARRIVED", 456, 605, 9, GOLD)
+    textCommand(hu ? "VENDÉG NEVE" : "GUEST NAME", 66, 605, 8.5, GOLD),
+    textCommand(hu ? "E-MAIL" : "EMAIL", 236, 605, 8.5, GOLD),
+    textCommand(hu ? "JEGYTÍPUS" : "TICKET TYPE", 391, 605, 7.5, GOLD),
+    textCommand(hu ? "KÓD" : "CODE", 461, 605, 8.5, GOLD),
+    textCommand(hu ? "ÉRKEZETT" : "ARRIVED", 510, 605, 7.5, GOLD)
   ];
-  let y = 579;
-  names.forEach((name) => {
-    commands.push(`${MUTED_GOLD} RG .45 w 54 ${pdfNumber(y - 8)} 487 28 re S\n`);
-    commands.push(textCommand(truncateToWidth(name, 365, 11, metrics), 66, y, 11, CREAM));
-    // The checklist box is centered against the full guest row, not the text baseline.
-    commands.push(`${GOLD} RG 1 w 500 ${pdfNumber(y - 0.5)} 13 13 re S\n`);
-    y -= 28;
+  let y = 575;
+  guests.forEach((guest) => {
+    const status = String(guest.attendance_status || guest.status || "VALID").toUpperCase();
+    const deleted = ["VOID", "REFUNDED", "DELETED"].includes(status);
+    const present = ["USED", "PRESENT", "ACCEPTED"].includes(status);
+    commands.push(`${MUTED_GOLD} RG .45 w 54 ${pdfNumber(y - 15)} 487 34 re S\n`);
+    commands.push(textCommand(truncateToWidth(guest.attendee_name || guest.guest_name || guest.name || "", 160, 10.2, metrics), 66, y, 10.2, CREAM));
+    commands.push(textCommand(truncateToWidth(guest.contact_email || guest.email || "", 145, 8.4, metrics), 236, y, 8.4, CREAM));
+    commands.push(textCommand(truncateToWidth(guest.ticket_type || guest.source_type || "", 64, 7.6, metrics), 391, y, 7.6, CREAM));
+    commands.push(textCommand(truncateToWidth(guest.public_code || guest.ticket_code || "", 52, 6.8, metrics), 461, y, 6.8, GOLD));
+    const boxX = 521;
+    const boxY = y - 6.5;
+    if (present) {
+      commands.push(`0.18 0.62 0.37 rg ${pdfNumber(boxX)} ${pdfNumber(boxY)} 14 14 re f\n`);
+      commands.push(`1 1 1 RG 1.45 w ${pdfNumber(boxX + 3)} ${pdfNumber(boxY + 7)} m ${pdfNumber(boxX + 6)} ${pdfNumber(boxY + 3.5)} l ${pdfNumber(boxX + 11)} ${pdfNumber(boxY + 11)} l S\n`);
+    } else if (deleted) {
+      commands.push(`0.86 0.32 0.22 RG 1.25 w ${pdfNumber(boxX)} ${pdfNumber(boxY)} 14 14 re S\n`);
+      commands.push(`0.86 0.32 0.22 RG 1.25 w ${pdfNumber(boxX + 3)} ${pdfNumber(boxY + 3)} m ${pdfNumber(boxX + 11)} ${pdfNumber(boxY + 11)} l ${pdfNumber(boxX + 11)} ${pdfNumber(boxY + 3)} l ${pdfNumber(boxX + 3)} ${pdfNumber(boxY + 11)} l S\n`);
+    } else {
+      commands.push(`${GOLD} RG 1 w ${pdfNumber(boxX)} ${pdfNumber(boxY)} 14 14 re S\n`);
+    }
+    if (closed && !present) commands.push(`0.86 0.32 0.22 RG 1.05 w 62 ${pdfNumber(y - 1)} m 534 ${pdfNumber(y - 1)} l S\n`);
+    y -= 38;
   });
   // Keep pagination as plain ASCII so every PDF viewer renders the same `1 / 1` form.
   commands.push(textCommand(`${pageNumber} / ${pageCount}`, 288, 43, 8.5, GOLD));
@@ -197,12 +216,18 @@ function pageContent({ event, names, language, pageNumber, pageCount, metrics })
   return commands.join("");
 }
 
-function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPath }) {
-  const names = guests.map((guest) => escapePdfText(guest.attendee_name || guest.guest_name || guest.name)).filter(Boolean);
-  const safeNames = names.length ? names : [language === "hu" ? "Nincs rögzített vendég" : "No registered guests"];
-  const rowsPerPage = 18;
-  const pageCount = Math.max(1, Math.ceil(safeNames.length / rowsPerPage));
-  const labels = [event.title, event.dateLabel, ...safeNames, "0123456789", "GUEST LIST", "VENDÉGLISTA", "ARRIVED", "MEGÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
+function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPath, closed = false }) {
+  const rows = (guests || []).map((guest) => ({
+    attendee_name: escapePdfText(guest.attendee_name || guest.guest_name || guest.name),
+    contact_email: escapePdfText(guest.contact_email || guest.email),
+    ticket_type: escapePdfText(guest.ticket_type || guest.source_type),
+    public_code: escapePdfText(guest.public_code || guest.ticket_code),
+    attendance_status: escapePdfText(guest.attendance_status || guest.status || "VALID")
+  })).filter((guest) => guest.attendee_name);
+  const safeRows = rows.length ? rows : [{ attendee_name: language === "hu" ? "Nincs rögzített vendég" : "No registered guests", attendance_status: "VALID" }];
+  const rowsPerPage = 12;
+  const pageCount = Math.max(1, Math.ceil(safeRows.length / rowsPerPage));
+  const labels = [event.title, event.dateLabel, ...safeRows.flatMap((guest) => [guest.attendee_name, guest.contact_email, guest.ticket_type, guest.public_code]), "0123456789", "GUEST LIST", "VENDÉGLISTA", "GUEST NAME", "VENDÉG NEVE", "EMAIL", "E-MAIL", "TICKET TYPE", "JEGYTÍPUS", "CODE", "KÓD", "ARRIVED", "ÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
   const font = fs.readFileSync(fontPath || path.join(__dirname, "assets", "DejaVuSans.ttf"));
   const metrics = createFontMetrics(font);
   const codes = usedCodePoints(labels);
@@ -222,7 +247,7 @@ function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPa
   const logoId = pdf.add(pdf.stream(`/Type /XObject /Subtype /Image /Width ${logoSize.width} /Height ${logoSize.height} /ColorSpace ${logoSize.components === 1 ? "/DeviceGray" : "/DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode`, logo));
   const pageIds = [];
   for (let index = 0; index < pageCount; index += 1) {
-    const content = pageContent({ event, names: safeNames.slice(index * rowsPerPage, (index + 1) * rowsPerPage), language, pageNumber: index + 1, pageCount, metrics });
+    const content = pageContent({ event, guests: safeRows.slice(index * rowsPerPage, (index + 1) * rowsPerPage), language, pageNumber: index + 1, pageCount, metrics, closed });
     const contentId = pdf.add(pdf.stream("", content));
     pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${pdfNumber(A4.width)} ${pdfNumber(A4.height)}] /Resources << /Font << /F1 ${fontId} 0 R >> /XObject << /Logo ${logoId} 0 R >> >> /Contents ${contentId} 0 R >>`));
   }
