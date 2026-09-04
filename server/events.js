@@ -305,7 +305,7 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     };
   }
 
-  function createTicket({ eventId, invitationId = null, sourceType, buyerName = "", attendeeName, contactEmail, priceCents = 0, userId = null }) {
+  function createTicket({ eventId, invitationId = null, sourceType, ticketVariant = "", buyerName = "", attendeeName, contactEmail, priceCents = 0, userId = null }) {
     const event = eventById(eventId);
     if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
     if (["CANCELLED", "CLOSED"].includes(event.status)) throw Object.assign(new Error("EVENT_NOT_AVAILABLE"), { status: 409 });
@@ -313,9 +313,12 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     if (cap.remaining < 1) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
     const id = newId("EVTKT");
     const sequence = Number(db.prepare("SELECT COALESCE(MAX(ticket_sequence),0)+1 AS next FROM event_tickets WHERE event_id=?").get(eventId)?.next || 1);
-    const ticketCode = nextTicketCode(db, event, sourceType, sequence);
-    db.prepare(`INSERT INTO event_tickets(id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,ticket_sequence,created_by_user_id)
-      VALUES(?,?,?,?,?,?,?,?, 'VALID',?,'USD',?,?)`).run(id, eventId, invitationId, sourceType, cleanText(buyerName, 200), cleanText(attendeeName, 200), normalizeEmail(contactEmail), ticketCode.code, Number(priceCents || 0), ticketCode.sequence, userId);
+    const normalizedVariant = ["PUBLIC", "INVITATION", "VIP", "COMPLIMENTARY"].includes(String(ticketVariant).toUpperCase())
+      ? String(ticketVariant).toUpperCase()
+      : event.access_type === "INTERNAL" ? "VIP" : sourceType === "INVITATION" ? "INVITATION" : sourceType === "COMPLIMENTARY" ? "COMPLIMENTARY" : "PUBLIC";
+    const ticketCode = nextTicketCode(db, event, sourceType, sequence, normalizedVariant);
+    db.prepare(`INSERT INTO event_tickets(id,event_id,invitation_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,ticket_sequence,created_by_user_id)
+      VALUES(?,?,?,?,?,?,?,?,?,'VALID',?,'USD',?,?)`).run(id, eventId, invitationId, sourceType, normalizedVariant, cleanText(buyerName, 200), cleanText(attendeeName, 200), normalizeEmail(contactEmail), ticketCode.code, Number(priceCents || 0), ticketCode.sequence, userId);
     if (capacity(eventId).remaining <= 0) db.prepare("UPDATE events SET sold_out_at=COALESCE(sold_out_at,CURRENT_TIMESTAMP) WHERE id=?").run(eventId);
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(id);
   }
@@ -605,11 +608,12 @@ function registerEventRoutes(options) {
     const row = service.eventById(req.params.id);
     if (!row) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     const invitations = db.prepare("SELECT id,event_id,guest_name,guest_email,language,status,delivery_status,sent_at,accepted_at,declined_at,revoked_at,created_at FROM event_invitations WHERE event_id=? ORDER BY created_at DESC").all(row.id);
-    const tickets = db.prepare("SELECT id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY created_at DESC").all(row.id);
+    const tickets = db.prepare("SELECT id,event_id,invitation_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const refunds = db.prepare("SELECT * FROM event_refund_requests WHERE event_id=? ORDER BY requested_at DESC").all(row.id);
     const payments = db.prepare("SELECT * FROM event_payments WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const checkoutHolds = db.prepare("SELECT id,quantity,status,expires_at,purchaser_name,purchaser_email,amount_total,currency,test_mode,created_at FROM event_checkout_holds WHERE event_id=? ORDER BY created_at DESC LIMIT 100").all(row.id);
-    res.json({ ...service.eventResponse(row), invitations, tickets, refunds, payments, checkout_holds: checkoutHolds, stripe: stripeSandbox?.configuration?.() || { enabled: false, test_mode: true } });
+    const refundReviews = db.prepare("SELECT * FROM event_ticket_refund_reviews WHERE event_id=? ORDER BY created_at DESC").all(row.id);
+    res.json({ ...service.eventResponse(row), invitations, tickets, refunds, refund_reviews: refundReviews, payments, checkout_holds: checkoutHolds, stripe: stripeSandbox?.configuration?.() || { enabled: false, test_mode: true } });
   });
 
   app.post("/api/events", auth, admin, eventImage, (req, res) => {
@@ -889,7 +893,7 @@ function registerEventRoutes(options) {
   });
 
   app.get("/api/events/:id/tickets", auth, admin, (req, res) => {
-    res.json(db.prepare("SELECT id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY attendee_name").all(req.params.id));
+    res.json(db.prepare("SELECT id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY attendee_name").all(req.params.id));
   });
 
   app.put("/api/events/tickets/:id", auth, admin, (req, res) => {
@@ -906,15 +910,17 @@ function registerEventRoutes(options) {
   app.get("/api/events/:id/guest-list.pdf", auth, admin, (req, res) => {
     const event = service.eventById(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const guests = db.prepare(`SELECT attendee_name FROM event_tickets
-      WHERE event_id=? AND status IN ('VALID','USED') ORDER BY lower(attendee_name),created_at`).all(event.id);
+    if (event.attendance_mode === "DIGITAL" && !db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(event.id)) return res.status(409).json({ error: "ATTENDANCE_PDF_LOCKED_UNTIL_CLOSED" });
+    const closure = db.prepare("SELECT snapshot_json FROM event_closures WHERE event_id=?").get(event.id);
+    const guests = closure ? (JSON.parse(closure.snapshot_json).attendance_rows || []) : db.prepare(`SELECT attendee_name,contact_email,source_type,ticket_variant,public_code,status,price_cents,currency
+      FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED') ORDER BY lower(attendee_name),created_at`).all(event.id);
     const language = req.query.lang === "hu" ? "hu" : "en";
     const title = language === "hu" ? event.title_hu : event.title_en;
     const dateLabel = new Intl.DateTimeFormat(language === "hu" ? "hu-HU" : "en-US", {
       timeZone: event.timezone || NY_TIME_ZONE, dateStyle: "long", timeStyle: "short"
     }).format(new Date(event.start_at));
     try {
-      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language });
+      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language, closed: Boolean(closure) });
       const safeName = slugify(title) || "event";
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}-guest-list.pdf"`);
