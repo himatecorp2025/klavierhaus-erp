@@ -271,10 +271,10 @@ function createStripeSandbox(options = {}) {
       try { attendeeNames = JSON.parse(hold.attendee_names_json || "[]"); } catch (_error) { attendeeNames = []; }
       for (let sequence = 1; sequence <= Number(hold.quantity); sequence += 1) {
         const ticketId = newId("EVTKT");
-        const ticketCode = nextTicketCode(db, event, "PURCHASE", sequence);
+        const ticketCode = nextTicketCode(db, event, "PURCHASE", sequence, "PUBLIC");
         const attendeeName = cleanText(attendeeNames[sequence - 1] || customer.name, 200);
-        db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence)
-          VALUES(?,?,'PURCHASE',?,?,?,?, 'VALID',?,'USD',?,?)`).run(
+        db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence)
+          VALUES(?,?,'PURCHASE','PUBLIC',?,?,?,?, 'VALID',?,'USD',?,?)`).run(
           ticketId,
           event.id,
           customer.name,
