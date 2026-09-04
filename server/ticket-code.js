@@ -22,12 +22,14 @@ function stableNumber(value) {
 
 function eventNumber(event) {
   const source = clean(event?.event_key || event?.id);
-  const matches = source.match(/\d+/g);
-  if (matches?.length) return String(Number(matches[matches.length - 1]) % 1000).padStart(3, "0");
+  // The three-digit event segment is derived from the complete event key, not
+  // only the year. That keeps two events in the same category/year distinct.
   return stableNumber(source || "KLAVIERHAUS-EVENT");
 }
 
-function accessPrefix(event, sourceType) {
+function accessPrefix(event, sourceType, ticketVariant = "") {
+  if (clean(ticketVariant) === "VIP") return "V";
+  if (clean(ticketVariant) === "INVITATION") return "I";
   if (event?.access_type === "INTERNAL" || sourceType === "INTERNAL") return "V";
   if (event?.access_type === "INVITE_ONLY" || sourceType === "INVITATION") return "I";
   return "P";
@@ -37,21 +39,21 @@ function categorySegment(event) {
   return initials(event?.category_code || event?.category_name_en || event?.title_en || "EVENT");
 }
 
-function buildTicketCode(event, sourceType, sequence) {
+function buildTicketCode(event, sourceType, sequence, ticketVariant = "") {
   return [
-    accessPrefix(event, sourceType),
+    accessPrefix(event, sourceType, ticketVariant),
     categorySegment(event),
     eventNumber(event),
     String(Math.max(1, Number(sequence) || 1)).padStart(2, "0")
   ].join("-");
 }
 
-function nextTicketCode(db, event, sourceType, initialSequence) {
+function nextTicketCode(db, event, sourceType, initialSequence, ticketVariant = "") {
   let sequence = Math.max(1, Number(initialSequence) || 1);
-  let code = buildTicketCode(event, sourceType, sequence);
+  let code = buildTicketCode(event, sourceType, sequence, ticketVariant);
   while (db.prepare("SELECT 1 FROM event_tickets WHERE public_code=? LIMIT 1").get(code)) {
     sequence += 1;
-    code = buildTicketCode(event, sourceType, sequence);
+    code = buildTicketCode(event, sourceType, sequence, ticketVariant);
   }
   return { code, sequence };
 }
