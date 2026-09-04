@@ -4,10 +4,14 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { generateTicketPdf, generateInvoicePdf, normalizeTicketSide } = require("./document-pdf");
+const { generateGuestListPdf } = require("./guest-list-pdf");
+const { nextTicketCode } = require("./ticket-code");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "TECHNICAL", "GENERAL"]);
 const CONVERSATION_STATUSES = new Set(["OPEN", "PENDING_CUSTOMER", "PENDING_STAFF", "CLOSED"]);
+const ATTENDANCE_MODES = new Set(["UNSET", "PAPER", "DIGITAL"]);
+const MANUAL_TICKET_VARIANTS = new Set(["PUBLIC", "INVITATION", "VIP", "COMPLIMENTARY"]);
 
 function clean(value, max = 5000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -117,6 +121,33 @@ function eventVenue(event) {
   return [event?.venue_name, event?.venue_street, event?.venue_city, event?.venue_region, event?.venue_postal_code].filter(Boolean).join(", ");
 }
 
+function attendanceTicketType(ticket, event) {
+  const variant = String(ticket?.ticket_variant || "").toUpperCase();
+  if (variant === "VIP" || event?.access_type === "INTERNAL") return "VIP TICKET";
+  if (variant === "INVITATION" || ticket?.source_type === "INVITATION" || event?.access_type === "INVITE_ONLY") return "PERSONAL INVITATION";
+  if (variant === "COMPLIMENTARY" || ticket?.source_type === "COMPLIMENTARY") return "COMPLIMENTARY";
+  return "PUBLIC EVENT";
+}
+
+function attendanceRow(ticket, event) {
+  return {
+    id: ticket.id,
+    attendee_name: ticket.attendee_name,
+    contact_email: ticket.contact_email,
+    ticket_type: attendanceTicketType(ticket, event),
+    public_code: ticket.public_code,
+    source_type: ticket.source_type,
+    ticket_variant: ticket.ticket_variant || "PUBLIC",
+    status: ticket.status,
+    attendance_status: ticket.status,
+    price_cents: Number(ticket.price_cents || 0),
+    currency: ticket.currency || event.currency || "USD",
+    checked_in_at: ticket.checked_in_at || null,
+    checked_in_by_user_id: ticket.checked_in_by_user_id || null,
+    created_at: ticket.created_at || null
+  };
+}
+
 function createBusinessDocumentService({ db, uploadDir, transactionalEmail, websiteBaseUrl = "", env = process.env }) {
   const documentDir = path.join(uploadDir || path.join(__dirname, "uploads"), "documents");
   fs.mkdirSync(documentDir, { recursive: true });
@@ -172,6 +203,15 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     return { pdf: generateInvoicePdf({ company, event: documentEvent(event, language), payment, tickets, invoiceNumber: invoiceNumber(payment, company), language, logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) }), invoice_number: invoiceNumber(payment, company) };
   }
 
+  function prepareTicketDocument(ticketId, { language = "en", side = "front" } = {}) {
+    const { ticket, event, company } = ticketContext(ticketId);
+    const normalizedSide = normalizeTicketSide(side, "front");
+    const ticketPath = artifactPath("ticket", ticket.id);
+    const pdf = generateTicketPdf({ event: documentEvent(event, language), tickets: [ticket], language, side: normalizedSide, logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    fs.writeFileSync(ticketPath, pdf);
+    return { ticket_file: publicDocumentPath(ticketPath), side: normalizedSide };
+  }
+
   function invoiceNumber(payment, company) {
     const existing = db.prepare("SELECT invoice_number FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${payment.id}%`);
     if (existing?.invoice_number) return existing.invoice_number;
@@ -197,7 +237,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     );
   }
 
-  async function sendPurchaseDocuments(paymentId, { resend = false } = {}) {
+  async function sendPurchaseDocuments(paymentId, { resend = false, sendEmail = true } = {}) {
     const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
     if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
     const context = paymentContext(paymentId);
@@ -213,6 +253,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     if (!existingInvoice) db.prepare(`INSERT INTO knowledge_base(id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number)
       VALUES(?,?,?,?,?,?,?,?,?,?)`).run(newId("DOC"), `Invoice ${invoice}`, "Event Ticketing", "Event Invoice", JSON.stringify({ payment_id: payment.id, event_id: event.id }), publicDocumentPath(invoicePath), payment.purchaser_name, Number(payment.amount_total || 0) / 100, "STRIPE_TEST", invoice);
     createFinancialItem(payment, event);
+    if (!sendEmail) return { status: "PREPARED", invoice_number: invoice, ticket_file: publicDocumentPath(ticketPath), invoice_file: publicDocumentPath(invoicePath) };
     const key = `event-purchase-documents:${payment.id}`;
     beginDelivery({ eventKey: key, deliveryType: "EVENT_PURCHASE_DOCUMENTS", recipientEmail: payment.purchaser_email, eventId: event.id, paymentId: payment.id });
     if (!transactionalEmail?.sendEventPurchaseConfirmation) {
@@ -306,6 +347,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     ticketPdfForTicket,
     ticketPdfForPayment,
     invoicePdfForPayment,
+    prepareTicketDocument,
     sendPurchaseDocuments,
     sendTicketDocuments,
     sendTicketDocument,
@@ -380,48 +422,224 @@ function registerBusinessOperationsRoutes(options) {
     } catch (error) { sendError(res, error); }
   });
 
-  app.get("/api/events/:id/attendance", auth, admin, (req, res) => {
-    const event = db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency FROM events WHERE id=?").get(req.params.id);
+  app.post("/api/manual-tickets", auth, admin, async (req, res) => {
+    const eventId = clean(req.body?.event_id, 120);
+    const attendeeName = clean(req.body?.attendee_name, 200);
+    const contactEmail = normalizeEmail(req.body?.contact_email);
+    const requestedVariant = clean(req.body?.ticket_variant || "PUBLIC", 30).toUpperCase();
+    const sendEmail = Boolean(req.body?.send_email);
+    if (!eventId || !attendeeName || !validEmail(contactEmail)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
+    if (!MANUAL_TICKET_VARIANTS.has(requestedVariant)) return res.status(400).json({ error: "INVALID_MANUAL_TICKET_TYPE" });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const query = clean(req.query.q, 160).toLocaleLowerCase();
-    const tickets = db.prepare(`SELECT id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,checked_in_by_user_id,created_at
-      FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED') AND (?='' OR lower(attendee_name) LIKE '%'||?||'%' OR lower(contact_email) LIKE '%'||?||'%' OR lower(public_code) LIKE '%'||?||'%') ORDER BY lower(attendee_name),created_at`)
-      .all(event.id, query, query, query, query);
-    const totals = db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='USED' THEN 1 ELSE 0 END) AS present,SUM(CASE WHEN status='VALID' THEN 1 ELSE 0 END) AS no_show FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED')").get(event.id);
+    if (["CANCELLED", "CLOSED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    const requestedPrice = Number(req.body?.price_cents ?? (requestedVariant === "PUBLIC" ? event.price_cents : 0));
+    if (!Number.isInteger(requestedPrice) || requestedPrice < 0) return res.status(400).json({ error: "INVALID_EVENT_PRICE" });
+    if (requestedVariant !== "PUBLIC" && requestedPrice !== 0) return res.status(400).json({ error: "MANUAL_NON_PAID_TICKET_MUST_BE_ZERO" });
+    if (requestedVariant === "PUBLIC" && event.access_type !== "PUBLIC_PAID" && requestedPrice !== 0) return res.status(400).json({ error: "NON_PAID_EVENT_PRICE_MUST_BE_ZERO" });
+    if (requestedVariant === "PUBLIC" && event.access_type === "PUBLIC_PAID" && requestedPrice <= 0) return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
+    const sourceType = requestedVariant === "INVITATION" ? "INVITATION" : requestedVariant === "PUBLIC" ? "PURCHASE" : "COMPLIMENTARY";
+    const ticketId = newId("EVTKT");
+    let created;
+    try {
+      created = db.transaction(() => {
+        const occupied = Number(db.prepare("SELECT COUNT(*) AS count FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED')").get(event.id).count || 0);
+        const held = Number(db.prepare("SELECT COALESCE(SUM(quantity),0) AS count FROM event_checkout_holds WHERE event_id=? AND status='PENDING' AND expires_at>CURRENT_TIMESTAMP").get(event.id).count || 0);
+        if (Number(event.capacity_total) - occupied - held < 1) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
+        const sequence = Number(db.prepare("SELECT COALESCE(MAX(ticket_sequence),0)+1 AS next FROM event_tickets WHERE event_id=?").get(event.id).next || 1);
+        const ticketCode = nextTicketCode(db, event, sourceType, sequence, requestedVariant);
+        let payment = null;
+        if (requestedVariant === "PUBLIC" && requestedPrice > 0) {
+          const holdId = newId("EVHLD");
+          const paymentId = newId("EVPAY");
+          const sessionId = `manual_session_${paymentId}`;
+          const intentId = `manual_intent_${paymentId}`;
+          const now = new Date().toISOString();
+          db.prepare(`INSERT INTO event_checkout_holds(id,event_id,quantity,status,expires_at,language,attendee_names_json,purchaser_name,purchaser_email,currency,amount_total,test_mode)
+            VALUES(?,?,1,'PAID',?,'en',?,?,?,?,?,1)`).run(holdId, event.id, now, JSON.stringify([attendeeName]), attendeeName, contactEmail, "USD", requestedPrice);
+          db.prepare(`INSERT INTO event_payments(id,event_id,hold_id,status,purchaser_name,purchaser_email,quantity,amount_total,currency,stripe_checkout_session_id,stripe_payment_intent_id,test_mode,paid_at)
+            VALUES(?,?,?,'PAID',?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(paymentId, event.id, holdId, attendeeName, contactEmail, 1, requestedPrice, "USD", sessionId, intentId, 1);
+          payment = { id: paymentId, hold_id: holdId };
+        }
+        db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence,created_by_user_id)
+          VALUES(?,?,?,?,?,?,?,?,'VALID',?,?,?, ?,?)`).run(ticketId, event.id, sourceType, requestedVariant, attendeeName, attendeeName, contactEmail, ticketCode.code, requestedPrice, "USD", payment?.id || null, ticketCode.sequence, req.user.id);
+        return { ticket: db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId), payment: payment ? db.prepare("SELECT * FROM event_payments WHERE id=?").get(payment.id) : null };
+      })();
+    } catch (error) { return sendError(res, error, "MANUAL_TICKET_CREATE_FAILED"); }
+    try {
+      let documents;
+      if (created.payment) documents = await documentService.sendPurchaseDocuments(created.payment.id, { sendEmail });
+      else {
+        documents = documentService.prepareTicketDocument(created.ticket.id, { side: "front" });
+        if (sendEmail) documents = await documentService.sendTicketDocument(created.ticket.id);
+      }
+      audit(req, "CREATE_MANUAL_TICKET", "event_tickets", created.ticket.id, null, created.ticket, 1, `${requestedVariant} manual ticket issued`);
+      res.status(201).json({ ticket: created.ticket, payment: created.payment, documents, ticket_pdf_url: `/api/events/tickets/${encodeURIComponent(created.ticket.id)}.pdf?side=front`, invoice_pdf_url: created.payment ? `/api/event-payments/${encodeURIComponent(created.payment.id)}/invoice.pdf` : null });
+    } catch (error) {
+      sendError(res, Object.assign(error, { status: 500 }), "MANUAL_TICKET_DOCUMENT_FAILED");
+    }
+  });
+
+  function attendanceEvent(eventId) {
+    return db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency,attendance_mode,attendance_closed_at,attendance_closed_by_user_id,timezone FROM events WHERE id=?").get(eventId) || null;
+  }
+
+  function attendanceTickets(eventId, query = "") {
+    const normalizedQuery = clean(query, 160).toLocaleLowerCase();
+    const rows = db.prepare(`SELECT id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,checked_in_by_user_id,created_at
+      FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED','VOID','REFUNDED')
+      AND (?='' OR lower(attendee_name) LIKE '%'||?||'%' OR lower(contact_email) LIKE '%'||?||'%' OR lower(public_code) LIKE '%'||?||'%')
+      ORDER BY lower(attendee_name),created_at,id`).all(eventId, normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery);
+    const event = attendanceEvent(eventId);
+    return rows.map((ticket) => attendanceRow(ticket, event));
+  }
+
+  function attendanceSummary(rows) {
+    return {
+      total: rows.length,
+      present: rows.filter((row) => row.status === "USED").length,
+      no_show: rows.filter((row) => row.status === "VALID").length,
+      deleted: rows.filter((row) => ["VOID", "REFUNDED"].includes(row.status)).length,
+      voided: rows.filter((row) => row.status === "VOID").length,
+      refunded: rows.filter((row) => row.status === "REFUNDED").length
+    };
+  }
+
+  function refundReviewOutcome(event) {
+    if (event.status === "CANCELLED" || event.status === "RESCHEDULED") return { outcome: "REFUND_ELIGIBLE", note: "Refund review required because the event was cancelled or rescheduled." };
+    if (["COMPLETED", "CLOSED"].includes(event.status)) return { outcome: "REFUND_NOT_ELIGIBLE", note: "REFUND NOT ELIGIBLE – NO-SHOW" };
+    return { outcome: "REVIEW_REQUIRED", note: "Manual refund review required; no automatic refund was initiated." };
+  }
+
+  function recordDeletedPaidTicketReview(ticket, event, userId) {
+    if (ticket.source_type !== "PURCHASE" && !ticket.event_payment_id) return null;
+    const review = refundReviewOutcome(event);
+    const id = newId("EVTRR");
+    const existing = db.prepare("SELECT id FROM event_ticket_refund_reviews WHERE ticket_id=? AND reason_code='ATTENDANCE_DELETED'").get(ticket.id);
+    if (existing) db.prepare("UPDATE event_ticket_refund_reviews SET event_id=?,payment_id=?,outcome=?,note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id, ticket.event_payment_id || null, review.outcome, review.note, existing.id);
+    else db.prepare(`INSERT INTO event_ticket_refund_reviews(id,event_id,ticket_id,payment_id,reason_code,outcome,note,created_by_user_id)
+      VALUES(?,?,?,?,?,?,?,?)`).run(id, event.id, ticket.id, ticket.event_payment_id || null, "ATTENDANCE_DELETED", review.outcome, review.note, userId);
+    return db.prepare("SELECT * FROM event_ticket_refund_reviews WHERE ticket_id=? AND reason_code='ATTENDANCE_DELETED'").get(ticket.id);
+  }
+
+  app.post("/api/events/:id/attendance/open", auth, admin, (req, res) => {
+    const event = attendanceEvent(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    if (event.attendance_mode === "PAPER") return res.status(409).json({ error: "ATTENDANCE_PAPER_MODE_ACTIVE" });
+    if (event.attendance_closed_at || event.status === "CLOSED" || db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(event.id)) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
+    if (event.attendance_mode !== "DIGITAL") db.prepare("UPDATE events SET attendance_mode='DIGITAL',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, event.id);
+    const updated = attendanceEvent(event.id);
+    audit(req, "ATTENDANCE_OPEN", "event_attendance", event.id, event, updated, 1, "Digital attendance mode opened");
+    res.json({ event: updated, mode: updated.attendance_mode, opened: true });
+  });
+
+  app.get("/api/events/:id/attendance", auth, admin, (req, res) => {
+    const event = attendanceEvent(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    const query = clean(req.query.q, 160);
     const closure = db.prepare("SELECT id,snapshot_json,created_at FROM event_closures WHERE event_id=?").get(event.id);
-    res.json({ event, closed: Boolean(closure), tickets, totals: { total: Number(totals.total || 0), present: Number(totals.present || 0), no_show: Number(totals.no_show || 0) }, report: closure ? JSON.parse(closure.snapshot_json) : null });
+    const report = closure ? JSON.parse(closure.snapshot_json) : null;
+    const rows = report?.attendance_rows ? report.attendance_rows.filter((row) => `${row.attendee_name || ""} ${row.contact_email || ""} ${row.public_code || ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) : attendanceTickets(event.id, query);
+    const allRows = report?.attendance_rows || attendanceTickets(event.id);
+    res.json({ event, mode: event.attendance_mode || "UNSET", closed: Boolean(closure), tickets: rows, totals: report?.tickets || attendanceSummary(allRows), report, digital_enabled: event.attendance_mode !== "PAPER" && !closure });
+  });
+
+  app.post("/api/events/:id/attendance/paper-export", auth, admin, (req, res) => {
+    const event = attendanceEvent(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.attendance_mode === "DIGITAL") return res.status(409).json({ error: "ATTENDANCE_DIGITAL_MODE_ACTIVE" });
+    if (event.attendance_closed_at || event.status === "CLOSED") return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
+    if (new Date(event.start_at).getTime() <= Date.now()) return res.status(409).json({ error: "PAPER_ATTENDANCE_EXPORT_WINDOW_CLOSED" });
+    if (event.attendance_mode !== "PAPER" && req.body?.confirm !== true) return res.status(409).json({ error: "PAPER_ATTENDANCE_CONFIRMATION_REQUIRED", warning: "Paper attendance mode will disable digital check-in for this event. Use one attendance method only." });
+    db.prepare("UPDATE events SET attendance_mode='PAPER',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND attendance_mode='UNSET'").run(req.user.id, event.id);
+    const current = attendanceEvent(event.id);
+    const guests = attendanceTickets(event.id).filter((row) => ["VALID", "USED"].includes(row.status)).map((row) => ({ ...row, attendance_status: "VALID", status: "VALID" }));
+    const language = req.query.lang === "hu" ? "hu" : "en";
+    const title = language === "hu" ? current.title_hu : current.title_en;
+    try {
+      const pdf = generateGuestListPdf({ event: { title, dateLabel: formatEventDate(current, language) }, guests, language, closed: false });
+      audit(req, "ATTENDANCE_PAPER_EXPORT", "event_attendance", current.id, event, { mode: "PAPER", guest_count: guests.length }, 1, "Paper attendance mode selected");
+      const safeName = title.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "event";
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}-paper-guest-list.pdf"`);
+      res.type("application/pdf").send(pdf);
+    } catch (error) { sendError(res, Object.assign(error, { status: 500 }), "GUEST_LIST_PDF_FAILED"); }
+  });
+
+  app.get("/api/events/:id/attendance.pdf", auth, admin, (req, res) => {
+    const event = attendanceEvent(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.attendance_mode !== "DIGITAL") return res.status(409).json({ error: event.attendance_mode === "PAPER" ? "ATTENDANCE_PAPER_MODE_ACTIVE" : "ATTENDANCE_DIGITAL_MODE_REQUIRED" });
+    const closure = db.prepare("SELECT snapshot_json FROM event_closures WHERE event_id=?").get(event.id);
+    if (!closure) return res.status(409).json({ error: "ATTENDANCE_PDF_LOCKED_UNTIL_CLOSED" });
+    const report = JSON.parse(closure.snapshot_json);
+    const language = req.query.lang === "hu" ? "hu" : "en";
+    const title = language === "hu" ? event.title_hu : event.title_en;
+    try {
+      const pdf = generateGuestListPdf({ event: { title, dateLabel: formatEventDate(event, language) }, guests: report.attendance_rows || [], language, closed: true });
+      const safeName = title.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "event";
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}-attendance-report.pdf"`);
+      res.type("application/pdf").send(pdf);
+    } catch (error) { sendError(res, Object.assign(error, { status: 500 }), "ATTENDANCE_PDF_FAILED"); }
+  });
+
+  app.post("/api/events/tickets/:id/attendance-delete", auth, admin, (req, res) => {
+    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
+    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
+    const event = attendanceEvent(ticket.event_id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.attendance_mode !== "DIGITAL") return res.status(409).json({ error: event.attendance_mode === "PAPER" ? "ATTENDANCE_PAPER_MODE_ACTIVE" : "ATTENDANCE_DIGITAL_MODE_REQUIRED" });
+    if (event.attendance_closed_at || db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(ticket.event_id)) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
+    if (["VOID", "REFUNDED"].includes(ticket.status)) return res.json({ ...attendanceRow(ticket, event), deleted: true, refund_review: db.prepare("SELECT * FROM event_ticket_refund_reviews WHERE ticket_id=? ORDER BY created_at DESC LIMIT 1").get(ticket.id) || null });
+    const result = db.transaction(() => {
+      db.prepare("UPDATE event_tickets SET status='VOID',voided_at=CURRENT_TIMESTAMP,voided_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, ticket.id);
+      db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,performed_by_user_id,details) VALUES(?,?,?,'VOID',?,?)").run(newId("CHK"), ticket.event_id, ticket.id, req.user.id, "Guest marked deleted from digital attendance list");
+      const updated = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id);
+      return { ticket: updated, refund_review: recordDeletedPaidTicketReview(updated, event, req.user.id) };
+    })();
+    audit(req, "ATTENDANCE_DELETE", "event_attendance", ticket.id, ticket, result.ticket, 1, "Guest retained with Deleted attendance status");
+    res.json({ ...attendanceRow(result.ticket, event), deleted: true, refund_review: result.refund_review });
   });
 
   app.post("/api/events/tickets/:id/check-in", auth, admin, (req, res) => {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
+    const event = attendanceEvent(ticket.event_id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.attendance_mode !== "DIGITAL") return res.status(409).json({ error: event.attendance_mode === "PAPER" ? "ATTENDANCE_PAPER_MODE_ACTIVE" : "ATTENDANCE_DIGITAL_MODE_REQUIRED" });
     if (["VOID", "REFUNDED"].includes(ticket.status)) return res.status(409).json({ error: "TICKET_NOT_ACTIVE" });
-    if (db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(ticket.event_id)) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
+    if (event.attendance_closed_at || db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(ticket.event_id)) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
     const checkedIn = req.body?.checked_in !== false;
-    if (checkedIn && ticket.status === "USED") return res.status(409).json({ error: "TICKET_ALREADY_CHECKED_IN", ticket: { ...ticket, checked_in: true } });
     const result = db.transaction(() => {
       const nextStatus = checkedIn ? "USED" : "VALID";
       db.prepare("UPDATE event_tickets SET status=?,checked_in_at=?,checked_in_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nextStatus, checkedIn ? new Date().toISOString() : null, checkedIn ? req.user.id : null, ticket.id);
       db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,performed_by_user_id,details) VALUES(?,?,?, ?,?,?)").run(newId("CHK"), ticket.event_id, ticket.id, checkedIn ? "ACCEPTED" : "REVERTED", req.user.id, checkedIn ? "Manual digital check-in" : "Manual check-in correction");
-      return db.prepare("SELECT id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,checked_in_at,checked_in_by_user_id FROM event_tickets WHERE id=?").get(ticket.id);
+      return db.prepare("SELECT id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,checked_in_at,checked_in_by_user_id FROM event_tickets WHERE id=?").get(ticket.id);
     })();
     audit(req, checkedIn ? "CHECK_IN" : "CHECK_IN_REVERT", "event_attendance", ticket.id, ticket, result, 1, checkedIn ? "Manual attendance recorded" : "Manual attendance corrected");
     res.json({ ...result, checked_in: result.status === "USED" });
   });
 
   app.post("/api/events/:id/attendance/close", auth, admin, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    const event = attendanceEvent(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (event.attendance_mode !== "DIGITAL") return res.status(409).json({ error: event.attendance_mode === "PAPER" ? "ATTENDANCE_PAPER_MODE_ACTIVE" : "ATTENDANCE_DIGITAL_MODE_REQUIRED" });
     const existing = db.prepare("SELECT snapshot_json FROM event_closures WHERE event_id=?").get(event.id);
     if (existing) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED", report: JSON.parse(existing.snapshot_json) });
     const force = Boolean(req.body?.force) && isSuperadmin(req.user);
     if (new Date(event.end_at).getTime() > Date.now() && !force) return res.status(409).json({ error: "EVENT_HAS_NOT_ENDED" });
     const report = db.transaction(() => {
-      const counts = db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='USED' THEN 1 ELSE 0 END) AS present,SUM(CASE WHEN status='VALID' THEN 1 ELSE 0 END) AS no_show,SUM(CASE WHEN status='VOID' THEN 1 ELSE 0 END) AS voided,SUM(CASE WHEN status='REFUNDED' THEN 1 ELSE 0 END) AS refunded FROM event_tickets WHERE event_id=?").get(event.id);
-      const sourceCounts = Object.fromEntries(db.prepare("SELECT source_type,COUNT(*) count FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED') GROUP BY source_type").all(event.id).map((row) => [row.source_type, Number(row.count)]));
-      const value = { event_id: event.id, event_key: event.event_key, closed_at: new Date().toISOString(), capacity_total: Number(event.capacity_total), tickets: { total: Number(counts.total || 0), present: Number(counts.present || 0), no_show: Number(counts.no_show || 0), voided: Number(counts.voided || 0), refunded: Number(counts.refunded || 0) }, sources: sourceCounts, attendance_tracking: "MANUAL_DIGITAL_CHECKLIST", test_mode: true };
+      const rows = attendanceTickets(event.id);
+      const counts = attendanceSummary(rows);
+      const sourceCounts = rows.filter((row) => !["VOID", "REFUNDED"].includes(row.status)).reduce((map, row) => { map[row.source_type] = (map[row.source_type] || 0) + 1; return map; }, {});
+      const closedEvent = { ...event, status: "CLOSED" };
+      const paidNoShows = db.prepare("SELECT * FROM event_tickets WHERE event_id=? AND source_type='PURCHASE' AND status IN ('VALID','VOID')").all(event.id);
+      for (const ticket of paidNoShows) recordDeletedPaidTicketReview(ticket, closedEvent, req.user.id);
+      const value = { event_id: event.id, event_key: event.event_key, closed_at: new Date().toISOString(), capacity_total: Number(event.capacity_total), attendance_mode: "DIGITAL", tickets: counts, sources: sourceCounts, attendance_rows: rows, attendance_tracking: "MANUAL_DIGITAL_CHECKLIST", test_mode: true };
       db.prepare("INSERT INTO event_closures(id,event_id,snapshot_json,closed_by_user_id) VALUES(?,?,?,?)").run(newId("EVCLS"), event.id, JSON.stringify(value), req.user.id);
-      db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, JSON.stringify(value), req.user.id, event.id);
+      db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,attendance_closed_at=CURRENT_TIMESTAMP,attendance_closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, req.user.id, JSON.stringify(value), req.user.id, event.id);
       return value;
     })();
     audit(req, "ATTENDANCE_CLOSE", "event_attendance", event.id, event, report, 1, "Digital guest list finalized");
