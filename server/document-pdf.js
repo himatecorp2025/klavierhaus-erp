@@ -252,6 +252,7 @@ function ticketTypeLabel(event, ticket, language) {
   const explicit = safeText(ticket.ticket_variant || ticket.ticket_type || ticket.access_level).toUpperCase();
   if (event.access_type === "INTERNAL" || ["VIP", "INTERNAL"].includes(explicit)) return hu ? "VIP JEGY" : "VIP TICKET";
   if (event.access_type === "INVITE_ONLY" || ["INVITATION", "INVITE_ONLY"].includes(explicit) || ticket.source_type === "INVITATION") return hu ? "SZEMÉLYES MEGHÍVÁS" : "PERSONAL INVITATION";
+  if (["COMPLIMENTARY", "FREE", "COMPLIMENTARY_TICKET"].includes(explicit) || ticket.source_type === "COMPLIMENTARY") return hu ? "TISZTELETJEGY" : "COMPLIMENTARY TICKET";
   return hu ? "NYILVÁNOS ESEMÉNY" : "PUBLIC EVENT";
 }
 
@@ -430,7 +431,7 @@ function ticketLabels(event, tickets, language) {
     "ADMISSION TICKET", "BELÉPŐJEGY", "ATTENDEE", "VENDÉG", "TICKET CODE", "JEGYKÓD",
     "TICKET ID", "JEGYAZONOSÍTÓ", "TICKET TYPE", "JEGYTÍPUS", "PRICE", "ÁR",
     "PUBLIC EVENT", "NYILVÁNOS ESEMÉNY", "PERSONAL INVITATION", "SZEMÉLYES MEGHÍVÁS",
-    "VIP TICKET", "VIP JEGY", "COMPLIMENTARY", "INGYENES"
+    "VIP TICKET", "VIP JEGY", "COMPLIMENTARY", "COMPLIMENTARY TICKET", "TISZTELETJEGY", "INGYENES"
   ]);
 }
 
