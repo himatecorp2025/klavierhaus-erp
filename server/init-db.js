@@ -112,12 +112,13 @@ function migrationRequiresBackup() {
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
-  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
+  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id", "attendance_mode", "attendance_closed_at", "attendance_closed_by_user_id"].some((column) => !tableColumns("events").has(column));
+  const ticketPlatformColumnsMissing = tableExists("event_tickets") && ["event_payment_id", "ticket_sequence", "ticket_variant"].some((column) => !tableColumns("event_tickets").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const conversationCategoryMissing = tableExists("customer_conversations") && !String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql || "").toUpperCase().includes("'TECHNICAL'");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing || conversationCategoryMissing;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || ticketPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing || conversationCategoryMissing;
 }
 
 function migrateCustomerConversationCategoryConstraint() {
@@ -430,9 +431,13 @@ function runMigrations() {
     ensureColumn("events", "sold_out_at", "TEXT");
     ensureColumn("events", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
+    ensureColumn("events", "attendance_mode", "TEXT NOT NULL DEFAULT 'UNSET'");
+    ensureColumn("events", "attendance_closed_at", "TEXT");
+    ensureColumn("events", "attendance_closed_by_user_id", "TEXT");
     ensureColumn("events", "artist_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
+    ensureColumn("event_tickets", "ticket_variant", "TEXT NOT NULL DEFAULT 'PUBLIC'");
     ensureColumn("event_checkout_holds", "attendee_names_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn("website_reviews", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("website_showroom_pianos", "is_sample", "INTEGER DEFAULT 0");
@@ -538,6 +543,8 @@ function runMigrations() {
   ensureIndex("idx_event_holds_session", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_holds_session ON event_checkout_holds(stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL");
   ensureIndex("idx_event_payments_event_status", "CREATE INDEX IF NOT EXISTS idx_event_payments_event_status ON event_payments(event_id,status,created_at DESC)");
   ensureIndex("idx_event_tickets_payment", "CREATE INDEX IF NOT EXISTS idx_event_tickets_payment ON event_tickets(event_payment_id,ticket_sequence)");
+  ensureIndex("idx_event_ticket_refund_reviews_event", "CREATE INDEX IF NOT EXISTS idx_event_ticket_refund_reviews_event ON event_ticket_refund_reviews(event_id,created_at DESC)");
+  ensureIndex("idx_event_ticket_refund_reviews_ticket", "CREATE INDEX IF NOT EXISTS idx_event_ticket_refund_reviews_ticket ON event_ticket_refund_reviews(ticket_id,created_at DESC)");
   ensureIndex("idx_stripe_webhook_status", "CREATE INDEX IF NOT EXISTS idx_stripe_webhook_status ON stripe_webhook_events(status,received_at DESC)");
   ensureIndex("idx_website_content_updated", "CREATE INDEX IF NOT EXISTS idx_website_content_updated ON website_content_pages(updated_at DESC)");
   ensureIndex("idx_website_reviews_public", "CREATE INDEX IF NOT EXISTS idx_website_reviews_public ON website_reviews(visible,sort_order,updated_at DESC)");
@@ -562,6 +569,8 @@ function runMigrations() {
   db.prepare("UPDATE jobs SET planned_minutes=CAST(ROUND(COALESCE(planned_hours,0)*60) AS INTEGER) WHERE COALESCE(planned_minutes,0)=0 AND COALESCE(planned_hours,0)>0").run();
   db.prepare("UPDATE pianos SET ownership_type=COALESCE(NULLIF(ownership_type,''),ownership,'Customer owned')").run();
   db.prepare("UPDATE pianos SET display_name=trim(COALESCE(NULLIF(original_description,''),COALESCE(brand,'')||' '||COALESCE(model,''))) WHERE display_name IS NULL OR display_name='' ").run();
+  db.prepare("UPDATE events SET attendance_mode=COALESCE(NULLIF(attendance_mode,''),'UNSET') WHERE attendance_mode IS NULL OR attendance_mode='' ").run();
+  db.prepare("UPDATE event_tickets SET ticket_variant=CASE WHEN source_type='INVITATION' THEN 'INVITATION' WHEN source_type='COMPLIMENTARY' THEN 'COMPLIMENTARY' ELSE 'PUBLIC' END WHERE ticket_variant IS NULL OR ticket_variant='' ").run();
 
   const accounts = [
     ["1000","Cash","Készpénz","ASSET","DEBIT"],["1010","Bank","Bank","ASSET","DEBIT"],
