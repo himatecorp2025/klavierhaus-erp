@@ -4,21 +4,25 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { generateTicketPdf, generateInvoicePdf } = require("./document-pdf");
+const { buildConversationAutoReplyEmail } = require("./transactional-email");
 const {
   attendanceError,
   attendanceRows,
   attendanceSnapshot,
   changeGuestStatus,
   close: closeAttendance,
+  createAttendanceHub,
   ensureSession,
+  pause: pauseAttendance,
   recordPdfExport,
   reopen: reopenAttendance,
+  resume: resumeAttendance,
   startMode,
   state: attendanceState
 } = require("./event-attendance");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "GENERAL"]);
+const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "TECHNICAL", "GENERAL"]);
 const CONVERSATION_STATUSES = new Set(["OPEN", "PENDING_CUSTOMER", "PENDING_STAFF", "CLOSED"]);
 
 function clean(value, max = 5000) {
@@ -111,6 +115,15 @@ function formatEventDate(event, language = "en") {
 
 function eventVenue(event) {
   return [event?.venue_name, event?.venue_street, event?.venue_city, event?.venue_region, event?.venue_postal_code].filter(Boolean).join(", ");
+}
+
+function isSupportHoursOpen(date = new Date(), env = process.env) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).reduce((result, part) => { result[part.type] = part.value; return result; }, {});
+  const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+  const holidays = String(env.SUPPORT_HOLIDAYS || "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (["Sat", "Sun"].includes(parts.weekday) || holidays.includes(dateKey)) return false;
+  const hour = Number(parts.hour);
+  return hour >= 9 && hour < 17;
 }
 
 function createBusinessDocumentService({ db, uploadDir, transactionalEmail, websiteBaseUrl = "", env = process.env }) {
@@ -219,10 +232,43 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     }
   }
 
+  function ticketPdfForTicket(ticketId) {
+    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
+    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
+    const company = readCompanyData(db);
+    return generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets: [ticket], language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+  }
+
+  function ticketPdfForPayment(paymentId) {
+    const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
+    if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
+    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
+    if (!event || !tickets.length) throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"), { status: 404 });
+    const company = readCompanyData(db);
+    return generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+  }
+
+  function invoicePdfForPayment(paymentId) {
+    const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
+    if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
+    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
+    if (!event || !tickets.length) throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"), { status: 404 });
+    const company = readCompanyData(db);
+    const invoice = invoiceNumber(payment, company);
+    return { pdf: generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) }), invoice_number: invoice };
+  }
+
   return Object.freeze({
     companyData: () => readCompanyData(db),
     sendPurchaseDocuments,
     sendTicketDocuments,
+    ticketPdfForTicket,
+    ticketPdfForPayment,
+    invoicePdfForPayment,
     deliveryRow,
     recordDelivery,
     async onPaymentFulfilled({ paymentId }) { return sendPurchaseDocuments(paymentId); },
@@ -237,6 +283,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
 function registerBusinessOperationsRoutes(options) {
   const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService } = options;
   const admin = permit("ADMIN");
+  const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
   const conversationKey = conversationEncryptionKey(env);
   const recentRequests = new Map();
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -247,7 +294,9 @@ function registerBusinessOperationsRoutes(options) {
   }
   function sendError(res, error, fallback = "BUSINESS_OPERATION_FAILED") {
     const code = clean(error?.message || fallback, 120);
-    res.status(Number(error?.status || (code.includes("NOT_FOUND") ? 404 : code.includes("ALREADY") ? 409 : 400))).json({ error: code });
+    const payload = { error: code };
+    if (error?.state) payload.state = error.state;
+    res.status(Number(error?.status || (code.includes("NOT_FOUND") ? 404 : code.includes("ALREADY") || code.includes("CONFLICT") ? 409 : 400))).json(payload);
   }
   function notifyStaff(conversation, message) {
     const users = db.prepare("SELECT id FROM users WHERE status='Active' AND role IN ('SUPERADMIN','ADMIN','MANAGER')").all();
@@ -263,11 +312,19 @@ function registerBusinessOperationsRoutes(options) {
   }
   function conversationPayload(row, includeMessages = false) {
     if (!row) return null;
-    const payload = { id: row.id, name: row.name, email: row.email, language: row.language, category: row.category, service_id: row.service_id, piano_id: row.piano_id, event_id: row.event_id, ticket_id: row.ticket_id, status: row.status, assigned_user_id: row.assigned_user_id, source_path: row.source_path, last_message_at: row.last_message_at, created_at: row.created_at, updated_at: row.updated_at };
+    const assignee = row.assigned_user_id ? db.prepare("SELECT name FROM users WHERE id=?").get(row.assigned_user_id) : null;
+    const payload = { id: row.id, name: row.name, email: row.email, language: row.language, category: row.category, service_id: row.service_id, piano_id: row.piano_id, event_id: row.event_id, ticket_id: row.ticket_id, status: row.status, assigned_user_id: row.assigned_user_id, assigned_user_name: assignee?.name || null, source_path: row.source_path, last_message_at: row.last_message_at, created_at: row.created_at, updated_at: row.updated_at };
     if (includeMessages) payload.messages = db.prepare("SELECT id,direction,sender_name,sender_email,sender_user_id,body,status,created_at FROM customer_messages WHERE conversation_id=? ORDER BY created_at,id").all(row.id);
     return payload;
   }
   function conversationByToken(token) { return db.prepare("SELECT * FROM customer_conversations WHERE public_token_hash=?").get(tokenHash(token)); }
+
+  const attendanceHub = createAttendanceHub({
+    getState(eventId) {
+      const event = db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
+      return event ? attendanceState(db, event) : null;
+    }
+  });
 
   app.get("/api/settings/company-data", auth, admin, (_req, res) => res.json(documentService.companyData()));
   app.put("/api/settings/company-data", auth, admin, (req, res) => {
@@ -279,20 +336,81 @@ function registerBusinessOperationsRoutes(options) {
     } catch (error) { sendError(res, error); }
   });
 
-  app.get("/api/events/:id/attendance", auth, admin, (req, res) => {
+  function sendPdf(res, pdf, filename) {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.type("application/pdf").send(pdf);
+  }
+
+  app.get("/api/events/tickets/:id.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id), `klavierhaus-ticket-${req.params.id}.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/event-payments/:id/tickets.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id), `klavierhaus-tickets-${req.params.id}.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/event-payments/:id/invoice.pdf", auth, admin, (req, res) => {
+    try { const invoice = documentService.invoicePdfForPayment(req.params.id); sendPdf(res, invoice.pdf, `klavierhaus-invoice-${invoice.invoice_number}.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.post("/api/event-payments/:id/invoice/resend", auth, admin, async (req, res) => {
+    try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
+  });
+
+  app.get("/api/events/:id/attendance", auth, attendanceOperator, (req, res) => {
     const event = db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency,venue_name,timezone FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     res.json(attendanceState(db, event, clean(req.query.q, 160)));
   });
 
-  app.post("/api/events/:id/attendance/mode", auth, admin, (req, res) => {
+  app.post("/api/events/:id/attendance/mode", auth, attendanceOperator, (req, res) => {
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     try {
       const before = ensureSession(db, event.id, req.user.id);
       const session = startMode(db, event, req.body?.mode, req.user);
       audit(req, "ATTENDANCE_MODE", "event_attendance", event.id, before, session, 1, "Attendance mode changed");
-      res.json(attendanceState(db, event));
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json(current);
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.get("/api/events/:id/attendance/stream", auth, attendanceOperator, (req, res) => {
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    res.write(": connected\n\n");
+    const unsubscribe = attendanceHub.subscribe(event.id, res, attendanceState(db, event));
+    req.on("close", unsubscribe);
+  });
+
+  app.post("/api/events/:id/attendance/pause", auth, attendanceOperator, (req, res) => {
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const before = ensureSession(db, event.id, req.user.id);
+      const session = pauseAttendance(db, event, req.user);
+      audit(req, "ATTENDANCE_PAUSE", "event_attendance", event.id, before, session, 1, "Digital attendance input paused");
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json(current);
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.post("/api/events/:id/attendance/resume", auth, attendanceOperator, (req, res) => {
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const before = ensureSession(db, event.id, req.user.id);
+      const session = resumeAttendance(db, event, req.user);
+      audit(req, "ATTENDANCE_RESUME", "event_attendance", event.id, before, session, 1, "Digital attendance input resumed");
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json(current);
     } catch (error) { sendError(res, error); }
   });
 
@@ -303,32 +421,44 @@ function registerBusinessOperationsRoutes(options) {
       const before = ensureSession(db, event.id, req.user.id);
       const session = reopenAttendance(db, event, req.user);
       audit(req, "ATTENDANCE_REOPEN", "event_attendance", event.id, before, session, 1, "Attendance list reopened by administrator");
-      res.json(attendanceState(db, event));
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json(current);
     } catch (error) { sendError(res, error); }
   });
 
-  app.post("/api/events/tickets/:id/check-in", auth, admin, (req, res) => {
+  app.post("/api/events/tickets/:id/check-in", auth, attendanceOperator, (req, res) => {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     try {
-      const result = changeGuestStatus(db, event, ticket, req.body?.checked_in === false ? "NOT_ARRIVED" : "PRESENT", req.user);
+      const result = changeGuestStatus(db, event, ticket, req.body?.checked_in === false ? "NOT_ARRIVED" : "PRESENT", req.user, { expectedRevision: req.body?.expected_revision });
       audit(req, result.attendance_status === "PRESENT" ? "CHECK_IN" : "CHECK_IN_REVERT", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance status changed");
-      res.json({ ...result, checked_in: result.attendance_status === "PRESENT" });
-    } catch (error) { sendError(res, error); }
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json({ ...result, checked_in: result.attendance_status === "PRESENT", state: current });
+    } catch (error) {
+      if (error?.message === "ATTENDANCE_CONFLICT") error.state = attendanceState(db, event);
+      sendError(res, error);
+    }
   });
 
-  app.post("/api/events/tickets/:id/attendance-status", auth, admin, (req, res) => {
+  app.post("/api/events/tickets/:id/attendance-status", auth, attendanceOperator, (req, res) => {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     try {
-      const result = changeGuestStatus(db, event, ticket, req.body?.status, req.user);
+      const result = changeGuestStatus(db, event, ticket, req.body?.status, req.user, { expectedRevision: req.body?.expected_revision });
       audit(req, req.body?.status === "DELETED" ? "GUEST_DELETE" : "ATTENDANCE_STATUS", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance guest status changed");
-      res.json(result);
-    } catch (error) { sendError(res, error); }
+      const current = attendanceState(db, event);
+      attendanceHub.publish(event.id, current);
+      res.json({ ...result, state: current });
+    } catch (error) {
+      if (error?.message === "ATTENDANCE_CONFLICT") error.state = attendanceState(db, event);
+      sendError(res, error);
+    }
   });
 
   app.post("/api/events/:id/attendance/close", auth, admin, (req, res) => {
@@ -338,11 +468,12 @@ function registerBusinessOperationsRoutes(options) {
       const before = ensureSession(db, event.id, req.user.id);
       const report = closeAttendance(db, event, req.user, Boolean(req.body?.force));
       audit(req, "ATTENDANCE_CLOSE", "event_attendance", event.id, before, report, 1, "Digital guest list finalized");
+      attendanceHub.publish(event.id, attendanceState(db, event));
       res.json(report);
     } catch (error) { sendError(res, error); }
   });
 
-  app.get("/api/events/:id/attendance-report", auth, admin, (req, res) => {
+  app.get("/api/events/:id/attendance-report", auth, attendanceOperator, (req, res) => {
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     const session = ensureSession(db, event.id, req.user.id);
@@ -372,13 +503,14 @@ function registerBusinessOperationsRoutes(options) {
     try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
   });
 
-  app.post("/api/public/customer-conversations", (req, res) => {
+  app.post("/api/public/customer-conversations", async (req, res) => {
     const ipKey = clean(req.ip || req.socket?.remoteAddress, 120);
     if (rateLimited(`conversation:${ipKey}`, 5, 10 * 60 * 1000)) return res.status(429).json({ error: "TOO_MANY_REQUESTS" });
     const name = clean(req.body?.name, 200); const email = normalizeEmail(req.body?.email); const body = clean(req.body?.message, 5000);
     const category = clean(req.body?.category || "GENERAL", 40).toUpperCase();
     if (!name || !validEmail(email) || !body || !CONVERSATION_CATEGORIES.has(category) || req.body?.consent_contact !== true) return res.status(400).json({ error: "VALID_CONVERSATION_FIELDS_REQUIRED" });
     const rawToken = crypto.randomBytes(32).toString("base64url"); const id = newId("CONV"); const language = req.body?.language === "hu" ? "hu" : "en";
+    const outsideSupportHours = !isSupportHoursOpen(new Date(), env);
     const context = { service_id: clean(req.body?.service_id, 120) || null, piano_id: clean(req.body?.piano_id, 120) || null, event_id: clean(req.body?.event_id, 120) || null, ticket_id: clean(req.body?.ticket_id, 120) || null };
     try {
       db.transaction(() => {
@@ -388,9 +520,20 @@ function registerBusinessOperationsRoutes(options) {
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(messageId, id, "CUSTOMER", name, email, body);
         const conversation = db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(id);
         notifyStaff(conversation, { id: messageId, body });
+        if (outsideSupportHours) {
+          const conversationUrl = `${String(websiteBaseUrl).replace(/\/$/, "")}/contact?conversation=${encodeURIComponent(rawToken)}`;
+          const autoReply = buildConversationAutoReplyEmail({ name, conversationUrl, language });
+          db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'READ')").run(newId("MSG"), id, "STAFF", "Klavierhaus Support", null, autoReply.text);
+        }
       })();
     } catch (error) { return sendError(res, error); }
-    res.status(201).json({ ...conversationPayload(db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(id), true), access_token: rawToken, conversation_url: `${String(websiteBaseUrl).replace(/\/$/, "")}/contact?conversation=${encodeURIComponent(rawToken)}` });
+    const conversationUrl = `${String(websiteBaseUrl).replace(/\/$/, "")}/contact?conversation=${encodeURIComponent(rawToken)}`;
+    let autoReplyDelivery = { status: "NOT_CONFIGURED" };
+    if (outsideSupportHours && transactionalEmail?.sendCustomerConversationAutoReply) {
+      try { const sent = await transactionalEmail.sendCustomerConversationAutoReply({ to: email, name, conversationUrl, language, idempotencyKey: `customer-conversation-auto-reply:${id}` }); autoReplyDelivery = { status: "SENT", provider_message_id: sent.providerMessageId }; }
+      catch (error) { autoReplyDelivery = { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED" }; }
+    }
+    res.status(201).json({ ...conversationPayload(db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(id), true), access_token: rawToken, conversation_url: conversationUrl, outside_support_hours: outsideSupportHours, auto_reply_delivery: autoReplyDelivery });
   });
 
   app.get("/api/public/customer-conversations/:token", (req, res) => {
@@ -472,6 +615,12 @@ function registerBusinessOperationsRoutes(options) {
     res.json(conversationPayload(db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(row.id)));
   });
 
+  app.get("/api/customer-conversations/:id/report", auth, admin, (req, res) => {
+    const row = db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(req.params.id);
+    if (!row) return res.status(404).json({ error: "CONVERSATION_NOT_FOUND" });
+    res.json({ report_type: "CUSTOMER_HELPDESK_CONVERSATION", generated_at: new Date().toISOString(), conversation: conversationPayload(row), messages: db.prepare("SELECT id,direction,sender_name,sender_email,sender_user_id,body,status,created_at FROM customer_messages WHERE conversation_id=? ORDER BY created_at,id").all(row.id) });
+  });
+
   app.get("/api/marketing/seo/audit", auth, admin, (_req, res) => {
     const settingsRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_seo_settings'").get();
     let settings = {}; try { settings = JSON.parse(settingsRow?.setting_value || "{}"); } catch (_error) { settings = {}; }
@@ -499,4 +648,4 @@ function registerBusinessOperationsRoutes(options) {
   });
 }
 
-module.exports = { COMPANY_KEYS, createBusinessDocumentService, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail };
+module.exports = { COMPANY_KEYS, createBusinessDocumentService, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail };
