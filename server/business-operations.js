@@ -4,6 +4,18 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { generateTicketPdf, generateInvoicePdf } = require("./document-pdf");
+const {
+  attendanceError,
+  attendanceRows,
+  attendanceSnapshot,
+  changeGuestStatus,
+  close: closeAttendance,
+  ensureSession,
+  recordPdfExport,
+  reopen: reopenAttendance,
+  startMode,
+  state: attendanceState
+} = require("./event-attendance");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "GENERAL"]);
@@ -268,57 +280,74 @@ function registerBusinessOperationsRoutes(options) {
   });
 
   app.get("/api/events/:id/attendance", auth, admin, (req, res) => {
-    const event = db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency FROM events WHERE id=?").get(req.params.id);
+    const event = db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency,venue_name,timezone FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const query = clean(req.query.q, 160).toLocaleLowerCase();
-    const tickets = db.prepare(`SELECT id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,checked_in_by_user_id,created_at
-      FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED') AND (?='' OR lower(attendee_name) LIKE '%'||?||'%' OR lower(contact_email) LIKE '%'||?||'%' OR lower(public_code) LIKE '%'||?||'%') ORDER BY lower(attendee_name),created_at`)
-      .all(event.id, query, query, query, query);
-    const totals = db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='USED' THEN 1 ELSE 0 END) AS present,SUM(CASE WHEN status='VALID' THEN 1 ELSE 0 END) AS no_show FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED')").get(event.id);
-    const closure = db.prepare("SELECT id,snapshot_json,created_at FROM event_closures WHERE event_id=?").get(event.id);
-    res.json({ event, closed: Boolean(closure), tickets, totals: { total: Number(totals.total || 0), present: Number(totals.present || 0), no_show: Number(totals.no_show || 0) }, report: closure ? JSON.parse(closure.snapshot_json) : null });
+    res.json(attendanceState(db, event, clean(req.query.q, 160)));
+  });
+
+  app.post("/api/events/:id/attendance/mode", auth, admin, (req, res) => {
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const before = ensureSession(db, event.id, req.user.id);
+      const session = startMode(db, event, req.body?.mode, req.user);
+      audit(req, "ATTENDANCE_MODE", "event_attendance", event.id, before, session, 1, "Attendance mode changed");
+      res.json(attendanceState(db, event));
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.post("/api/events/:id/attendance/reopen", auth, admin, (req, res) => {
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const before = ensureSession(db, event.id, req.user.id);
+      const session = reopenAttendance(db, event, req.user);
+      audit(req, "ATTENDANCE_REOPEN", "event_attendance", event.id, before, session, 1, "Attendance list reopened by administrator");
+      res.json(attendanceState(db, event));
+    } catch (error) { sendError(res, error); }
   });
 
   app.post("/api/events/tickets/:id/check-in", auth, admin, (req, res) => {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (["VOID", "REFUNDED"].includes(ticket.status)) return res.status(409).json({ error: "TICKET_NOT_ACTIVE" });
-    if (db.prepare("SELECT 1 FROM event_closures WHERE event_id=?").get(ticket.event_id)) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED" });
-    const checkedIn = req.body?.checked_in !== false;
-    if (checkedIn && ticket.status === "USED") return res.status(409).json({ error: "TICKET_ALREADY_CHECKED_IN", ticket: { ...ticket, checked_in: true } });
-    const result = db.transaction(() => {
-      const nextStatus = checkedIn ? "USED" : "VALID";
-      db.prepare("UPDATE event_tickets SET status=?,checked_in_at=?,checked_in_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nextStatus, checkedIn ? new Date().toISOString() : null, checkedIn ? req.user.id : null, ticket.id);
-      db.prepare("INSERT INTO event_checkins(id,event_id,ticket_id,result,performed_by_user_id,details) VALUES(?,?,?, ?,?,?)").run(newId("CHK"), ticket.event_id, ticket.id, checkedIn ? "ACCEPTED" : "REVERTED", req.user.id, checkedIn ? "Manual digital check-in" : "Manual check-in correction");
-      return db.prepare("SELECT id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,checked_in_at,checked_in_by_user_id FROM event_tickets WHERE id=?").get(ticket.id);
-    })();
-    audit(req, checkedIn ? "CHECK_IN" : "CHECK_IN_REVERT", "event_attendance", ticket.id, ticket, result, 1, checkedIn ? "Manual attendance recorded" : "Manual attendance corrected");
-    res.json({ ...result, checked_in: result.status === "USED" });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const result = changeGuestStatus(db, event, ticket, req.body?.checked_in === false ? "NOT_ARRIVED" : "PRESENT", req.user);
+      audit(req, result.attendance_status === "PRESENT" ? "CHECK_IN" : "CHECK_IN_REVERT", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance status changed");
+      res.json({ ...result, checked_in: result.attendance_status === "PRESENT" });
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.post("/api/events/tickets/:id/attendance-status", auth, admin, (req, res) => {
+    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
+    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    try {
+      const result = changeGuestStatus(db, event, ticket, req.body?.status, req.user);
+      audit(req, req.body?.status === "DELETED" ? "GUEST_DELETE" : "ATTENDANCE_STATUS", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance guest status changed");
+      res.json(result);
+    } catch (error) { sendError(res, error); }
   });
 
   app.post("/api/events/:id/attendance/close", auth, admin, (req, res) => {
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const existing = db.prepare("SELECT snapshot_json FROM event_closures WHERE event_id=?").get(event.id);
-    if (existing) return res.status(409).json({ error: "ATTENDANCE_ALREADY_CLOSED", report: JSON.parse(existing.snapshot_json) });
-    const force = Boolean(req.body?.force) && isSuperadmin(req.user);
-    if (new Date(event.end_at).getTime() > Date.now() && !force) return res.status(409).json({ error: "EVENT_HAS_NOT_ENDED" });
-    const report = db.transaction(() => {
-      const counts = db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='USED' THEN 1 ELSE 0 END) AS present,SUM(CASE WHEN status='VALID' THEN 1 ELSE 0 END) AS no_show,SUM(CASE WHEN status='VOID' THEN 1 ELSE 0 END) AS voided,SUM(CASE WHEN status='REFUNDED' THEN 1 ELSE 0 END) AS refunded FROM event_tickets WHERE event_id=?").get(event.id);
-      const sourceCounts = Object.fromEntries(db.prepare("SELECT source_type,COUNT(*) count FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED') GROUP BY source_type").all(event.id).map((row) => [row.source_type, Number(row.count)]));
-      const value = { event_id: event.id, event_key: event.event_key, closed_at: new Date().toISOString(), capacity_total: Number(event.capacity_total), tickets: { total: Number(counts.total || 0), present: Number(counts.present || 0), no_show: Number(counts.no_show || 0), voided: Number(counts.voided || 0), refunded: Number(counts.refunded || 0) }, sources: sourceCounts, attendance_tracking: "MANUAL_DIGITAL_CHECKLIST", test_mode: true };
-      db.prepare("INSERT INTO event_closures(id,event_id,snapshot_json,closed_by_user_id) VALUES(?,?,?,?)").run(newId("EVCLS"), event.id, JSON.stringify(value), req.user.id);
-      db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, JSON.stringify(value), req.user.id, event.id);
-      return value;
-    })();
-    audit(req, "ATTENDANCE_CLOSE", "event_attendance", event.id, event, report, 1, "Digital guest list finalized");
-    res.json(report);
+    try {
+      const before = ensureSession(db, event.id, req.user.id);
+      const report = closeAttendance(db, event, req.user, Boolean(req.body?.force));
+      audit(req, "ATTENDANCE_CLOSE", "event_attendance", event.id, before, report, 1, "Digital guest list finalized");
+      res.json(report);
+    } catch (error) { sendError(res, error); }
   });
 
   app.get("/api/events/:id/attendance-report", auth, admin, (req, res) => {
-    const row = db.prepare("SELECT snapshot_json FROM event_closures WHERE event_id=?").get(req.params.id);
-    if (!row) return res.status(404).json({ error: "ATTENDANCE_REPORT_NOT_FOUND" });
-    res.json(JSON.parse(row.snapshot_json));
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    const session = ensureSession(db, event.id, req.user.id);
+    if (!session.snapshot_json) return res.status(404).json({ error: "ATTENDANCE_REPORT_NOT_FOUND" });
+    res.json(JSON.parse(session.snapshot_json));
   });
 
   app.post("/api/events/tickets/:id/void", auth, admin, (req, res) => {
