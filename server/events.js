@@ -335,6 +335,7 @@ function registerEventRoutes(options) {
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
   const service = createEventService({ db, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
   const admin = permit("ADMIN");
+  const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
   const requireSuperadmin = permit("SUPERADMIN");
   const eventImage = eventImageUpload ? eventImageUpload.single("event_image") : (_req, _res, next) => next();
 
@@ -902,7 +903,7 @@ function registerEventRoutes(options) {
     res.json(after);
   });
 
-  app.get("/api/events/:id/guest-list.pdf", auth, admin, (req, res) => {
+  app.get("/api/events/:id/guest-list.pdf", auth, attendanceOperator, (req, res) => {
     const event = service.eventById(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     try {
