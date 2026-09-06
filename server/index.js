@@ -33,6 +33,7 @@ try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable
 require("dotenv").config();
 
 const app = express();
+const OPERATIONAL_CONTRACT_KEYS = Object.freeze(["helpdesk", "notification_audit"]);
 const PORT = process.env.PORT || 3030;
 const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
 const DEPLOYMENT_COMMIT = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown";
@@ -1101,6 +1102,7 @@ app.put('/api/notification-preferences',auth,(req,res)=>{db.prepare('INSERT OR I
 app.get('/api/notifications',auth,(req,res)=>{const active=String(req.query.active??'1')!=='0';const rows=db.prepare(`SELECT n.*,su.name sender_name FROM notifications n LEFT JOIN users su ON su.id=n.sender_user_id WHERE n.recipient_user_id=? ${active?"AND n.status='ACTIVE'":''} ORDER BY n.created_at DESC LIMIT 500`).all(req.user.id);res.json(rows);});
 app.get('/api/notifications/count',auth,(req,res)=>res.json({count:db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(req.user.id).c}));
 app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prepare('SELECT * FROM notifications WHERE id=? AND recipient_user_id=?').get(req.params.id,req.user.id);if(!row)return res.status(404).json({error:'NOTIFICATION_NOT_FOUND'});db.prepare("UPDATE notifications SET status='ACKNOWLEDGED',acknowledged_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);const count=db.prepare("SELECT COUNT(*) c FROM notifications WHERE recipient_user_id=? AND status='ACTIVE'").get(req.user.id).c;res.json({ok:true,count,notificationId:row.id});});
+app.get('/api/notifications/acknowledgements',auth,(req,res)=>{res.json(db.prepare("SELECT id,notification_type,title_en,title_hu,body_en,body_hu,acknowledged_at,created_at FROM notifications WHERE recipient_user_id=? AND status='ACKNOWLEDGED' ORDER BY acknowledged_at DESC,created_at DESC").all(req.user.id));});
 app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
 app.get("/api/planned-jobs", auth, (req,res)=>{
@@ -2333,7 +2335,7 @@ app.get('/api/admin/modules',auth,permit('ADMIN'),(req,res)=>{
   let settings={};
   try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
   const canToggle=isSuperadminUser(req.user);
-  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:canToggle})),cards:ADMIN_MODULE_CARDS.map(card=>({...card,enabled:settings[card.key]!==false,can_toggle:canToggle})),superadmin_visible:canToggle});
+  res.json({modules:ADMIN_MODULES.map(module=>({...module,enabled:settings[module.key]!==false,can_toggle:canToggle})),cards:ADMIN_MODULE_CARDS.map(card=>({...card,enabled:settings[card.key]!==false,can_toggle:canToggle})),operational_contract_keys:OPERATIONAL_CONTRACT_KEYS,superadmin_visible:canToggle});
 });
 app.put('/api/admin/modules/:moduleKey',auth,(req,res)=>{
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'SUPERADMIN_REQUIRED'});
