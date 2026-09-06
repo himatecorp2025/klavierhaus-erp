@@ -500,6 +500,11 @@ function runMigrations() {
   ensureIndex("idx_event_invitations_email", "CREATE INDEX IF NOT EXISTS idx_event_invitations_email ON event_invitations(lower(trim(guest_email)))");
   ensureIndex("idx_event_tickets_event_status", "CREATE INDEX IF NOT EXISTS idx_event_tickets_event_status ON event_tickets(event_id,status,source_type)");
   ensureIndex("idx_event_tickets_contact", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact ON event_tickets(lower(trim(contact_email)))");
+  ensureIndex("idx_event_attendance_sessions_event", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_attendance_sessions_event ON event_attendance_sessions(event_id)");
+  ensureIndex("idx_event_attendance_entries_event_status", "CREATE INDEX IF NOT EXISTS idx_event_attendance_entries_event_status ON event_attendance_entries(event_id,status,updated_at)");
+  ensureIndex("idx_event_attendance_entries_ticket", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_attendance_entries_ticket ON event_attendance_entries(ticket_id)");
+  ensureIndex("idx_event_attendance_actions_event_time", "CREATE INDEX IF NOT EXISTS idx_event_attendance_actions_event_time ON event_attendance_actions(event_id,created_at DESC)");
+  ensureIndex("idx_event_attendance_exports_event_version", "CREATE INDEX IF NOT EXISTS idx_event_attendance_exports_event_version ON event_attendance_exports(event_id,export_version DESC,created_at DESC)");
   ensureColumn("customer_conversations", "public_token_encrypted", "TEXT");
   ensureIndex("idx_event_checkins_event_time", "CREATE INDEX IF NOT EXISTS idx_event_checkins_event_time ON event_checkins(event_id,created_at DESC)");
   ensureIndex("idx_event_refunds_event_status", "CREATE INDEX IF NOT EXISTS idx_event_refunds_event_status ON event_refund_requests(event_id,status,requested_at DESC)");
