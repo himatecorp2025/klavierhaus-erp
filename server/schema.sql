@@ -313,9 +313,6 @@ CREATE TABLE IF NOT EXISTS events (
   closed_at TEXT,
   closed_by_user_id TEXT,
   closure_snapshot_json TEXT,
-  attendance_mode TEXT NOT NULL DEFAULT 'UNSET' CHECK(attendance_mode IN ('UNSET','PAPER','DIGITAL')),
-  attendance_closed_at TEXT,
-  attendance_closed_by_user_id TEXT,
   sold_out_at TEXT,
   is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
   relaunch_source_event_id TEXT,
@@ -327,7 +324,6 @@ CREATE TABLE IF NOT EXISTS events (
   FOREIGN KEY(artist_id) REFERENCES website_artists(id) ON DELETE SET NULL,
   FOREIGN KEY(cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(attendance_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(relaunch_source_event_id) REFERENCES events(id) ON DELETE SET NULL
@@ -367,7 +363,6 @@ CREATE TABLE IF NOT EXISTS event_tickets (
   contact_email TEXT NOT NULL,
   public_code TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'VALID' CHECK(status IN ('VALID','USED','VOID','REFUNDED')),
-  ticket_variant TEXT NOT NULL DEFAULT 'PUBLIC' CHECK(ticket_variant IN ('PUBLIC','INVITATION','VIP','COMPLIMENTARY')),
   price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
   currency TEXT NOT NULL DEFAULT 'USD',
   event_payment_id TEXT,
@@ -489,24 +484,6 @@ CREATE TABLE IF NOT EXISTS event_closures (
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS event_ticket_refund_reviews (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  ticket_id TEXT NOT NULL,
-  payment_id TEXT,
-  reason_code TEXT NOT NULL,
-  outcome TEXT NOT NULL CHECK(outcome IN ('REVIEW_REQUIRED','REFUND_ELIGIBLE','REFUND_NOT_ELIGIBLE','REFUND_PROCESSED')),
-  note TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(ticket_id,reason_code),
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
-  FOREIGN KEY(payment_id) REFERENCES event_payments(id) ON DELETE SET NULL,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
 -- Operational extensions for manual attendance, customer conversations and
 -- auditable transactional document delivery. Public conversation access is
 -- token based; only a keyed hash is stored in the ERP database.
@@ -517,7 +494,7 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','GENERAL')),
   service_id TEXT,
   piano_id TEXT,
   event_id TEXT,
