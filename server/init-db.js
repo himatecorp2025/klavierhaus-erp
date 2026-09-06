@@ -112,42 +112,11 @@ function migrationRequiresBackup() {
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
-  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id", "attendance_mode", "attendance_closed_at", "attendance_closed_by_user_id"].some((column) => !tableColumns("events").has(column));
-  const ticketPlatformColumnsMissing = tableExists("event_tickets") && ["event_payment_id", "ticket_sequence", "ticket_variant"].some((column) => !tableColumns("event_tickets").has(column));
+  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
-  const conversationCategoryMissing = tableExists("customer_conversations") && !String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql || "").toUpperCase().includes("'TECHNICAL'");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || ticketPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing || conversationCategoryMissing;
-}
-
-function migrateCustomerConversationCategoryConstraint() {
-  if (!tableExists("customer_conversations")) return;
-  const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql || "").toUpperCase();
-  if (sql.includes("'TECHNICAL'")) return;
-  log("Adding TECHNICAL to the customer conversation categories while preserving conversations");
-  db.pragma("foreign_keys = OFF");
-  try {
-    db.transaction(() => {
-      db.exec(`CREATE TABLE customer_conversations_new (
-        id TEXT PRIMARY KEY,public_token_hash TEXT NOT NULL UNIQUE,public_token_encrypted TEXT,name TEXT NOT NULL,email TEXT NOT NULL,
-        language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-        category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
-        service_id TEXT,piano_id TEXT,event_id TEXT,ticket_id TEXT,
-        status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
-        assigned_user_id TEXT,consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),source_path TEXT,
-        metadata_json TEXT NOT NULL DEFAULT '{}',last_message_at TEXT,closed_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
-        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
-        FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
-      )`);
-      db.exec(`INSERT INTO customer_conversations_new SELECT id,public_token_hash,public_token_encrypted,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,consent_contact,source_path,metadata_json,last_message_at,closed_at,created_at,updated_at FROM customer_conversations`);
-      db.exec("DROP TABLE customer_conversations");
-      db.exec("ALTER TABLE customer_conversations_new RENAME TO customer_conversations");
-    })();
-  } finally {
-    db.pragma("foreign_keys = ON");
-  }
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -431,13 +400,9 @@ function runMigrations() {
     ensureColumn("events", "sold_out_at", "TEXT");
     ensureColumn("events", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
-    ensureColumn("events", "attendance_mode", "TEXT NOT NULL DEFAULT 'UNSET'");
-    ensureColumn("events", "attendance_closed_at", "TEXT");
-    ensureColumn("events", "attendance_closed_by_user_id", "TEXT");
     ensureColumn("events", "artist_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
-    ensureColumn("event_tickets", "ticket_variant", "TEXT NOT NULL DEFAULT 'PUBLIC'");
     ensureColumn("event_checkout_holds", "attendee_names_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn("website_reviews", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("website_showroom_pianos", "is_sample", "INTEGER DEFAULT 0");
@@ -481,7 +446,6 @@ function runMigrations() {
   });
 
   migrateColumns();
-  migrateCustomerConversationCategoryConstraint();
   migrateWebsiteContactLeadStatuses();
   migrateEventArtistForeignKey();
   migrateUsersRoleConstraint();
@@ -543,8 +507,6 @@ function runMigrations() {
   ensureIndex("idx_event_holds_session", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_holds_session ON event_checkout_holds(stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL");
   ensureIndex("idx_event_payments_event_status", "CREATE INDEX IF NOT EXISTS idx_event_payments_event_status ON event_payments(event_id,status,created_at DESC)");
   ensureIndex("idx_event_tickets_payment", "CREATE INDEX IF NOT EXISTS idx_event_tickets_payment ON event_tickets(event_payment_id,ticket_sequence)");
-  ensureIndex("idx_event_ticket_refund_reviews_event", "CREATE INDEX IF NOT EXISTS idx_event_ticket_refund_reviews_event ON event_ticket_refund_reviews(event_id,created_at DESC)");
-  ensureIndex("idx_event_ticket_refund_reviews_ticket", "CREATE INDEX IF NOT EXISTS idx_event_ticket_refund_reviews_ticket ON event_ticket_refund_reviews(ticket_id,created_at DESC)");
   ensureIndex("idx_stripe_webhook_status", "CREATE INDEX IF NOT EXISTS idx_stripe_webhook_status ON stripe_webhook_events(status,received_at DESC)");
   ensureIndex("idx_website_content_updated", "CREATE INDEX IF NOT EXISTS idx_website_content_updated ON website_content_pages(updated_at DESC)");
   ensureIndex("idx_website_reviews_public", "CREATE INDEX IF NOT EXISTS idx_website_reviews_public ON website_reviews(visible,sort_order,updated_at DESC)");
@@ -569,8 +531,6 @@ function runMigrations() {
   db.prepare("UPDATE jobs SET planned_minutes=CAST(ROUND(COALESCE(planned_hours,0)*60) AS INTEGER) WHERE COALESCE(planned_minutes,0)=0 AND COALESCE(planned_hours,0)>0").run();
   db.prepare("UPDATE pianos SET ownership_type=COALESCE(NULLIF(ownership_type,''),ownership,'Customer owned')").run();
   db.prepare("UPDATE pianos SET display_name=trim(COALESCE(NULLIF(original_description,''),COALESCE(brand,'')||' '||COALESCE(model,''))) WHERE display_name IS NULL OR display_name='' ").run();
-  db.prepare("UPDATE events SET attendance_mode=COALESCE(NULLIF(attendance_mode,''),'UNSET') WHERE attendance_mode IS NULL OR attendance_mode='' ").run();
-  db.prepare("UPDATE event_tickets SET ticket_variant=CASE WHEN source_type='INVITATION' THEN 'INVITATION' WHEN source_type='COMPLIMENTARY' THEN 'COMPLIMENTARY' ELSE 'PUBLIC' END WHERE ticket_variant IS NULL OR ticket_variant='' ").run();
 
   const accounts = [
     ["1000","Cash","Készpénz","ASSET","DEBIT"],["1010","Bank","Bank","ASSET","DEBIT"],
