@@ -115,8 +115,9 @@ function migrationRequiresBackup() {
   const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
+  const attendancePauseColumnsMissing = tableExists("event_attendance_sessions") && ["paused_at", "paused_by_user_id", "resumed_at", "resumed_by_user_id"].some((column) => !tableColumns("event_attendance_sessions").has(column));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || sampleContentMissing;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -138,6 +139,36 @@ function migrateWebsiteContactLeadStatuses() {
     db.exec("DROP TABLE website_contact_leads");
     db.exec("ALTER TABLE website_contact_leads_new RENAME TO website_contact_leads");
   })();
+}
+
+function migrateCustomerConversationCategories() {
+  if (!tableExists("customer_conversations")) return;
+  const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql || "").toUpperCase();
+  if (sql.includes("'TECHNICAL'")) return;
+  log("Adding the TECHNICAL customer conversation category while preserving existing conversations");
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE customer_conversations_new (
+        id TEXT PRIMARY KEY,public_token_hash TEXT NOT NULL UNIQUE,public_token_encrypted TEXT,name TEXT NOT NULL,email TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+        category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
+        service_id TEXT,piano_id TEXT,event_id TEXT,ticket_id TEXT,
+        status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
+        assigned_user_id TEXT,consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),source_path TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',last_message_at TEXT,closed_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
+        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
+        FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+      )`);
+      db.exec(`INSERT INTO customer_conversations_new(id,public_token_hash,public_token_encrypted,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,consent_contact,source_path,metadata_json,last_message_at,closed_at,created_at,updated_at)
+        SELECT id,public_token_hash,public_token_encrypted,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,consent_contact,source_path,metadata_json,last_message_at,closed_at,created_at,updated_at FROM customer_conversations`);
+      db.exec("DROP TABLE customer_conversations");
+      db.exec("ALTER TABLE customer_conversations_new RENAME TO customer_conversations");
+    })();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 function migrateEventArtistForeignKey() {
@@ -420,6 +451,10 @@ function runMigrations() {
     ensureColumn("event_repeat_requests", "notified_at", "TEXT");
     ensureColumn("event_repeat_requests", "notification_event_id", "TEXT");
     ensureColumn("event_repeat_requests", "delivery_status", "TEXT");
+    ensureColumn("event_attendance_sessions", "paused_at", "TEXT");
+    ensureColumn("event_attendance_sessions", "paused_by_user_id", "TEXT");
+    ensureColumn("event_attendance_sessions", "resumed_at", "TEXT");
+    ensureColumn("event_attendance_sessions", "resumed_by_user_id", "TEXT");
 
     // Inventory.
     const inventoryColumns = {
@@ -447,6 +482,7 @@ function runMigrations() {
 
   migrateColumns();
   migrateWebsiteContactLeadStatuses();
+  migrateCustomerConversationCategories();
   migrateEventArtistForeignKey();
   migrateUsersRoleConstraint();
   backfillUserCalendarColors(db, log);
