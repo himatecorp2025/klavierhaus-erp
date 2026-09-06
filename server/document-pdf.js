@@ -8,7 +8,7 @@ const { createFontMetrics, jpegDimensions } = require("./guest-list-pdf");
 const GOLD = "0.788 0.663 0.369";
 const CREAM = "0.969 0.953 0.894";
 const MUTED = "0.62 0.58 0.50";
-const BOARDING_PASS = { width: 612, height: 235.28 };
+const BOARDING_PASS = { width: 612, height: 252 };
 const LETTER = { width: 612, height: 792 };
 
 function number(value) {
