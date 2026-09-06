@@ -498,6 +498,10 @@ CREATE TABLE IF NOT EXISTS event_attendance_sessions (
   closed_by_user_id TEXT,
   reopened_at TEXT,
   reopened_by_user_id TEXT,
+  paused_at TEXT,
+  paused_by_user_id TEXT,
+  resumed_at TEXT,
+  resumed_by_user_id TEXT,
   revision INTEGER NOT NULL DEFAULT 0,
   export_version INTEGER NOT NULL DEFAULT 0,
   last_status_change_at TEXT,
@@ -509,6 +513,8 @@ CREATE TABLE IF NOT EXISTS event_attendance_sessions (
   FOREIGN KEY(started_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  ,FOREIGN KEY(paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  ,FOREIGN KEY(resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS event_attendance_entries (
@@ -571,7 +577,7 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','GENERAL')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
   service_id TEXT,
   piano_id TEXT,
   event_id TEXT,
