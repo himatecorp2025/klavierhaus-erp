@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { generateGuestListPdf } = require("./guest-list-pdf");
+const { attendanceError, attendanceRows, attendanceSnapshot, ensureSession, recordPdfExport, startMode, state: attendanceState } = require("./event-attendance");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
@@ -904,20 +905,24 @@ function registerEventRoutes(options) {
   app.get("/api/events/:id/guest-list.pdf", auth, admin, (req, res) => {
     const event = service.eventById(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const guests = db.prepare(`SELECT attendee_name FROM event_tickets
-      WHERE event_id=? AND status IN ('VALID','USED') ORDER BY lower(attendee_name),created_at`).all(event.id);
-    const language = req.query.lang === "hu" ? "hu" : "en";
-    const title = language === "hu" ? event.title_hu : event.title_en;
-    const dateLabel = new Intl.DateTimeFormat(language === "hu" ? "hu-HU" : "en-US", {
-      timeZone: event.timezone || NY_TIME_ZONE, dateStyle: "long", timeStyle: "short"
-    }).format(new Date(event.start_at));
     try {
-      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language });
+      let session = ensureSession(db, event.id, req.user.id);
+      if (!session.mode) session = startMode(db, event, "PAPER", req.user);
+      if (session.mode === "DIGITAL" && session.status !== "CLOSED") throw attendanceError("DIGITAL_ATTENDANCE_NOT_CLOSED");
+      const guests = attendanceRows(db, event.id);
+      const title = event.title_en || event.title_hu || "Klavierhaus Event";
+      const dateLabel = new Intl.DateTimeFormat("en-US", {
+        timeZone: event.timezone || NY_TIME_ZONE, dateStyle: "long", timeStyle: "short"
+      }).format(new Date(event.start_at));
+      const snapshot = attendanceSnapshot(db, event, session, guests);
+      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language: "en", closed: session.mode === "DIGITAL" && session.status === "CLOSED" });
+      recordPdfExport(db, event, req.user, session.mode, snapshot);
       const safeName = slugify(title) || "event";
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}-guest-list.pdf"`);
+      res.setHeader("X-Klavierhaus-Attendance-Mode", session.mode);
       res.type("application/pdf").send(pdf);
-    } catch (error) { sendError(res, Object.assign(error, { status: 500 }), "GUEST_LIST_PDF_FAILED"); }
+    } catch (error) { sendError(res, error.status ? error : Object.assign(error, { status: 500 }), "GUEST_LIST_PDF_FAILED"); }
   });
 
   app.get("/api/events/:id/refund-requests", auth, admin, (req, res) => {
