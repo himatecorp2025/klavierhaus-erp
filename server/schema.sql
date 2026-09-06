@@ -484,6 +484,83 @@ CREATE TABLE IF NOT EXISTS event_closures (
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Digital and paper attendance are represented separately from the ticket
+-- lifecycle. A guest can therefore be marked as deleted without changing a
+-- paid ticket into VOID or destroying its financial history.
+CREATE TABLE IF NOT EXISTS event_attendance_sessions (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  mode TEXT CHECK(mode IN ('PAPER','DIGITAL')),
+  status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK(status IN ('NOT_STARTED','OPEN','CLOSED')),
+  started_at TEXT,
+  started_by_user_id TEXT,
+  closed_at TEXT,
+  closed_by_user_id TEXT,
+  reopened_at TEXT,
+  reopened_by_user_id TEXT,
+  revision INTEGER NOT NULL DEFAULT 0,
+  export_version INTEGER NOT NULL DEFAULT 0,
+  last_status_change_at TEXT,
+  last_pdf_export_at TEXT,
+  snapshot_json TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(started_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_attendance_entries (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  ticket_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'NOT_ARRIVED' CHECK(status IN ('NOT_ARRIVED','PRESENT','DELETED')),
+  checked_in_at TEXT,
+  checked_in_by_user_id TEXT,
+  deleted_at TEXT,
+  deleted_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
+  FOREIGN KEY(checked_in_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(deleted_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_attendance_actions (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  session_id TEXT,
+  ticket_id TEXT,
+  action TEXT NOT NULL,
+  from_mode TEXT,
+  to_mode TEXT,
+  from_status TEXT,
+  to_status TEXT,
+  performed_by_user_id TEXT,
+  details TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(session_id) REFERENCES event_attendance_sessions(id) ON DELETE SET NULL,
+  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
+  FOREIGN KEY(performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_attendance_exports (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  session_id TEXT,
+  export_type TEXT NOT NULL CHECK(export_type IN ('PAPER','DIGITAL')),
+  export_version INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  exported_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY(session_id) REFERENCES event_attendance_sessions(id) ON DELETE SET NULL,
+  FOREIGN KEY(exported_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Operational extensions for manual attendance, customer conversations and
 -- auditable transactional document delivery. Public conversation access is
 -- token based; only a keyed hash is stored in the ERP database.
