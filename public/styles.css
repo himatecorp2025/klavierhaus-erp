@@ -752,6 +752,10 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
 .digital-attendance-row__details dt{color:#c9a95e;font-size:9px;font-weight:900;letter-spacing:.08em}
 .digital-attendance-row__details dd{margin:0;color:#d9ccb8;font-size:11px;overflow-wrap:anywhere}
 .digital-attendance-modal-shell .digital-attendance-sheet__footer{margin-top:auto}
+.digital-attendance-modal-shell #form{scrollbar-width:thin;scrollbar-color:#b79547 #050505}
+.digital-attendance-modal-shell #form::-webkit-scrollbar{width:12px}
+.digital-attendance-modal-shell #form::-webkit-scrollbar-track{background:#050505;border-left:1px solid #3e321d}
+.digital-attendance-modal-shell #form::-webkit-scrollbar-thumb{background:linear-gradient(#d6b76b,#8f763d);border:3px solid #050505;border-radius:12px}
 .guest-data-shell .guest-data-filters{margin:14px 0}
 .guest-data-shell .guest-data-row>td:first-child>div{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .guest-data-history{min-width:210px}
