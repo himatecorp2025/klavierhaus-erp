@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const Stripe = require("stripe");
+const { createTicketService } = require("./ticket-service");
 
 const HOLD_MINUTES = 15;
 const HOLD_MS = HOLD_MINUTES * 60 * 1000;
@@ -49,6 +50,7 @@ function createStripeSandbox(options = {}) {
   const websiteBaseUrl = normalizeBaseUrl(options.websiteBaseUrl ?? env.WEBSITE_BASE_URL, "https://klavierhaus-home.onrender.com");
   const onPaymentFulfilled = typeof options.onPaymentFulfilled === "function" ? options.onPaymentFulfilled : null;
   const onPaymentRefunded = typeof options.onPaymentRefunded === "function" ? options.onPaymentRefunded : null;
+  const ticketService = options.ticketService || createTicketService({ db });
 
   if (LIVE_SECRET_PREFIXES.some((prefix) => secretKey.startsWith(prefix))) {
     throw new Error("Live Stripe keys are not accepted while Stripe Sandbox mode is enforced");
@@ -109,12 +111,12 @@ function createStripeSandbox(options = {}) {
   }
 
   function eventTicketCount(eventId) {
-    const row = db.prepare("SELECT COUNT(*) AS count FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED')").get(eventId);
-    return Number(row?.count || 0);
+    return Number(ticketService.capacity(eventId)?.occupied || 0);
   }
 
   function availableCapacity(event, now = new Date()) {
-    return Math.max(0, Number(event.capacity_total || 0) - eventTicketCount(event.id) - activeHoldCount(event.id, now));
+    const current = ticketService.capacity(event.id, now);
+    return current ? Number(current.remaining || 0) : Math.max(0, Number(event.capacity_total || 0) - eventTicketCount(event.id) - activeHoldCount(event.id, now));
   }
 
   async function createCheckout({ event, language = "en", quantity = 1, attendeeNames = [] }) {
@@ -237,8 +239,9 @@ function createStripeSandbox(options = {}) {
     }
 
     const expired = new Date(hold.expires_at).getTime() <= Date.now();
-    const ticketCountWithoutThisHold = Number(db.prepare("SELECT COUNT(*) AS count FROM event_tickets WHERE event_id=? AND status IN ('VALID','USED')").get(event.id)?.count || 0);
-    if (expired && Number(event.capacity_total) - ticketCountWithoutThisHold < Number(hold.quantity)) {
+    const currentCapacity = ticketService.capacity(event.id);
+    const publicTicketCount = Number(currentCapacity?.public_occupied ?? currentCapacity?.occupied ?? 0);
+    if (expired && Number(event.capacity_total) - publicTicketCount < Number(hold.quantity)) {
       await refundLatePayment(session, hold, "CAPACITY_HOLD_EXPIRED");
       return { refunded: true, hold_id: hold.id };
     }
@@ -269,22 +272,22 @@ function createStripeSandbox(options = {}) {
       let attendeeNames = [];
       try { attendeeNames = JSON.parse(hold.attendee_names_json || "[]"); } catch (_error) { attendeeNames = []; }
       for (let sequence = 1; sequence <= Number(hold.quantity); sequence += 1) {
-        const ticketId = newId("EVTKT");
-        const publicCode = crypto.randomBytes(18).toString("base64url");
         const attendeeName = cleanText(attendeeNames[sequence - 1] || customer.name, 200);
-        db.prepare(`INSERT INTO event_tickets(id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,event_payment_id,ticket_sequence)
-          VALUES(?,?,'PURCHASE',?,?,?,?, 'VALID',?,'USD',?,?)`).run(
-          ticketId,
-          event.id,
-          customer.name,
+        const ticket = ticketService.createTicket({
+          eventId: event.id,
+          sourceType: "PURCHASE",
+          ticketVariant: "PUBLIC_PAID",
+          buyerName: customer.name,
           attendeeName,
-          customer.email,
-          publicCode,
-          Number(event.price_cents),
-          paymentId,
-          sequence
-        );
-        createdTickets.push(ticketId);
+          contactEmail: customer.email,
+          priceCents: Number(event.price_cents),
+          paymentStatus: "PAID",
+          reservationStatus: "FINALIZED",
+          paymentMethod: "STRIPE_TEST",
+          eventPaymentId: paymentId,
+          ticketSequence: sequence
+        });
+        createdTickets.push(ticket.id);
       }
       db.prepare(`UPDATE event_checkout_holds SET status='PAID',stripe_payment_intent_id=?,purchaser_name=?,purchaser_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(paymentIntent, customer.name, customer.email, hold.id);
