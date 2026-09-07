@@ -257,4 +257,84 @@ function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPa
   return pdf.serialize(catalogId, infoId);
 }
 
-module.exports = { generateGuestListPdf, createFontMetrics, jpegDimensions };
+function generateGuestDataPdf({ guests, language = "en", logoPath, fontPath }) {
+  const hu = language === "hu";
+  const rows = (guests || []).map((guest) => ({
+    name: escapePdfText(guest.name),
+    email: escapePdfText(guest.email),
+    eventHistory: escapePdfText((guest.events || []).map((event) => (hu ? event.title_hu : event.title_en) || event.title_en || event.title_hu || "Klavierhaus event").join(" · ")),
+    events: Number(guest.event_count || 0),
+    tickets: Number(guest.ticket_count || 0),
+    paidTickets: Number(guest.paid_ticket_count || 0),
+    average: guest.average_paid_price_cents == null ? "—" : `${(Number(guest.average_paid_price_cents) / 100).toFixed(2)} ${escapePdfText(guest.currency || "USD")}`
+  })).filter((guest) => guest.name);
+  const safeRows = rows.length ? rows : [{ name: hu ? "Nincs rögzített vendég" : "No registered guests", email: "", eventHistory: "", events: 0, tickets: 0, paidTickets: 0, average: "—" }];
+  const rowsPerPage = 16;
+  const pageCount = Math.max(1, Math.ceil(safeRows.length / rowsPerPage));
+  const labels = [
+    hu ? "VENDÉGADATOK" : "GUEST DATA",
+    hu ? "VENDÉG NEVE" : "GUEST NAME",
+    hu ? "E-MAIL" : "EMAIL",
+    hu ? "ESEMÉNYELŐZMÉNYEK" : "EVENT HISTORY",
+    hu ? "JEGYEK" : "TICKETS",
+    hu ? "FIZETETT JEGYEK" : "PAID TICKETS",
+    hu ? "ÁTLAGÁR" : "PAID AVERAGE",
+    "KLAVIERHAUS · NEW YORK | FRANCE",
+    ...safeRows.flatMap((row) => [row.name, row.email, row.eventHistory, row.average])
+  ];
+  const font = fs.readFileSync(fontPath || path.join(__dirname, "assets", "DejaVuSans.ttf"));
+  const metrics = createFontMetrics(font);
+  const codes = usedCodePoints(labels);
+  const cidMap = Buffer.alloc((Math.max(...codes) + 1) * 2);
+  codes.forEach((code) => cidMap.writeUInt16BE(metrics.glyphForCode(code), code * 2));
+  const widths = codes.map((code) => `${code} [${metrics.widthForGlyph(metrics.glyphForCode(code))}]`).join(" ");
+  const logo = fs.readFileSync(logoPath || path.join(__dirname, "assets", "klavierhaus-logo-black.jpg"));
+  const logoSize = jpegDimensions(logo);
+  const pdf = new PdfBuilder();
+  const pagesId = pdf.reserve();
+  const fontFileId = pdf.add(pdf.stream(`/Length1 ${font.length}`, font));
+  const descriptorId = pdf.add(`<< /Type /FontDescriptor /FontName /DejaVuSans /Flags 32 /FontBBox [${metrics.bbox.join(" ")}] /ItalicAngle 0 /Ascent 928 /Descent -236 /CapHeight 729 /StemV 80 /FontFile2 ${fontFileId} 0 R >>`);
+  const cidMapId = pdf.add(pdf.stream("", cidMap));
+  const unicodeId = pdf.add(pdf.stream("", createToUnicode(codes)));
+  const cidFontId = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /DejaVuSans /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${descriptorId} 0 R /CIDToGIDMap ${cidMapId} 0 R /DW 1000 /W [${widths}] >>`);
+  const fontId = pdf.add(`<< /Type /Font /Subtype /Type0 /BaseFont /DejaVuSans /Encoding /Identity-H /DescendantFonts [${cidFontId} 0 R] /ToUnicode ${unicodeId} 0 R >>`);
+  const logoId = pdf.add(pdf.stream(`/Type /XObject /Subtype /Image /Width ${logoSize.width} /Height ${logoSize.height} /ColorSpace ${logoSize.components === 1 ? "/DeviceGray" : "/DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode`, logo));
+  const pageIds = [];
+  for (let index = 0; index < pageCount; index += 1) {
+    const pageRows = safeRows.slice(index * rowsPerPage, (index + 1) * rowsPerPage);
+    const commands = [
+      `0.02 0.02 0.02 rg 0 0 ${pdfNumber(A4.width)} ${pdfNumber(A4.height)} re f\n`,
+      `${GOLD} RG 3 w 20 20 ${pdfNumber(A4.width - 40)} ${pdfNumber(A4.height - 40)} re S\n`,
+      `${MUTED_GOLD} RG .7 w 28 28 ${pdfNumber(A4.width - 56)} ${pdfNumber(A4.height - 56)} re S\n`,
+      "q 70 0 0 73 262.5 729 cm /Logo Do Q\n",
+      textCommand(hu ? "VENDÉGADATOK" : "GUEST DATA", 54, 698, 17, GOLD),
+      textCommand(hu ? "Statikus vendég- és eseményelőzmények" : "Static guest and event history", 54, 668, 12, CREAM),
+      `${MUTED_GOLD} RG .8 w 54 624 487 0 re S\n`,
+      textCommand(hu ? "VENDÉG NEVE" : "GUEST NAME", 66, 605, 8.5, GOLD),
+      textCommand(hu ? "E-MAIL" : "EMAIL", 180, 605, 8.5, GOLD),
+      textCommand(hu ? "ESEMÉNYELŐZMÉNYEK" : "EVENT HISTORY", 330, 605, 7, GOLD),
+      textCommand(hu ? "JEGYEK" : "TICKETS", 462, 605, 7.5, GOLD),
+      textCommand(hu ? "ÁTLAGÁR" : "PAID AVG", 502, 605, 7.5, GOLD)
+    ];
+    let y = 575;
+    pageRows.forEach((row) => {
+      commands.push(`${MUTED_GOLD} RG .45 w 54 ${pdfNumber(y - 15)} 487 34 re S\n`);
+      commands.push(textCommand(truncateToWidth(row.name, 105, 8.9, metrics), 66, y, 8.9, CREAM));
+      commands.push(textCommand(truncateToWidth(row.email, 138, 7.5, metrics), 180, y, 7.5, CREAM));
+      commands.push(textCommand(truncateToWidth(`${row.events} · ${row.eventHistory}`, 124, 6.6, metrics), 330, y, 6.6, CREAM));
+      commands.push(textCommand(`${row.tickets}/${row.paidTickets}`, 462, y, 7.8, CREAM));
+      commands.push(textCommand(truncateToWidth(row.average, 45, 6.8, metrics), 502, y, 6.8, GOLD));
+      y -= 38;
+    });
+    commands.push(textCommand(`${index + 1} / ${pageCount}`, 288, 43, 8.5, GOLD));
+    commands.push(textCommand("KLAVIERHAUS · NEW YORK | FRANCE", 54, 43, 8.5, CREAM));
+    const contentId = pdf.add(pdf.stream("", commands.join("")));
+    pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${pdfNumber(A4.width)} ${pdfNumber(A4.height)}] /Resources << /Font << /F1 ${fontId} 0 R >> /XObject << /Logo ${logoId} 0 R >> >> /Contents ${contentId} 0 R >>`));
+  }
+  pdf.set(pagesId, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
+  const catalogId = pdf.add(`<< /Type /Catalog /Pages ${pagesId} 0 R /PageLayout /SinglePage >>`);
+  const infoId = pdf.add(`<< /Title (${hu ? "Vendégadatok" : "Guest Data"}) /Author (Klavierhaus) /Creator (Klavierhaus ERP) >>`);
+  return pdf.serialize(catalogId, infoId);
+}
+
+module.exports = { generateGuestDataPdf, generateGuestListPdf, createFontMetrics, jpegDimensions };
