@@ -4,6 +4,8 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { generateTicketPdf, generateInvoicePdf } = require("./document-pdf");
+const { generateGuestDataPdf } = require("./guest-list-pdf");
+const { readGuestData } = require("./guest-data");
 const { buildConversationAutoReplyEmail } = require("./transactional-email");
 const {
   attendanceError,
@@ -117,11 +119,59 @@ function eventVenue(event) {
   return [event?.venue_name, event?.venue_street, event?.venue_city, event?.venue_region, event?.venue_postal_code].filter(Boolean).join(", ");
 }
 
+function isoDate(year, month, day) { return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`; }
+function weekdayDate(year, month, weekday, occurrence) {
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const offset = (weekday - first.getUTCDay() + 7) % 7;
+  return isoDate(year, month, 1 + offset + (occurrence - 1) * 7);
+}
+function lastWeekdayDate(year, month, weekday) {
+  const last = new Date(Date.UTC(year, month, 0));
+  const offset = (last.getUTCDay() - weekday + 7) % 7;
+  return isoDate(year, month, last.getUTCDate() - offset);
+}
+function addCalendarDays(dateKey, amount) {
+  const date = new Date(`${dateKey}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + amount);
+  return isoDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+}
+function easterSundayDate(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return isoDate(year, month, day);
+}
+function supportHolidayKeys(year, includeChristian = true) {
+  const fixed = [[1, 1], [6, 19], [7, 4], [11, 11], [12, 25]];
+  const keys = new Set(fixed.map(([month, day]) => isoDate(year, month, day)));
+  const observed = (month, day) => {
+    const key = isoDate(year, month, day); const weekday = new Date(`${key}T00:00:00Z`).getUTCDay();
+    keys.add(weekday === 6 ? addCalendarDays(key, -1) : weekday === 0 ? addCalendarDays(key, 1) : key);
+  };
+  fixed.forEach(([month, day]) => observed(month, day));
+  keys.add(weekdayDate(year, 1, 1, 3)); // Martin Luther King Jr. Day
+  keys.add(weekdayDate(year, 2, 1, 3)); // Washington's Birthday
+  keys.add(lastWeekdayDate(year, 5, 1)); // Memorial Day
+  keys.add(weekdayDate(year, 9, 1, 1)); // Labor Day
+  keys.add(weekdayDate(year, 10, 1, 2)); // Columbus / Indigenous Peoples' Day
+  keys.add(weekdayDate(year, 11, 4, 4)); // Thanksgiving Day
+  if (includeChristian) {
+    const easter = easterSundayDate(year);
+    keys.add(addCalendarDays(easter, -2)); // Good Friday
+    keys.add(easter); // Easter Sunday
+    keys.add(addCalendarDays(easter, 1)); // Easter Monday
+    keys.add(addCalendarDays(easter, 39)); // Ascension Day
+    keys.add(addCalendarDays(easter, 49)); // Pentecost Sunday
+    keys.add(addCalendarDays(easter, 50)); // Pentecost Monday
+  }
+  return keys;
+}
 function isSupportHoursOpen(date = new Date(), env = process.env) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).reduce((result, part) => { result[part.type] = part.value; return result; }, {});
   const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
-  const holidays = String(env.SUPPORT_HOLIDAYS || "").split(",").map((value) => value.trim()).filter(Boolean);
-  if (["Sat", "Sun"].includes(parts.weekday) || holidays.includes(dateKey)) return false;
+  const holidays = supportHolidayKeys(Number(parts.year), String(env.SUPPORT_CHRISTIAN_HOLIDAYS || "true").toLowerCase() !== "false");
+  String(env.SUPPORT_HOLIDAYS || "").split(",").map((value) => value.trim()).filter(Boolean).forEach((value) => holidays.add(value));
+  if (["Sat", "Sun"].includes(parts.weekday) || holidays.has(dateKey)) return false;
   const hour = Number(parts.hour);
   return hour >= 9 && hour < 17;
 }
@@ -353,6 +403,34 @@ function registerBusinessOperationsRoutes(options) {
   });
   app.post("/api/event-payments/:id/invoice/resend", auth, admin, async (req, res) => {
     try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
+  });
+
+  app.get("/api/guest-data", auth, admin, (req, res) => {
+    try {
+      const data = readGuestData(db, {
+        search: clean(req.query.search, 160),
+        eventId: clean(req.query.event_id, 160)
+      });
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json(data);
+    } catch (error) { sendError(res, error, "GUEST_DATA_LOAD_FAILED"); }
+  });
+
+  app.get("/api/guest-data.pdf", auth, admin, (req, res) => {
+    try {
+      const data = readGuestData(db, {
+        search: clean(req.query.search, 160),
+        eventId: clean(req.query.event_id, 160)
+      });
+      const language = req.query.lang === "hu" ? "hu" : "en";
+      const company = readCompanyData(db);
+      const pdf = generateGuestDataPdf({
+        guests: data.guests,
+        language,
+        logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir)
+      });
+      sendPdf(res, pdf, `klavierhaus-guest-data-${language}.pdf`);
+    } catch (error) { sendError(res, error, "GUEST_DATA_PDF_FAILED"); }
   });
 
   app.get("/api/events/:id/attendance", auth, attendanceOperator, (req, res) => {
