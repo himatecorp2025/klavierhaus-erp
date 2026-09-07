@@ -10,6 +10,15 @@ const CREAM = "0.969 0.953 0.894";
 const MUTED = "0.62 0.58 0.50";
 const SILVER = "0.76 0.78 0.80";
 const DARK = "0.02 0.02 0.02";
+const GOLD_RGB = Object.freeze([0.788, 0.663, 0.369]);
+const SILVER_RGB = Object.freeze([0.76, 0.78, 0.80]);
+const DARK_RGB = Object.freeze([0.02, 0.02, 0.02]);
+const WHITE_RGB = Object.freeze([1, 1, 1]);
+const LOGO_SPECS = Object.freeze({
+  LogoWhite: Object.freeze({ tint: WHITE_RGB }),
+  LogoBlack: Object.freeze({ tint: DARK_RGB }),
+  LogoGold: Object.freeze({ tint: GOLD_RGB })
+});
 const BOARDING_PASS = { width: 612, height: 252 };
 const LETTER = { width: 612, height: 792 };
 
@@ -31,7 +40,7 @@ function paethPredictor(left, above, upperLeft) {
   return upperLeft;
 }
 
-function readPngAsRgb(buffer) {
+function readPngAsRgba(buffer) {
   if (buffer.length < 33 || buffer.toString("hex", 0, 8) !== "89504e470d0a1a0a") throw new Error("INVALID_LOGO_PNG");
   const width = buffer.readUInt32BE(16);
   const height = buffer.readUInt32BE(20);
@@ -39,9 +48,11 @@ function readPngAsRgb(buffer) {
   const colorType = buffer[25];
   const interlace = buffer[28];
   const channelsByColorType = { 0: 1, 2: 3, 4: 2, 6: 4 };
-  const channels = channelsByColorType[colorType];
+  const channels = colorType === 3 ? 1 : channelsByColorType[colorType];
   if (!width || !height || bitDepth !== 8 || !channels || interlace !== 0) throw new Error("UNSUPPORTED_LOGO_PNG");
   const idat = [];
+  let palette = null;
+  let transparency = null;
   let offset = 8;
   while (offset + 12 <= buffer.length) {
     const length = buffer.readUInt32BE(offset);
@@ -50,9 +61,12 @@ function readPngAsRgb(buffer) {
     const end = start + length;
     if (end + 4 > buffer.length) throw new Error("INVALID_LOGO_PNG");
     if (type === "IDAT") idat.push(buffer.subarray(start, end));
+    if (type === "PLTE") palette = Buffer.from(buffer.subarray(start, end));
+    if (type === "tRNS") transparency = Buffer.from(buffer.subarray(start, end));
     if (type === "IEND") break;
     offset = end + 4;
   }
+  if (colorType === 3 && (!palette || palette.length < 3 || palette.length % 3 !== 0)) throw new Error("INVALID_LOGO_PNG_PALETTE");
   const rowBytes = width * channels;
   const raw = zlib.inflateSync(Buffer.concat(idat));
   const expected = height * (rowBytes + 1);
@@ -79,33 +93,61 @@ function readPngAsRgb(buffer) {
     rows.push(row);
     previous = row;
   }
-  const rgb = Buffer.alloc(width * height * 3);
+  const rgba = Buffer.alloc(width * height * 4);
   let targetOffset = 0;
   rows.forEach((row) => {
     for (let x = 0; x < width; x += 1) {
       const source = x * channels;
-      const alpha = colorType === 6 ? row[source + 3] / 255 : colorType === 4 ? row[source + 1] / 255 : 1;
-      const red = row[source];
-      const green = colorType === 0 || colorType === 4 ? red : row[source + 1];
-      const blue = colorType === 0 || colorType === 4 ? red : row[source + 2];
-      // Flatten transparency onto the black document background so PDF viewers
-      // render transparent logos consistently without an SMask dependency.
-      rgb[targetOffset++] = Math.round(red * alpha);
-      rgb[targetOffset++] = Math.round(green * alpha);
-      rgb[targetOffset++] = Math.round(blue * alpha);
+      let red;
+      let green;
+      let blue;
+      let alpha = 255;
+      if (colorType === 3) {
+        const paletteIndex = row[source];
+        const paletteOffset = paletteIndex * 3;
+        if (paletteOffset + 2 >= palette.length) throw new Error("INVALID_LOGO_PNG_PALETTE_INDEX");
+        red = palette[paletteOffset];
+        green = palette[paletteOffset + 1];
+        blue = palette[paletteOffset + 2];
+        alpha = transparency && paletteIndex < transparency.length ? transparency[paletteIndex] : 255;
+      } else {
+        red = row[source];
+        green = colorType === 0 || colorType === 4 ? red : row[source + 1];
+        blue = colorType === 0 || colorType === 4 ? red : row[source + 2];
+        alpha = colorType === 6 ? row[source + 3] : colorType === 4 ? row[source + 1] : 255;
+      }
+      rgba[targetOffset++] = red;
+      rgba[targetOffset++] = green;
+      rgba[targetOffset++] = blue;
+      rgba[targetOffset++] = alpha;
     }
   });
-  return { width, height, colorSpace: "/DeviceRGB", filter: "/FlateDecode", data: zlib.deflateSync(rgb) };
+  return { width, height, rgba };
 }
 
-function readLogoImage(logoPath) {
+function colorizeLogo(source, tint) {
+  const rgb = Buffer.alloc(source.width * source.height * 3);
+  const alpha = Buffer.alloc(source.width * source.height);
+  let targetOffset = 0;
+  let alphaOffset = 0;
+  for (let sourceOffset = 0; sourceOffset < source.rgba.length; sourceOffset += 4) {
+    const opacity = source.rgba[sourceOffset + 3];
+    for (let channel = 0; channel < 3; channel += 1) {
+      rgb[targetOffset++] = Math.round(tint[channel] * 255);
+    }
+    alpha[alphaOffset++] = opacity;
+  }
+  return { width: source.width, height: source.height, colorSpace: "/DeviceRGB", filter: "/FlateDecode", data: zlib.deflateSync(rgb), softMask: { width: source.width, height: source.height, colorSpace: "/DeviceGray", filter: "/FlateDecode", data: zlib.deflateSync(alpha) } };
+}
+
+function readLogoSource(logoPath) {
   if (!logoPath) return null;
   try {
     const buffer = fs.readFileSync(logoPath);
-    if (buffer.toString("hex", 0, 8) === "89504e470d0a1a0a") return readPngAsRgb(buffer);
+    if (buffer.toString("hex", 0, 8) === "89504e470d0a1a0a") return { type: "png", ...readPngAsRgba(buffer) };
     if (buffer.length > 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
       const dimensions = jpegDimensions(buffer);
-      return { width: dimensions.width, height: dimensions.height, colorSpace: dimensions.components === 1 ? "/DeviceGray" : "/DeviceRGB", filter: "/DCTDecode", data: buffer };
+      return { type: "jpeg", width: dimensions.width, height: dimensions.height, colorSpace: dimensions.components === 1 ? "/DeviceGray" : "/DeviceRGB", filter: "/DCTDecode", data: buffer };
     }
   } catch (_error) {
     return null;
@@ -113,8 +155,54 @@ function readLogoImage(logoPath) {
   return null;
 }
 
-function logoCommand(hasLogo, x, y, width, height) {
-  return hasLogo ? `q ${number(width)} 0 0 ${number(height)} ${number(x)} ${number(y)} cm /Logo Do Q\n` : "";
+function readLogoVariants(logoPath) {
+  const fallbackPath = path.join(__dirname, "assets", "klavierhaus-logo-white.png");
+  const source = readLogoSource(logoPath) || readLogoSource(fallbackPath);
+  if (!source) return {};
+  if (source.type === "jpeg") {
+    const canonical = readLogoSource(fallbackPath);
+    if (canonical?.type === "png") return { LogoOriginal: source, ...Object.fromEntries(Object.entries(LOGO_SPECS).map(([name, spec]) => [name, colorizeLogo(canonical, spec.tint)])) };
+    return { LogoOriginal: source };
+  }
+  return Object.fromEntries(Object.entries(LOGO_SPECS).map(([name, spec]) => [name, colorizeLogo(source, spec.tint)]));
+}
+
+function logoCommand(hasLogo, x, y, width, height, resourceName = "LogoWhite") {
+  return hasLogo ? `q ${number(width)} 0 0 ${number(height)} ${number(x)} ${number(y)} cm /${resourceName} Do Q\n` : "";
+}
+
+function rgbColor(values) {
+  return values.map((value) => Number(value).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0").join(" ");
+}
+
+function interpolateColor(left, right, amount) {
+  return left.map((value, index) => value + (right[index] - value) * amount);
+}
+
+function metallicColor(stops, amount) {
+  for (let index = 1; index < stops.length; index += 1) {
+    if (amount <= stops[index][0]) {
+      const [leftStop, leftColor] = stops[index - 1];
+      const [rightStop, rightColor] = stops[index];
+      return interpolateColor(leftColor, rightColor, (amount - leftStop) / (rightStop - leftStop));
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+function ticketBackground(palette) {
+  if (palette.designType === "NORMAL") return `${palette.background} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`;
+  const stops = palette.designType === "VIP"
+    ? [[0, [0.56, 0.42, 0.20]], [0.18, [0.78, 0.62, 0.32]], [0.36, [0.94, 0.82, 0.55]], [0.52, [0.68, 0.50, 0.24]], [0.72, [0.88, 0.73, 0.42]], [1, [0.57, 0.43, 0.21]]]
+    : [[0, [0.56, 0.59, 0.62]], [0.20, [0.78, 0.80, 0.82]], [0.38, [0.93, 0.94, 0.95]], [0.54, [0.67, 0.70, 0.73]], [0.76, [0.86, 0.87, 0.88]], [1, [0.58, 0.61, 0.64]]];
+  const bands = 256;
+  const commands = [];
+  for (let index = 0; index < bands; index += 1) {
+    const y = BOARDING_PASS.height * index / bands;
+    const bandHeight = BOARDING_PASS.height / bands + 0.15;
+    commands.push(`${rgbColor(metallicColor(stops, index / (bands - 1)))} rg 0 ${number(y)} ${number(BOARDING_PASS.width)} ${number(bandHeight)} re f\n`);
+  }
+  return commands.join("");
 }
 
 function unicodeHex(value) {
@@ -197,11 +285,21 @@ function createPdf({ pages, size, labels, title, fontPath, logoPath }) {
   const pdf = new PdfBuilder();
   const pagesId = pdf.reserve();
   const { fontId, metrics } = addFont(pdf, labels, fontPath);
-  const logo = readLogoImage(logoPath);
-  const logoId = logo ? pdf.add(pdf.stream(`/Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} /ColorSpace ${logo.colorSpace} /BitsPerComponent 8 /Filter ${logo.filter}`, logo.data)) : null;
+  const logoVariants = readLogoVariants(logoPath);
+  const logoIds = Object.fromEntries(Object.entries(logoVariants).map(([name, logo]) => {
+    const maskId = logo.softMask
+      ? pdf.add(pdf.stream(`/Type /XObject /Subtype /Image /Width ${logo.softMask.width} /Height ${logo.softMask.height} /ColorSpace ${logo.softMask.colorSpace} /BitsPerComponent 8 /Filter ${logo.softMask.filter}`, logo.softMask.data))
+      : null;
+    const softMask = maskId ? ` /SMask ${maskId} 0 R` : "";
+    const imageId = pdf.add(pdf.stream(`/Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} /ColorSpace ${logo.colorSpace} /BitsPerComponent 8 /Filter ${logo.filter}${softMask}`, logo.data));
+    return [name, imageId];
+  }));
+  const logoResources = Object.fromEntries(Object.entries(logoIds).map(([name, id]) => [name, `${id} 0 R`]));
+  const imageResources = Object.keys(logoResources).length
+    ? ` /XObject << ${Object.entries(logoResources).map(([name, reference]) => `/${name} ${reference}`).join(" ")} >>`
+    : "";
   const pageIds = pages.map((content) => {
-    const contentId = pdf.add(pdf.stream("", content(metrics, Boolean(logo))));
-    const imageResources = logoId ? ` /XObject << /Logo ${logoId} 0 R >>` : "";
+    const contentId = pdf.add(pdf.stream("", content(metrics, logoResources)));
     return pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${number(size.width)} ${number(size.height)}] /Resources << /Font << /F1 ${fontId} 0 R >>${imageResources} >> /Contents ${contentId} 0 R >>`);
   });
   pdf.set(pagesId, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
@@ -218,10 +316,33 @@ function ticketVariant(ticket, event) {
   return event?.access_type === "PUBLIC_FREE" ? "PUBLIC_FREE" : "COMPLIMENTARY";
 }
 
+function ticketDesignType(variant) {
+  if (variant === "VIP" || variant === "INVITATION") return "VIP";
+  if (variant === "COMPLIMENTARY") return "HONORARY";
+  return "NORMAL";
+}
+
 function ticketPalette(variant) {
-  if (variant === "VIP" || variant === "INVITATION") return { background: GOLD, foreground: DARK, accent: DARK, muted: "0.18 0.15 0.09" };
-  if (variant === "COMPLIMENTARY" || variant === "MANUAL") return { background: DARK, foreground: CREAM, accent: SILVER, muted: "0.55 0.58 0.62" };
-  return { background: DARK, foreground: CREAM, accent: GOLD, muted: MUTED };
+  const designType = ticketDesignType(variant);
+  if (designType === "VIP") {
+    return { designType, background: GOLD, logoResource: "LogoBlack", border: DARK, divider: DARK, wordmark: DARK, label: DARK, title: DARK, foreground: DARK, muted: DARK };
+  }
+  if (designType === "HONORARY") {
+    return { designType, background: SILVER, logoResource: "LogoGold", border: GOLD, divider: GOLD, wordmark: GOLD, label: DARK, title: GOLD, foreground: DARK, muted: DARK };
+  }
+  return { designType, background: DARK, logoResource: "LogoWhite", border: GOLD, divider: GOLD, wordmark: CREAM, label: GOLD, title: CREAM, foreground: CREAM, muted: CREAM };
+}
+
+function ticketTypeLabel(designType) {
+  if (designType === "VIP") return "VIP INVITATION";
+  if (designType === "HONORARY") return "HONORARY TICKET";
+  return "PUBLIC EVENT";
+}
+
+function ticketEventType(event, designType) {
+  const raw = safeText(event?.custom_type || event?.event_type || "").replace(/_/g, " ");
+  if (!raw || /^(PUBLIC PAID|PUBLIC FREE|VIP|INVITATION|COMPLIMENTARY|MANUAL|ON SITE)$/i.test(raw)) return ticketTypeLabel(designType);
+  return raw;
 }
 
 function ticketDate(event) {
@@ -232,52 +353,54 @@ function ticketDate(event) {
   } catch (_error) { return safeText(event.start_at); }
 }
 
-function ticketPage({ event, ticket, index, pageCount, metrics, hasLogo }) {
+function ticketPage({ event, ticket, index, pageCount, metrics, logoResources }) {
   const variant = ticketVariant(ticket, event);
   const palette = ticketPalette(variant);
   const title = safeText(event.title_en || event.title_hu || "Klavierhaus Event");
-  const eventType = safeText(event.custom_type || event.event_type || event.access_type || "EVENT").replace(/_/g, " ");
+  const eventType = ticketEventType(event, palette.designType);
   const date = ticketDate(event);
   const venue = safeText(event.venueLabel || event.venue_name || "Klavierhaus");
   const guest = safeText(ticket.display_name || ticket.attendee_name || ticket.original_guest_name || "Guest");
   const code = safeText(ticket.public_code);
   const id = safeText(ticket.id);
-  const priceVisible = !["VIP", "INVITATION", "COMPLIMENTARY"].includes(variant)
+  const priceVisible = palette.designType === "NORMAL"
     && Number(ticket.price_cents || 0) > 0
     && String(ticket.payment_status || "PAID").toUpperCase() === "PAID";
   const price = priceVisible ? `${String(ticket.currency || event.currency || "USD").toUpperCase()} ${(Number(ticket.price_cents || 0) / 100).toFixed(2)}` : "";
+  const hasLogo = Boolean(logoResources?.[palette.logoResource]);
   const commands = [
-    `${palette.background} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`,
-    `${palette.accent} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    `${palette.accent} rg 14 205 4 4 re f\n`,
-    logoCommand(hasLogo, 31, 183, 28, 28),
-    textCommand("KLAVIERHAUS", hasLogo ? 68 : 31, 204, 12, palette.accent),
-    textCommand("ADMISSION TICKET", 31, 174, 8, palette.muted),
+    ticketBackground(palette),
+    `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
+    `${palette.border} rg 14 205 4 4 re f\n`,
+    logoCommand(hasLogo, 31, 183, 28, 28, palette.logoResource),
+    textCommand("KLAVIERHAUS", hasLogo ? 68 : 31, 204, 12, palette.wordmark),
+    textCommand("ADMISSION TICKET", 31, 174, 8, palette.label),
     textCommand(truncate(eventType, 370, 8, metrics), 31, 158, 8, palette.foreground),
-    textCommand(truncate(title, 370, 20, metrics), 31, 132, 20, palette.foreground),
-    textCommand("DATE / TIME", 31, 98, 7, palette.accent),
+    textCommand(truncate(title, 370, 20, metrics), 31, 132, 20, palette.title),
+    textCommand("DATE / TIME", 31, 98, 7, palette.label),
     textCommand(truncate(date, 370, 9, metrics), 31, 84, 9, palette.foreground),
-    textCommand("LOCATION", 31, 66, 7, palette.accent),
+    textCommand("LOCATION", 31, 66, 7, palette.label),
     textCommand(truncate(venue, 370, 8, metrics), 31, 52, 8, palette.muted),
-    `${palette.muted} RG .7 w 430 30 0 175 re S\n`,
-    textCommand("GUEST", 458, 174, 7, palette.accent),
+    `${palette.divider} RG .7 w 430 30 0 175 re S\n`,
+    textCommand("GUEST", 458, 174, 7, palette.label),
     textCommand(truncate(guest, 125, 13, metrics), 458, 151, 13, palette.foreground),
-    textCommand("TICKET ID", 458, 119, 7, palette.accent),
+    textCommand("TICKET ID", 458, 119, 7, palette.label),
     textCommand(truncate(id, 125, 7.5, metrics), 458, 105, 7.5, palette.foreground),
-    textCommand("TICKET CODE", 458, 86, 7, palette.accent),
+    textCommand("TICKET CODE", 458, 86, 7, palette.label),
     textCommand(truncate(code, 125, 8.5, metrics), 458, 72, 8.5, palette.foreground),
-    priceVisible ? textCommand(price, 458, 45, 9, palette.foreground) : textCommand(variant.replace(/_/g, " "), 458, 45, 7.5, palette.muted),
+    priceVisible ? textCommand(price, 458, 45, 9, palette.foreground) : "",
     textCommand(`${index + 1} / ${pageCount}`, 458, 31, 7, palette.muted)
   ];
   return commands.join("");
 }
 
-function ticketBackPage({ metrics, hasLogo }) {
+function ticketBackPage({ palette, logoResources }) {
+  const hasLogo = Boolean(logoResources?.[palette.logoResource]);
   return [
-    `${DARK} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`,
-    `${GOLD} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    logoCommand(hasLogo, 281, 139, 50, 50),
-    textCommand("KLAVIERHAUS", 238, 105, 16, GOLD)
+    ticketBackground(palette),
+    `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
+    logoCommand(hasLogo, 281, 139, 50, 50, palette.logoResource),
+    textCommand("KLAVIERHAUS", 238, 105, 16, palette.wordmark)
   ].join("");
 }
 
@@ -285,13 +408,21 @@ function generateTicketDocumentPdf({ event, tickets, mode = "full", fontPath, lo
   const rows = Array.isArray(tickets) ? tickets : [];
   const safeRows = rows.length ? rows : [{ id: "", attendee_name: "No ticket", public_code: "", ticket_variant: "PUBLIC_PAID" }];
   const normalizedMode = ["front", "back", "full"].includes(String(mode).toLowerCase()) ? String(mode).toLowerCase() : "full";
-  const labels = safeRows.flatMap((ticket) => [ticket.id, ticket.attendee_name, ticket.display_name, ticket.public_code, ticket.ticket_variant, ticket.price_cents, ticket.currency]).concat([
+  const labels = safeRows.flatMap((ticket) => {
+    const palette = ticketPalette(ticketVariant(ticket, event));
+    return [
+      ticket.id, ticket.attendee_name, ticket.display_name, ticket.original_guest_name, ticket.public_code, ticket.ticket_variant,
+      ticket.price_cents, ticket.currency, ticketDate(event), ticketEventType(event, palette.designType), ticketTypeLabel(palette.designType),
+      event.venueLabel || event.venue_name, event.venue_street, event.venue_city, event.venue_region, event.venue_postal_code
+    ];
+  }).concat([
     event.title_en, event.title_hu, event.dateLabel, event.venueLabel, event.venue_name, event.custom_type, "KLAVIERHAUS", "ADMISSION TICKET", "DATE / TIME", "LOCATION", "GUEST", "TICKET ID", "TICKET CODE", "PUBLIC PAID", "PUBLIC FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON SITE"
   ]);
   const pages = [];
   safeRows.forEach((ticket, index) => {
-    if (normalizedMode !== "back") pages.push((metrics, hasLogo) => ticketPage({ event, ticket, index, pageCount: normalizedMode === "full" ? safeRows.length * 2 : safeRows.length, metrics, hasLogo }));
-    if (normalizedMode !== "front") pages.push((metrics, hasLogo) => ticketBackPage({ metrics, hasLogo }));
+    const palette = ticketPalette(ticketVariant(ticket, event));
+    if (normalizedMode !== "back") pages.push((metrics, logoResources) => ticketPage({ event, ticket, index, pageCount: normalizedMode === "full" ? safeRows.length * 2 : safeRows.length, metrics, logoResources }));
+    if (normalizedMode !== "front") pages.push((_metrics, logoResources) => ticketBackPage({ palette, logoResources }));
   });
   return createPdf({ pages, size: BOARDING_PASS, labels, title: `Klavierhaus ${normalizedMode} ticket document`, fontPath, logoPath });
 }
@@ -301,12 +432,14 @@ function generateTicketFrontPdf(options = {}) { return generateTicketDocumentPdf
 function generateTicketBackPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: "back" }); }
 function generateTicketFullPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: "full" }); }
 
-function invoicePage({ company, event, payment, tickets, invoiceNumber, language, metrics, hasLogo }) {
+function invoicePage({ company, event, payment, tickets, invoiceNumber, language, metrics, logoResources }) {
   const hu = language === "hu";
+  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const hasLogo = Boolean(logoResources?.[logoResource]);
   const lines = [
     `0.02 0.02 0.02 rg 0 0 ${number(LETTER.width)} ${number(LETTER.height)} re f\n`,
     `${GOLD} RG 2 w 28 28 ${number(LETTER.width - 56)} ${number(LETTER.height - 56)} re S\n`,
-    logoCommand(hasLogo, 54, 724, 42, 42),
+    logoCommand(hasLogo, 54, 724, 42, 42, logoResource),
     textCommand(company.legal_name || company.trade_name || "Klavierhaus", hasLogo ? 112 : 54, 716, 19, CREAM),
     textCommand(hu ? "SZÁMLA" : "INVOICE", 400, 716, 18, GOLD),
     textCommand(invoiceNumber, 400, 692, 9, MUTED),
@@ -343,7 +476,7 @@ function generateInvoicePdf({ company = {}, event, payment, tickets = [], invoic
     payment.purchaser_name, payment.purchaser_email, event.title_en, event.title_hu, invoiceNumber, company.invoice_payment_terms, company.invoice_footer, "INVOICE", "SZÁMLA", "BILLED TO", "VÁSÁRLÓ", "DESCRIPTION", "TÉTEL", "QTY", "AMOUNT", "MENNYISÉG", "ÖSSZEG", "TOTAL / PAID", "FIZETENDŐ / RENDEZVE", "This document records the transaction issued by the Klavierhaus internal system."
   ];
   return createPdf({
-    pages: [(metrics, hasLogo) => invoicePage({ company, event, payment, tickets, invoiceNumber, language, metrics, hasLogo })],
+    pages: [(metrics, logoResources) => invoicePage({ company, event, payment, tickets, invoiceNumber, language, metrics, logoResources })],
     size: LETTER,
     labels,
     title: `Klavierhaus Invoice ${invoiceNumber}`,
@@ -352,4 +485,4 @@ function generateInvoicePdf({ company = {}, event, payment, tickets = [], invoic
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf };
+module.exports = { BOARDING_PASS, LETTER, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, ticketDesignType, ticketPalette };
