@@ -107,6 +107,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   insert.run("EV-SA", "Hidden Owner", "event-owner@example.com", hash, "ADMIN", 1, 1);
   insert.run("EV-A", "Event Admin", "event-admin@example.com", hash, "ADMIN", 0, 0);
   insert.run("EV-W", "Event Worker", "event-worker@example.com", hash, "WORKER", 0, 0);
+  db.prepare("INSERT INTO contacts(id,name,email) VALUES('EV-CUSTOMER','Ada Beethoven','ada@example.com')").run();
   db.prepare("INSERT INTO website_artists(id,slug_en,slug_hu,name,portrait_url,published) VALUES('EV-ARTIST-1','event-artist','esemeny-muvesz','Event Artist','/assets/media/klavierhaus-artist-salon.png',1)").run();
   db.close();
 
@@ -261,6 +262,21 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   const adminCalendarDetails = await request(baseUrl, `/api/calendar-events/${eventId}`, { token: adminToken });
   assert.equal(adminCalendarDetails.payload.can_manage, true);
 
+  const individualVip = await request(baseUrl, "/api/events/individual-tickets", {
+    token: adminToken,
+    method: "POST",
+    body: { event_id: eventId, ticket_variant: "VIP", contact_id: "EV-CUSTOMER", salutation: "Dr.", first_names: "Ada Maria", surnames: "Beethoven", payment_status: "NOT_REQUIRED" }
+  });
+  assert.equal(individualVip.status, 201, JSON.stringify(individualVip.payload));
+  assert.equal(individualVip.payload.ticket.ticket_variant, "VIP");
+  assert.equal(individualVip.payload.ticket.original_guest_name, "Dr. Ada Maria Beethoven");
+  assert.match(individualVip.payload.ticket.public_code, /^V-[A-Z0-9]{3}-\d{3}-\d{2,}$/);
+  assert.deepEqual(individualVip.payload.documents.map((document) => document.document_type), ["FRONT", "BACK", "FULL"]);
+  assert.equal(individualVip.payload.ticket.contact_id, "EV-CUSTOMER");
+  const individualAttendance = await request(baseUrl, `/api/events/${eventId}/attendance`, { token: adminToken });
+  assert.equal(individualAttendance.payload.tickets.some((ticket) => ticket.id === individualVip.payload.ticket.id), true);
+  assert.equal((await request(baseUrl, `/api/events/${eventId}`, { token: adminToken })).payload.capacity.remaining, 2, "special tickets must not consume public capacity");
+
   const editedPublished = await request(baseUrl, `/api/events/${eventId}`, {
     token: adminToken,
     method: "PUT",
@@ -325,8 +341,34 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
     method: "POST",
     body: { attendee_name: "Too Late", contact_email: "late@example.com" }
   });
-  assert.equal(soldOut.status, 409);
-  assert.equal(soldOut.payload.error, "EVENT_SOLD_OUT");
+  assert.equal(soldOut.status, 201, JSON.stringify(soldOut.payload));
+  assert.equal(soldOut.payload.ticket_variant, "COMPLIMENTARY");
+  assert.equal(soldOut.payload.capacity?.remaining ?? (await request(baseUrl, `/api/events/${eventId}`, { token: adminToken })).payload.capacity.remaining, 2);
+
+  const onSite = await request(baseUrl, "/api/events/individual-tickets", {
+    token: adminToken,
+    method: "POST",
+    body: { event_id: eventId, ticket_variant: "ON_SITE", attendee_name: "On Site Guest", contact_email: "onsite@example.com", price_cents: 1500, payment_status: "PENDING", payment_method: "ON_SITE" }
+  });
+  assert.equal(onSite.status, 201, JSON.stringify(onSite.payload));
+  assert.equal(onSite.payload.ticket.payment_status, "PENDING");
+  assert.deepEqual(onSite.payload.documents, []);
+  const onSitePaid = await request(baseUrl, `/api/events/tickets/${onSite.payload.ticket.id}/pay`, {
+    token: adminToken,
+    method: "POST",
+    body: { payment_method: "CASH" }
+  });
+  assert.equal(onSitePaid.status, 200, JSON.stringify(onSitePaid.payload));
+  assert.equal(onSitePaid.payload.ticket.payment_status, "PAID");
+  assert.equal(onSitePaid.payload.ticket.reservation_status, "FINALIZED");
+  assert.deepEqual(onSitePaid.payload.documents.map((document) => document.document_type), ["FRONT", "BACK", "FULL"]);
+  assert.match(onSitePaid.payload.invoice.invoice_number, /^KH-/);
+  const voidedOnSite = await request(baseUrl, `/api/events/tickets/${onSite.payload.ticket.id}/void`, { token: adminToken, method: "POST", body: { reason: "Administrative correction" } });
+  assert.equal(voidedOnSite.status, 200, JSON.stringify(voidedOnSite.payload));
+  assert.equal(voidedOnSite.payload.status, "VOID");
+  assert.equal((await request(baseUrl, `/api/events/${eventId}`, { token: adminToken })).payload.capacity.remaining, 2);
+  const voidedAttendance = await request(baseUrl, `/api/events/${eventId}/attendance`, { token: adminToken });
+  assert.equal(voidedAttendance.payload.tickets.find((ticket) => ticket.id === onSite.payload.ticket.id)?.attendance_status, "DELETED");
 
   const guestList = await fetch(`${baseUrl}/api/events/${eventId}/guest-list.pdf?lang=hu`, { headers: { Authorization: `Bearer ${adminToken}` } });
   assert.equal(guestList.status, 200);
@@ -339,7 +381,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
 
   const refund = await request(baseUrl, "/api/public/event-refund-requests", {
     method: "POST",
-    body: { ticket_code: complimentary.payload.public_code, email: "honorary@example.com", reason: "Unable to attend", name: "Honorary Guest" }
+    body: { ticket_code: complimentary.payload.public_code, email: "honorary@example.com", reason_code: "CUSTOMER_REQUEST", reason_detail: "Unable to attend", name: "Honorary Guest" }
   });
   assert.equal(refund.status, 201, JSON.stringify(refund.payload));
   assert.equal(refund.payload.eligible, true);
@@ -350,7 +392,28 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
     body: { status: "APPROVED", resolution_note: "Approved under the 48-hour rule" }
   });
   assert.equal(approvedRefund.status, 200);
-  assert.equal(approvedRefund.payload.status, "APPROVED");
+  assert.equal(approvedRefund.payload.status, "PROCESSED");
+  assert.equal(approvedRefund.payload.execution_status, "COMPLETED");
+
+  const invalidRefundReason = await request(baseUrl, "/api/public/event-refund-requests", {
+    method: "POST",
+    body: { ticket_code: soldOut.payload.public_code, email: "late@example.com", reason_code: "NOT_ALLOWED", reason_detail: "Unsupported reason", name: "Too Late" }
+  });
+  assert.equal(invalidRefundReason.status, 400);
+  assert.equal(invalidRefundReason.payload.error, "INVALID_REFUND_REASON");
+  const noShowRequest = await request(baseUrl, "/api/public/event-refund-requests", {
+    method: "POST",
+    body: { ticket_code: soldOut.payload.public_code, email: "late@example.com", reason_code: "CUSTOMER_REQUEST", reason_detail: "Unable to attend", name: "Too Late" }
+  });
+  assert.equal(noShowRequest.status, 201, JSON.stringify(noShowRequest.payload));
+  const noShowRefund = await request(baseUrl, `/api/events/refund-requests/${noShowRequest.payload.id}`, {
+    token: adminToken,
+    method: "PUT",
+    body: { status: "REJECTED", no_show: true, review_note: "Guest did not arrive" }
+  });
+  assert.equal(noShowRefund.status, 200);
+  assert.equal(noShowRefund.payload.eligibility_code, "REFUND NOT ELIGIBLE – NO-SHOW");
+  assert.equal(noShowRefund.payload.execution_status, "NOT_ELIGIBLE");
 
   const cancelled = await request(baseUrl, `/api/events/${eventId}/cancel`, { token: adminToken, method: "POST", body: { reason: "Artist illness" } });
   assert.equal(cancelled.status, 200);
@@ -394,6 +457,11 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   const closed = await request(baseUrl, `/api/events/${past.payload.id}/close`, { token: adminToken, method: "POST", body: {} });
   assert.equal(closed.status, 200);
   assert.equal(closed.payload.finance_connected, false);
+  const closedAttendance = await request(baseUrl, `/api/events/${past.payload.id}/attendance`, { token: adminToken });
+  assert.equal(closedAttendance.payload.closed, true);
+  const closedModeChange = await request(baseUrl, `/api/events/${past.payload.id}/attendance/mode`, { token: adminToken, method: "POST", body: { mode: "DIGITAL" } });
+  assert.equal(closedModeChange.status, 409);
+  assert.equal(closedModeChange.payload.error, "EVENT_ALREADY_CLOSED");
   const duplicateClose = await request(baseUrl, `/api/events/${past.payload.id}/close`, { token: adminToken, method: "POST", body: {} });
   assert.equal(duplicateClose.status, 409);
   assert.equal(duplicateClose.payload.error, "EVENT_ALREADY_CLOSED");
