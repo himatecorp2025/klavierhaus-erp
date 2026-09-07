@@ -45,7 +45,7 @@ test("website platform installs editable sample content once and publishes artis
     db.prepare("INSERT INTO pianos(id,brand,model,ownership) VALUES('CLIENT-PIANO','Client brand','Client model','Customer owned')").run();
     const installed = await request("/api/demo-content/install", { method: "POST", body: "{}" });
     assert.equal(installed.status, 201, JSON.stringify(installed.body));
-    assert.deepEqual(installed.body.installed, { artists: 3, services: 3, pianos: 6, reviews: 3, events: 3 });
+    assert.deepEqual(installed.body.installed, { artists: 3, services: 3, pianos: 6, reviews: 3, events: 0 });
     assert.equal((await request("/api/demo-content/install", { method: "POST", body: "{}" })).status, 409);
     const artists = await request("/api/public/website-artists?lang=hu");
     assert.equal(artists.body.length, 3);
@@ -62,7 +62,7 @@ test("website platform installs editable sample content once and publishes artis
     assert.deepEqual([...new Set(pianos.body.map((piano) => piano.brand))].sort(), ["Bösendorfer", "Fazioli", "Steinway & Sons"]);
     assert.equal(reviews.status, 200);
     assert.equal(reviews.body.length, 3, "all sample reviews must be public");
-    assert.equal(db.prepare("SELECT COUNT(*) count FROM events WHERE is_sample=1 AND status='PUBLISHED' AND published_at IS NOT NULL").get().count, 3, "sample events must be published for the public event API");
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM events WHERE is_sample=1 AND status='PUBLISHED' AND published_at IS NOT NULL").get().count, 0, "sample events must not be installed; event data is operational and starts empty");
     assert.equal(db.prepare("SELECT COUNT(*) count FROM pianos").get().count, 1, "sample showroom content must not touch customer pianos");
     const removed = await request("/api/demo-content", { method: "DELETE", headers: { "x-test-super": "1" } });
     assert.equal(removed.status, 200, JSON.stringify(removed.body));
