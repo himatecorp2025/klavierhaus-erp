@@ -127,6 +127,8 @@ test("document service creates downloadable ticket and invoice artifacts from cu
   const paymentTicketsPdf = service.ticketPdfForPayment("PAY-DOC-1");
   const invoice = service.invoicePdfForPayment("PAY-DOC-1");
   assert.match(ticketPdf.toString("latin1"), /\/MediaBox \[0 0 612 252\]/);
+  assert.match(ticketPdf.toString("latin1"), /\/LogoWhite \d+ 0 R/);
+  assert.match(ticketPdf.toString("latin1"), /\/LogoWhite Do/);
   assert.match(paymentTicketsPdf.toString("latin1"), /\/MediaBox \[0 0 612 252\]/);
   assert.equal(invoice.invoice_number.startsWith("KH-"), true);
   db.prepare("UPDATE app_settings SET setting_value='Klavierhaus Updated LLC' WHERE setting_key='company_data_legal_name'").run();
@@ -143,6 +145,34 @@ test("document service creates downloadable ticket and invoice artifacts from cu
     db.close();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
+});
+
+test("email ticket delivery uses the approved logo palette and hides VIP prices", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kh-email-ticket-"));
+  const dbPath = path.join(tempRoot, "email.sqlite");
+  const init = spawnSync(process.execPath, [path.join(projectRoot, "server", "init-db.js")], { cwd: projectRoot, env: { ...process.env, DB_PATH: dbPath, BACKUP_DIR: path.join(tempRoot, "backups") }, encoding: "utf8" });
+  assert.equal(init.status, 0, `${init.stdout}\n${init.stderr}`);
+  const db = new Database(dbPath);
+  db.prepare("INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,start_at,end_at,capacity_total,price_cents,currency) VALUES('EV-EMAIL-1','EMAIL-1','EVC-SALON-CONCERT','PUBLIC_PAID','PUBLISHED','email-event','email-event-hu','Email Concert','E-mail koncert','Klavierhaus','790 11th Avenue','New York','NY','10019','US','2031-04-10T23:00:00.000Z','2031-04-11T01:00:00.000Z',4,12500,'USD')").run();
+  db.prepare("INSERT INTO event_tickets(id,event_id,source_type,ticket_variant,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,payment_status,ticket_sequence) VALUES('T-EMAIL-VIP','EV-EMAIL-1','COMPLIMENTARY','VIP','VIP Guest','VIP Guest','vip@example.com','V-EMAIL-001','VALID',12500,'USD','PAID',1)").run();
+  let deliveredPdf = null;
+  const service = createBusinessDocumentService({
+    db,
+    uploadDir: path.join(tempRoot, "uploads"),
+    transactionalEmail: {
+      async sendEventTicketDocuments({ ticketPdf }) { deliveredPdf = ticketPdf; return { providerMessageId: "mail-email-vip" }; }
+    },
+    websiteBaseUrl: "https://klavierhaus.com",
+    env: { JWT_SECRET: "email-ticket-test-secret" }
+  });
+  const delivery = await service.sendTicketDocuments({ eventId: "EV-EMAIL-1", ticketIds: ["T-EMAIL-VIP"], deliveryType: "EVENT_INDIVIDUAL_TICKET" });
+  assert.equal(delivery.status, "SENT");
+  assert.ok(Buffer.isBuffer(deliveredPdf));
+  const extracted = spawnSync("pdftotext", ["-", "-"], { input: deliveredPdf }).stdout.toString("utf8");
+  assert.doesNotMatch(extracted, /PRICE|USD 125\.00|FREE|COMPLIMENTARY|NO PRICE/);
+  assert.match(deliveredPdf.toString("latin1"), /\/LogoBlack Do/);
+  db.close();
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
 test("document and helpdesk HTTP routes work end to end with admin authentication", async (t) => {
