@@ -8,6 +8,8 @@ const { createFontMetrics, jpegDimensions } = require("./guest-list-pdf");
 const GOLD = "0.788 0.663 0.369";
 const CREAM = "0.969 0.953 0.894";
 const MUTED = "0.62 0.58 0.50";
+const SILVER = "0.76 0.78 0.80";
+const DARK = "0.02 0.02 0.02";
 const BOARDING_PASS = { width: 612, height: 252 };
 const LETTER = { width: 612, height: 792 };
 
@@ -208,50 +210,96 @@ function createPdf({ pages, size, labels, title, fontPath, logoPath }) {
   return pdf.serialize(catalogId, infoId);
 }
 
-function ticketPage({ event, ticket, index, pageCount, language, metrics, hasLogo }) {
-  const hu = language === "hu";
-  const title = hu ? (event.title_hu || event.title_en) : event.title_en;
-  const date = event.dateLabel || event.start_at || "";
-  const venue = event.venueLabel || event.venue_name || "Klavierhaus";
-  const label = hu ? "BELÉPŐJEGY" : "ADMISSION TICKET";
-  const attendee = hu ? "VENDÉG" : "ATTENDEE";
+function ticketVariant(ticket, event) {
+  const value = safeText(ticket?.ticket_variant).toUpperCase();
+  if (value) return value;
+  if (ticket?.source_type === "INVITATION") return "INVITATION";
+  if (ticket?.source_type === "PURCHASE") return "PUBLIC_PAID";
+  return event?.access_type === "PUBLIC_FREE" ? "PUBLIC_FREE" : "COMPLIMENTARY";
+}
+
+function ticketPalette(variant) {
+  if (variant === "VIP" || variant === "INVITATION") return { background: GOLD, foreground: DARK, accent: DARK, muted: "0.18 0.15 0.09" };
+  if (variant === "COMPLIMENTARY" || variant === "MANUAL") return { background: DARK, foreground: CREAM, accent: SILVER, muted: "0.55 0.58 0.62" };
+  return { background: DARK, foreground: CREAM, accent: GOLD, muted: MUTED };
+}
+
+function ticketDate(event) {
+  if (event?.dateLabel) return safeText(event.dateLabel);
+  if (!event?.start_at) return "";
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: event.timezone || "America/New_York", dateStyle: "long", timeStyle: "short" }).format(new Date(event.start_at));
+  } catch (_error) { return safeText(event.start_at); }
+}
+
+function ticketPage({ event, ticket, index, pageCount, metrics, hasLogo }) {
+  const variant = ticketVariant(ticket, event);
+  const palette = ticketPalette(variant);
+  const title = safeText(event.title_en || event.title_hu || "Klavierhaus Event");
+  const eventType = safeText(event.custom_type || event.event_type || event.access_type || "EVENT").replace(/_/g, " ");
+  const date = ticketDate(event);
+  const venue = safeText(event.venueLabel || event.venue_name || "Klavierhaus");
+  const guest = safeText(ticket.display_name || ticket.attendee_name || ticket.original_guest_name || "Guest");
   const code = safeText(ticket.public_code);
+  const id = safeText(ticket.id);
+  const priceVisible = !["VIP", "INVITATION", "COMPLIMENTARY"].includes(variant)
+    && Number(ticket.price_cents || 0) > 0
+    && String(ticket.payment_status || "PAID").toUpperCase() === "PAID";
+  const price = priceVisible ? `${String(ticket.currency || event.currency || "USD").toUpperCase()} ${(Number(ticket.price_cents || 0) / 100).toFixed(2)}` : "";
   const commands = [
-    `0.02 0.02 0.02 rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`,
-    `${GOLD} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    `${GOLD} rg 14 205 4 4 re f\n`,
-    logoCommand(hasLogo, 31, 182, 30, 30),
-    textCommand("KLAVIERHAUS", hasLogo ? 70 : 31, 204, 12, GOLD),
-    textCommand(label, 31, 174, 10, MUTED),
-    textCommand(truncate(title, 370, 23, metrics), 31, 141, 23, CREAM),
-    textCommand(date, 31, 112, 10, CREAM),
-    textCommand(truncate(venue, 370, 10, metrics), 31, 94, 10, MUTED),
-    `${MUTED} RG .7 w 430 30 0 175 re S\n`,
-    textCommand(attendee, 458, 174, 8, GOLD),
-    textCommand(truncate(ticket.attendee_name, 125, 16, metrics), 458, 143, 16, CREAM),
-    textCommand(hu ? "JEGYKÓD" : "TICKET CODE", 458, 103, 8, GOLD),
-    textCommand(truncate(code, 125, 9, metrics), 458, 84, 9, CREAM),
-    textCommand(`${index + 1} / ${pageCount}`, 458, 45, 8, MUTED),
-    textCommand("BLACK · GOLD · PERSONAL ADMISSION", 31, 31, 7.5, MUTED)
+    `${palette.background} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`,
+    `${palette.accent} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
+    `${palette.accent} rg 14 205 4 4 re f\n`,
+    logoCommand(hasLogo, 31, 183, 28, 28),
+    textCommand("KLAVIERHAUS", hasLogo ? 68 : 31, 204, 12, palette.accent),
+    textCommand("ADMISSION TICKET", 31, 174, 8, palette.muted),
+    textCommand(truncate(eventType, 370, 8, metrics), 31, 158, 8, palette.foreground),
+    textCommand(truncate(title, 370, 20, metrics), 31, 132, 20, palette.foreground),
+    textCommand("DATE / TIME", 31, 98, 7, palette.accent),
+    textCommand(truncate(date, 370, 9, metrics), 31, 84, 9, palette.foreground),
+    textCommand("LOCATION", 31, 66, 7, palette.accent),
+    textCommand(truncate(venue, 370, 8, metrics), 31, 52, 8, palette.muted),
+    `${palette.muted} RG .7 w 430 30 0 175 re S\n`,
+    textCommand("GUEST", 458, 174, 7, palette.accent),
+    textCommand(truncate(guest, 125, 13, metrics), 458, 151, 13, palette.foreground),
+    textCommand("TICKET ID", 458, 119, 7, palette.accent),
+    textCommand(truncate(id, 125, 7.5, metrics), 458, 105, 7.5, palette.foreground),
+    textCommand("TICKET CODE", 458, 86, 7, palette.accent),
+    textCommand(truncate(code, 125, 8.5, metrics), 458, 72, 8.5, palette.foreground),
+    priceVisible ? textCommand(price, 458, 45, 9, palette.foreground) : textCommand(variant.replace(/_/g, " "), 458, 45, 7.5, palette.muted),
+    textCommand(`${index + 1} / ${pageCount}`, 458, 31, 7, palette.muted)
   ];
   return commands.join("");
 }
 
-function generateTicketPdf({ event, tickets, language = "en", fontPath, logoPath }) {
-  const rows = Array.isArray(tickets) ? tickets : [];
-  const safeRows = rows.length ? rows : [{ attendee_name: language === "hu" ? "Nincs jegy" : "No ticket", public_code: "" }];
-  const labels = safeRows.flatMap((ticket) => [ticket.attendee_name, ticket.public_code]).concat([
-    event.title_en, event.title_hu, event.dateLabel, event.venueLabel, "KLAVIERHAUS", "ADMISSION TICKET", "BELÉPŐJEGY", "ATTENDEE", "VENDÉG", "TICKET CODE", "JEGYKÓD", "BLACK · GOLD · PERSONAL ADMISSION"
-  ]);
-  return createPdf({
-    pages: safeRows.map((ticket, index) => (metrics, hasLogo) => ticketPage({ event, ticket, index, pageCount: safeRows.length, language, metrics, hasLogo })),
-    size: BOARDING_PASS,
-    labels,
-    title: "Klavierhaus Admission Tickets",
-    fontPath,
-    logoPath
-  });
+function ticketBackPage({ metrics, hasLogo }) {
+  return [
+    `${DARK} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`,
+    `${GOLD} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
+    logoCommand(hasLogo, 281, 139, 50, 50),
+    textCommand("KLAVIERHAUS", 238, 105, 16, GOLD)
+  ].join("");
 }
+
+function generateTicketDocumentPdf({ event, tickets, mode = "full", fontPath, logoPath }) {
+  const rows = Array.isArray(tickets) ? tickets : [];
+  const safeRows = rows.length ? rows : [{ id: "", attendee_name: "No ticket", public_code: "", ticket_variant: "PUBLIC_PAID" }];
+  const normalizedMode = ["front", "back", "full"].includes(String(mode).toLowerCase()) ? String(mode).toLowerCase() : "full";
+  const labels = safeRows.flatMap((ticket) => [ticket.id, ticket.attendee_name, ticket.display_name, ticket.public_code, ticket.ticket_variant, ticket.price_cents, ticket.currency]).concat([
+    event.title_en, event.title_hu, event.dateLabel, event.venueLabel, event.venue_name, event.custom_type, "KLAVIERHAUS", "ADMISSION TICKET", "DATE / TIME", "LOCATION", "GUEST", "TICKET ID", "TICKET CODE", "PUBLIC PAID", "PUBLIC FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON SITE"
+  ]);
+  const pages = [];
+  safeRows.forEach((ticket, index) => {
+    if (normalizedMode !== "back") pages.push((metrics, hasLogo) => ticketPage({ event, ticket, index, pageCount: normalizedMode === "full" ? safeRows.length * 2 : safeRows.length, metrics, hasLogo }));
+    if (normalizedMode !== "front") pages.push((metrics, hasLogo) => ticketBackPage({ metrics, hasLogo }));
+  });
+  return createPdf({ pages, size: BOARDING_PASS, labels, title: `Klavierhaus ${normalizedMode} ticket document`, fontPath, logoPath });
+}
+
+function generateTicketPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: options.mode || "full" }); }
+function generateTicketFrontPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: "front" }); }
+function generateTicketBackPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: "back" }); }
+function generateTicketFullPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: "full" }); }
 
 function invoicePage({ company, event, payment, tickets, invoiceNumber, language, metrics, hasLogo }) {
   const hu = language === "hu";
@@ -304,4 +352,4 @@ function generateInvoicePdf({ company = {}, event, payment, tickets = [], invoic
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, generateTicketPdf, generateInvoicePdf };
+module.exports = { BOARDING_PASS, LETTER, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf };
