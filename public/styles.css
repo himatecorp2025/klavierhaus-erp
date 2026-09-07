@@ -725,3 +725,47 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
 /* Digital attendance guest rows keep the PDF column order: name, email, type, code, actions. */
 .digital-attendance-notice.is-paused{border-color:#b7833a}.digital-attendance-sheet__controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 12px}
 .digital-attendance-email{color:#b7ad9d;font-size:11px;overflow-wrap:anywhere}
+
+/* Digital Attendance is an interactive A4 preview, not an inline ERP table. */
+.digital-attendance-modal-shell{align-items:center!important;padding:18px!important}
+.digital-attendance-modal-shell .modal-box{width:min(760px,96vw)!important;max-width:760px!important;max-height:94vh!important;padding:14px!important;background:#050505;border:1px solid #b79547;border-radius:4px;overflow:hidden}
+.digital-attendance-modal-shell .modal-header{margin:0 0 8px;padding:0 2px 10px;border-bottom:1px solid #705a2d;color:#f7f1e4;background:#050505}
+.digital-attendance-modal-shell .modal-header h3{color:#d6b76b;letter-spacing:.08em;text-transform:uppercase}
+.digital-attendance-modal-shell .modal-close{background:transparent;color:#f7f1e4;border:1px solid #705a2d;border-radius:0}
+.digital-attendance-modal-shell #form{overflow-x:hidden;overflow-y:auto;padding:0 4px 4px;background:#050505}
+.digital-attendance-modal-content{display:grid;gap:14px;min-width:0}
+.digital-attendance-pages{display:grid;gap:18px;justify-items:center}
+.digital-attendance-modal-shell .digital-attendance-sheet{width:min(100%,595px);min-width:0;min-height:842px;margin:0;padding:28px;display:flex;flex-direction:column;background:#050505;border:3px solid #b79547;box-shadow:inset 0 0 0 5px #050505,inset 0 0 0 6px #705a2d;color:#f7f1e4}
+.digital-attendance-modal-shell .digital-attendance-sheet__header{flex:0 0 auto}
+.digital-attendance-modal-shell .digital-attendance-table{min-width:0;overflow:visible}
+.digital-attendance-modal-shell .digital-attendance-table__head,.digital-attendance-modal-shell .digital-attendance-row{grid-template-columns:minmax(0,1fr) 92px 76px;min-width:0}
+.digital-attendance-modal-shell .digital-attendance-table__head span{min-width:0;overflow-wrap:anywhere}
+.digital-attendance-modal-shell .digital-attendance-row{align-items:start;min-height:64px;padding:10px 12px}
+.digital-attendance-modal-shell .digital-attendance-row__guest{min-width:0;padding-right:12px}
+.digital-attendance-modal-shell .digital-attendance-row__guest>strong{font-size:17px;line-height:1.22;overflow-wrap:anywhere}
+.digital-attendance-modal-shell .digital-attendance-status{padding:7px 4px 0;color:#c9a95e;font-size:10px;font-weight:900;letter-spacing:.06em;overflow-wrap:anywhere}
+.digital-attendance-modal-shell .attendance-ticket-actions{justify-content:flex-end;padding-top:3px}
+.attendance-details-toggle{justify-self:start;margin-top:6px;padding:5px 8px!important;font-size:11px!important;line-height:1.1}
+.digital-attendance-row__details{margin-top:8px;padding:8px;border:1px solid #594824;background:#0b0a07}
+.digital-attendance-row__details dl{display:grid;gap:5px;margin:0}
+.digital-attendance-row__details dl div{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px;min-width:0}
+.digital-attendance-row__details dt{color:#c9a95e;font-size:9px;font-weight:900;letter-spacing:.08em}
+.digital-attendance-row__details dd{margin:0;color:#d9ccb8;font-size:11px;overflow-wrap:anywhere}
+.digital-attendance-modal-shell .digital-attendance-sheet__footer{margin-top:auto}
+.guest-data-shell .guest-data-filters{margin:14px 0}
+.guest-data-shell .guest-data-row>td:first-child>div{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.guest-data-history{min-width:210px}
+.guest-data-history summary{cursor:pointer;color:var(--blue);font-weight:800}
+.guest-data-history ul{display:grid;gap:8px;margin:10px 0 0;padding-left:18px}
+.guest-data-history li{display:grid;gap:2px}
+.guest-data-history li span{color:var(--muted);font-size:12px}
+.guest-data-note{margin:14px 0 0}
+@media(max-width:900px){
+ .digital-attendance-modal-shell{align-items:end!important;padding:0!important}
+ .digital-attendance-modal-shell .modal-box{width:100%!important;max-width:100%!important;max-height:100dvh!important;border-radius:0;border-left:0;border-right:0;padding:10px!important}
+ .digital-attendance-modal-shell .digital-attendance-sheet{width:100%;min-height:auto;padding:18px;border-width:2px}
+ .digital-attendance-modal-shell .digital-attendance-sheet__header{grid-template-columns:76px minmax(0,1fr);gap:14px;padding-inline:8px}
+ .digital-attendance-modal-shell .digital-attendance-sheet__brand img{width:56px;height:56px}
+ .digital-attendance-modal-shell .digital-attendance-sheet__brand{font-size:9px;letter-spacing:.1em}
+ .digital-attendance-modal-shell .digital-attendance-sheet__header h2{font-size:clamp(23px,6vw,34px)}
+}
