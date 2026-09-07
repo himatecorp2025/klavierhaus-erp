@@ -8,7 +8,7 @@ function initials(value) {
   const words = clean(value).replace(/^EVC[-_]/, "").split(/[^A-Z0-9]+/).filter(Boolean);
   if (!words.length) return "EVT";
   if (words.length === 1) return words[0].slice(0, 3).padEnd(3, "X");
-  return words.map((word) => word[0]).join("").slice(0, 3);
+  return words.map((word) => word[0]).join("").slice(0, 3).padEnd(3, "X");
 }
 
 function stableNumber(value) {
@@ -28,8 +28,10 @@ function eventNumber(event) {
 }
 
 function accessPrefix(event, sourceType, ticketVariant = "") {
-  if (clean(ticketVariant) === "VIP") return "V";
-  if (clean(ticketVariant) === "INVITATION") return "I";
+  const variant = clean(ticketVariant);
+  if (variant === "VIP") return "V";
+  if (variant === "INVITATION") return "I";
+  if (["COMPLIMENTARY", "MANUAL", "ON_SITE_FREE"].includes(variant)) return "C";
   if (event?.access_type === "INTERNAL" || sourceType === "INTERNAL") return "V";
   if (event?.access_type === "INVITE_ONLY" || sourceType === "INVITATION") return "I";
   return "P";
