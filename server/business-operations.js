@@ -434,7 +434,7 @@ function registerBusinessOperationsRoutes(options) {
   });
 
   app.get("/api/events/:id/attendance", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT id,event_key,title_en,title_hu,start_at,end_at,status,capacity_total,currency,venue_name,timezone FROM events WHERE id=?").get(req.params.id);
+    const event = db.prepare("SELECT id,event_key,custom_type,title_en,title_hu,start_at,end_at,status,capacity_total,currency,venue_name,timezone FROM events WHERE id=?").get(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     res.json(attendanceState(db, event, clean(req.query.q, 160)));
   });
