@@ -3,6 +3,8 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { backfillUserCalendarColors } = require("./calendar-colors");
 const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content");
+const { nextTicketCode } = require("./ticket-code");
+const { parseGuestName } = require("./name-format");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -182,14 +184,15 @@ function migrateEventArtistForeignKey() {
       db.exec(`CREATE TABLE events_new (
         id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,category_id TEXT NOT NULL,custom_type TEXT,
         access_type TEXT NOT NULL CHECK(access_type IN ('PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL')),
-        status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),
+        status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),status_before_close TEXT,
         slug_en TEXT NOT NULL UNIQUE,slug_hu TEXT NOT NULL UNIQUE,title_en TEXT NOT NULL,title_hu TEXT NOT NULL,
         short_description_en TEXT,short_description_hu TEXT,description_en TEXT,description_hu TEXT,artist_id TEXT,performer_name TEXT,
         hero_image_url TEXT,hero_image_alt_en TEXT,hero_image_alt_hu TEXT,gallery_json TEXT DEFAULT '[]',venue_name TEXT NOT NULL,
         venue_street TEXT NOT NULL,venue_city TEXT NOT NULL,venue_region TEXT NOT NULL,venue_postal_code TEXT NOT NULL,
         venue_country TEXT NOT NULL DEFAULT 'US',timezone TEXT NOT NULL DEFAULT 'America/New_York',start_at TEXT NOT NULL,end_at TEXT NOT NULL,
         previous_start_at TEXT,cancellation_reason TEXT,cancelled_at TEXT,cancelled_by_user_id TEXT,
-        capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
+        capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),special_capacity_total INTEGER NOT NULL DEFAULT 0 CHECK(special_capacity_total >= 0),
+        special_capacity_unlimited INTEGER NOT NULL DEFAULT 1 CHECK(special_capacity_unlimited IN (0,1)),price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
         currency TEXT NOT NULL DEFAULT 'USD',sales_start_at TEXT,sales_end_at TEXT,refund_policy_version TEXT NOT NULL DEFAULT 'KH-48H-V1',
         published_at TEXT,closed_at TEXT,closed_by_user_id TEXT,closure_snapshot_json TEXT,sold_out_at TEXT,
         is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),relaunch_source_event_id TEXT,created_by_user_id TEXT,updated_by_user_id TEXT,
@@ -200,11 +203,11 @@ function migrateEventArtistForeignKey() {
         FOREIGN KEY(relaunch_source_event_id) REFERENCES events_new(id) ON DELETE SET NULL
       )`);
       const hasCustomType = tableColumns("events").has("custom_type");
-      db.exec(`INSERT INTO events_new SELECT e.id,e.event_key,e.category_id,${hasCustomType ? "e.custom_type" : "NULL"},e.access_type,e.status,e.slug_en,e.slug_hu,e.title_en,e.title_hu,
+      db.exec(`INSERT INTO events_new SELECT e.id,e.event_key,e.category_id,${hasCustomType ? "e.custom_type" : "NULL"},e.access_type,e.status,e.status_before_close,e.slug_en,e.slug_hu,e.title_en,e.title_hu,
         e.short_description_en,e.short_description_hu,e.description_en,e.description_hu,
         CASE WHEN a.id IS NULL THEN NULL ELSE e.artist_id END,e.performer_name,e.hero_image_url,e.hero_image_alt_en,
         e.hero_image_alt_hu,e.gallery_json,e.venue_name,e.venue_street,e.venue_city,e.venue_region,e.venue_postal_code,e.venue_country,e.timezone,e.start_at,e.end_at,
-        e.previous_start_at,e.cancellation_reason,e.cancelled_at,e.cancelled_by_user_id,e.capacity_total,e.price_cents,e.currency,e.sales_start_at,e.sales_end_at,
+        e.previous_start_at,e.cancellation_reason,e.cancelled_at,e.cancelled_by_user_id,e.capacity_total,e.special_capacity_total,e.special_capacity_unlimited,e.price_cents,e.currency,e.sales_start_at,e.sales_end_at,
         e.refund_policy_version,e.published_at,e.closed_at,e.closed_by_user_id,e.closure_snapshot_json,e.sold_out_at,e.is_sample,e.relaunch_source_event_id,
         e.created_by_user_id,e.updated_by_user_id,e.created_at,e.updated_at FROM events e LEFT JOIN website_artists a ON a.id=e.artist_id`);
       db.exec("DROP TABLE events");
@@ -213,6 +216,49 @@ function migrateEventArtistForeignKey() {
   } finally {
     db.pragma("foreign_keys = ON");
   }
+}
+
+function migrateEventTicketData() {
+  if (!tableExists("event_tickets") || !tableExists("events")) return;
+  const rows = db.prepare(`SELECT t.*,e.event_key,e.access_type,c.code AS category_code,c.name_en AS category_name_en,e.title_en
+    FROM event_tickets t JOIN events e ON e.id=t.event_id
+    LEFT JOIN event_categories c ON c.id=e.category_id ORDER BY t.event_id,t.created_at,t.id`).all();
+  if (!rows.length) return;
+
+  const sequenceByKey = new Map();
+  const variantFor = (row) => {
+    const existing = String(row.ticket_variant || "").trim().toUpperCase();
+    if (existing && existing !== "PUBLIC_PAID") return existing;
+    if (row.source_type === "PURCHASE") return "PUBLIC_PAID";
+    if (row.source_type === "INVITATION") return "INVITATION";
+    return row.access_type === "PUBLIC_FREE" ? "PUBLIC_FREE" : "COMPLIMENTARY";
+  };
+  const paymentStatusFor = (row, variant) => {
+    if (variant === "PUBLIC_PAID" && row.event_payment_id) {
+      const payment = db.prepare("SELECT status FROM event_payments WHERE id=?").get(row.event_payment_id);
+      return payment?.status === "PAID" ? "PAID" : "PENDING";
+    }
+    return Number(row.price_cents || 0) > 0 ? "PENDING" : "NOT_REQUIRED";
+  };
+  const update = db.prepare(`UPDATE event_tickets SET ticket_variant=?,attendee_name=?,original_guest_name=COALESCE(NULLIF(original_guest_name,''),?),
+    payment_status=?,reservation_status=COALESCE(NULLIF(reservation_status,''),'FINALIZED'),ticket_sequence=?,legacy_public_code=?,public_code=? WHERE id=?`);
+
+  db.transaction(() => {
+    for (const row of rows) {
+      const variant = variantFor(row);
+      const key = `${row.event_id}:${variant}`;
+      const fallbackSequence = (sequenceByKey.get(key) || 0) + 1;
+      const sequence = Number(row.ticket_sequence) > 0 ? Number(row.ticket_sequence) : fallbackSequence;
+      sequenceByKey.set(key, Math.max(sequenceByKey.get(key) || 0, sequence));
+      const event = { ...row, category_code: row.category_code, category_name_en: row.category_name_en };
+      const parsed = parseGuestName(row.original_guest_name || row.attendee_name || row.buyer_name || "Unknown guest");
+      const isNewCode = /^[PVIC]-[A-Z0-9]{3}-\d{3}-\d{2,}$/.test(String(row.public_code || ""));
+      const next = isNewCode ? { code: row.public_code, sequence } : nextTicketCode(db, event, row.source_type, sequence, variant);
+      const oldCode = isNewCode ? row.legacy_public_code || null : row.public_code || null;
+      update.run(variant, parsed.display_name, parsed.original_name, paymentStatusFor(row, variant), next.sequence, oldCode, next.code, row.id);
+    }
+  })();
+  log(`Migrated ${rows.length} event ticket record(s) to the v2 ticket model`);
 }
 
 function createPreMigrationBackup() {
@@ -560,7 +606,34 @@ function runMigrations() {
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
     ensureColumn("events", "artist_id", "TEXT");
     ensureColumn("event_tickets", "event_payment_id", "TEXT");
+    ensureColumn("event_tickets", "contact_id", "TEXT");
     ensureColumn("event_tickets", "ticket_sequence", "INTEGER");
+    ensureColumn("events", "special_capacity_total", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("events", "special_capacity_unlimited", "INTEGER NOT NULL DEFAULT 1");
+    ensureColumn("events", "status_before_close", "TEXT");
+    ensureColumn("event_tickets", "ticket_variant", "TEXT NOT NULL DEFAULT 'PUBLIC_PAID'");
+    ensureColumn("event_tickets", "original_guest_name", "TEXT");
+    ensureColumn("event_tickets", "salutation", "TEXT");
+    ensureColumn("event_tickets", "first_names", "TEXT");
+    ensureColumn("event_tickets", "surnames", "TEXT");
+    ensureColumn("event_tickets", "suffix", "TEXT");
+    ensureColumn("event_tickets", "payment_method", "TEXT");
+    ensureColumn("event_tickets", "payment_status", "TEXT NOT NULL DEFAULT 'NOT_REQUIRED'");
+    ensureColumn("event_tickets", "reservation_status", "TEXT NOT NULL DEFAULT 'FINALIZED'");
+    ensureColumn("event_tickets", "on_site_deadline_at", "TEXT");
+    ensureColumn("event_tickets", "reserved_at", "TEXT");
+    ensureColumn("event_tickets", "paid_at", "TEXT");
+    ensureColumn("event_tickets", "finalized_at", "TEXT");
+    ensureColumn("event_tickets", "legacy_public_code", "TEXT");
+    ensureColumn("event_tickets", "document_front_path", "TEXT");
+    ensureColumn("event_tickets", "document_back_path", "TEXT");
+    ensureColumn("event_tickets", "document_full_path", "TEXT");
+    ensureColumn("event_refund_requests", "review_note", "TEXT");
+    ensureColumn("event_refund_requests", "reviewed_at", "TEXT");
+    ensureColumn("event_refund_requests", "approved_at", "TEXT");
+    ensureColumn("event_refund_requests", "executed_at", "TEXT");
+    ensureColumn("event_refund_requests", "execution_status", "TEXT NOT NULL DEFAULT 'NOT_STARTED'");
+    ensureColumn("event_refund_requests", "no_show", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn("event_checkout_holds", "attendee_names_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn("website_reviews", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("website_showroom_pianos", "is_sample", "INTEGER DEFAULT 0");
@@ -608,6 +681,7 @@ function runMigrations() {
   });
 
   migrateColumns();
+  migrateEventTicketData();
   migrateWebsiteContactLeadStatuses();
   migrateCustomerConversationCategories();
   migrateEventArtistForeignKey();
@@ -662,7 +736,11 @@ function runMigrations() {
   ensureIndex("idx_event_invitations_event_status", "CREATE INDEX IF NOT EXISTS idx_event_invitations_event_status ON event_invitations(event_id,status,created_at)");
   ensureIndex("idx_event_invitations_email", "CREATE INDEX IF NOT EXISTS idx_event_invitations_email ON event_invitations(lower(trim(guest_email)))");
   ensureIndex("idx_event_tickets_event_status", "CREATE INDEX IF NOT EXISTS idx_event_tickets_event_status ON event_tickets(event_id,status,source_type)");
+  ensureIndex("idx_event_tickets_variant", "CREATE INDEX IF NOT EXISTS idx_event_tickets_variant ON event_tickets(event_id,ticket_variant,status)");
+  ensureIndex("idx_event_ticket_documents_ticket", "CREATE INDEX IF NOT EXISTS idx_event_ticket_documents_ticket ON event_ticket_documents(ticket_id,document_type)");
+  ensureIndex("idx_event_refund_execution", "CREATE INDEX IF NOT EXISTS idx_event_refund_execution ON event_refund_requests(event_id,execution_status,requested_at DESC)");
   ensureIndex("idx_event_tickets_contact", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact ON event_tickets(lower(trim(contact_email)))");
+  ensureIndex("idx_event_tickets_contact_id", "CREATE INDEX IF NOT EXISTS idx_event_tickets_contact_id ON event_tickets(contact_id)");
   ensureIndex("idx_event_attendance_sessions_event", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_attendance_sessions_event ON event_attendance_sessions(event_id)");
   ensureIndex("idx_event_attendance_entries_event_status", "CREATE INDEX IF NOT EXISTS idx_event_attendance_entries_event_status ON event_attendance_entries(event_id,status,updated_at)");
   ensureIndex("idx_event_attendance_entries_ticket", "CREATE UNIQUE INDEX IF NOT EXISTS idx_event_attendance_entries_ticket ON event_attendance_entries(ticket_id)");
