@@ -3,9 +3,10 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { generateTicketPdf, generateInvoicePdf } = require("./document-pdf");
+const { generateInvoicePdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
 const { generateGuestDataPdf } = require("./guest-list-pdf");
 const { readGuestData } = require("./guest-data");
+const { createTicketService } = require("./ticket-service");
 const { buildConversationAutoReplyEmail } = require("./transactional-email");
 const {
   attendanceError,
@@ -200,6 +201,23 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
   }
   function artifactPath(prefix, id) { return path.join(documentDir, `${prefix}-${String(id).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`); }
   function publicDocumentPath(filePath) { return `/uploads/documents/${path.basename(filePath)}`; }
+  function eventDocumentData(event, tickets) {
+    return { event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveCompanyLogoPath(readCompanyData(db).logo_url, uploadDir) };
+  }
+  function ticketDocumentGenerator(mode) {
+    return mode === "front" ? generateTicketFrontPdf : mode === "back" ? generateTicketBackPdf : generateTicketFullPdf;
+  }
+  function persistTicketDocument(ticket, documentType, pdf, userId = null) {
+    const normalized = String(documentType || "FULL").toUpperCase();
+    const filePath = artifactPath(`ticket-${ticket.id}-${normalized.toLowerCase()}`, ticket.id);
+    fs.writeFileSync(filePath, pdf);
+    const column = ({ FRONT: "document_front_path", BACK: "document_back_path", FULL: "document_full_path" })[normalized];
+    if (column) db.prepare(`UPDATE event_tickets SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(publicDocumentPath(filePath), ticket.id);
+    db.prepare(`INSERT INTO event_ticket_documents(id,ticket_id,event_id,document_type,stored_path,generated_by_user_id)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(ticket_id,document_type) DO UPDATE SET stored_path=excluded.stored_path,generated_at=CURRENT_TIMESTAMP,generated_by_user_id=excluded.generated_by_user_id`)
+      .run(newId("TDOC"), ticket.id, ticket.event_id, normalized, publicDocumentPath(filePath), userId);
+    return { document_type: normalized, stored_path: publicDocumentPath(filePath), file_path: filePath };
+  }
 
   function invoiceNumber(payment, company) {
     const existing = db.prepare("SELECT invoice_number FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${payment.id}%`);
@@ -235,7 +253,13 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const company = readCompanyData(db);
     const invoice = invoiceNumber(payment, company);
     const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-    const ticketPdf = generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath });
+    const pdfOptions = eventDocumentData(event, tickets);
+    const ticketPdf = generateTicketFrontPdf(pdfOptions);
+    tickets.forEach((ticket) => {
+      persistTicketDocument(ticket, "FRONT", generateTicketFrontPdf(eventDocumentData(event, [ticket])));
+      persistTicketDocument(ticket, "BACK", generateTicketBackPdf(eventDocumentData(event, [ticket])));
+      persistTicketDocument(ticket, "FULL", generateTicketFullPdf(eventDocumentData(event, [ticket])));
+    });
     const invoicePdf = generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath });
     const ticketPath = artifactPath("tickets", payment.id); const invoicePath = artifactPath("invoice", payment.id);
     if (!fs.existsSync(ticketPath) || resend) fs.writeFileSync(ticketPath, ticketPdf);
@@ -267,8 +291,8 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const first = tickets[0];
     const key = `${deliveryType.toLowerCase()}:${first.id}`;
     beginDelivery({ eventKey: key, deliveryType, recipientEmail: first.contact_email, eventId, ticketId: first.id });
-    const pdf = generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveCompanyLogoPath(readCompanyData(db).logo_url, uploadDir) });
-    if (!transactionalEmail?.sendEventTicketDocuments) {
+    const pdf = generateTicketFrontPdf(eventDocumentData(event, tickets));
+    if (!validEmail(first.contact_email) || !transactionalEmail?.sendEventTicketDocuments) {
       finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       return { status: "NOT_CONFIGURED" };
     }
@@ -282,23 +306,38 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     }
   }
 
-  function ticketPdfForTicket(ticketId) {
+  function ticketPdfForTicket(ticketId, mode = "full") {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
     if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
     if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
     const company = readCompanyData(db);
-    return generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets: [ticket], language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    return ticketDocumentGenerator(mode)(eventDocumentData(event, [ticket]));
   }
 
-  function ticketPdfForPayment(paymentId) {
+  function ticketPdfForPayment(paymentId, mode = "full") {
     const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
     if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
     const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
     if (!event || !tickets.length) throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"), { status: 404 });
     const company = readCompanyData(db);
-    return generateTicketPdf({ event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    return ticketDocumentGenerator(mode)(eventDocumentData(event, tickets));
+  }
+
+  function generateTicketDocuments(ticketId, { mode = "full", userId = null } = {}) {
+    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
+    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
+    const normalized = String(mode || "full").toLowerCase();
+    const generator = ticketDocumentGenerator(normalized);
+    const document = persistTicketDocument(ticket, normalized.toUpperCase(), generator(eventDocumentData(event, [ticket])), userId);
+    return { ticket_id: ticket.id, event_id: event.id, mode: normalized, ...document };
+  }
+
+  function ticketDocuments(ticketId) {
+    return db.prepare("SELECT document_type,stored_path,generated_at,generated_by_user_id FROM event_ticket_documents WHERE ticket_id=? ORDER BY document_type").all(ticketId);
   }
 
   function invoicePdfForPayment(paymentId) {
@@ -312,13 +351,41 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     return { pdf: generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) }), invoice_number: invoice };
   }
 
+  function invoicePdfForTicket(ticketId) {
+    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
+    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
+    if (ticket.payment_status !== "PAID" || Number(ticket.price_cents || 0) <= 0) throw Object.assign(new Error("TICKET_INVOICE_REQUIRES_PAID_PRICE"), { status: 409 });
+    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
+    const company = readCompanyData(db);
+    const payment = {
+      id: `ticket:${ticket.id}`,
+      purchaser_name: ticket.buyer_name || ticket.attendee_name,
+      purchaser_email: ticket.contact_email || "",
+      amount_total: Number(ticket.price_cents || 0),
+      currency: ticket.currency || "USD",
+      status: "PAID"
+    };
+    const invoice = invoiceNumber(payment, company);
+    const pdf = generateInvoicePdf({ company, event, payment, tickets: [ticket], invoiceNumber: invoice, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
+    const invoicePath = artifactPath("invoice-ticket", ticket.id);
+    if (!fs.existsSync(invoicePath)) fs.writeFileSync(invoicePath, pdf);
+    const existing = db.prepare("SELECT id FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${ticket.id}%`);
+    if (!existing) db.prepare(`INSERT INTO knowledge_base(id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(newId("DOC"), `Invoice ${invoice}`, "Event Ticketing", "Event Invoice", JSON.stringify({ ticket_id: ticket.id, event_id: event.id }), publicDocumentPath(invoicePath), payment.purchaser_name, Number(ticket.price_cents || 0) / 100, ticket.payment_method || "MANUAL", invoice);
+    return { pdf, invoice_number: invoice, stored_path: publicDocumentPath(invoicePath) };
+  }
+
   return Object.freeze({
     companyData: () => readCompanyData(db),
     sendPurchaseDocuments,
     sendTicketDocuments,
     ticketPdfForTicket,
     ticketPdfForPayment,
+    generateTicketDocuments,
+    ticketDocuments,
     invoicePdfForPayment,
+    invoicePdfForTicket,
     deliveryRow,
     recordDelivery,
     async onPaymentFulfilled({ paymentId }) { return sendPurchaseDocuments(paymentId); },
@@ -331,9 +398,10 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
 }
 
 function registerBusinessOperationsRoutes(options) {
-  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService, ticketService: providedTicketService } = options;
   const admin = permit("ADMIN");
   const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
+  const ticketService = providedTicketService || createTicketService({ db });
   const conversationKey = conversationEncryptionKey(env);
   const recentRequests = new Map();
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -392,11 +460,150 @@ function registerBusinessOperationsRoutes(options) {
     res.type("application/pdf").send(pdf);
   }
 
+  function normalizeTicketVariant(value) {
+    const key = clean(value, 40).toUpperCase().replace(/[- ]+/g, "_");
+    return ({
+      PUBLIC: "PUBLIC_PAID", PAID: "PUBLIC_PAID", PUBLIC_PAID: "PUBLIC_PAID", FREE: "PUBLIC_FREE", PUBLIC_FREE: "PUBLIC_FREE",
+      VIP: "VIP", INVITATION: "INVITATION", COMPLIMENTARY: "COMPLIMENTARY", COMPLIMENTARY_TICKET: "COMPLIMENTARY",
+      MANUAL: "MANUAL", ON_SITE: "ON_SITE", ON_SITE_PAYMENT: "ON_SITE"
+    })[key] || key;
+  }
+
+  function recordManualTicketIncome(ticket, event, userName = "SYSTEM") {
+    if (ticket.payment_status !== "PAID" || Number(ticket.price_cents || 0) <= 0) return;
+    if (db.prepare("SELECT 1 FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=? LIMIT 1").get(ticket.id)) return;
+    db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,source_type,source_id,created_by)
+      VALUES(?,?,?,?,?,'INCOME','CONCERT_SERVICE_REVENUE','ONE_TIME',?,'1010','event_manual_ticket',?,?)`).run(
+      newId("FIN"), new Date().toISOString().slice(0, 10), `Event ticket sale · ${event.title_en}`, `Administrative ticket ${ticket.id}`, Number(ticket.price_cents || 0) / 100,
+      ticket.payment_method || "MANUAL", ticket.id, userName
+    );
+  }
+
   app.get("/api/events/tickets/:id.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id), `klavierhaus-ticket-${req.params.id}.pdf`); } catch (error) { sendError(res, error); }
+    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "full"), `klavierhaus-ticket-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/events/tickets/:id/front.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "front"), `klavierhaus-ticket-${req.params.id}-front.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/events/tickets/:id/back.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "back"), `klavierhaus-ticket-${req.params.id}-back.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/events/tickets/:id/full.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "full"), `klavierhaus-ticket-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.post("/api/events/tickets/:id/documents", auth, admin, async (req, res) => {
+    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
+    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
+    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
+    try {
+      const mode = ["front", "back", "full"].includes(String(req.body?.mode || "full").toLowerCase()) ? String(req.body.mode || "full").toLowerCase() : "full";
+      const document = documentService.generateTicketDocuments(ticket.id, { mode, userId: req.user.id });
+      let email = { status: "NOT_REQUESTED" };
+      if (req.body?.email_front === true) email = await documentService.sendTicketDocuments({ eventId: ticket.event_id, ticketIds: [ticket.id], deliveryType: "EVENT_MANUAL_TICKET" });
+      res.json({ ok: true, document, email, ticket: db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id) });
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.post("/api/events/individual-tickets", auth, admin, async (req, res) => {
+    const eventId = clean(req.body?.event_id, 160);
+    const event = eventId ? db.prepare("SELECT * FROM events WHERE id=?").get(eventId) : null;
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    if (["CANCELLED", "CLOSED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    const contactId = clean(req.body?.contact_id || req.body?.customer_id, 160) || null;
+    const contact = contactId ? db.prepare("SELECT id,name,email FROM contacts WHERE id=?").get(contactId) : null;
+    if (contactId && !contact) return res.status(404).json({ error: "CONTACT_NOT_FOUND" });
+    const salutation = clean(req.body?.salutation, 30);
+    const firstNames = clean(req.body?.first_names || req.body?.firstNames, 120);
+    const surnames = clean(req.body?.surnames || req.body?.last_names || req.body?.lastNames, 120);
+    const suffix = clean(req.body?.suffix, 30);
+    const structuredName = [salutation, firstNames, surnames, suffix].filter(Boolean).join(" ");
+    const attendeeName = clean(req.body?.attendee_name || req.body?.guest_name || req.body?.name || structuredName || contact?.name, 500);
+    if (!attendeeName) return res.status(400).json({ error: "GUEST_NAME_REQUIRED" });
+    const email = normalizeEmail(req.body?.contact_email || req.body?.email || contact?.email);
+    if (email && !validEmail(email)) return res.status(400).json({ error: "CONTACT_EMAIL_INVALID" });
+    const variant = normalizeTicketVariant(req.body?.ticket_variant || req.body?.ticket_type || req.body?.type || "PUBLIC_PAID");
+    const allowedVariants = ["PUBLIC_PAID", "PUBLIC_FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON_SITE"];
+    if (!allowedVariants.includes(variant)) return res.status(400).json({ error: "INVALID_TICKET_VARIANT" });
+    const specialVariant = ["VIP", "INVITATION", "COMPLIMENTARY"].includes(variant);
+    const requestedPrice = Number(req.body?.price_cents ?? (variant === "PUBLIC_PAID" || variant === "ON_SITE" ? event.price_cents : 0));
+    const priceCents = specialVariant || variant === "PUBLIC_FREE" ? 0 : requestedPrice;
+    if (!Number.isInteger(priceCents) || priceCents < 0) return res.status(400).json({ error: "INVALID_TICKET_PRICE" });
+    const requestedPayment = clean(req.body?.payment_status, 30).toUpperCase();
+    const paymentMethod = clean(req.body?.payment_method, 60).toUpperCase() || (variant === "ON_SITE" ? "ON_SITE" : "MANUAL");
+    const paymentStatus = requestedPayment || ((priceCents > 0 && variant !== "ON_SITE" && paymentMethod) ? "PAID" : priceCents === 0 ? "NOT_REQUIRED" : "PENDING");
+    if (!["PAID", "PENDING", "NOT_REQUIRED"].includes(paymentStatus)) return res.status(400).json({ error: "INVALID_PAYMENT_STATUS" });
+    if (paymentStatus === "PAID" && priceCents <= 0) return res.status(400).json({ error: "FREE_TICKET_CANNOT_BE_PAID" });
+    if (variant === "ON_SITE" && paymentStatus === "PENDING" && !event.start_at) return res.status(400).json({ error: "EVENT_START_REQUIRED" });
+    try {
+      const ticket = db.transaction(() => {
+        const created = ticketService.createTicket({
+          eventId, ticketVariant: variant, sourceType: variant === "INVITATION" ? "INVITATION" : variant === "PUBLIC_PAID" || variant === "ON_SITE" ? "PURCHASE" : "COMPLIMENTARY",
+          invitationId: clean(req.body?.invitation_id, 160) || null, contactId, buyerName: clean(req.body?.buyer_name || contact?.name || attendeeName, 500), attendeeName,
+          originalGuestName: attendeeName, salutation, firstNames, surnames, suffix, contactEmail: email, priceCents, currency: event.currency || "USD", paymentMethod,
+          paymentStatus, reservationStatus: clean(req.body?.reservation_status, 30).toUpperCase() || undefined, userId: req.user.id
+        });
+        recordManualTicketIncome(created, event, req.user.name || req.user.id);
+        return created;
+      })();
+      const documents = variant === "ON_SITE" && paymentStatus !== "PAID"
+        ? []
+        : ["front", "back", "full"].map((mode) => documentService.generateTicketDocuments(ticket.id, { mode, userId: req.user.id }));
+      const invoice = paymentStatus === "PAID" && priceCents > 0 ? documentService.invoicePdfForTicket(ticket.id) : null;
+      let emailDelivery = { status: "NOT_REQUESTED" };
+      if (documents.length && (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1")) {
+        emailDelivery = await documentService.sendTicketDocuments({ eventId, ticketIds: [ticket.id], deliveryType: "EVENT_INDIVIDUAL_TICKET" });
+      } else if (!documents.length && (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1")) {
+        emailDelivery = { status: "NOT_AVAILABLE_UNPAID" };
+      }
+      const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id);
+      audit(req, "CREATE_INDIVIDUAL_TICKET", "event_tickets", ticket.id, null, after, 1, `Individual ${variant} ticket created`);
+      res.status(201).json({ ok: true, ticket: after, documents, invoice: invoice ? { invoice_number: invoice.invoice_number, stored_path: invoice.stored_path } : null, email: emailDelivery });
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.post("/api/events/tickets/:id/pay", auth, admin, async (req, res) => {
+    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
+    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
+    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
+    if (ticket.event_status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    if (ticket.ticket_variant !== "ON_SITE") return res.status(400).json({ error: "ONLY_ON_SITE_TICKETS_CAN_BE_PAID_HERE" });
+    if (Number(ticket.price_cents || 0) <= 0) return res.status(400).json({ error: "ON_SITE_PRICE_REQUIRED" });
+    try {
+      const paymentMethod = clean(req.body?.payment_method || ticket.payment_method || "ON_SITE", 60).toUpperCase();
+      const paid = db.transaction(() => {
+        const updated = ticketService.markPaid(ticket.id, { paymentMethod });
+        recordManualTicketIncome(updated, db.prepare("SELECT * FROM events WHERE id=?").get(updated.event_id), req.user.name || req.user.id);
+        return updated;
+      })();
+      const documents = ["front", "back", "full"].map((mode) => documentService.generateTicketDocuments(paid.id, { mode, userId: req.user.id }));
+      const invoice = documentService.invoicePdfForTicket(paid.id);
+      let email = { status: "NOT_REQUESTED" };
+      if (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1") {
+        email = await documentService.sendTicketDocuments({ eventId: paid.event_id, ticketIds: [paid.id], deliveryType: "EVENT_ON_SITE_TICKET" });
+      }
+      const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(paid.id);
+      audit(req, "MARK_ON_SITE_TICKET_PAID", "event_tickets", paid.id, ticket, after, 1, "On-site reservation paid and finalized");
+      res.json({ ok: true, ticket: after, documents, invoice: { invoice_number: invoice.invoice_number, stored_path: invoice.stored_path }, email });
+    } catch (error) { sendError(res, error); }
+  });
+
+  app.get("/api/events/tickets/:id/invoice.pdf", auth, admin, (req, res) => {
+    try {
+      const invoice = documentService.invoicePdfForTicket(req.params.id);
+      sendPdf(res, invoice.pdf, `klavierhaus-invoice-${invoice.invoice_number}.pdf`);
+    } catch (error) { sendError(res, error); }
   });
   app.get("/api/event-payments/:id/tickets.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id), `klavierhaus-tickets-${req.params.id}.pdf`); } catch (error) { sendError(res, error); }
+    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "full"), `klavierhaus-tickets-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/event-payments/:id/tickets/front.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "front"), `klavierhaus-tickets-${req.params.id}-front.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/event-payments/:id/tickets/back.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "back"), `klavierhaus-tickets-${req.params.id}-back.pdf`); } catch (error) { sendError(res, error); }
+  });
+  app.get("/api/event-payments/:id/tickets/full.pdf", auth, admin, (req, res) => {
+    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "full"), `klavierhaus-tickets-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
   });
   app.get("/api/event-payments/:id/invoice.pdf", auth, admin, (req, res) => {
     try { const invoice = documentService.invoicePdfForPayment(req.params.id); sendPdf(res, invoice.pdf, `klavierhaus-invoice-${invoice.invoice_number}.pdf`); } catch (error) { sendError(res, error); }
@@ -560,9 +767,11 @@ function registerBusinessOperationsRoutes(options) {
   });
 
   app.post("/api/events/tickets/:id/void", auth, admin, (req, res) => {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
+    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (ticket.source_type === "PURCHASE") return res.status(409).json({ error: "PURCHASE_TICKET_REQUIRES_REFUND" });
+    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
+    if (ticket.event_status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
+    if (ticket.source_type === "PURCHASE" && ticket.ticket_variant !== "ON_SITE") return res.status(409).json({ error: "PURCHASE_TICKET_REQUIRES_REFUND" });
     if (["VOID", "REFUNDED"].includes(ticket.status)) return res.json({ ...ticket, already_void: true });
     if (ticket.status === "USED") return res.status(409).json({ error: "CHECKED_IN_TICKET_CANNOT_BE_VOIDED" });
     db.prepare("UPDATE event_tickets SET status='VOID',voided_at=CURRENT_TIMESTAMP,voided_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, ticket.id);
