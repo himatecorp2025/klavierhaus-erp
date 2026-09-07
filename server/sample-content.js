@@ -50,8 +50,6 @@ function ensureSampleGalleriesAndLinks(db, publicWebsiteUrl) {
   artistGalleries.forEach(([id, value]) => updateGallery.run(value, id));
   const updatePianoGallery = db.prepare("UPDATE website_showroom_pianos SET gallery_json=? WHERE id=? AND is_sample=1 AND (gallery_json IS NULL OR trim(gallery_json) IN ('','[]'))");
   pianoGalleries.forEach(([id, value]) => updatePianoGallery.run(value, id));
-  const artistLinks = db.prepare("UPDATE events SET artist_id=? WHERE id=? AND is_sample=1 AND (artist_id IS NULL OR trim(artist_id)='')");
-  for (let index = 1; index <= 3; index += 1) artistLinks.run(`SAMPLE-ARTIST-${index}`, `SAMPLE-EVENT-${index}`);
 }
 
 function sampleContentComplete(db) {
@@ -60,7 +58,6 @@ function sampleContentComplete(db) {
     ["website_services", ["SAMPLE-SERVICE-1", "SAMPLE-SERVICE-2", "SAMPLE-SERVICE-3"]],
     ["website_showroom_pianos", ["SAMPLE-PIANO-1", "SAMPLE-PIANO-2", "SAMPLE-PIANO-3", "SAMPLE-PIANO-4", "SAMPLE-PIANO-5", "SAMPLE-PIANO-6"]],
     ["website_reviews", ["SAMPLE-REVIEW-1", "SAMPLE-REVIEW-2", "SAMPLE-REVIEW-3"]],
-    ["events", ["SAMPLE-EVENT-1", "SAMPLE-EVENT-2", "SAMPLE-EVENT-3"]]
   ];
   return required.every(([table, ids]) => ids.every((id) => db.prepare(`SELECT 1 FROM ${table} WHERE id=? AND is_sample=1 AND ${table === "events" ? "status='PUBLISHED' AND published_at IS NOT NULL" : table === "website_reviews" ? "visible=1" : table === "website_showroom_pianos" ? "published=1" : table === "website_artists" ? "published=1" : "visible=1"}`).get(id)));
 }
@@ -123,25 +120,10 @@ function installSampleContent({ db, userId = null, updatedBy = "SYSTEM", publicW
     ) VALUES(?,?,?,?,'Klavierhaus turns listening into a deeply personal encounter.','A Klavierhaus a zenehallgatást mélyen személyes találkozássá formálja.',?,?,?,1,?,1,?,?)`);
     reviews.forEach((row, index) => insertReview.run(...row, row[1], row[1], index + 1, userId, userId));
 
-    const category = db.prepare("SELECT id FROM event_categories ORDER BY sort_order,id LIMIT 1").get();
-    if (!category) throw new Error("SAMPLE_EVENT_CATEGORY_REQUIRED");
-    const dates = [["2027-10-15T23:00:00.000Z", "2027-10-16T01:00:00.000Z"], ["2027-11-12T00:00:00.000Z", "2027-11-12T02:00:00.000Z"], ["2027-12-04T23:30:00.000Z", "2027-12-05T01:30:00.000Z"]];
-    const titlesEn = ["An Evening of Ravel", "The Art of the Singing Line", "Young Artists Salon"];
-    const titlesHu = ["Ravel estje", "Az éneklő dallam művészete", "Fiatal művészek szalonja"];
-    const insertEvent = db.prepare(`INSERT OR IGNORE INTO events(
-      id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,published_at,is_sample,created_by_user_id,updated_by_user_id
-    ) VALUES(?,?,?,?,'PUBLISHED',?,?,?,?,?,?,?,?,?,?,?,?, 'Klavierhaus','790 11th Avenue','New York','NY','10019','US','America/New_York',?,?,40,?,'USD',CURRENT_TIMESTAMP,1,?,?)`);
-    artists.forEach((artist, index) => insertEvent.run(
-      `SAMPLE-EVENT-${index + 1}`, `SAMPLE-EV-${index + 1}`, category.id, index === 2 ? "PUBLIC_FREE" : "PUBLIC_PAID",
-      `klavierhaus-salon-${index + 1}`, `klavierhaus-szalon-${index + 1}`, titlesEn[index], titlesHu[index],
-      "An intimate Klavierhaus salon shaped around tone, conversation, and presence.", "Intim Klavierhaus-szalon a hang, a párbeszéd és a jelenlét köré formálva.",
-      artist.id, artist.name, index === 0 ? salon : index === 1 ? artistSalon : hero, titlesEn[index], titlesHu[index], gallery([salon, artistSalon]), dates[index][0], dates[index][1], index === 2 ? 0 : 12500, userId, userId
-    ));
-
     db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at)
       VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
       .run(SAMPLE_VERSION_KEY, "1", updatedBy);
-    return { artists: 3, services: 3, pianos: 6, reviews: 3, events: 3 };
+    return { artists: 3, services: 3, pianos: 6, reviews: 3, events: 0 };
   })();
   return { alreadyInstalled: false, installed };
 }
