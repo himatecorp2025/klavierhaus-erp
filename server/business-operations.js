@@ -111,6 +111,21 @@ function resolveCompanyLogoPath(logoUrl, uploadDir) {
   return path.join(__dirname, "assets", "klavierhaus-logo-black.jpg");
 }
 
+function resolveTicketLogoPath(logoUrl, uploadDir) {
+  const canonical = path.join(__dirname, "assets", "klavierhaus-logo-white.png");
+  const value = clean(logoUrl, 1000);
+  if (!value || value === "/icons/icon-192.png" || value === "/icons/icon-512.png") return canonical;
+  if (value.startsWith("/uploads/") && uploadDir) {
+    const uploaded = path.join(uploadDir, path.basename(value));
+    return fs.existsSync(uploaded) ? uploaded : canonical;
+  }
+  if (value.startsWith("/icons/")) {
+    const publicAsset = path.join(__dirname, "..", "public", value.slice(1));
+    return fs.existsSync(publicAsset) ? publicAsset : canonical;
+  }
+  return canonical;
+}
+
 function formatEventDate(event, language = "en") {
   if (!event?.start_at) return "";
   return new Intl.DateTimeFormat(language === "hu" ? "hu-HU" : "en-US", { timeZone: event.timezone || "America/New_York", dateStyle: "long", timeStyle: "short" }).format(new Date(event.start_at));
@@ -202,7 +217,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
   function artifactPath(prefix, id) { return path.join(documentDir, `${prefix}-${String(id).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`); }
   function publicDocumentPath(filePath) { return `/uploads/documents/${path.basename(filePath)}`; }
   function eventDocumentData(event, tickets) {
-    return { event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveCompanyLogoPath(readCompanyData(db).logo_url, uploadDir) };
+    return { event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveTicketLogoPath(readCompanyData(db).logo_url, uploadDir) };
   }
   function ticketDocumentGenerator(mode) {
     return mode === "front" ? generateTicketFrontPdf : mode === "back" ? generateTicketBackPdf : generateTicketFullPdf;
