@@ -18,6 +18,7 @@ const { registerWebsiteContentRoutes } = require("./website-content");
 const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
+const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
 const {
   createDocumentUpload,
@@ -57,10 +58,11 @@ fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
+const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
 const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env});
-const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
+const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -739,6 +741,7 @@ registerEventRoutes({
   onTicketsIssued: businessDocuments.sendTicketDocuments,
   eventImageUpload,
   eventImageDir:EVENT_IMAGE_DIR,
+  ticketService,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   stripeSandbox
@@ -786,10 +789,14 @@ registerBusinessOperationsRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   uploadDir:UPLOAD_DIR,
   env:process.env,
-  documentService:businessDocuments
+  documentService: businessDocuments,
+  ticketService
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
+},60*1000).unref();
+setInterval(()=>{
+  try{ticketService.expireOnSiteReservations();}catch(error){console.warn('On-site ticket cleanup failed:',error.message);}
 },60*1000).unref();
 function resolveActiveUser(userId, userName){
   if(userId){const byId=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(userId);if(byId)return byId;}
