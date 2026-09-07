@@ -81,7 +81,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "events", group_key: "website_events", label_en: "Events", label_hu: "Események" },
   { key: "event_tickets", group_key: "website_events", label_en: "Tickets & Reservations", label_hu: "Jegyek és foglalások" },
   { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
-  { key: "event_guest_list", group_key: "website_events", label_en: "Guest List", label_hu: "Vendéglista" },
+  { key: "event_guest_list", group_key: "website_events", label_en: "Guest Data", label_hu: "Vendégadatok" },
   { key: "digital_attendance", group_key: "website_events", label_en: "Digital Attendance", label_hu: "Digitális jelenlétiív" },
   { key: "website_contacts", group_key: "website_events", label_en: "Contacts", label_hu: "Kapcsolatfelvételek" },
   { key: "customer_inbox", group_key: "website_events", label_en: "Customer Inbox", label_hu: "Ügyfélüzenetek" },
