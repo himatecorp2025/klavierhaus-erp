@@ -370,7 +370,7 @@ function registerWebsitePlatformRoutes(options) {
     if (times.error) return res.status(400).json({ error: times.error });
     const id = identifier("EVT");
     const value = {
-      id, event_key: `EV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`, category_id: source.category_id, access_type: source.access_type,
+      id, event_key: `EV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`, category_id: source.category_id, custom_type: source.custom_type || null, access_type: source.access_type,
       slug_en: uniqueSlug(db, "events", "slug_en", `${source.title_en}-new-date`), slug_hu: uniqueSlug(db, "events", "slug_hu", `${source.title_hu}-uj-idopont`),
       title_en: source.title_en, title_hu: source.title_hu, short_description_en: source.short_description_en, short_description_hu: source.short_description_hu,
       description_en: source.description_en, description_hu: source.description_hu, artist_id: source.artist_id, performer_name: source.performer_name, hero_image_url: source.hero_image_url,
@@ -379,8 +379,8 @@ function registerWebsitePlatformRoutes(options) {
       venue_country: source.venue_country, timezone: source.timezone, start_at: times.startAt, end_at: times.endAt, capacity_total: source.capacity_total,
       price_cents: source.price_cents, currency: source.currency, refund_policy_version: source.refund_policy_version, user_id: req.user.id
     };
-    db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,refund_policy_version,relaunch_source_event_id,created_by_user_id,updated_by_user_id)
-      VALUES(@id,@event_key,@category_id,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@refund_policy_version,@source_event_id,@user_id,@user_id)`).run({ ...value, source_event_id: source.id });
+    db.prepare(`INSERT INTO events(id,event_key,category_id,custom_type,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,refund_policy_version,relaunch_source_event_id,created_by_user_id,updated_by_user_id)
+      VALUES(@id,@event_key,@category_id,@custom_type,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@refund_policy_version,@source_event_id,@user_id,@user_id)`).run({ ...value, source_event_id: source.id });
     const created = db.prepare("SELECT * FROM events WHERE id=?").get(id);
     audit(req, "RELAUNCH_DRAFT", "events", id, { source_event_id: source.id }, created, 1, "New event draft created from audience demand");
     res.status(201).json(created);
