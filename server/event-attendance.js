@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 
 const ATTENDANCE_MODES = new Set(["PAPER", "DIGITAL"]);
 const ATTENDANCE_STATUSES = new Set(["NOT_ARRIVED", "PRESENT", "DELETED"]);
+const { ticketVariantForRow } = require("./ticket-service");
 
 function newId(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
@@ -61,18 +62,22 @@ function syncEntries(db, eventId) {
       CASE WHEN t.status IN ('VOID','REFUNDED') THEN COALESCE(t.voided_at,CURRENT_TIMESTAMP) ELSE NULL END
     FROM event_tickets t
     WHERE t.event_id=?`).run(eventId);
+  db.prepare(`UPDATE event_attendance_entries
+    SET status='DELETED',deleted_at=COALESCE(deleted_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
+    WHERE event_id=? AND status<>'DELETED' AND ticket_id IN (SELECT id FROM event_tickets WHERE event_id=? AND status IN ('VOID','REFUNDED'))`).run(eventId, eventId);
 }
 
-function ticketType(sourceType) {
-  return ({ PURCHASE: "PUBLIC", INVITATION: "INVITATION", COMPLIMENTARY: "COMPLIMENTARY" })[sourceType] || sourceType || "TICKET";
+function ticketType(sourceType, variant) {
+  return ({ PUBLIC_PAID: "PUBLIC PAID", PUBLIC_FREE: "PUBLIC FREE", VIP: "VIP", INVITATION: "INVITATION", COMPLIMENTARY: "COMPLIMENTARY", MANUAL: "MANUAL", ON_SITE: "ON-SITE" })[variant]
+    || ({ PURCHASE: "PUBLIC", INVITATION: "INVITATION", COMPLIMENTARY: "COMPLIMENTARY" })[sourceType] || sourceType || "TICKET";
 }
 
 function attendanceRows(db, eventId, query = "") {
   syncEntries(db, eventId);
   const normalized = String(query || "").trim().toLocaleLowerCase();
   const rows = db.prepare(`SELECT
-      t.id,t.event_id,t.source_type,t.buyer_name,t.attendee_name,t.contact_email,t.public_code,t.status AS ticket_status,
-      t.price_cents,t.currency,t.created_at,t.checked_in_at,t.checked_in_by_user_id,
+      t.id,t.event_id,t.source_type,t.ticket_variant,t.buyer_name,t.attendee_name,t.original_guest_name,t.salutation,t.first_names,t.surnames,t.suffix,t.contact_email,t.public_code,t.status AS ticket_status,
+      t.price_cents,t.currency,t.payment_status,t.reservation_status,t.created_at,t.checked_in_at,t.checked_in_by_user_id,
       a.id AS attendance_entry_id,a.status AS attendance_status,a.checked_in_at AS attendance_checked_in_at,
       a.checked_in_by_user_id AS attendance_checked_in_by_user_id,a.deleted_at,a.deleted_by_user_id,a.updated_at AS attendance_updated_at
     FROM event_tickets t
@@ -86,14 +91,22 @@ function attendanceRows(db, eventId, query = "") {
     id: row.id,
     event_id: row.event_id,
     source_type: row.source_type,
-    ticket_type: ticketType(row.source_type),
+    ticket_variant: ticketVariantForRow(row, {}),
+    ticket_type: ticketType(row.source_type, ticketVariantForRow(row, {})),
     buyer_name: row.buyer_name || "",
     attendee_name: row.attendee_name || "",
+    original_guest_name: row.original_guest_name || row.attendee_name || "",
+    salutation: row.salutation || "",
+    first_names: row.first_names || "",
+    surnames: row.surnames || "",
+    suffix: row.suffix || "",
     contact_email: row.contact_email || "",
     public_code: row.public_code || "",
     ticket_status: row.ticket_status,
     price_cents: Number(row.price_cents || 0),
     currency: row.currency || "USD",
+    payment_status: row.payment_status || "NOT_REQUIRED",
+    reservation_status: row.reservation_status || "FINALIZED",
     attendance_status: row.attendance_status || "NOT_ARRIVED",
     checked_in_at: row.attendance_checked_in_at || row.checked_in_at || null,
     checked_in_by_user_id: row.attendance_checked_in_by_user_id || row.checked_in_by_user_id || null,
@@ -158,10 +171,11 @@ function state(db, event, query = "") {
   const present = tickets.filter((ticket) => ticket.attendance_status === "PRESENT").length;
   const deleted = tickets.filter((ticket) => ticket.attendance_status === "DELETED").length;
   const noShow = tickets.length - present - deleted;
-  const closed = session.status === "CLOSED";
-  const paused = session.status !== "CLOSED" && Boolean(session.paused_at);
+  const closed = session.status === "CLOSED" || event?.status === "CLOSED";
+  const paused = !closed && Boolean(session.paused_at);
   const digital = session.mode === "DIGITAL";
-  const publicStatus = publicSessionStatus(session);
+  const publicStatus = closed ? "CLOSED" : publicSessionStatus(session);
+  const timePassed = !closed && Boolean(event?.end_at) && new Date(event.end_at).getTime() <= Date.now();
   return {
     event,
     session: {
@@ -181,6 +195,8 @@ function state(db, event, query = "") {
     },
     mode: session.mode || null,
     status: publicStatus,
+    event_state: closed ? "CLOSED" : timePassed ? "TIME_PASSED" : (event?.status || publicStatus),
+    time_passed: timePassed,
     closed,
     paused,
     paper: session.mode === "PAPER",
@@ -188,7 +204,7 @@ function state(db, event, query = "") {
     can_edit: digital && !closed && !paused,
     can_export: session.mode === "PAPER" || (digital && closed),
     can_close: digital && !closed && !paused,
-    can_reopen: closed,
+    can_reopen: session.status === "CLOSED",
     can_pause: digital && !closed && !paused,
     can_resume: digital && !closed && paused,
     tickets,
@@ -200,6 +216,7 @@ function state(db, event, query = "") {
 function startMode(db, event, mode, user) {
   const normalized = String(mode || "").trim().toUpperCase();
   if (!ATTENDANCE_MODES.has(normalized)) throw attendanceError("INVALID_ATTENDANCE_MODE", 400);
+  if (event?.status === "CLOSED") throw attendanceError("EVENT_ALREADY_CLOSED");
   const session = ensureSession(db, event.id, user?.id);
   if (session.status === "CLOSED") throw attendanceError("ATTENDANCE_CLOSED_REOPEN_REQUIRED");
   if (session.mode === normalized) return session;
@@ -221,15 +238,19 @@ function reopen(db, event, user) {
   if (session.status !== "CLOSED") throw attendanceError("ATTENDANCE_NOT_CLOSED");
   if (!isAdminOrSuperadmin(user)) throw attendanceError("ATTENDANCE_REOPEN_ADMIN_REQUIRED", 403);
   const now = new Date().toISOString();
+  const restoredStatus = String(event.status_before_close || "").trim().toUpperCase()
+    || (event.end_at && new Date(event.end_at).getTime() <= Date.now() ? "COMPLETED" : event.published_at ? "PUBLISHED" : "DRAFT");
   db.transaction(() => {
     db.prepare(`UPDATE event_attendance_sessions SET status='OPEN',paused_at=NULL,paused_by_user_id=NULL,resumed_at=NULL,resumed_by_user_id=NULL,reopened_at=?,reopened_by_user_id=?,revision=revision+1,last_status_change_at=?,updated_at=CURRENT_TIMESTAMP WHERE event_id=?`).run(now, user.id, now, event.id);
     recordAction(db, { eventId: event.id, sessionId: session.id, action: "REOPEN", fromMode: session.mode, toMode: session.mode, userId: user.id, details: "Attendance list reopened by administrator" });
+    db.prepare("UPDATE events SET status=?,closed_at=NULL,closed_by_user_id=NULL,closure_snapshot_json=NULL,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='CLOSED'").run(restoredStatus, user.id, event.id);
   })();
   return db.prepare("SELECT * FROM event_attendance_sessions WHERE event_id=?").get(event.id);
 }
 
 function pause(db, event, user) {
   const session = ensureSession(db, event.id, user?.id);
+  if (event?.status === "CLOSED") throw attendanceError("EVENT_ALREADY_CLOSED");
   if (!isAttendanceOperator(user)) throw attendanceError("ATTENDANCE_OPERATOR_REQUIRED", 403);
   if (session.mode !== "DIGITAL") throw attendanceError(session.mode === "PAPER" ? "ATTENDANCE_PAPER_MODE" : "ATTENDANCE_NOT_STARTED");
   if (session.status === "CLOSED") throw attendanceError("ATTENDANCE_ALREADY_CLOSED");
@@ -244,6 +265,7 @@ function pause(db, event, user) {
 
 function resume(db, event, user) {
   const session = ensureSession(db, event.id, user?.id);
+  if (event?.status === "CLOSED") throw attendanceError("EVENT_ALREADY_CLOSED");
   if (!isAttendanceOperator(user)) throw attendanceError("ATTENDANCE_OPERATOR_REQUIRED", 403);
   if (session.mode !== "DIGITAL") throw attendanceError(session.mode === "PAPER" ? "ATTENDANCE_PAPER_MODE" : "ATTENDANCE_NOT_STARTED");
   if (session.status === "CLOSED") throw attendanceError("ATTENDANCE_ALREADY_CLOSED");
@@ -259,6 +281,7 @@ function resume(db, event, user) {
 function changeGuestStatus(db, event, ticket, nextStatus, user, options = {}) {
   const status = String(nextStatus || "").trim().toUpperCase();
   if (!ATTENDANCE_STATUSES.has(status)) throw attendanceError("INVALID_ATTENDANCE_STATUS", 400);
+  if (event?.status === "CLOSED") throw attendanceError("EVENT_ALREADY_CLOSED");
   const session = ensureSession(db, event.id, user?.id);
   if (session.mode !== "DIGITAL") throw attendanceError(session.mode === "PAPER" ? "ATTENDANCE_PAPER_MODE" : "ATTENDANCE_NOT_STARTED");
   if (session.status === "CLOSED") throw attendanceError("ATTENDANCE_ALREADY_CLOSED");
@@ -296,12 +319,12 @@ function changeGuestStatus(db, event, ticket, nextStatus, user, options = {}) {
   return db.prepare(`SELECT t.id,t.event_id,t.source_type,t.buyer_name,t.attendee_name,t.contact_email,t.public_code,t.status AS ticket_status,a.status AS attendance_status,a.checked_in_at,a.deleted_at FROM event_tickets t JOIN event_attendance_entries a ON a.ticket_id=t.id WHERE t.id=?`).get(ticket.id);
 }
 
-function close(db, event, user, force = false) {
+function close(db, event, user, _force = false) {
+  if (event?.status === "CLOSED") throw attendanceError("EVENT_ALREADY_CLOSED");
   const session = ensureSession(db, event.id, user?.id);
   if (session.mode !== "DIGITAL") throw attendanceError(session.mode === "PAPER" ? "ATTENDANCE_PAPER_MODE" : "ATTENDANCE_NOT_STARTED");
   if (session.status === "CLOSED") throw attendanceError("ATTENDANCE_ALREADY_CLOSED");
   if (session.paused_at) throw attendanceError("ATTENDANCE_PAUSED");
-  if (new Date(event.end_at).getTime() > Date.now() && !(force && isSuperadmin(user))) throw attendanceError("EVENT_HAS_NOT_ENDED");
   const rows = attendanceRows(db, event.id);
   const report = attendanceSnapshot(db, event, session, rows);
   report.status = "CLOSED";
@@ -313,7 +336,7 @@ function close(db, event, user, force = false) {
     db.prepare(`UPDATE event_attendance_sessions SET status='CLOSED',closed_at=?,closed_by_user_id=?,revision=?,last_status_change_at=?,snapshot_json=?,updated_at=CURRENT_TIMESTAMP WHERE event_id=?`).run(now, user.id, nextRevision, now, JSON.stringify(report), event.id);
     db.prepare(`INSERT INTO event_closures(id,event_id,snapshot_json,closed_by_user_id) VALUES(?,?,?,?)
       ON CONFLICT(event_id) DO UPDATE SET snapshot_json=excluded.snapshot_json,closed_by_user_id=excluded.closed_by_user_id,created_at=CURRENT_TIMESTAMP`).run(newId("EVCLS"), event.id, JSON.stringify(report), user.id);
-    db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(user.id, JSON.stringify(report), user.id, event.id);
+    db.prepare("UPDATE events SET status_before_close=CASE WHEN status='CLOSED' THEN status_before_close ELSE status END,status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(user.id, JSON.stringify(report), user.id, event.id);
     recordAction(db, { eventId: event.id, sessionId: session.id, action: "CLOSE", fromMode: session.mode, toMode: session.mode, userId: user.id, details: "Digital guest list finalized" });
   })();
   return report;
