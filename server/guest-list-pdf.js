@@ -177,6 +177,7 @@ function pageContent({ event, guests, language, pageNumber, pageCount, metrics, 
     `${MUTED_GOLD} RG .7 w 28 28 ${pdfNumber(width - 56)} ${pdfNumber(height - 56)} re S\n`,
     "q 70 0 0 73 262.5 729 cm /Logo Do Q\n",
     textCommand(hu ? "VENDÉGLISTA" : "GUEST LIST", 54, 698, 17, GOLD),
+    textCommand(truncateToWidth(event.customType || event.category || "", 487, 8.5, metrics), 54, 682, 8.5, GOLD),
     textCommand(truncateToWidth(event.title, 487, 20, metrics), 54, 668, 20, CREAM),
     textCommand(event.dateLabel || "", 54, 645, 10, CREAM),
     `${MUTED_GOLD} RG .8 w 54 624 487 0 re S\n`,
@@ -227,7 +228,7 @@ function generateGuestListPdf({ event, guests, language = "en", logoPath, fontPa
   const safeRows = rows.length ? rows : [{ attendee_name: language === "hu" ? "Nincs rögzített vendég" : "No registered guests", attendance_status: "VALID" }];
   const rowsPerPage = 12;
   const pageCount = Math.max(1, Math.ceil(safeRows.length / rowsPerPage));
-  const labels = [event.title, event.dateLabel, ...safeRows.flatMap((guest) => [guest.attendee_name, guest.contact_email, guest.ticket_type, guest.public_code]), "0123456789", "GUEST LIST", "VENDÉGLISTA", "GUEST NAME", "VENDÉG NEVE", "EMAIL", "E-MAIL", "TICKET TYPE", "JEGYTÍPUS", "CODE", "KÓD", "ARRIVED", "ÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
+  const labels = [event.title, event.customType, event.category, event.dateLabel, ...safeRows.flatMap((guest) => [guest.attendee_name, guest.contact_email, guest.ticket_type, guest.public_code]), "0123456789", "GUEST LIST", "VENDÉGLISTA", "GUEST NAME", "VENDÉG NEVE", "EMAIL", "E-MAIL", "TICKET TYPE", "JEGYTÍPUS", "CODE", "KÓD", "ARRIVED", "ÉRKEZETT", "KLAVIERHAUS · NEW YORK | FRANCE"];
   const font = fs.readFileSync(fontPath || path.join(__dirname, "assets", "DejaVuSans.ttf"));
   const metrics = createFontMetrics(font);
   const codes = usedCodePoints(labels);
