@@ -112,7 +112,7 @@ function migrationRequiresBackup() {
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
-  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id"].some((column) => !tableColumns("events").has(column));
+  const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id", "custom_type"].some((column) => !tableColumns("events").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const attendancePauseColumnsMissing = tableExists("event_attendance_sessions") && ["paused_at", "paused_by_user_id", "resumed_at", "resumed_by_user_id"].some((column) => !tableColumns("event_attendance_sessions").has(column));
@@ -180,7 +180,7 @@ function migrateEventArtistForeignKey() {
   try {
     db.transaction(() => {
       db.exec(`CREATE TABLE events_new (
-        id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,category_id TEXT NOT NULL,
+        id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,category_id TEXT NOT NULL,custom_type TEXT,
         access_type TEXT NOT NULL CHECK(access_type IN ('PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL')),
         status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),
         slug_en TEXT NOT NULL UNIQUE,slug_hu TEXT NOT NULL UNIQUE,title_en TEXT NOT NULL,title_hu TEXT NOT NULL,
@@ -199,7 +199,8 @@ function migrateEventArtistForeignKey() {
         FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
         FOREIGN KEY(relaunch_source_event_id) REFERENCES events_new(id) ON DELETE SET NULL
       )`);
-      db.exec(`INSERT INTO events_new SELECT e.id,e.event_key,e.category_id,e.access_type,e.status,e.slug_en,e.slug_hu,e.title_en,e.title_hu,
+      const hasCustomType = tableColumns("events").has("custom_type");
+      db.exec(`INSERT INTO events_new SELECT e.id,e.event_key,e.category_id,${hasCustomType ? "e.custom_type" : "NULL"},e.access_type,e.status,e.slug_en,e.slug_hu,e.title_en,e.title_hu,
         e.short_description_en,e.short_description_hu,e.description_en,e.description_hu,
         CASE WHEN a.id IS NULL THEN NULL ELSE e.artist_id END,e.performer_name,e.hero_image_url,e.hero_image_alt_en,
         e.hero_image_alt_hu,e.gallery_json,e.venue_name,e.venue_street,e.venue_city,e.venue_region,e.venue_postal_code,e.venue_country,e.timezone,e.start_at,e.end_at,
@@ -355,22 +356,27 @@ function removeRetiredPrivateConsultationPage() {
 
 function purgeLegacyRoundOneEvents() {
   if (!tableExists("events") || !tableExists("app_settings")) return;
-  const markerKey = "legacy_round_one_events_purged_v2";
+  const markerKey = "legacy_round_one_events_purged_v3";
   if (db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(markerKey)) return;
 
-  const events = db.prepare(`SELECT id,title_en,title_hu,slug_en,slug_hu,hero_image_url,gallery_json FROM events`).all();
+  const events = db.prepare(`SELECT id,title_en,title_hu,slug_en,slug_hu,start_at,hero_image_url,gallery_json FROM events`).all();
   const normalized = (value) => String(value || "").toLocaleLowerCase("hu-HU");
+  const localDate = (value) => {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(value)).reduce((output, part) => { output[part.type] = part.value; return output; }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
   const matches = [
-    (event) => /ravel/.test([event.title_en, event.title_hu, event.slug_en, event.slug_hu].map(normalized).join(" "))
-      && /(est|evening)/.test([event.title_en, event.title_hu, event.slug_en, event.slug_hu].map(normalized).join(" ")),
-    (event) => /éneklő\s+dallam\s+művész/.test(normalized(event.title_hu))
-      || /(?:singing\s+melody|art\s+of\s+the\s+singing\s+line)/.test(normalized(event.title_en)),
-    (event) => /young\s+artist\s+salon/.test(normalized(event.title_en))
-      || /fiatal\s+művészek\s+szalonja/.test(normalized(event.title_hu))
+    { date: "2027-10-15", matcher: (text) => /ravel/.test(text) && /(est|evening)/.test(text) },
+    { date: "2027-11-11", matcher: (text) => /éneklő\s+dallam\s+művész|singing\s+melody|art\s+of\s+the\s+singing\s+line/.test(text) },
+    { date: "2027-12-04", matcher: (text) => /young\s+artist\s+salon|fiatal\s+művészek\s+szalonja/.test(text) }
   ];
   const selected = new Map();
-  matches.forEach((matcher, index) => {
-    const found = events.filter(matcher);
+  matches.forEach((target, index) => {
+    const found = events.filter((event) => {
+      const text = [event.title_en, event.title_hu, event.slug_en, event.slug_hu].map(normalized).join(" ");
+      return localDate(event.start_at) === target.date && target.matcher(text);
+    });
     if (found.length > 1) throw new Error(`LEGACY_EVENT_PURGE_AMBIGUOUS_${index + 1}`);
     if (found[0]) selected.set(found[0].id, found[0]);
   });
@@ -389,14 +395,20 @@ function purgeLegacyRoundOneEvents() {
   if (selectedRows.length) {
     const ids = selectedRows.map((event) => event.id);
     const placeholders = ids.map(() => "?").join(",");
-    const tickets = tableExists("event_tickets") && tableColumns("event_tickets").has("event_id")
-      ? db.prepare(`SELECT id,event_payment_id FROM event_tickets WHERE event_id IN (${placeholders})`).all(...ids)
+    const ticketColumns = tableColumns("event_tickets");
+    const tickets = tableExists("event_tickets") && ticketColumns.has("event_id")
+      ? db.prepare(`SELECT id,${ticketColumns.has("event_payment_id") ? "event_payment_id" : "NULL AS event_payment_id"} FROM event_tickets WHERE event_id IN (${placeholders})`).all(...ids)
       : [];
     const ticketIds = tickets.map((row) => row.id).filter(Boolean);
-    const paymentIds = [...new Set(tickets.map((row) => row.event_payment_id).filter(Boolean))];
+    const paymentColumns = tableColumns("event_payments");
+    const directPayments = tableExists("event_payments") && paymentColumns.has("event_id")
+      ? db.prepare(`SELECT id FROM event_payments WHERE event_id IN (${placeholders})`).all(...ids)
+      : [];
+    const paymentIds = [...new Set([...tickets.map((row) => row.event_payment_id), ...directPayments.map((row) => row.id)].filter(Boolean))];
     const paymentPlaceholders = paymentIds.map(() => "?").join(",");
     const documentNeedles = [...ids, ...paymentIds];
-    const documentRows = tableExists("knowledge_base") && tableColumns("knowledge_base").has("stored_path") && documentNeedles.length
+    const documentColumns = tableColumns("knowledge_base");
+    const documentRows = tableExists("knowledge_base") && documentColumns.has("stored_path") && documentColumns.has("body") && documentNeedles.length
       ? db.prepare(`SELECT id,stored_path FROM knowledge_base WHERE content_type='Event Invoice' AND (${documentNeedles.map(() => "body LIKE ?").join(" OR ")})`)
         .all(...documentNeedles.map((id) => `%${id}%`))
       : [];
@@ -464,6 +476,10 @@ function purgeLegacyRoundOneEvents() {
 }
 
 function runMigrations() {
+  // Remove the explicitly identified historical demo events before creating
+  // the migration backup. They must not survive in a backup as recoverable
+  // business data because the requested cleanup is intentionally permanent.
+  purgeLegacyRoundOneEvents();
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
@@ -538,6 +554,7 @@ function runMigrations() {
     ensureColumn("events", "cancelled_by_user_id", "TEXT");
     ensureColumn("events", "hero_image_alt_en", "TEXT");
     ensureColumn("events", "hero_image_alt_hu", "TEXT");
+    ensureColumn("events", "custom_type", "TEXT");
     ensureColumn("events", "sold_out_at", "TEXT");
     ensureColumn("events", "is_sample", "INTEGER DEFAULT 0");
     ensureColumn("events", "relaunch_source_event_id", "TEXT");
