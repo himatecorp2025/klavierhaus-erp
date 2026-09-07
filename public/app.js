@@ -3395,7 +3395,7 @@ async function openIndividualTicketModal(eventId=''){
 async function saveIndividualTicket(event){
  event.preventDefault();const formData=new FormData(event.target),body=Object.fromEntries(formData.entries());body.price_cents=Math.round(Number(body.price_dollars||0)*100);delete body.price_dollars;body.send_email=formData.has('send_email');
  try{
-  const result=await api('/api/events/individual-tickets',{method:'POST',body:JSON.stringify(body)});const eventId=body.event_id;closeModal();showToast(bi('Individual ticket created and documents generated.','Az egyedi jegy létrejött, a dokumentumok elkészültek.'),'success');await renderEventWorkspace('event_tickets');if(eventId)await openEventDetails(eventId);
+  await api('/api/events/individual-tickets',{method:'POST',body:JSON.stringify(body)});closeModal();showToast(bi('Individual ticket created and documents generated.','Az egyedi jegy létrejött, a dokumentumok elkészültek.'),'success');await renderEventWorkspace('event_tickets');
  }catch(error){showError(error)}
 }
 
