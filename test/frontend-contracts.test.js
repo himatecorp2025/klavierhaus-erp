@@ -82,6 +82,16 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui12/);
 });
 
+test("individual ticket save refreshes the ticket list without reopening event management", () => {
+  const saveStart = appSource.indexOf("async function saveIndividualTicket(event)");
+  const saveEnd = appSource.indexOf("async function openEventDetails", saveStart);
+  const saveSource = appSource.slice(saveStart, saveEnd);
+  assert.ok(saveStart > 0);
+  assert.match(saveSource, /showToast\(bi\('Individual ticket created and documents generated\./);
+  assert.match(saveSource, /await renderEventWorkspace\('event_tickets'\)/);
+  assert.doesNotMatch(saveSource, /openEventDetails\(eventId\)/);
+});
+
 test("Landing Page Design exposes protected bilingual page, SEO, review, legal-copy and image publishing controls", () => {
   const designStart = appSource.indexOf("let websiteDesignMeta=null");
   const designEnd = appSource.indexOf("async function renderAuditLog", designStart);
