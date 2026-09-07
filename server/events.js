@@ -152,7 +152,8 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfi
     title: row[`title_${lang}`],
     short_description: excerpt(description),
     description,
-    category: row[`category_name_${lang}`] || "",
+    category: row.custom_type || row[`category_name_${lang}`] || "",
+    custom_type: row.custom_type || "",
     category_code: row.category_code,
     access_type: row.access_type,
     status: row.status,
@@ -287,7 +288,7 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     if (artistId && !artist) return { error: "EVENT_ARTIST_NOT_FOUND" };
     return {
       value: {
-        category_id: cleanText(merged.category_id, 100), access_type: merged.access_type,
+        category_id: cleanText(merged.category_id, 100), custom_type: cleanText(merged.custom_type, 160) || null, access_type: merged.access_type,
         slug_en: cleanText(merged.slug_en, 160), slug_hu: cleanText(merged.slug_hu, 160),
         title_en: cleanText(merged.title_en, 300), title_hu: cleanText(merged.title_hu, 300),
         short_description_en: excerpt(descriptionEn, 700), short_description_hu: excerpt(descriptionHu, 700),
@@ -597,7 +598,7 @@ function registerEventRoutes(options) {
   });
 
   app.get("/api/events", auth, admin, (_req, res) => {
-    const rows = db.prepare(`${service.selectEventSql} ORDER BY e.start_at DESC`).all();
+    const rows = db.prepare(`${service.selectEventSql} ORDER BY e.start_at ASC,e.id ASC`).all();
     res.json(rows.map(service.eventResponse));
   });
 
@@ -634,8 +635,8 @@ function registerEventRoutes(options) {
       return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
     }
     try {
-      db.prepare(`INSERT INTO events(id,event_key,category_id,access_type,status,published_at,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,sales_start_at,sales_end_at,created_by_user_id,updated_by_user_id)
-        VALUES(@id,@event_key,@category_id,@access_type,@status,@published_at,@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@sales_start_at,@sales_end_at,@created_by_user_id,@updated_by_user_id)`)
+      db.prepare(`INSERT INTO events(id,event_key,category_id,custom_type,access_type,status,published_at,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,sales_start_at,sales_end_at,created_by_user_id,updated_by_user_id)
+        VALUES(@id,@event_key,@category_id,@custom_type,@access_type,@status,@published_at,@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@sales_start_at,@sales_end_at,@created_by_user_id,@updated_by_user_id)`)
         .run({ id, event_key: eventKey, ...value, status: publishNow ? "PUBLISHED" : "DRAFT", published_at: publishNow ? new Date().toISOString() : null, created_by_user_id: req.user.id, updated_by_user_id: req.user.id });
       const created = service.eventById(id);
       audit(req, publishNow ? "CREATE_AND_PUBLISH" : "CREATE", "events", id, null, created, 1, publishNow ? "Event saved and published atomically" : "Event draft created");
@@ -671,7 +672,7 @@ function registerEventRoutes(options) {
     if (publishNow && !value.hero_image_url) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" }); }
     if (publishNow && value.access_type === "PUBLIC_PAID" && Number(value.price_cents) <= 0) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" }); }
     try {
-      db.prepare(`UPDATE events SET category_id=@category_id,access_type=@access_type,slug_en=@slug_en,slug_hu=@slug_hu,title_en=@title_en,title_hu=@title_hu,short_description_en=@short_description_en,short_description_hu=@short_description_hu,description_en=@description_en,description_hu=@description_hu,artist_id=@artist_id,performer_name=@performer_name,hero_image_url=@hero_image_url,hero_image_alt_en=@hero_image_alt_en,hero_image_alt_hu=@hero_image_alt_hu,gallery_json=@gallery_json,venue_name=@venue_name,venue_street=@venue_street,venue_city=@venue_city,venue_region=@venue_region,venue_postal_code=@venue_postal_code,venue_country=@venue_country,timezone=@timezone,start_at=@start_at,end_at=@end_at,capacity_total=@capacity_total,price_cents=@price_cents,currency=@currency,sales_start_at=@sales_start_at,sales_end_at=@sales_end_at,status=CASE WHEN @publish_now=1 THEN 'PUBLISHED' ELSE status END,published_at=CASE WHEN @publish_now=1 THEN COALESCE(published_at,CURRENT_TIMESTAMP) ELSE published_at END,updated_by_user_id=@updated_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
+      db.prepare(`UPDATE events SET category_id=@category_id,custom_type=@custom_type,access_type=@access_type,slug_en=@slug_en,slug_hu=@slug_hu,title_en=@title_en,title_hu=@title_hu,short_description_en=@short_description_en,short_description_hu=@short_description_hu,description_en=@description_en,description_hu=@description_hu,artist_id=@artist_id,performer_name=@performer_name,hero_image_url=@hero_image_url,hero_image_alt_en=@hero_image_alt_en,hero_image_alt_hu=@hero_image_alt_hu,gallery_json=@gallery_json,venue_name=@venue_name,venue_street=@venue_street,venue_city=@venue_city,venue_region=@venue_region,venue_postal_code=@venue_postal_code,venue_country=@venue_country,timezone=@timezone,start_at=@start_at,end_at=@end_at,capacity_total=@capacity_total,price_cents=@price_cents,currency=@currency,sales_start_at=@sales_start_at,sales_end_at=@sales_end_at,status=CASE WHEN @publish_now=1 THEN 'PUBLISHED' ELSE status END,published_at=CASE WHEN @publish_now=1 THEN COALESCE(published_at,CURRENT_TIMESTAMP) ELSE published_at END,updated_by_user_id=@updated_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
         .run({ id: before.id, ...value, publish_now: publishNow ? 1 : 0, updated_by_user_id: req.user.id });
       const after = service.eventById(before.id);
       if (uploaded.imageUrl && before.hero_image_url !== uploaded.imageUrl) removeStoredEventImage(before.hero_image_url);
@@ -916,7 +917,7 @@ function registerEventRoutes(options) {
         timeZone: event.timezone || NY_TIME_ZONE, dateStyle: "long", timeStyle: "short"
       }).format(new Date(event.start_at));
       const snapshot = attendanceSnapshot(db, event, session, guests);
-      const pdf = generateGuestListPdf({ event: { title, dateLabel }, guests, language: "en", closed: session.mode === "DIGITAL" && session.status === "CLOSED" });
+      const pdf = generateGuestListPdf({ event: { title, customType: event.custom_type || "", dateLabel }, guests, language: "en", closed: session.mode === "DIGITAL" && session.status === "CLOSED" });
       recordPdfExport(db, event, req.user, session.mode, snapshot);
       const safeName = slugify(title) || "event";
       res.setHeader("Cache-Control", "private, no-store");
