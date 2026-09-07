@@ -26,10 +26,10 @@ function isActuallyPaidTicket(row) {
 function readGuestData(db, { search = "", eventId = "" } = {}) {
   const rows = db.prepare(`
     SELECT
-      t.id AS ticket_id,t.event_id,t.source_type,t.attendee_name,t.contact_email,t.public_code,
-      t.status AS ticket_status,t.price_cents,t.currency,t.created_at,
+      t.id AS ticket_id,t.event_id,t.source_type,t.ticket_variant,t.original_guest_name,t.attendee_name,t.contact_email,t.public_code,
+      t.status AS ticket_status,t.price_cents,t.currency,t.payment_method,t.created_at,
       e.title_en,e.title_hu,e.start_at,e.end_at,e.venue_name,e.timezone,e.status AS event_status,
-      p.status AS payment_status,
+      COALESCE(p.status,t.payment_status) AS payment_status,
       a.status AS attendance_status
     FROM event_tickets t
     JOIN events e ON e.id=t.event_id
@@ -49,7 +49,7 @@ function readGuestData(db, { search = "", eventId = "" } = {}) {
     // Guest Data is a historical, static view. A voided or refunded ticket
     // remains visible in the guest/event relationship; only the paid-average
     // calculation excludes it.
-    const name = String(row.attendee_name || "").trim() || "Unknown guest";
+    const name = String(row.original_guest_name || row.attendee_name || "").trim() || "Unknown guest";
     const email = String(row.contact_email || "").trim();
     const key = `${normalize(email)}\u0000${normalize(name)}`;
     let guest = groups.get(key);
