@@ -4,6 +4,8 @@ const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { generateGuestListPdf } = require("./guest-list-pdf");
 const { attendanceError, attendanceRows, attendanceSnapshot, ensureSession, recordPdfExport, startMode, state: attendanceState } = require("./event-attendance");
+const { createTicketService } = require("./ticket-service");
+const { parseGuestName } = require("./name-format");
 
 const EVENT_ACCESS_TYPES = new Set(["PUBLIC_PAID", "PUBLIC_FREE", "INVITE_ONLY", "INTERNAL"]);
 const EVENT_STATUSES = new Set(["DRAFT", "PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "CLOSED"]);
@@ -11,6 +13,7 @@ const PUBLIC_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED", "COMPLETED", "
 const PUBLIC_LIST_STATUSES = ["PUBLISHED", "RESCHEDULED", "CANCELLED"];
 const ACTIVE_TICKET_STATUSES = ["VALID", "USED"];
 const REFUND_STATUSES = new Set(["REQUESTED", "APPROVED", "REJECTED", "PROCESSED"]);
+const REFUND_REASON_CODES = new Set(["CUSTOMER_REQUEST", "SCHEDULE_CONFLICT", "EVENT_CANCELLED", "RESCHEDULED", "OTHER"]);
 const NY_TIME_ZONE = "America/New_York";
 const REFUND_WINDOW_MS = 48 * 60 * 60 * 1000;
 
@@ -194,7 +197,7 @@ function publicEventRow(row, language, capacity, assetBaseUrl = "", paymentConfi
   };
 }
 
-function createEventService({ db, activeHoldCount = () => 0 }) {
+function createEventService({ db, activeHoldCount = () => 0, ticketCapacity = null, ticketService = null }) {
   const selectEventSql = `SELECT e.*,c.code AS category_code,c.name_en AS category_name_en,c.name_hu AS category_name_hu,a.name AS artist_name
     FROM events e JOIN event_categories c ON c.id=e.category_id LEFT JOIN website_artists a ON a.id=e.artist_id`;
 
@@ -235,6 +238,7 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
   }
 
   function capacity(eventId) {
+    if (typeof ticketCapacity === "function") return ticketCapacity(eventId);
     const event = eventById(eventId);
     if (!event) return null;
     const counts = ticketCounts(eventId);
@@ -270,6 +274,11 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
     if (times.error) return times;
     const capacityTotal = Number(merged.capacity_total);
     if (!Number.isInteger(capacityTotal) || capacityTotal <= 0 || capacityTotal > 100000) return { error: "INVALID_EVENT_CAPACITY" };
+    const specialCapacityTotal = Number(merged.special_capacity_total || 0);
+    if (!Number.isInteger(specialCapacityTotal) || specialCapacityTotal < 0 || specialCapacityTotal > 100000) return { error: "INVALID_SPECIAL_EVENT_CAPACITY" };
+    const specialCapacityUnlimited = Object.prototype.hasOwnProperty.call(body || {}, "special_capacity_unlimited")
+      ? ([true, 1, "true", "1"].includes(body.special_capacity_unlimited) ? 1 : 0)
+      : Number(existing?.special_capacity_unlimited ?? 1);
     const priceCents = Number(merged.price_cents || 0);
     if (!Number.isInteger(priceCents) || priceCents < 0) return { error: "INVALID_EVENT_PRICE" };
     if (merged.access_type !== "PUBLIC_PAID" && priceCents !== 0) return { error: "NON_PAID_EVENT_PRICE_MUST_BE_ZERO" };
@@ -300,13 +309,15 @@ function createEventService({ db, activeHoldCount = () => 0 }) {
         venue_street: cleanText(merged.venue_street, 300), venue_city: cleanText(merged.venue_city, 160),
         venue_region: cleanText(merged.venue_region, 100), venue_postal_code: cleanText(merged.venue_postal_code, 40),
         venue_country: cleanText(merged.venue_country || "US", 2).toUpperCase(), timezone: NY_TIME_ZONE,
-        start_at: times.startAt, end_at: times.endAt, capacity_total: capacityTotal, price_cents: priceCents,
+        start_at: times.startAt, end_at: times.endAt, capacity_total: capacityTotal, special_capacity_total: specialCapacityTotal,
+        special_capacity_unlimited: specialCapacityUnlimited, price_cents: priceCents,
         currency: "USD", sales_start_at: salesStart.value, sales_end_at: salesEnd.value
       }
     };
   }
 
   function createTicket({ eventId, invitationId = null, sourceType, buyerName = "", attendeeName, contactEmail, priceCents = 0, userId = null }) {
+    if (ticketService?.createTicket) return ticketService.createTicket({ eventId, invitationId, sourceType, buyerName, attendeeName, contactEmail, priceCents, userId });
     const event = eventById(eventId);
     if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
     if (["CANCELLED", "CLOSED"].includes(event.status)) throw Object.assign(new Error("EVENT_NOT_AVAILABLE"), { status: 409 });
@@ -334,7 +345,8 @@ function registerEventRoutes(options) {
   const { app, db, auth, permit, audit, transactionalEmail, onTicketsIssued, eventImageUpload, eventImageDir, stripeSandbox } = options;
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
-  const service = createEventService({ db, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0) });
+  const ticketService = options.ticketService || createTicketService({ db });
+  const service = createEventService({ db, activeHoldCount: stripeSandbox?.activeHoldCount || (() => 0), ticketCapacity: ticketService.capacity, ticketService });
   const admin = permit("ADMIN");
   const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
   const requireSuperadmin = permit("SUPERADMIN");
@@ -494,7 +506,7 @@ function registerEventRoutes(options) {
         const created = [];
         for (let sequence = 1; sequence <= quantity; sequence += 1) {
           const name = names[sequence - 1];
-          created.push(service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", buyerName: names[0], attendeeName: name, contactEmail }));
+          created.push(ticketService.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", ticketVariant: "PUBLIC_FREE", buyerName: names[0], attendeeName: name, contactEmail }));
         }
         return created;
       })();
@@ -529,7 +541,7 @@ function registerEventRoutes(options) {
           db.prepare("UPDATE event_invitations SET status='DECLINED',declined_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'").run(invitation.id);
           return { status: "DECLINED" };
         }
-        const ticket = service.createTicket({ eventId: event.id, invitationId: invitation.id, sourceType: "INVITATION", attendeeName: invitation.guest_name, contactEmail: invitation.guest_email });
+        const ticket = ticketService.createTicket({ eventId: event.id, invitationId: invitation.id, sourceType: "INVITATION", ticketVariant: "INVITATION", attendeeName: invitation.guest_name, contactEmail: invitation.guest_email });
         db.prepare("UPDATE event_invitations SET status='ACCEPTED',accepted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'").run(invitation.id);
         return { status: "ACCEPTED", ticket_code: ticket.public_code, ticket_id: ticket.id, event_id: event.id };
       })();
@@ -546,8 +558,10 @@ function registerEventRoutes(options) {
   app.post("/api/public/event-refund-requests", (req, res) => {
     const ticketCode = cleanText(req.body?.ticket_code, 100);
     const email = normalizeEmail(req.body?.email);
-    const reason = cleanText(req.body?.reason, 3000);
+    const reasonCode = cleanText(req.body?.reason_code, 60).toUpperCase();
+    const reason = cleanText(req.body?.reason_detail || req.body?.reason, 3000);
     if (!ticketCode || !validEmail(email) || !reason) return res.status(400).json({ error: "REQUIRED_REFUND_FIELDS" });
+    if (!REFUND_REASON_CODES.has(reasonCode)) return res.status(400).json({ error: "INVALID_REFUND_REASON" });
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE public_code=? AND lower(trim(contact_email))=?").get(ticketCode, email);
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
     if (!["VALID", "USED"].includes(ticket.status)) return res.status(409).json({ error: "TICKET_NOT_REFUNDABLE" });
@@ -556,8 +570,8 @@ function registerEventRoutes(options) {
     const eligibility = service.refundEligibility(event, new Date());
     const id = newId("EVRFD");
     db.prepare(`INSERT INTO event_refund_requests(id,event_id,ticket_id,requester_name,requester_email,reason,status,eligibility_code,eligible)
-      VALUES(?,?,?,?,?,?,'REQUESTED',?,?)`).run(id, event.id, ticket.id, cleanText(req.body?.name, 200), email, reason, eligibility.code, eligibility.eligible ? 1 : 0);
-    res.status(201).json({ id, status: "REQUESTED", eligible: eligibility.eligible, eligibility_code: eligibility.code });
+      VALUES(?,?,?,?,?,?,'REQUESTED',?,?)`).run(id, event.id, ticket.id, cleanText(req.body?.name, 200), email, `${reasonCode}: ${reason}`, eligibility.code, eligibility.eligible ? 1 : 0);
+    res.status(201).json({ id, status: "REQUESTED", reason_code: reasonCode, eligible: eligibility.eligible, eligibility_code: eligibility.code });
   });
 
   app.get("/api/event-categories", auth, admin, (_req, res) => {
@@ -606,7 +620,7 @@ function registerEventRoutes(options) {
     const row = service.eventById(req.params.id);
     if (!row) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     const invitations = db.prepare("SELECT id,event_id,guest_name,guest_email,language,status,delivery_status,sent_at,accepted_at,declined_at,revoked_at,created_at FROM event_invitations WHERE event_id=? ORDER BY created_at DESC").all(row.id);
-    const tickets = db.prepare("SELECT id,event_id,invitation_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY created_at DESC").all(row.id);
+    const tickets = db.prepare("SELECT id,event_id,invitation_id,contact_id,source_type,ticket_variant,buyer_name,attendee_name,original_guest_name,salutation,first_names,surnames,suffix,contact_email,public_code,status,price_cents,currency,payment_method,payment_status,reservation_status,on_site_deadline_at,checked_in_at,document_front_path,document_back_path,document_full_path,created_at FROM event_tickets WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const refunds = db.prepare("SELECT * FROM event_refund_requests WHERE event_id=? ORDER BY requested_at DESC").all(row.id);
     const payments = db.prepare("SELECT * FROM event_payments WHERE event_id=? ORDER BY created_at DESC").all(row.id);
     const checkoutHolds = db.prepare("SELECT id,quantity,status,expires_at,purchaser_name,purchaser_email,amount_total,currency,test_mode,created_at FROM event_checkout_holds WHERE event_id=? ORDER BY created_at DESC LIMIT 100").all(row.id);
@@ -635,8 +649,8 @@ function registerEventRoutes(options) {
       return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" });
     }
     try {
-      db.prepare(`INSERT INTO events(id,event_key,category_id,custom_type,access_type,status,published_at,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,sales_start_at,sales_end_at,created_by_user_id,updated_by_user_id)
-        VALUES(@id,@event_key,@category_id,@custom_type,@access_type,@status,@published_at,@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@sales_start_at,@sales_end_at,@created_by_user_id,@updated_by_user_id)`)
+      db.prepare(`INSERT INTO events(id,event_key,category_id,custom_type,access_type,status,published_at,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,special_capacity_total,special_capacity_unlimited,price_cents,currency,sales_start_at,sales_end_at,created_by_user_id,updated_by_user_id)
+        VALUES(@id,@event_key,@category_id,@custom_type,@access_type,@status,@published_at,@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@special_capacity_total,@special_capacity_unlimited,@price_cents,@currency,@sales_start_at,@sales_end_at,@created_by_user_id,@updated_by_user_id)`)
         .run({ id, event_key: eventKey, ...value, status: publishNow ? "PUBLISHED" : "DRAFT", published_at: publishNow ? new Date().toISOString() : null, created_by_user_id: req.user.id, updated_by_user_id: req.user.id });
       const created = service.eventById(id);
       audit(req, publishNow ? "CREATE_AND_PUBLISH" : "CREATE", "events", id, null, created, 1, publishNow ? "Event saved and published atomically" : "Event draft created");
@@ -672,7 +686,7 @@ function registerEventRoutes(options) {
     if (publishNow && !value.hero_image_url) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "EVENT_IMAGE_REQUIRED" }); }
     if (publishNow && value.access_type === "PUBLIC_PAID" && Number(value.price_cents) <= 0) { removeUploadedFile(req.file?.path); return res.status(400).json({ error: "PAID_EVENT_PRICE_REQUIRED" }); }
     try {
-      db.prepare(`UPDATE events SET category_id=@category_id,custom_type=@custom_type,access_type=@access_type,slug_en=@slug_en,slug_hu=@slug_hu,title_en=@title_en,title_hu=@title_hu,short_description_en=@short_description_en,short_description_hu=@short_description_hu,description_en=@description_en,description_hu=@description_hu,artist_id=@artist_id,performer_name=@performer_name,hero_image_url=@hero_image_url,hero_image_alt_en=@hero_image_alt_en,hero_image_alt_hu=@hero_image_alt_hu,gallery_json=@gallery_json,venue_name=@venue_name,venue_street=@venue_street,venue_city=@venue_city,venue_region=@venue_region,venue_postal_code=@venue_postal_code,venue_country=@venue_country,timezone=@timezone,start_at=@start_at,end_at=@end_at,capacity_total=@capacity_total,price_cents=@price_cents,currency=@currency,sales_start_at=@sales_start_at,sales_end_at=@sales_end_at,status=CASE WHEN @publish_now=1 THEN 'PUBLISHED' ELSE status END,published_at=CASE WHEN @publish_now=1 THEN COALESCE(published_at,CURRENT_TIMESTAMP) ELSE published_at END,updated_by_user_id=@updated_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
+      db.prepare(`UPDATE events SET category_id=@category_id,custom_type=@custom_type,access_type=@access_type,slug_en=@slug_en,slug_hu=@slug_hu,title_en=@title_en,title_hu=@title_hu,short_description_en=@short_description_en,short_description_hu=@short_description_hu,description_en=@description_en,description_hu=@description_hu,artist_id=@artist_id,performer_name=@performer_name,hero_image_url=@hero_image_url,hero_image_alt_en=@hero_image_alt_en,hero_image_alt_hu=@hero_image_alt_hu,gallery_json=@gallery_json,venue_name=@venue_name,venue_street=@venue_street,venue_city=@venue_city,venue_region=@venue_region,venue_postal_code=@venue_postal_code,venue_country=@venue_country,timezone=@timezone,start_at=@start_at,end_at=@end_at,capacity_total=@capacity_total,special_capacity_total=@special_capacity_total,special_capacity_unlimited=@special_capacity_unlimited,price_cents=@price_cents,currency=@currency,sales_start_at=@sales_start_at,sales_end_at=@sales_end_at,status=CASE WHEN @publish_now=1 THEN 'PUBLISHED' ELSE status END,published_at=CASE WHEN @publish_now=1 THEN COALESCE(published_at,CURRENT_TIMESTAMP) ELSE published_at END,updated_by_user_id=@updated_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=@id`)
         .run({ id: before.id, ...value, publish_now: publishNow ? 1 : 0, updated_by_user_id: req.user.id });
       const after = service.eventById(before.id);
       if (uploaded.imageUrl && before.hero_image_url !== uploaded.imageUrl) removeStoredEventImage(before.hero_image_url);
@@ -766,8 +780,9 @@ function registerEventRoutes(options) {
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     const existing = db.prepare("SELECT * FROM event_closures WHERE event_id=?").get(event.id);
     if (existing) return res.status(409).json({ error: "EVENT_ALREADY_CLOSED", closure: JSON.parse(existing.snapshot_json) });
-    const force = Boolean(req.body?.force) && (req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin || 0) === 1);
-    if (new Date(event.end_at).getTime() > Date.now() && !force) return res.status(409).json({ error: "EVENT_HAS_NOT_ENDED" });
+    // Closing is an explicit administrative decision. The event may be closed
+    // before its scheduled end; the attendance module still keeps TIME PASSED
+    // editable until this final CLOSED action is performed.
     const snapshot = db.transaction(() => {
       const counts = service.ticketCounts(event.id);
       const invitationCounts = Object.fromEntries(db.prepare("SELECT status,COUNT(*) count FROM event_invitations WHERE event_id=? GROUP BY status").all(event.id).map((row) => [row.status, Number(row.count)]));
@@ -797,7 +812,7 @@ function registerEventRoutes(options) {
         finance_connected: false
       };
       db.prepare("INSERT INTO event_closures(id,event_id,snapshot_json,closed_by_user_id) VALUES(?,?,?,?)").run(newId("EVCLS"), event.id, JSON.stringify(report), req.user.id);
-      db.prepare("UPDATE events SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      db.prepare("UPDATE events SET status_before_close=CASE WHEN status='CLOSED' THEN status_before_close ELSE status END,status='CLOSED',closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?,closure_snapshot_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(req.user.id, JSON.stringify(report), req.user.id, event.id);
       return report;
     })();
@@ -879,7 +894,7 @@ function registerEventRoutes(options) {
     const email = normalizeEmail(req.body?.contact_email);
     if (!attendeeName || !validEmail(email)) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
     try {
-      const ticket = db.transaction(() => service.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", attendeeName, contactEmail: email, userId: req.user.id }))();
+      const ticket = db.transaction(() => ticketService.createTicket({ eventId: event.id, sourceType: "COMPLIMENTARY", ticketVariant: "COMPLIMENTARY", attendeeName, contactEmail: email, userId: req.user.id }))();
       let delivery = { status: "NOT_CONFIGURED" };
       if (onTicketsIssued) {
         try { delivery = await onTicketsIssued({ eventId: event.id, ticketIds: [ticket.id], deliveryType: "EVENT_COMPLIMENTARY_TICKET" }); }
@@ -890,15 +905,18 @@ function registerEventRoutes(options) {
   });
 
   app.get("/api/events/:id/tickets", auth, admin, (req, res) => {
-    res.json(db.prepare("SELECT id,event_id,source_type,buyer_name,attendee_name,contact_email,public_code,status,price_cents,currency,checked_in_at,created_at FROM event_tickets WHERE event_id=? ORDER BY attendee_name").all(req.params.id));
+    res.json(db.prepare("SELECT id,event_id,invitation_id,contact_id,source_type,ticket_variant,buyer_name,attendee_name,original_guest_name,salutation,first_names,surnames,suffix,contact_email,public_code,status,price_cents,currency,payment_method,payment_status,reservation_status,on_site_deadline_at,checked_in_at,document_front_path,document_back_path,document_full_path,created_at FROM event_tickets WHERE event_id=? ORDER BY attendee_name").all(req.params.id));
   });
 
   app.put("/api/events/tickets/:id", auth, admin, (req, res) => {
-    const before = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
+    const before = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
     if (!before) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    const attendeeName = cleanText(req.body?.attendee_name, 200);
+    if (["CLOSED", "CANCELLED"].includes(before.event_status)) return res.status(409).json({ error: before.event_status === "CLOSED" ? "EVENT_ALREADY_CLOSED" : "EVENT_NOT_AVAILABLE" });
+    const attendeeName = cleanText(req.body?.attendee_name, 500);
     if (!attendeeName) return res.status(400).json({ error: "VALID_GUEST_REQUIRED" });
-    db.prepare("UPDATE event_tickets SET attendee_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(attendeeName, before.id);
+    const parsed = parseGuestName(attendeeName);
+    db.prepare("UPDATE event_tickets SET attendee_name=?,original_guest_name=?,salutation=?,first_names=?,surnames=?,suffix=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(parsed.display_name, parsed.original_name, parsed.salutation, parsed.first_names, parsed.surnames, parsed.suffix, before.id);
     const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(before.id);
     audit(req, "UPDATE_GUEST_NAME", "events", before.id, before, after, 1, "Guest-list attendee name corrected");
     res.json(after);
@@ -937,21 +955,39 @@ function registerEventRoutes(options) {
     if (!request) return res.status(404).json({ error: "REFUND_REQUEST_NOT_FOUND" });
     const status = cleanText(req.body?.status, 30).toUpperCase();
     if (!REFUND_STATUSES.has(status) || status === "PROCESSED") return res.status(400).json({ error: "INVALID_REFUND_STATUS" });
-    if (status === "APPROVED" && !Number(request.eligible)) return res.status(409).json({ error: "REFUND_NOT_ELIGIBLE" });
     const resolutionNote = cleanText(req.body?.resolution_note, 2000);
+    const reviewNote = cleanText(req.body?.review_note || resolutionNote, 2000);
+    const noShow = req.body?.no_show === true || req.body?.no_show === 1 || String(req.body?.no_show || "") === "1" || String(req.body?.no_show || "").toLowerCase() === "true";
+    if (noShow) {
+      db.prepare(`UPDATE event_refund_requests SET status='REJECTED',eligible=0,no_show=1,eligibility_code='REFUND NOT ELIGIBLE – NO-SHOW',review_note=?,resolution_note=?,reviewed_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,execution_status='NOT_ELIGIBLE',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(reviewNote, resolutionNote, req.user.id, request.id);
+      return res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
+    }
+    if (status === "APPROVED" && !Number(request.eligible)) return res.status(409).json({ error: "REFUND_NOT_ELIGIBLE" });
     if (status === "APPROVED") {
       const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(request.ticket_id);
       if (ticket?.source_type === "PURCHASE") {
+        db.prepare("UPDATE event_refund_requests SET status='APPROVED',review_note=?,reviewed_at=CURRENT_TIMESTAMP,approved_at=CURRENT_TIMESTAMP,execution_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?")
+          .run(reviewNote, request.id);
         try {
           await stripeSandbox.refundPaymentForTicket(ticket.id, resolutionNote || request.reason);
-          db.prepare("UPDATE event_refund_requests SET status='PROCESSED',resolution_note=?,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-            .run(resolutionNote, req.user.id, request.id);
+          db.prepare("UPDATE event_refund_requests SET status='PROCESSED',resolution_note=?,review_note=?,reviewed_at=COALESCE(reviewed_at,CURRENT_TIMESTAMP),approved_at=COALESCE(approved_at,CURRENT_TIMESTAMP),executed_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,execution_status='COMPLETED',updated_at=CURRENT_TIMESTAMP WHERE id=?")
+            .run(resolutionNote, reviewNote, req.user.id, request.id);
           return res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
-        } catch (error) { return sendError(res, error, "STRIPE_REFUND_FAILED"); }
+        } catch (error) {
+          db.prepare("UPDATE event_refund_requests SET execution_status='FAILED',review_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(`${reviewNote}${reviewNote ? " · " : ""}${error.message || "Stripe refund failed"}`, request.id);
+          return sendError(res, error, "STRIPE_REFUND_FAILED");
+        }
       }
+      db.transaction(() => {
+        db.prepare("UPDATE event_tickets SET status='REFUNDED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('VALID','USED')").run(request.ticket_id);
+        db.prepare("UPDATE event_refund_requests SET status='PROCESSED',review_note=?,resolution_note=?,reviewed_at=CURRENT_TIMESTAMP,approved_at=CURRENT_TIMESTAMP,executed_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,execution_status='COMPLETED',updated_at=CURRENT_TIMESTAMP WHERE id=?")
+          .run(reviewNote, resolutionNote, req.user.id, request.id);
+      })();
+      return res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
     }
-    db.prepare("UPDATE event_refund_requests SET status=?,resolution_note=?,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(status, resolutionNote, req.user.id, request.id);
+    db.prepare("UPDATE event_refund_requests SET status=?,review_note=?,resolution_note=?,reviewed_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,execution_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(status, reviewNote, resolutionNote, req.user.id, status === "REJECTED" ? "NOT_ELIGIBLE" : "NOT_STARTED", request.id);
     res.json(db.prepare("SELECT * FROM event_refund_requests WHERE id=?").get(request.id));
   });
 
