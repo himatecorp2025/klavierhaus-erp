@@ -353,6 +353,116 @@ function removeRetiredPrivateConsultationPage() {
   log("Removed retired standalone Private Consultation website content");
 }
 
+function purgeLegacyRoundOneEvents() {
+  if (!tableExists("events") || !tableExists("app_settings")) return;
+  const markerKey = "legacy_round_one_events_purged_v2";
+  if (db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(markerKey)) return;
+
+  const events = db.prepare(`SELECT id,title_en,title_hu,slug_en,slug_hu,hero_image_url,gallery_json FROM events`).all();
+  const normalized = (value) => String(value || "").toLocaleLowerCase("hu-HU");
+  const matches = [
+    (event) => /ravel/.test([event.title_en, event.title_hu, event.slug_en, event.slug_hu].map(normalized).join(" "))
+      && /(est|evening)/.test([event.title_en, event.title_hu, event.slug_en, event.slug_hu].map(normalized).join(" ")),
+    (event) => /éneklő\s+dallam\s+művész/.test(normalized(event.title_hu))
+      || /(?:singing\s+melody|art\s+of\s+the\s+singing\s+line)/.test(normalized(event.title_en)),
+    (event) => /young\s+artist\s+salon/.test(normalized(event.title_en))
+      || /fiatal\s+művészek\s+szalonja/.test(normalized(event.title_hu))
+  ];
+  const selected = new Map();
+  matches.forEach((matcher, index) => {
+    const found = events.filter(matcher);
+    if (found.length > 1) throw new Error(`LEGACY_EVENT_PURGE_AMBIGUOUS_${index + 1}`);
+    if (found[0]) selected.set(found[0].id, found[0]);
+  });
+  const selectedRows = [...selected.values()];
+  const removeUploadedFile = (url) => {
+    const value = String(url || "");
+    if (!value.startsWith("/uploads/events/")) return;
+    const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
+    try { fs.unlinkSync(path.join(uploadDir, "events", path.basename(value))); } catch (_error) {}
+  };
+  const eventImages = selectedRows.flatMap((event) => {
+    let gallery = [];
+    try { gallery = JSON.parse(event.gallery_json || "[]"); } catch (_error) {}
+    return [event.hero_image_url, ...(Array.isArray(gallery) ? gallery.map((item) => typeof item === "string" ? item : item?.url || item?.image_url) : [])];
+  });
+  if (selectedRows.length) {
+    const ids = selectedRows.map((event) => event.id);
+    const placeholders = ids.map(() => "?").join(",");
+    const tickets = tableExists("event_tickets") && tableColumns("event_tickets").has("event_id")
+      ? db.prepare(`SELECT id,event_payment_id FROM event_tickets WHERE event_id IN (${placeholders})`).all(...ids)
+      : [];
+    const ticketIds = tickets.map((row) => row.id).filter(Boolean);
+    const paymentIds = [...new Set(tickets.map((row) => row.event_payment_id).filter(Boolean))];
+    const paymentPlaceholders = paymentIds.map(() => "?").join(",");
+    const documentNeedles = [...ids, ...paymentIds];
+    const documentRows = tableExists("knowledge_base") && tableColumns("knowledge_base").has("stored_path") && documentNeedles.length
+      ? db.prepare(`SELECT id,stored_path FROM knowledge_base WHERE content_type='Event Invoice' AND (${documentNeedles.map(() => "body LIKE ?").join(" OR ")})`)
+        .all(...documentNeedles.map((id) => `%${id}%`))
+      : [];
+    const removeDocumentFile = (value) => {
+      const relative = String(value || "");
+      if (!relative.startsWith("/uploads/documents/")) return;
+      const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
+      const documentDir = path.join(uploadDir, "documents");
+      const fileName = path.basename(relative);
+      const target = path.resolve(documentDir, fileName);
+      if (path.dirname(target) !== path.resolve(documentDir)) return;
+      try { fs.unlinkSync(target); } catch (_error) {}
+    };
+    const legacyDocumentFiles = [
+      ...paymentIds.flatMap((id) => [`tickets-${id}.pdf`, `invoice-${id}.pdf`]),
+      ...ticketIds.map((id) => `ticket-${id}.pdf`),
+      ...documentRows.map((row) => path.basename(String(row.stored_path || ""))).filter(Boolean)
+    ];
+    db.transaction(() => {
+      // These relations intentionally use SET NULL in the operational schema,
+      // but the round-one purge is a hard deletion. Remove every event-owned
+      // record explicitly before the parent event is removed so no orphaned
+      // interest, conversation, delivery, tracking, review or finance record
+      // survives the requested cleanup.
+      const deleteByEvent = (tableName, columnName = "event_id") => {
+        if (tableExists(tableName) && tableColumns(tableName).has(columnName)) {
+          db.prepare(`DELETE FROM ${tableName} WHERE ${columnName} IN (${placeholders})`).run(...ids);
+        }
+      };
+      [
+        "event_repeat_requests",
+        "customer_conversations",
+        "website_tracking_events",
+        "communication_deliveries"
+      ].forEach((tableName) => deleteByEvent(tableName));
+      deleteByEvent("website_reviews", "linked_event_id");
+
+      if (tableExists("financial_items") && paymentIds.length && tableColumns("financial_items").has("source_id")) {
+        db.prepare(`DELETE FROM financial_items WHERE source_type IN ('event_payment','event_payment_refund') AND source_id IN (${paymentPlaceholders})`).run(...paymentIds);
+      }
+      if (tableExists("knowledge_base") && documentRows.length) {
+        db.prepare(`DELETE FROM knowledge_base WHERE id IN (${documentRows.map(() => "?").join(",")})`).run(...documentRows.map((row) => row.id));
+      }
+      if (tableExists("audit_log") && tableColumns("audit_log").has("record_id")) {
+        const auditIds = [...new Set([...ids, ...ticketIds, ...paymentIds])];
+        const auditPlaceholders = auditIds.map(() => "?").join(",");
+        if (auditIds.length) db.prepare(`DELETE FROM audit_log WHERE record_id IN (${auditPlaceholders})`).run(...auditIds);
+      }
+      db.prepare(`DELETE FROM events WHERE id IN (${placeholders})`).run(...ids);
+      db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)").run(markerKey, JSON.stringify({ deleted_event_ids: ids, deleted_count: ids.length }), "SYSTEM");
+    })();
+    eventImages.forEach(removeUploadedFile);
+    const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
+    const documentDir = path.join(uploadDir, "documents");
+    legacyDocumentFiles.forEach((fileName) => {
+      if (!fileName || fileName.includes("/") || fileName.includes("\\")) return;
+      try { fs.unlinkSync(path.join(documentDir, fileName)); } catch (_error) {}
+    });
+    documentRows.forEach((row) => removeDocumentFile(row.stored_path));
+    log(`Removed ${selectedRows.length} targeted legacy event(s) and all cascading records: ${ids.join(", ")}`);
+  } else {
+    db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)").run(markerKey, JSON.stringify({ deleted_event_ids: [], deleted_count: 0 }), "SYSTEM");
+    log("Targeted legacy events were already absent; purge marker recorded");
+  }
+}
+
 function runMigrations() {
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
@@ -599,13 +709,6 @@ function runMigrations() {
     log('Enabled all notification preferences for existing users');
   }
   assertPreservedBusinessCounts(preservedCounts);
-  const foreignKeyErrors = db.prepare("PRAGMA foreign_key_check").all();
-  if (foreignKeyErrors.length) throw new Error(`Foreign-key integrity check failed: ${JSON.stringify(foreignKeyErrors.slice(0, 10))}`);
-  const integrity = db.prepare("PRAGMA integrity_check").all();
-  if (integrity.some((row) => String(row.integrity_check || "").toLowerCase() !== "ok")) {
-    throw new Error(`SQLite integrity check failed: ${JSON.stringify(integrity)}`);
-  }
-  log("SQLite integrity and foreign-key checks passed");
   const autoInstallSamples = process.env.WEBSITE_AUTO_INSTALL_SAMPLES === undefined
     ? Boolean(String(process.env.WEBSITE_BASE_URL || "").trim())
     : String(process.env.WEBSITE_AUTO_INSTALL_SAMPLES).toLowerCase() !== "false";
@@ -613,6 +716,17 @@ function runMigrations() {
     const sampleResult = installSampleContent({ db, publicWebsiteUrl: process.env.WEBSITE_BASE_URL, updatedBy: "SYSTEM" });
     log(sampleResult.alreadyInstalled ? "Editable public sample content already present" : `Editable public sample content installed: ${JSON.stringify(sampleResult.installed)}`);
   }
+  // Sample content includes the three historical round-one demo events. Run
+  // the hard purge after optional sample installation so they cannot be
+  // reintroduced after the one-time purge marker is written.
+  purgeLegacyRoundOneEvents();
+  const foreignKeyErrors = db.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyErrors.length) throw new Error(`Foreign-key integrity check failed: ${JSON.stringify(foreignKeyErrors.slice(0, 10))}`);
+  const integrity = db.prepare("PRAGMA integrity_check").all();
+  if (integrity.some((row) => String(row.integrity_check || "").toLowerCase() !== "ok")) {
+    throw new Error(`SQLite integrity check failed: ${JSON.stringify(integrity)}`);
+  }
+  log("SQLite integrity and foreign-key checks passed");
   // No user, customer piano, job, inventory or financial demo record is seeded.
   const users = db.prepare("SELECT id,email,is_superadmin,status FROM users ORDER BY created_at").all();
   const superadmins = users.filter((user) => Number(user.is_superadmin || 0) === 1 && user.status === "Active");
