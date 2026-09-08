@@ -248,6 +248,17 @@ test("large master lists are cached, coalesced and searched with debounce", () =
   assert.match(serverSource, /busy_timeout = 5000/);
 });
 
+test("admin module state hides disabled workspaces and client search filters from the first character", () => {
+  assert.match(serverSource, /app\.get\('\/api\/admin\/modules',auth,permit\(\.\.\.VISIBLE_USER_ROLES\)/);
+  assert.match(appSource, /function adminGroupForView/);
+  assert.match(appSource, /function adminViewEnabled/);
+  assert.match(appSource, /if\(!adminViewEnabled\(v\)\)return showError/);
+  assert.match(appSource, /const visibleItems=group\.items\.filter\(\(\[view\]\)=>isSuperadmin\(\)\|\|adminCardIsEnabled\(group\.id,view\)\)/);
+  assert.doesNotMatch(appSource, /if\(q\.length<3\) return true/);
+  assert.doesNotMatch(appSource, /searchPlaceholder:"Type at least 3 characters/);
+  assert.doesNotMatch(appSource, /searchPlaceholder:"Írj be legalább 3 karaktert/);
+});
+
 test("administrator navigation has three primary areas and card-first workspaces", () => {
   assert.match(appSource, /id:"website_events",icon:"◈",label:\["Website & Events","Weboldal és események"\]/);
   assert.match(appSource, /id:"marketing",icon:"✦",label:\["Marketing","Marketing"\]/);
