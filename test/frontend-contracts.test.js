@@ -259,6 +259,13 @@ test("admin module state hides disabled workspaces and client search filters fro
   assert.doesNotMatch(appSource, /searchPlaceholder:"Írj be legalább 3 karaktert/);
 });
 
+test("client search preserves the focused input while refreshing only results", () => {
+  assert.match(appSource, /function renderContactResults/);
+  assert.match(appSource, /document\.querySelector\("#contactsTableWrap tbody"\)/);
+  assert.match(appSource, /input\.removeAttribute\("oninput"\);input\.oninput=\(\)=>\{currentClientSearch=input\.value;currentClientPage=1;renderContactResults\(\);\}/);
+  assert.doesNotMatch(appSource, /scheduleContactsRender\(\);\}\s*if\(input&&!isCompactViewport\(\)\)/);
+});
+
 test("administrator navigation has three primary areas and card-first workspaces", () => {
   assert.match(appSource, /id:"website_events",icon:"◈",label:\["Website & Events","Weboldal és események"\]/);
   assert.match(appSource, /id:"marketing",icon:"✦",label:\["Marketing","Marketing"\]/);
