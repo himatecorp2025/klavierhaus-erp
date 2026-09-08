@@ -2532,4 +2532,4 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 app.use(uploadErrorHandler);
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
-app.listen(PORT,()=>console.log(`Klavierhaus v6.5.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
+app.listen(PORT,()=>console.log(`Klavierhaus v6.6.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
