@@ -55,19 +55,21 @@ test("ticket palettes use the approved three visual designs", () => {
   assert.equal(ticketDesignType("INVITATION"), "VIP");
   assert.equal(ticketDesignType("COMPLIMENTARY"), "HONORARY");
   assert.equal(normal.logoResource, "LogoWhite");
-  assert.equal(normal.background, "0.02 0.02 0.02");
-  assert.equal(normal.border, "0.788 0.663 0.369");
+  assert.equal(normal.background, "0.055 0.055 0.055");
+  assert.equal(normal.border, "0.95 0.73 0.18");
   assert.equal(vip.logoResource, "LogoBlack");
-  assert.equal(vip.background, "0.788 0.663 0.369");
-  assert.equal(vip.border, "0.02 0.02 0.02");
+  assert.equal(vip.background, "0.95 0.73 0.18");
+  assert.equal(vip.border, "0.055 0.055 0.055");
   assert.equal(honorary.logoResource, "LogoGold");
-  assert.equal(honorary.background, "0.76 0.78 0.80");
-  assert.equal(honorary.border, "0.788 0.663 0.369");
-  assert.equal(honorary.title, "0.788 0.663 0.369");
-  assert.equal(honorary.foreground, "0.02 0.02 0.02");
+  assert.equal(honorary.background, "0.70 0.71 0.71");
+  assert.equal(honorary.border, "0.95 0.73 0.18");
+  assert.equal(honorary.divider, "0.95 0.73 0.18");
+  assert.equal(honorary.wordmark, "0.62 0.39 0.05");
+  assert.equal(honorary.title, "0.62 0.39 0.05");
+  assert.equal(honorary.foreground, "0.055 0.055 0.055");
 });
 
-test("ticket PDFs render recolored Klavierhaus logos and never show a price on VIP or honorary tickets", () => {
+test("ticket PDFs match the visual ticket rules for fonts, logos, prices, and page sides", () => {
   const event = {
     event_key: "EV-2031-ABCD", custom_type: "Chamber recital", title_en: "Salon Evening", title_hu: "Szalonest",
     start_at: "2031-04-10T23:00:00.000Z", end_at: "2031-04-11T01:00:00.000Z", timezone: "America/New_York",
@@ -78,15 +80,22 @@ test("ticket PDFs render recolored Klavierhaus logos and never show a price on V
   assert.match(normalText, /USD 125\.00/);
   const legacyLogoPdf = generateTicketDocumentPdf({ event, tickets: [makeTicket("PUBLIC_PAID")], mode: "front", logoPath: legacyLogoPath });
   assert.match(legacyLogoPdf.toString("latin1"), /\/LogoWhite Do/);
+  assert.match(legacyLogoPdf.toString("latin1"), /\/BaseFont \/DejaVuSerif/);
+  assert.match(legacyLogoPdf.toString("latin1"), /\/LogoBlack \d+ 0 R/);
   for (const variant of ["VIP", "INVITATION", "COMPLIMENTARY"]) {
     for (const mode of ["front", "back", "full"]) {
       const pdf = generateTicketDocumentPdf({ event, tickets: [makeTicket(variant)], mode, logoPath });
       const text = spawnSync("pdftotext", ["-", "-"], { input: pdf }).stdout.toString("utf8");
-      assert.doesNotMatch(text, /PRICE|USD 125\.00|FREE|COMPLIMENTARY|NO PRICE/);
       const source = pdf.toString("latin1");
       const resourceName = variant === "COMPLIMENTARY" ? "LogoGold" : "LogoBlack";
       assert.match(source, new RegExp(`/${resourceName} \\d+ 0 R`));
       assert.match(source, new RegExp(`/${resourceName} Do`));
+      assert.match(source, /\/BaseFont \/DejaVuSerif/);
+      if (mode === "back") {
+        assert.doesNotMatch(text, /USD 125\.00/);
+      } else {
+        assert.match(text, /USD 125\.00/);
+      }
     }
   }
 });
