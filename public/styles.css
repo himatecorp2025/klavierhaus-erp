@@ -240,6 +240,17 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 @media(max-width:900px){.timeline-scroll{margin-inline:-10px;border-radius:0}.timeline-calendar{grid-template-columns:58px repeat(7,minmax(132px,1fr));min-width:982px;grid-template-rows:52px 960px}.scheduler-toolbar{align-items:flex-start}.scheduler-actions{width:100%}.worker-filter-select{max-width:210px}.timeline-event{padding:4px 22px 4px 4px}}
 @media(prefers-color-scheme:light){.current-time-line,.current-time-line:before{background:#dc2626}.current-time-line span{background:#dc2626;color:#fff}}
 
+/* Unified scrollbars for every modal and nested admin scroll surface. */
+:root{--admin-scrollbar-track:#081525;--admin-scrollbar-thumb:#2d9ca8;--admin-scrollbar-thumb-hover:#56c5c2}
+.modal-box,#form,.modal-box .table-wrap,.modal-box .table-scroll-top,.modal-box .digital-attendance-modal-content,.modal-box .import-preview-table{scrollbar-width:thin;scrollbar-color:var(--admin-scrollbar-thumb) var(--admin-scrollbar-track);-webkit-overflow-scrolling:touch}
+.modal-box::-webkit-scrollbar,#form::-webkit-scrollbar,.modal-box .table-wrap::-webkit-scrollbar,.modal-box .table-scroll-top::-webkit-scrollbar,.modal-box .digital-attendance-modal-content::-webkit-scrollbar,.modal-box .import-preview-table::-webkit-scrollbar{width:12px;height:12px}
+.modal-box::-webkit-scrollbar-track,#form::-webkit-scrollbar-track,.modal-box .table-wrap::-webkit-scrollbar-track,.modal-box .table-scroll-top::-webkit-scrollbar-track,.modal-box .digital-attendance-modal-content::-webkit-scrollbar-track,.modal-box .import-preview-table::-webkit-scrollbar-track{background:var(--admin-scrollbar-track);border-radius:12px}
+.modal-box::-webkit-scrollbar-thumb,#form::-webkit-scrollbar-thumb,.modal-box .table-wrap::-webkit-scrollbar-thumb,.modal-box .table-scroll-top::-webkit-scrollbar-thumb,.modal-box .digital-attendance-modal-content::-webkit-scrollbar-thumb,.modal-box .import-preview-table::-webkit-scrollbar-thumb{background:var(--admin-scrollbar-thumb);border:3px solid var(--admin-scrollbar-track);border-radius:12px}
+.modal-box::-webkit-scrollbar-thumb:hover,#form::-webkit-scrollbar-thumb:hover,.modal-box .table-wrap::-webkit-scrollbar-thumb:hover,.modal-box .table-scroll-top::-webkit-scrollbar-thumb:hover,.modal-box .digital-attendance-modal-content::-webkit-scrollbar-thumb:hover,.modal-box .import-preview-table::-webkit-scrollbar-thumb:hover{background:var(--admin-scrollbar-thumb-hover)}
+button[onclick="installWebsiteSamples()"]{display:none!important}
+.admin-image-frame{display:grid;place-items:center;min-width:0;min-height:150px;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--panel2);color:var(--muted)}
+.admin-image-frame img{display:block;width:100%;height:100%;min-height:150px;object-fit:cover}.admin-image-placeholder{padding:12px;text-align:center;font-size:12px;font-weight:800}.website-catalog-admin-card>.admin-image-frame{width:calc(100% + 28px);height:auto;min-height:0;aspect-ratio:16/10;margin:-14px -14px 14px;border-radius:15px 15px 0 0}.website-catalog-admin-card>.admin-image-frame img{min-height:0}.event-admin-card__image{display:block;width:100%;height:180px;object-fit:cover;background:var(--panel2)}
+
 
 /* Phase C: branding, dedicated audit, mobile day calendar and navigation polish */
 .brand-badge{overflow:hidden}.brand-badge img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
@@ -247,10 +258,10 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 .brand-home-button:hover{background:transparent;color:inherit}
 .brand-home-button:focus-visible{outline:2px solid var(--blue);outline-offset:4px}
 .branding-preview{display:flex;align-items:center;gap:16px;padding:14px;background:var(--panel2);border:1px solid var(--line);border-radius:16px;margin-bottom:16px}.branding-preview img{width:76px;height:76px;object-fit:cover;border-radius:16px}.branding-preview b,.branding-preview small{display:block}.branding-preview b{font-size:20px}.branding-preview small{color:var(--muted);margin-top:4px}.branding-logo-form{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
-.mobile-page-title{display:none}.daily-calendar-scroll{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:18px;background:var(--panel)}.daily-calendar{display:grid;grid-template-columns:58px minmax(320px,1fr);height:960px;min-width:378px;position:relative}.daily-calendar .timeline-times{grid-column:1;grid-row:1}.daily-calendar .timeline-day{grid-column:2;grid-row:1}.daily-day{cursor:crosshair}
+.page-back-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}.page-back-header h2{margin:0;font-size:clamp(20px,2.4vw,28px)}.page-back-header .is-hidden{visibility:hidden;pointer-events:none}.daily-calendar-scroll{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:18px;background:var(--panel)}.daily-calendar{display:grid;grid-template-columns:58px minmax(320px,1fr);height:960px;min-width:378px;position:relative}.daily-calendar .timeline-times{grid-column:1;grid-row:1}.daily-calendar .timeline-day{grid-column:2;grid-row:1}.daily-day{cursor:crosshair}
 @media(max-width:900px){
   #sidebarToggle{display:none!important}
-  .mobile-page-title{display:flex;align-items:center;gap:8px;margin-bottom:10px}.mobile-page-title h2{margin:0;font-size:21px}.mobile-back-btn{min-width:44px;width:44px;height:44px;border-radius:50%;font-size:34px;line-height:1;padding:0;background:var(--panel2);color:var(--text)}
+  .page-back-header{margin-bottom:10px}.page-back-header h2{font-size:21px}.mobile-back-btn{min-width:44px;width:44px;height:44px;border-radius:50%;font-size:34px;line-height:1;padding:0;background:var(--panel2);color:var(--text)}
   .daily-calendar-scroll{margin-inline:-4px}.daily-calendar{height:1050px}.branding-logo-form{flex-direction:column;align-items:stretch}.branding-logo-form>*{width:100%}
 }
 
@@ -752,10 +763,10 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
 .digital-attendance-row__details dt{color:#c9a95e;font-size:9px;font-weight:900;letter-spacing:.08em}
 .digital-attendance-row__details dd{margin:0;color:#d9ccb8;font-size:11px;overflow-wrap:anywhere}
 .digital-attendance-modal-shell .digital-attendance-sheet__footer{margin-top:auto}
-.digital-attendance-modal-shell #form{scrollbar-width:thin;scrollbar-color:#b79547 #050505}
+.digital-attendance-modal-shell #form{scrollbar-width:thin;scrollbar-color:var(--admin-scrollbar-thumb) var(--admin-scrollbar-track)}
 .digital-attendance-modal-shell #form::-webkit-scrollbar{width:12px}
-.digital-attendance-modal-shell #form::-webkit-scrollbar-track{background:#050505;border-left:1px solid #3e321d}
-.digital-attendance-modal-shell #form::-webkit-scrollbar-thumb{background:linear-gradient(#d6b76b,#8f763d);border:3px solid #050505;border-radius:12px}
+.digital-attendance-modal-shell #form::-webkit-scrollbar-track{background:var(--admin-scrollbar-track);border-left:0}
+.digital-attendance-modal-shell #form::-webkit-scrollbar-thumb{background:var(--admin-scrollbar-thumb);border:3px solid var(--admin-scrollbar-track);border-radius:12px}
 .guest-data-shell .guest-data-filters{margin:14px 0}
 .guest-data-shell .guest-data-row>td:first-child>div{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .guest-data-history{min-width:210px}
