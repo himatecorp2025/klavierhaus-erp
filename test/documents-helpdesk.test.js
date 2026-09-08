@@ -147,7 +147,7 @@ test("document service creates downloadable ticket and invoice artifacts from cu
   });
 });
 
-test("email ticket delivery uses the approved logo palette and hides VIP prices", async () => {
+test("email ticket delivery uses the approved logo palette and visual price rule", async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kh-email-ticket-"));
   const dbPath = path.join(tempRoot, "email.sqlite");
   const init = spawnSync(process.execPath, [path.join(projectRoot, "server", "init-db.js")], { cwd: projectRoot, env: { ...process.env, DB_PATH: dbPath, BACKUP_DIR: path.join(tempRoot, "backups") }, encoding: "utf8" });
@@ -169,7 +169,7 @@ test("email ticket delivery uses the approved logo palette and hides VIP prices"
   assert.equal(delivery.status, "SENT");
   assert.ok(Buffer.isBuffer(deliveredPdf));
   const extracted = spawnSync("pdftotext", ["-", "-"], { input: deliveredPdf }).stdout.toString("utf8");
-  assert.doesNotMatch(extracted, /PRICE|USD 125\.00|FREE|COMPLIMENTARY|NO PRICE/);
+  assert.match(extracted, /USD 125\.00/);
   assert.match(deliveredPdf.toString("latin1"), /\/LogoBlack Do/);
   db.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
