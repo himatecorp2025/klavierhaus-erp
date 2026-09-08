@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { normalizeEventTimes, slugify } = require("./events");
-const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content");
+const { SAMPLE_VERSION_KEY } = require("./sample-content");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
@@ -650,13 +650,6 @@ function registerWebsitePlatformRoutes(options) {
     db.prepare("DELETE FROM marketing_campaigns WHERE id=?").run(before.id);
     audit(req, "DELETE", "marketing_campaigns", before.id, before, null, 1, "Marketing campaign deleted");
     res.json({ ok: true });
-  });
-
-  app.post("/api/demo-content/install", auth, admin, (req, res) => {
-    const sharedInstall = installSampleContent({ db, userId: req.user.id, updatedBy: req.user.name || req.user.id, publicWebsiteUrl });
-    if (sharedInstall.alreadyInstalled) return res.status(409).json({ error: "SAMPLE_CONTENT_ALREADY_INSTALLED" });
-    audit(req, "INSTALL", "website_sample_content", "v2", null, sharedInstall.installed, 1, "Editable bilingual public sample content installed");
-    return res.status(201).json({ ok: true, installed: sharedInstall.installed });
   });
 
   app.delete("/api/demo-content", auth, requireSuperadmin, (req, res) => {
