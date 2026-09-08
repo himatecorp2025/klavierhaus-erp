@@ -5,14 +5,15 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { createFontMetrics, jpegDimensions } = require("./guest-list-pdf");
 
-const GOLD = "0.788 0.663 0.369";
-const CREAM = "0.969 0.953 0.894";
-const MUTED = "0.62 0.58 0.50";
-const SILVER = "0.76 0.78 0.80";
-const DARK = "0.02 0.02 0.02";
-const GOLD_RGB = Object.freeze([0.788, 0.663, 0.369]);
-const SILVER_RGB = Object.freeze([0.76, 0.78, 0.80]);
-const DARK_RGB = Object.freeze([0.02, 0.02, 0.02]);
+const GOLD = "0.95 0.73 0.18";
+const GOLD_DEEP = "0.62 0.39 0.05";
+const CREAM = "0.98 0.97 0.91";
+const MUTED = "0.72 0.69 0.61";
+const SILVER = "0.70 0.71 0.71";
+const DARK = "0.055 0.055 0.055";
+const GOLD_RGB = Object.freeze([0.62, 0.39, 0.05]);
+const SILVER_RGB = Object.freeze([0.70, 0.71, 0.71]);
+const DARK_RGB = Object.freeze([0.055, 0.055, 0.055]);
 const WHITE_RGB = Object.freeze([1, 1, 1]);
 const LOGO_SPECS = Object.freeze({
   LogoWhite: Object.freeze({ tint: WHITE_RGB }),
@@ -193,8 +194,8 @@ function metallicColor(stops, amount) {
 function ticketBackground(palette) {
   if (palette.designType === "NORMAL") return `${palette.background} rg 0 0 ${number(BOARDING_PASS.width)} ${number(BOARDING_PASS.height)} re f\n`;
   const stops = palette.designType === "VIP"
-    ? [[0, [0.56, 0.42, 0.20]], [0.18, [0.78, 0.62, 0.32]], [0.36, [0.94, 0.82, 0.55]], [0.52, [0.68, 0.50, 0.24]], [0.72, [0.88, 0.73, 0.42]], [1, [0.57, 0.43, 0.21]]]
-    : [[0, [0.56, 0.59, 0.62]], [0.20, [0.78, 0.80, 0.82]], [0.38, [0.93, 0.94, 0.95]], [0.54, [0.67, 0.70, 0.73]], [0.76, [0.86, 0.87, 0.88]], [1, [0.58, 0.61, 0.64]]];
+    ? [[0, [0.76, 0.57, 0.27]], [0.25, [0.84, 0.66, 0.36]], [0.50, [0.88, 0.71, 0.42]], [0.75, [0.84, 0.66, 0.36]], [1, [0.76, 0.57, 0.27]]]
+    : [[0, [0.62, 0.63, 0.63]], [0.25, [0.68, 0.69, 0.69]], [0.50, [0.72, 0.73, 0.73]], [0.75, [0.68, 0.69, 0.69]], [1, [0.62, 0.63, 0.63]]];
   const bands = 256;
   const commands = [];
   for (let index = 0; index < bands; index += 1) {
@@ -205,12 +206,48 @@ function ticketBackground(palette) {
   return commands.join("");
 }
 
+function ticketTexture(palette) {
+  const colors = palette.designType === "NORMAL"
+    ? ["0.09 0.09 0.09", "0.035 0.035 0.035"]
+    : palette.designType === "VIP"
+      ? ["0.92 0.72 0.34", "0.52 0.34 0.10"]
+      : ["0.86 0.87 0.87", "0.53 0.55 0.55"];
+  let seed = palette.designType === "VIP" ? 0x9e3779b9 : palette.designType === "HONORARY" ? 0x243f6a88 : 0x1f123bb5;
+  const commands = [];
+  for (let index = 0; index < 900; index += 1) {
+    seed = (Math.imul(seed ^ (seed >>> 16), 2246822519) + 3266489917) >>> 0;
+    const x = (seed % 612) + 2;
+    seed = (Math.imul(seed ^ (seed >>> 13), 3266489917) + 668265263) >>> 0;
+    const y = seed % 252;
+    seed = (Math.imul(seed ^ (seed >>> 16), 2246822519) + 3266489917) >>> 0;
+    const length = 0.12 + (seed % 12) / 40;
+    const slope = ((seed >>> 8) % 7 - 3) / 180;
+    commands.push(`${colors[index % 2]} RG 0.1 w ${number(x)} ${number(y)} m ${number(x + length)} ${number(y + slope)} l S\n`);
+  }
+  return commands.join("");
+}
+
 function unicodeHex(value) {
   return [...safeText(value)].map((character) => Math.min(character.codePointAt(0), 0xffff).toString(16).padStart(4, "0")).join("").toUpperCase();
 }
 
-function textCommand(text, x, y, size, color = CREAM) {
-  return `${color} rg BT /F1 ${number(size)} Tf 1 0 0 1 ${number(x)} ${number(y)} Tm <${unicodeHex(text)}> Tj ET\n`;
+function textCommand(text, x, y, size, color = CREAM, options = {}) {
+  const tracking = Number(options.tracking || 0);
+  const shear = Number(options.shear || 0);
+  const renderMode = options.bold ? `0.24 w 2 Tr` : "0 Tr";
+  const characterSpacing = tracking ? `${number(tracking)} Tc ` : "";
+  return `${color} rg BT /F1 ${number(size)} Tf ${characterSpacing}${renderMode} 1 ${number(shear)} 0 1 ${number(x)} ${number(y)} Tm <${unicodeHex(text)}> Tj ET\n`;
+}
+
+function textWidth(text, size, metrics, tracking = 0) {
+  const source = safeText(text);
+  const glyphWidth = [...source].reduce((total, character) => total + metrics.widthForGlyph(metrics.glyphForCode(Math.min(character.codePointAt(0), 0xffff))) * size / 1000, 0);
+  return glyphWidth + Math.max(0, source.length - 1) * Number(tracking || 0);
+}
+
+function centeredTextCommand(text, y, size, color, metrics, options = {}) {
+  const width = textWidth(text, size, metrics, options.tracking || 0);
+  return textCommand(text, (BOARDING_PASS.width - width) / 2, y, size, color, options);
 }
 
 function truncate(text, maxWidth, size, metrics) {
@@ -267,17 +304,18 @@ function createToUnicode(codes) {
 
 function addFont(pdf, labels, fontPath) {
   const font = fs.readFileSync(fontPath || path.join(__dirname, "assets", "DejaVuSans.ttf"));
+  const fontName = /DejaVuSerif/i.test(path.basename(fontPath || "")) ? "DejaVuSerif" : "DejaVuSans";
   const metrics = createFontMetrics(font);
   const codes = usedCodes(labels);
   const cidMap = Buffer.alloc((Math.max(...codes) + 1) * 2);
   codes.forEach((code) => cidMap.writeUInt16BE(metrics.glyphForCode(code), code * 2));
   const widths = codes.map((code) => `${code} [${metrics.widthForGlyph(metrics.glyphForCode(code))}]`).join(" ");
   const fontFileId = pdf.add(pdf.stream(`/Length1 ${font.length}`, font));
-  const descriptorId = pdf.add(`<< /Type /FontDescriptor /FontName /DejaVuSans /Flags 32 /FontBBox [${metrics.bbox.join(" ")}] /ItalicAngle 0 /Ascent 928 /Descent -236 /CapHeight 729 /StemV 80 /FontFile2 ${fontFileId} 0 R >>`);
+  const descriptorId = pdf.add(`<< /Type /FontDescriptor /FontName /${fontName} /Flags 32 /FontBBox [${metrics.bbox.join(" ")}] /ItalicAngle 0 /Ascent 928 /Descent -236 /CapHeight 729 /StemV 80 /FontFile2 ${fontFileId} 0 R >>`);
   const cidMapId = pdf.add(pdf.stream("", cidMap));
   const unicodeId = pdf.add(pdf.stream("", createToUnicode(codes)));
-  const cidFontId = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /DejaVuSans /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${descriptorId} 0 R /CIDToGIDMap ${cidMapId} 0 R /DW 1000 /W [${widths}] >>`);
-  const fontId = pdf.add(`<< /Type /Font /Subtype /Type0 /BaseFont /DejaVuSans /Encoding /Identity-H /DescendantFonts [${cidFontId} 0 R] /ToUnicode ${unicodeId} 0 R >>`);
+  const cidFontId = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${fontName} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${descriptorId} 0 R /CIDToGIDMap ${cidMapId} 0 R /DW 1000 /W [${widths}] >>`);
+  const fontId = pdf.add(`<< /Type /Font /Subtype /Type0 /BaseFont /${fontName} /Encoding /Identity-H /DescendantFonts [${cidFontId} 0 R] /ToUnicode ${unicodeId} 0 R >>`);
   return { fontId, metrics };
 }
 
@@ -325,12 +363,12 @@ function ticketDesignType(variant) {
 function ticketPalette(variant) {
   const designType = ticketDesignType(variant);
   if (designType === "VIP") {
-    return { designType, background: GOLD, logoResource: "LogoBlack", border: DARK, divider: DARK, wordmark: DARK, label: DARK, title: DARK, foreground: DARK, muted: DARK };
+    return { designType, background: GOLD, logoResource: "LogoBlack", border: DARK, divider: DARK, wordmark: DARK, label: DARK, title: DARK, foreground: DARK, muted: DARK, texture: true };
   }
   if (designType === "HONORARY") {
-    return { designType, background: SILVER, logoResource: "LogoGold", border: GOLD, divider: GOLD, wordmark: GOLD, label: DARK, title: GOLD, foreground: DARK, muted: DARK };
+    return { designType, background: SILVER, logoResource: "LogoGold", border: GOLD, divider: GOLD, wordmark: GOLD_DEEP, label: DARK, title: GOLD_DEEP, foreground: DARK, muted: DARK, texture: true };
   }
-  return { designType, background: DARK, logoResource: "LogoWhite", border: GOLD, divider: GOLD, wordmark: CREAM, label: GOLD, title: CREAM, foreground: CREAM, muted: CREAM };
+  return { designType, background: DARK, logoResource: "LogoWhite", border: GOLD, divider: GOLD, wordmark: CREAM, label: GOLD, title: CREAM, foreground: CREAM, muted: CREAM, texture: true };
 }
 
 function ticketTypeLabel(designType) {
@@ -353,54 +391,82 @@ function ticketDate(event) {
   } catch (_error) { return safeText(event.start_at); }
 }
 
+function ticketDateParts(event) {
+  const value = ticketDate(event);
+  const match = value.match(/^(.*?)(?:\s+at\s+)(.*)$/i);
+  return match ? [match[1], `at ${match[2]}`] : [value, ""];
+}
+
+function ticketSubtitle(event) {
+  const raw = safeText(event?.custom_type || event?.event_type || "").replace(/_/g, " ");
+  return /^(PUBLIC PAID|PUBLIC FREE|VIP|INVITATION|COMPLIMENTARY|MANUAL|ON SITE)$/i.test(raw) ? "" : raw;
+}
+
+function ticketVenueParts(event) {
+  const primary = safeText(event?.venue_name || "Klavierhaus");
+  const secondary = safeText([event?.venue_city, event?.venue_region].filter(Boolean).join(", ") || event?.venueLabel || "New York");
+  return [primary, secondary];
+}
+
+function calendarIcon(x, y, color) {
+  return `${color} RG 1 w ${number(x)} ${number(y)} 12 11 re S ${number(x + 2)} ${number(y + 13)} m ${number(x + 2)} ${number(y + 9)} l S ${number(x + 10)} ${number(y + 13)} m ${number(x + 10)} ${number(y + 9)} l S ${number(x)} ${number(y + 8)} m ${number(x + 12)} ${number(y + 8)} l S\n`;
+}
+
+function locationIcon(x, y, color) {
+  return `${color} RG 1 w ${number(x + 6)} ${number(y + 1)} m ${number(x + 1)} ${number(y + 7)} ${number(x + 2)} ${number(y + 13)} ${number(x + 6)} ${number(y + 16)} c ${number(x + 10)} ${number(y + 13)} ${number(x + 11)} ${number(y + 7)} ${number(x + 6)} ${number(y + 1)} c S ${color} rg ${number(x + 4.5)} ${number(y + 7)} 3 3 re f\n`;
+}
+
 function ticketPage({ event, ticket, index, pageCount, metrics, logoResources }) {
   const variant = ticketVariant(ticket, event);
   const palette = ticketPalette(variant);
-  const title = safeText(event.title_en || event.title_hu || "Klavierhaus Event");
-  const eventType = ticketEventType(event, palette.designType);
-  const date = ticketDate(event);
-  const venue = safeText(event.venueLabel || event.venue_name || "Klavierhaus");
+  const title = safeText(event.title_en || event.title_hu || "Klavierhaus Event").toUpperCase();
+  const subtitle = ticketSubtitle(event);
+  const [dateLine, timeLine] = ticketDateParts(event);
+  const [venueLine, venueCityLine] = ticketVenueParts(event);
   const guest = safeText(ticket.display_name || ticket.attendee_name || ticket.original_guest_name || "Guest");
   const code = safeText(ticket.public_code);
   const id = safeText(ticket.id);
-  const priceVisible = palette.designType === "NORMAL"
-    && Number(ticket.price_cents || 0) > 0
-    && String(ticket.payment_status || "PAID").toUpperCase() === "PAID";
-  const price = priceVisible ? `${String(ticket.currency || event.currency || "USD").toUpperCase()} ${(Number(ticket.price_cents || 0) / 100).toFixed(2)}` : "";
+  const priceCents = Number(ticket.price_cents || 0) > 0 ? Number(ticket.price_cents) : Number(event.price_cents || 0);
+  const priceVisible = priceCents > 0;
+  const price = priceVisible ? `${String(ticket.currency || event.currency || "USD").toUpperCase()} ${(priceCents / 100).toFixed(2)}` : "";
   const hasLogo = Boolean(logoResources?.[palette.logoResource]);
   const commands = [
     ticketBackground(palette),
+    palette.texture ? ticketTexture(palette) : "",
     `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
     `${palette.border} rg 14 205 4 4 re f\n`,
-    logoCommand(hasLogo, 31, 183, 28, 28, palette.logoResource),
-    textCommand("KLAVIERHAUS", hasLogo ? 68 : 31, 204, 12, palette.wordmark),
-    textCommand("ADMISSION TICKET", 31, 174, 8, palette.label),
-    textCommand(truncate(eventType, 370, 8, metrics), 31, 158, 8, palette.foreground),
-    textCommand(truncate(title, 370, 20, metrics), 31, 132, 20, palette.title),
-    textCommand("DATE / TIME", 31, 98, 7, palette.label),
-    textCommand(truncate(date, 370, 9, metrics), 31, 84, 9, palette.foreground),
-    textCommand("LOCATION", 31, 66, 7, palette.label),
-    textCommand(truncate(venue, 370, 8, metrics), 31, 52, 8, palette.muted),
-    `${palette.divider} RG .7 w 430 30 0 175 re S\n`,
-    textCommand("GUEST", 458, 174, 7, palette.label),
-    textCommand(truncate(guest, 125, 13, metrics), 458, 151, 13, palette.foreground),
-    textCommand("TICKET ID", 458, 119, 7, palette.label),
-    textCommand(truncate(id, 125, 7.5, metrics), 458, 105, 7.5, palette.foreground),
-    textCommand("TICKET CODE", 458, 86, 7, palette.label),
-    textCommand(truncate(code, 125, 8.5, metrics), 458, 72, 8.5, palette.foreground),
-    priceVisible ? textCommand(price, 458, 45, 9, palette.foreground) : "",
-    textCommand(`${index + 1} / ${pageCount}`, 458, 31, 7, palette.muted)
+    logoCommand(hasLogo, 44, 173, 58, 60, palette.logoResource),
+    textCommand("KLAVIERHAUS", hasLogo ? 136 : 44, 194, 16, palette.wordmark, { tracking: 1.2 }),
+    textCommand("ADMISSION TICKET", 44, 158, 8.5, palette.label, { tracking: 1.1 }),
+    textCommand(truncate(title, 330, 21, metrics), 44, 132, 21, palette.title, { bold: true, tracking: 0.4 }),
+    subtitle ? textCommand(truncate(subtitle, 330, 12, metrics), 44, 109, 12, palette.designType === "HONORARY" ? palette.foreground : palette.label, { shear: 0.16 }) : "",
+    textCommand(truncate(guest, 330, 13, metrics), 44, 82, 13, palette.foreground),
+    textCommand(ticketTypeLabel(palette.designType), 44, 36, 8.5, palette.designType === "NORMAL" ? palette.label : palette.foreground, { tracking: 1.1 }),
+    `${palette.divider} RG .7 w 390 28 0 190 re S\n`,
+    textCommand("TICKET CODE", 414, 195, 7, palette.label, { tracking: 0.7 }),
+    textCommand(truncate(code, 155, 9, metrics), 414, 180, 9, palette.foreground),
+    textCommand("TICKET ID", 414, 160, 7, palette.label, { tracking: 0.7 }),
+    textCommand(truncate(id, 155, 8, metrics), 414, 145, 8, palette.foreground),
+    priceVisible ? textCommand("PRICE", 414, 125, 7, palette.label, { tracking: 0.7 }) : "",
+    priceVisible ? textCommand(price, 414, 111, 9, palette.foreground) : "",
+    calendarIcon(414, 74, palette.label),
+    textCommand(truncate(dateLine, 135, 8.5, metrics), 432, 83, 8.5, palette.foreground),
+    textCommand(truncate(timeLine, 135, 8.5, metrics), 432, 70, 8.5, palette.foreground),
+    locationIcon(414, 34, palette.label),
+    textCommand(truncate(venueLine, 135, 8.5, metrics), 432, 48, 8.5, palette.foreground),
+    textCommand(truncate(venueCityLine, 135, 8.5, metrics), 432, 36, 8.5, palette.foreground),
   ];
   return commands.join("");
 }
 
-function ticketBackPage({ palette, logoResources }) {
+function ticketBackPage({ palette, logoResources, metrics }) {
   const hasLogo = Boolean(logoResources?.[palette.logoResource]);
   return [
     ticketBackground(palette),
+    palette.texture ? ticketTexture(palette) : "",
     `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    logoCommand(hasLogo, 281, 139, 50, 50, palette.logoResource),
-    textCommand("KLAVIERHAUS", 238, 105, 16, palette.wordmark)
+    logoCommand(hasLogo, 244, 99, 124, 129, palette.logoResource),
+    centeredTextCommand("KLAVIERHAUS", 72, 22, palette.wordmark, metrics, { tracking: 1.4 })
   ].join("");
 }
 
@@ -412,19 +478,19 @@ function generateTicketDocumentPdf({ event, tickets, mode = "full", fontPath, lo
     const palette = ticketPalette(ticketVariant(ticket, event));
     return [
       ticket.id, ticket.attendee_name, ticket.display_name, ticket.original_guest_name, ticket.public_code, ticket.ticket_variant,
-      ticket.price_cents, ticket.currency, ticketDate(event), ticketEventType(event, palette.designType), ticketTypeLabel(palette.designType),
+      ticket.price_cents, event.price_cents, ticket.currency, ticketDate(event), ticketSubtitle(event), ticketEventType(event, palette.designType), ticketTypeLabel(palette.designType), "PRICE",
       event.venueLabel || event.venue_name, event.venue_street, event.venue_city, event.venue_region, event.venue_postal_code
     ];
   }).concat([
-    event.title_en, event.title_hu, event.dateLabel, event.venueLabel, event.venue_name, event.custom_type, "KLAVIERHAUS", "ADMISSION TICKET", "DATE / TIME", "LOCATION", "GUEST", "TICKET ID", "TICKET CODE", "PUBLIC PAID", "PUBLIC FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON SITE"
+    event.title_en, event.title_hu, event.dateLabel, event.venueLabel, event.venue_name, event.custom_type, "KLAVIERHAUS", "ADMISSION TICKET", "DATE / TIME", "LOCATION", "GUEST", "TICKET ID", "TICKET CODE", "PRICE", "PUBLIC PAID", "PUBLIC FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON SITE"
   ]);
   const pages = [];
   safeRows.forEach((ticket, index) => {
     const palette = ticketPalette(ticketVariant(ticket, event));
     if (normalizedMode !== "back") pages.push((metrics, logoResources) => ticketPage({ event, ticket, index, pageCount: normalizedMode === "full" ? safeRows.length * 2 : safeRows.length, metrics, logoResources }));
-    if (normalizedMode !== "front") pages.push((_metrics, logoResources) => ticketBackPage({ palette, logoResources }));
+    if (normalizedMode !== "front") pages.push((metrics, logoResources) => ticketBackPage({ palette, logoResources, metrics }));
   });
-  return createPdf({ pages, size: BOARDING_PASS, labels, title: `Klavierhaus ${normalizedMode} ticket document`, fontPath, logoPath });
+  return createPdf({ pages, size: BOARDING_PASS, labels, title: `Klavierhaus ${normalizedMode} ticket document`, fontPath: fontPath || path.join(__dirname, "assets", "DejaVuSerif.ttf"), logoPath });
 }
 
 function generateTicketPdf(options = {}) { return generateTicketDocumentPdf({ ...options, mode: options.mode || "full" }); }
