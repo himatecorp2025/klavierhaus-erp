@@ -82,6 +82,12 @@ test("ticket PDFs match the visual ticket rules for fonts, logos, prices, and pa
   assert.match(legacyLogoPdf.toString("latin1"), /\/LogoWhite Do/);
   assert.match(legacyLogoPdf.toString("latin1"), /\/BaseFont \/DejaVuSerif/);
   assert.match(legacyLogoPdf.toString("latin1"), /\/LogoBlack \d+ 0 R/);
+  const geometryPdf = generateTicketDocumentPdf({ event, tickets: [makeTicket("PUBLIC_PAID")], mode: "full", logoPath });
+  const geometrySource = geometryPdf.toString("latin1");
+  assert.doesNotMatch(geometrySource, /14 205 4 4 re f/);
+  assert.match(geometrySource, /q 58 0 0 58 44 174 cm/);
+  assert.match(geometrySource, /q 124 0 0 124 244 80 cm/);
+  assert.match(geometrySource, / 53 Tm <[0-9A-F]+> Tj ET/);
   for (const variant of ["VIP", "INVITATION", "COMPLIMENTARY"]) {
     for (const mode of ["front", "back", "full"]) {
       const pdf = generateTicketDocumentPdf({ event, tickets: [makeTicket(variant)], mode, logoPath });
