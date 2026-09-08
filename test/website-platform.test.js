@@ -34,38 +34,18 @@ async function withPlatform(callback) {
   const request = async (url, options = {}) => {
     const response = await fetch(`${origin}${url}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
     const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : null };
+    let body=null;try{body=text?JSON.parse(text):null}catch(_error){body=text;}
+    return { status: response.status, body };
   };
   try { await callback({ db, request }); }
   finally { await new Promise((resolve) => server.close(resolve)); db.close(); }
 }
 
-test("website platform installs editable sample content once and publishes artists without touching customer pianos", async () => {
+test("website platform never installs sample content at startup or through the removed installer endpoint", async () => {
   await withPlatform(async ({ db, request }) => {
     db.prepare("INSERT INTO pianos(id,brand,model,ownership) VALUES('CLIENT-PIANO','Client brand','Client model','Customer owned')").run();
     const installed = await request("/api/demo-content/install", { method: "POST", body: "{}" });
-    assert.equal(installed.status, 201, JSON.stringify(installed.body));
-    assert.deepEqual(installed.body.installed, { artists: 3, services: 3, pianos: 6, reviews: 3, events: 0 });
-    assert.equal((await request("/api/demo-content/install", { method: "POST", body: "{}" })).status, 409);
-    const artists = await request("/api/public/website-artists?lang=hu");
-    assert.equal(artists.body.length, 3);
-    assert.equal(artists.body[0].portrait_url.startsWith("https://www.example.com/assets/media/"), true, "bundled sample media must resolve on both the public site and ERP administration");
-    assert.equal(artists.body[0].gallery.length, 2, "sample artist galleries must be public and ordered");
-    const services = await request("/api/public/website-services?lang=en");
-    const pianos = await request("/api/public/showroom-pianos?lang=en");
-    const reviews = await request("/api/public/website-reviews?lang=en");
-    assert.equal(services.status, 200);
-    assert.equal(services.body.length, 3, "all sample services must be public");
-    assert.equal(pianos.status, 200);
-    assert.equal(pianos.body.length, 6, "all sample showroom pianos must be public");
-    assert.equal(pianos.body.every((piano) => piano.gallery.length === 2), true, "sample piano galleries must be public");
-    assert.deepEqual([...new Set(pianos.body.map((piano) => piano.brand))].sort(), ["Bösendorfer", "Fazioli", "Steinway & Sons"]);
-    assert.equal(reviews.status, 200);
-    assert.equal(reviews.body.length, 3, "all sample reviews must be public");
-    assert.equal(db.prepare("SELECT COUNT(*) count FROM events WHERE is_sample=1 AND status='PUBLISHED' AND published_at IS NOT NULL").get().count, 0, "sample events must not be installed; event data is operational and starts empty");
-    assert.equal(db.prepare("SELECT COUNT(*) count FROM pianos").get().count, 1, "sample showroom content must not touch customer pianos");
-    const removed = await request("/api/demo-content", { method: "DELETE", headers: { "x-test-super": "1" } });
-    assert.equal(removed.status, 200, JSON.stringify(removed.body));
+    assert.equal(installed.status, 404, JSON.stringify(installed.body));
     assert.equal(db.prepare("SELECT COUNT(*) count FROM pianos").get().count, 1);
   });
 });
