@@ -192,7 +192,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   const atomicPublic = await request(baseUrl, `/api/public/events/${atomicPublish.payload.slug_en}?lang=en`);
   assert.equal(atomicPublic.status, 200);
   assert.equal(atomicPublic.payload.title, "Atomically published concert");
-  const atomicDeleted = await request(baseUrl, `/api/events/${atomicPublish.payload.id}`, { token: adminToken, method: "DELETE" });
+  const atomicDeleted = await request(baseUrl, `/api/events/${atomicPublish.payload.id}`, { token: adminToken, method: "DELETE", body: { reason: "Test cleanup" } });
   assert.equal(atomicDeleted.status, 200, JSON.stringify(atomicDeleted.payload));
 
   const created = await request(baseUrl, "/api/events", { token: adminToken, method: "POST", body: eventForm({ artist_id: "EV-ARTIST-1", performer_name: "This text is replaced by the linked profile" }) });
@@ -213,7 +213,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   assert.equal(duplicateSlug.status, 201, JSON.stringify(duplicateSlug.payload));
   assert.equal(duplicateSlug.payload.slug_en, "private-salon-evening-2031-04-10");
   assert.equal(duplicateSlug.payload.slug_hu, "privat-szalonest-2031-04-10");
-  const duplicateDeleted = await request(baseUrl, `/api/events/${duplicateSlug.payload.id}`, { token: superToken, method: "DELETE" });
+  const duplicateDeleted = await request(baseUrl, `/api/events/${duplicateSlug.payload.id}`, { token: superToken, method: "DELETE", body: { reason: "Test cleanup" } });
   assert.equal(duplicateDeleted.status, 200);
   assert.equal(fs.readdirSync(path.join(uploadDir, "events")).length, 1, "deleting an unpublished event must remove its image file");
 
@@ -426,10 +426,10 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   assert.equal(ticketAfterCancel.status, 409);
   assert.equal(ticketAfterCancel.payload.error, "EVENT_NOT_AVAILABLE");
 
-  const adminDeleteWithRecords = await request(baseUrl, `/api/events/${eventId}`, { token: adminToken, method: "DELETE" });
+  const adminDeleteWithRecords = await request(baseUrl, `/api/events/${eventId}`, { token: adminToken, method: "DELETE", body: { reason: "Test cleanup" } });
   assert.equal(adminDeleteWithRecords.status, 409);
   assert.equal(adminDeleteWithRecords.payload.error, "EVENT_CANCEL_REQUIRED");
-  const deletePublished = await request(baseUrl, `/api/events/${eventId}`, { token: superToken, method: "DELETE" });
+  const deletePublished = await request(baseUrl, `/api/events/${eventId}`, { token: superToken, method: "DELETE", body: { reason: "Test cleanup" } });
   assert.equal(deletePublished.status, 200);
   assert.equal(deletePublished.payload.ok, true);
 
@@ -439,7 +439,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
     body: eventForm({ title_en: "Deletable unpublished event", title_hu: "Törölhető nem publikált esemény" })
   });
   assert.equal(deletable.status, 201, JSON.stringify(deletable.payload));
-  const deleted = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE" });
+  const deleted = await request(baseUrl, `/api/events/${deletable.payload.id}`, { token: adminToken, method: "DELETE", body: { reason: "Test cleanup" } });
   assert.equal(deleted.status, 200);
 
   const past = await request(baseUrl, "/api/events", {
