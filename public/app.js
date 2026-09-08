@@ -62,6 +62,13 @@ const adminNavigationLabels=Object.fromEntries([
  ...adminNavigationItems
 ]);
 const adminNavigationIcons=Object.fromEntries(adminNavGroups.flatMap(group=>group.items.map(([view,en,hu,icon])=>[view,icon])));
+function adminGroupForView(view){return adminNavGroups.find(group=>group.id===view||group.items.some(item=>item[0]===view));}
+function adminViewEnabled(view){
+ const group=adminGroupForView(view);
+ if(!group||isSuperadmin())return true;
+ if(adminModuleState[group.id]===false)return false;
+ return group.id===view||adminCardState[view]!==false;
+}
 
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["billing_address","Billing address / Számlázási cím"],["has_piano","Has piano? / Van zongorája?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interested_buying","Interested in buying? / Vásárlási érdeklődő?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interest_brand","Interested brand / Érdeklődött márka"],["interest_model","Interested model / Érdeklődött modell"],["interest_budget","Budget / Keretösszeg","number"],["interest_timeline","Timeline / Várható vásárlási idő"],["interest_notes","Purchase interest notes / Vásárlási érdeklődés megjegyzés","textarea"],["owner","Relationship owner / Kapcsolattartó gazda"],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["customer_status_icon","name","phone","email","address","last_contact","next_step"]},
@@ -87,11 +94,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",activationTitle:"Verify your account",activationDescription:"Enter the six-digit code sent to your contact email.",activationCode:"Activation code",activationVerify:"Verify and continue",activationResend:"Send a new code",activationBack:"Back to login",activationRecipient:"Code sent to",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",events:"Events",website_design:"Landing Page Design",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Type at least 3 characters...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",events:"Events",website_design:"Landing Page Design",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Search as you type...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",activationTitle:"Fiók ellenőrzése",activationDescription:"Add meg a kapcsolattartási e-mail-címedre küldött hatjegyű kódot.",activationCode:"Aktiválókód",activationVerify:"Ellenőrzés és belépés",activationResend:"Új kód küldése",activationBack:"Vissza a belépéshez",activationRecipient:"A kód címzettje",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",events:"Események",website_design:"Weboldal dizájn",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Írj be legalább 3 karaktert...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",events:"Események",website_design:"Weboldal dizájn",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Gépelés közbeni keresés...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
 let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
@@ -113,6 +120,7 @@ function setLanguage(lang){
 function tr(key){return (staticTranslations[currentLang]&&staticTranslations[currentLang][key])||staticTranslations.en[key]||key;}
 function navLabel(view){return splitBilingualText(adminNavigationLabels[view]||tr(view)||view);}
 function navItemAllowed(view){
+ if(!adminViewEnabled(view))return false;
  if(isAdmin())return true;
  if(view==="audit_log")return userPermissions.all||userPermissions.permissions.includes("audit.view");
  return userPermissions.all||userPermissions.permissions.includes(`${view}.view`);
@@ -1207,6 +1215,7 @@ function forceShowView(id){
  return el;
 }
 async function render(v,opts={}){
+ if(!adminViewEnabled(v))return showError(bi("This workspace is disabled by the superadmin.","Ezt a munkaterületet a szuperadmin kikapcsolta."));
  if(v!="digital_attendance")stopDigitalAttendanceLiveSync?.();
  if(currentView && currentView!==v && !opts.noHistory) viewHistory.push(currentView);
  currentView=v;
@@ -1962,7 +1971,6 @@ async function renderContactsTable(data){
  const filtered=enriched.filter(c=>{
    if(showOnlyMissingClientData && !clientHasMissingCoreData(c)) return false;
    if(currentClientStatusFilter!=="ALL" && customerStatusCode(c)!==currentClientStatusFilter) return false;
-   if(q.length<3) return true;
    const owned=pianosByOwner.get(String(c.id))||[];
    const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
    return hay.includes(q);
@@ -3911,9 +3919,11 @@ function bindAdminGroupLanding(box){
 async function renderAdminGroupLanding(groupId){
  if(!isAdmin())return showError('PERMISSION_DENIED');
  const group=adminNavGroups.find(item=>item.id===groupId); if(!group)return showError('MODULE_NOT_FOUND');
+ if(!isSuperadmin()&&!adminViewEnabled(groupId))return showError('MODULE_DISABLED');
  const box=ensureView(groupId),groupEnabled=adminModuleState[group.id]!==false;
  const label=currentLang==='hu'?group.label[1]:group.label[0];
- const cards=group.items.map(([view,en,hu,icon])=>{
+ const visibleItems=group.items.filter(([view])=>isSuperadmin()||adminCardIsEnabled(group.id,view));
+ const cards=visibleItems.map(([view,en,hu,icon])=>{
   const enabled=adminCardIsEnabled(group.id,view),cardLabel=currentLang==='hu'?hu:en;
   const description=adminCardDescriptions[view];
   return `<article class="admin-ia-card ${enabled?'':'is-disabled'}" data-admin-card data-view="${view}" data-enabled="${enabled}" data-search="${htmlText(`${en} ${hu}`.toLowerCase())}" tabindex="0" role="button" aria-disabled="${enabled?'false':'true'}"><div class="admin-ia-card__head"><span class="admin-ia-card__icon" aria-hidden="true">${icon}</span><div><p class="event-kicker">${htmlText(label)}</p><h3>${htmlText(cardLabel)}</h3></div></div><p class="admin-ia-card__description">${enabled?(description?bi(description[0],description[1]):bi('Open this workspace','Munkaterület megnyitása')):bi('This card is disabled by the superadmin.','Ezt a kártyát a szuperadmin kikapcsolta.')}</p><div class="admin-ia-card__actions"><button type="button" class="small admin-ia-open" data-admin-card-open data-view="${view}" data-enabled="${enabled}" ${enabled?'':'disabled'}>${bi('Open','Megnyitás')}</button>${isSuperadmin()?`<button type="button" class="small ${enabled?'danger-btn':'ghost-btn'}" data-admin-card-toggle data-module-key="${view}" data-enabled="${enabled}">${enabled?bi('Disable card','Kártya kikapcsolása'):bi('Enable card','Kártya bekapcsolása')}</button>`:''}</div></article>`;
