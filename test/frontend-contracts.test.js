@@ -42,7 +42,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.6\.0-ui12/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -79,7 +79,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.5\.0-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.6\.0-ui12/);
 });
 
 test("individual ticket save refreshes the ticket list without reopening event management", () => {
@@ -264,6 +264,30 @@ test("client search preserves the focused input while refreshing only results", 
   assert.match(appSource, /document\.querySelector\("#contactsTableWrap tbody"\)/);
   assert.match(appSource, /input\.removeAttribute\("oninput"\);input\.oninput=\(\)=>\{currentClientSearch=input\.value;currentClientPage=1;renderContactResults\(\);\}/);
   assert.doesNotMatch(appSource, /scheduleContactsRender\(\);\}\s*if\(input&&!isCompactViewport\(\)\)/);
+});
+
+test("all live filters preserve their input DOM and the admin shell provides navigation and image fallbacks", () => {
+  assert.match(appSource, /function renderPianoResults/);
+  assert.match(appSource, /renderPianoResults\(\);/);
+  assert.doesNotMatch(appSource, /search\.oninput=\(\)=>\{currentPianoSearch=.*schedulePianosRender/);
+  assert.match(appSource, /function ensureViewBackHeader/);
+  assert.match(appSource, /addEventListener\("popstate"/);
+  assert.match(appSource, /history\.pushState\(\{khView:v\}/);
+  assert.match(appSource, /function adminAssetUrl/);
+  assert.match(appSource, /onerror="this.hidden=true;this.nextElementSibling.hidden=false"/);
+  assert.match(styles, /Unified scrollbars for every modal/);
+  assert.match(styles, /--admin-scrollbar-thumb/);
+});
+
+test("startup never installs sample content and event deletion requires an audited reason", () => {
+  const initSource=fs.readFileSync(path.join(projectRoot,"server","init-db.js"),"utf8");
+  const platformSource=fs.readFileSync(path.join(projectRoot,"server","website-platform.js"),"utf8");
+  const eventsSource=fs.readFileSync(path.join(projectRoot,"server","events.js"),"utf8");
+  assert.doesNotMatch(initSource, /installSampleContent\(/);
+  assert.doesNotMatch(platformSource, /api\/demo-content\/install/);
+  assert.match(eventsSource, /EVENT_DELETION_REASON_REQUIRED/);
+  assert.match(eventsSource, /reason: \$\{reason\}/);
+  assert.match(appSource, /body:JSON\.stringify\(\{reason:String\(reason\)\.trim\(\)\}\)/);
 });
 
 test("administrator navigation has three primary areas and card-first workspaces", () => {
