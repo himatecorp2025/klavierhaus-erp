@@ -2338,7 +2338,7 @@ app.get('/api/my-permissions',auth,(req,res)=>{
   const permissions=db.prepare('SELECT permission FROM role_permissions WHERE role=? AND enabled=1').all(req.user.role).map(x=>x.permission);
   res.json({all:false,permissions});
 });
-app.get('/api/admin/modules',auth,permit('ADMIN'),(req,res)=>{
+app.get('/api/admin/modules',auth,permit(...VISIBLE_USER_ROLES),(req,res)=>{
   let settings={};
   try{settings=JSON.parse(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='admin_module_settings'").get()?.setting_value||"{}")}catch(_error){settings={};}
   const canToggle=isSuperadminUser(req.user);
