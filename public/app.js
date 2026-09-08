@@ -34,6 +34,7 @@ let calendarAutoRefreshBusy=false;
 let jobDetailsRequestSequence=0;
 let contactsRenderTimer=null;
 let pianosRenderTimer=null;
+let contactsRenderData={data:[],pianos:[]};
 const apiResponseCache=new Map();
 const CACHEABLE_MASTER_ENDPOINTS=new Set(["/api/contacts","/api/pianos","/api/schedule-workers"]);
 
@@ -1962,6 +1963,7 @@ function scheduleContactsRender(){
 
 async function renderContactsTable(data){
  const pianos=await api("/api/pianos").catch(()=>[]);
+ contactsRenderData={data,pianos};
  const previousSearch=currentClientSearch;
  const q=previousSearch.trim().toLowerCase();
  const pianosByOwner=new Map();
@@ -1983,9 +1985,37 @@ async function renderContactsTable(data){
  const s=schemas.contacts;
  $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="currentClientPage=1;render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
  const input=document.getElementById("clientSearchInput");
- if(input){input.oninput=()=>{currentClientSearch=input.value;currentClientPage=1;scheduleContactsRender();};}
+ if(input){input.removeAttribute("oninput");input.oninput=()=>{currentClientSearch=input.value;currentClientPage=1;renderContactResults();};}
  if(input&&!isCompactViewport()){ input.focus({preventScroll:true}); input.setSelectionRange(input.value.length,input.value.length); }
  requestAnimationFrame(setupContactTableScroll);
+}
+function contactsRowsMarkup(pageRows){
+ const s=schemas.contacts;
+ return pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`;
+}
+function contactResultState(){
+ const {data,pianos}=contactsRenderData;
+ const q=currentClientSearch.trim().toLowerCase();
+ const pianosByOwner=new Map();
+ pianos.forEach(p=>{const key=String(p.owner_contact_id||"");if(!key)return;const rows=pianosByOwner.get(key)||[];rows.push(p);pianosByOwner.set(key,rows);});
+ const enriched=data.map(c=>({...c,_ownedPianoCount:(pianosByOwner.get(String(c.id))||[]).length}));
+ const filtered=enriched.filter(c=>{
+  if(showOnlyMissingClientData&&!clientHasMissingCoreData(c))return false;
+  if(currentClientStatusFilter!=="ALL"&&customerStatusCode(c)!==currentClientStatusFilter)return false;
+  const owned=pianosByOwner.get(String(c.id))||[];
+  const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
+  return hay.includes(q);
+ });
+ const totalPages=Math.max(1,Math.ceil(filtered.length/CLIENTS_PER_PAGE));
+ currentClientPage=Math.min(Math.max(1,currentClientPage),totalPages);
+ const start=(currentClientPage-1)*CLIENTS_PER_PAGE;
+ return {pageRows:filtered.slice(start,start+CLIENTS_PER_PAGE),pagination:clientPaginationHtml(currentClientPage,totalPages,filtered.length)};
+}
+function renderContactResults(){
+ const state=contactResultState();
+ const tbody=document.querySelector("#contactsTableWrap tbody");
+ if(tbody)tbody.innerHTML=contactsRowsMarkup(state.pageRows);
+ document.querySelectorAll("#contacts .client-pagination").forEach(pagination=>{pagination.outerHTML=state.pagination;});
 }
 async function deleteGenericResource(key,id){
  if(!isSuperadmin()) return showError("PERMISSION_DENIED");
