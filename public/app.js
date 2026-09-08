@@ -35,6 +35,7 @@ let jobDetailsRequestSequence=0;
 let contactsRenderTimer=null;
 let pianosRenderTimer=null;
 let contactsRenderData={data:[],pianos:[]};
+let pianosRenderData=[];
 const apiResponseCache=new Map();
 const CACHEABLE_MASTER_ENDPOINTS=new Set(["/api/contacts","/api/pianos","/api/schedule-workers"]);
 
@@ -904,6 +905,7 @@ async function boot(){
  const danger=document.getElementById("deleteEverythingBtn");
  if(danger) danger.classList.toggle("hidden", !isSuperadmin());
  resetInactivityTimer();
+ initViewHistory();
  $("#nav").onclick=e=>{
    let b=e.target.closest("button");
    if(!b)return;
@@ -920,7 +922,7 @@ async function boot(){
  const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
  if(notificationsReady){
    document.getElementById('app')?.classList.remove('hidden');
-   render(isMobileAppViewport()?"today":"scheduler");
+   render(viewFromLocation()||(isMobileAppViewport()?"today":"scheduler"),{noHistory:true,replaceHistory:true});
  }
  const googleResult=new URLSearchParams(location.search).get('googleCalendar');
  if(googleResult){
@@ -1218,7 +1220,12 @@ function forceShowView(id){
 async function render(v,opts={}){
  if(!adminViewEnabled(v))return showError(bi("This workspace is disabled by the superadmin.","Ezt a munkaterületet a szuperadmin kikapcsolta."));
  if(v!="digital_attendance")stopDigitalAttendanceLiveSync?.();
- if(currentView && currentView!==v && !opts.noHistory) viewHistory.push(currentView);
+ const changedView=currentView && currentView!==v;
+ if(changedView && !opts.noHistory){
+  viewHistory.push(currentView);
+  history.pushState({khView:v},"",`#${encodeURIComponent(v)}`);
+ }
+ if(opts.replaceHistory || (!location.hash && !changedView)) history.replaceState({khView:v},"",`#${encodeURIComponent(v)}`);
  currentView=v;
  document.body.dataset.currentView=v;
  const target=forceShowView(v);
@@ -1261,6 +1268,7 @@ async function render(v,opts={}){
   else if(v==="pianos") await renderPianos();
   else if(v==="notifications") await renderNotifications();
   else await renderTable(v);
+  ensureViewBackHeader(target,v);
   applyLanguageToDOM(target);
   enhanceCustomSelects(target);
  }finally{
@@ -1269,8 +1277,32 @@ async function render(v,opts={}){
 }
 
 
-function goBackView(){const previous=viewHistory.pop();render(previous||'today',{noHistory:true});}
-function mobileBackHeader(title){return isMobileAppViewport()?`<div class="mobile-page-title"><button type="button" class="mobile-back-btn" onclick="goBackView()" aria-label="Back">‹</button><h2>${title}</h2></div>`:'';}
+const rootWorkspaceViews=new Set(["today","scheduler"]);
+function viewFromLocation(){const raw=decodeURIComponent(String(location.hash||"").replace(/^#/,""));return raw&&/^[a-z0-9_]+$/i.test(raw)?raw:null;}
+function ensureViewBackHeader(target,view){
+ if(rootWorkspaceViews.has(view)||target.querySelector(".page-back-header,.mobile-page-title"))return;
+ const canGoBack=viewHistory.length>0;
+ const header=document.createElement("div");
+ header.className="page-back-header";
+ header.innerHTML=`<button type="button" class="mobile-back-btn ${canGoBack?"":"is-hidden"}" onclick="goBackView()" aria-label="${bi('Back','Vissza')}" ${canGoBack?"":"tabindex=\"-1\""}>‹</button><h2>${htmlText(navLabel(view))}</h2>`;
+ target.prepend(header);
+}
+function initViewHistory(){
+ if(window.__khViewHistoryBound)return;
+ window.__khViewHistoryBound=true;
+ window.addEventListener("popstate",event=>{
+  const previous=event.state?.khView||viewFromLocation();
+  if(!previous)return;
+  if(viewHistory.length)viewHistory.pop();
+  render(previous,{noHistory:true});
+ });
+}
+function goBackView(){
+ const previous=viewHistory.pop();
+ if(previous){history.replaceState({khView:previous},"",`#${encodeURIComponent(previous)}`);render(previous,{noHistory:true});return;}
+ if(!rootWorkspaceViews.has(currentView))render("today",{noHistory:true,replaceHistory:true});
+}
+function mobileBackHeader(title){const canGoBack=viewHistory.length>0;return `<div class="page-back-header"><button type="button" class="mobile-back-btn ${canGoBack?"":"is-hidden"}" onclick="goBackView()" aria-label="${bi('Back','Vissza')}" ${canGoBack?"":"tabindex=\"-1\""}>‹</button><h2>${title}</h2></div>`;}
 function isMobileAppViewport(){ return window.matchMedia("(max-width: 900px)").matches; }
 function nyDateKey(date=new Date()){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date).reduce((a,p)=>{a[p.type]=p.value;return a},{});
@@ -1799,13 +1831,14 @@ function schedulePianosRender(){
 }
 function bindPianoFilterDebounce(){
  const search=document.getElementById("pianoSearchInput");
- if(search)search.oninput=()=>{currentPianoSearch=search.value;currentPianoPage=1;schedulePianosRender();};
+ if(search){search.removeAttribute("oninput");search.oninput=()=>{currentPianoSearch=search.value;currentPianoPage=1;renderPianoResults();};}
  const numbers=[...document.querySelectorAll("#pianoFilterPanel input[type=number]")];
- if(numbers[0])numbers[0].oninput=()=>{currentPianoMinValue=numbers[0].value;currentPianoPage=1;schedulePianosRender();};
- if(numbers[1])numbers[1].oninput=()=>{currentPianoMaxValue=numbers[1].value;currentPianoPage=1;schedulePianosRender();};
+ if(numbers[0]){numbers[0].removeAttribute("oninput");numbers[0].oninput=()=>{currentPianoMinValue=numbers[0].value;currentPianoPage=1;renderPianoResults();};}
+ if(numbers[1]){numbers[1].removeAttribute("oninput");numbers[1].oninput=()=>{currentPianoMaxValue=numbers[1].value;currentPianoPage=1;renderPianoResults();};}
 }
 async function renderPianos(){
  const data=await api("/api/pianos");
+ pianosRenderData=Array.isArray(data)?data:[];
  const min=currentPianoMinValue===""?null:Number(currentPianoMinValue),max=currentPianoMaxValue===""?null:Number(currentPianoMaxValue);
  const ownershipCounts=data.reduce((acc,p)=>{const key=pianoOwnershipGroup(p);acc[key]=(acc[key]||0)+1;return acc;},{ALL:data.length});
  const filtered=data.filter(p=>{
@@ -1832,11 +1865,31 @@ async function renderPianos(){
  ];
  const ownerOptionHtml=ownerOptions.map(([v,t])=>`<option value="${v}" ${currentPianoOwnershipFilter===v?"selected":""}>${t} (${Number(ownershipCounts[v]||0)})</option>`).join("");
  const resetButton=isSuperadmin()?`<button type="button" class="small danger-btn piano-reset-btn" onclick="deleteAllPianos()">${bi("Delete all pianos","Összes zongora törlése")}</button>`:"";
- $("#pianos").innerHTML=`<div class="panel piano-list-panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button>${resetButton}</div></div><button id="pianoFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobilePianoFiltersOpen}" onclick="toggleMobileFilterPanel('pianoFilterPanel','pianoFilterToggle','pianos')">⌕ ${bi("Filters","Szűrők")}</button><div id="pianoFilterPanel" class="piano-filter-grid piano-filter-grid-no-status mobile-collapsible-filter ${mobilePianoFiltersOpen?"open":""}"><label>${bi("Search","Keresés")}<input id="pianoSearchInput" value="${htmlText(currentPianoSearch)}" placeholder="${bi("Client, piano, serial number or address","Ügyfél, zongora, gyári szám vagy cím")}" oninput="currentPianoSearch=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Ownership","Tulajdon")}<select onchange="currentPianoOwnershipFilter=this.value;currentPianoPage=1;renderPianos()">${ownerOptionHtml}</select></label><label>${bi("Minimum value (USD)","Minimum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMinValue)}" oninput="currentPianoMinValue=this.value;currentPianoPage=1;renderPianos()"></label><label>${bi("Maximum value (USD)","Maximum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMaxValue)}" oninput="currentPianoMaxValue=this.value;currentPianoPage=1;renderPianos()"></label><div class="piano-filter-actions"><button type="button" class="small ghost-btn" onclick="clearPianoFilters()">${bi("Clear filters","Szűrők törlése")}</button></div></div>${pagination}<div class="table-scroll-top" id="pianosScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap pianos-table-wrap" id="pianosTableWrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
- const input=document.getElementById("pianoSearchInput");if(input&&!isCompactViewport()){input.focus({preventScroll:true});input.setSelectionRange(input.value.length,input.value.length);}
+ $("#pianos").innerHTML=`<div class="panel piano-list-panel"><div class="toolbar"><h3>${bi("Pianos","Zongorák")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openPianoImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button class="small" onclick="exportTable('pianos')">Export CSV</button><button onclick="openForm('pianos')">+ ${bi("Add","Új")}</button>${resetButton}</div></div><button id="pianoFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobilePianoFiltersOpen}" onclick="toggleMobileFilterPanel('pianoFilterPanel','pianoFilterToggle','pianos')">⌕ ${bi("Filters","Szűrők")}</button><div id="pianoFilterPanel" class="piano-filter-grid piano-filter-grid-no-status mobile-collapsible-filter ${mobilePianoFiltersOpen?"open":""}"><label>${bi("Search","Keresés")}<input id="pianoSearchInput" value="${htmlText(currentPianoSearch)}" placeholder="${bi("Client, piano, serial number or address","Ügyfél, zongora, gyári szám vagy cím")}"></label><label>${bi("Ownership","Tulajdon")}<select onchange="currentPianoOwnershipFilter=this.value;currentPianoPage=1;renderPianos()">${ownerOptionHtml}</select></label><label>${bi("Minimum value (USD)","Minimum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMinValue)}"></label><label>${bi("Maximum value (USD)","Maximum érték (USD)")}<input type="number" min="0" value="${htmlText(currentPianoMaxValue)}"></label><div class="piano-filter-actions"><button type="button" class="small ghost-btn" onclick="clearPianoFilters()">${bi("Clear filters","Szűrők törlése")}</button></div></div>${pagination}<div class="table-scroll-top" id="pianosScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap pianos-table-wrap" id="pianosTableWrap"><table><thead><tr>${cols.map(c=>`<th>${label[c]}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
  bindPianoFilterDebounce();
  requestAnimationFrame(setupPianoTableScroll);
  applyLanguageToDOM();
+}
+function pianoResultState(data=pianosRenderData){
+ const min=currentPianoMinValue===""?null:Number(currentPianoMinValue),max=currentPianoMaxValue===""?null:Number(currentPianoMaxValue);
+ const filtered=(Array.isArray(data)?data:[]).filter(p=>{
+  if(!pianoSearchMatch(p,currentPianoSearch))return false;
+  if(currentPianoOwnershipFilter!=="ALL"&&pianoOwnershipGroup(p)!==currentPianoOwnershipFilter)return false;
+  const value=Number(p.estimated_value||0);
+  if(min!==null&&(!Number.isFinite(value)||value<min))return false;
+  if(max!==null&&(!Number.isFinite(value)||value>max))return false;
+  return true;
+ });
+ const totalPages=Math.max(1,Math.ceil(filtered.length/PIANOS_PER_PAGE));
+ currentPianoPage=Math.min(Math.max(1,currentPianoPage),totalPages);
+ const start=(currentPianoPage-1)*PIANOS_PER_PAGE;
+ return {pageRows:filtered.slice(start,start+PIANOS_PER_PAGE),pagination:pianoPaginationHtml(currentPianoPage,totalPages,filtered.length)};
+}
+function renderPianoResults(){
+ const state=pianoResultState();
+ const tbody=document.querySelector("#pianosTableWrap tbody");
+ if(tbody)tbody.innerHTML=state.pageRows.map(r=>`<tr><td class="piano-owner-cell ${!r.owner_contact_id?'piano-owner-unidentified':''}">${htmlText(pianoOwnerLabel(r))}</td><td>${htmlText(pianoDisplayName(r))}</td><td>${htmlText(r.serial_no||'—')}</td><td>${mapLink(r.location)||'—'}</td><td>${htmlText(r.ownership_type||r.ownership||'—')}</td><td>${money(r.estimated_value)}</td><td class="piano-actions"><button class="small" onclick="pianoInfo('${r.id}')">${bi("Info","Információ")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('pianos','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7" class="muted">${bi("No matching pianos","Nincs találat")}</td></tr>`;
+ document.querySelectorAll("#pianos .client-pagination").forEach(pagination=>{pagination.outerHTML=state.pagination;});
 }
 async function pianoInfo(id){
  let p;try{p=await api(`/api/pianos/${encodeURIComponent(id)}`);}catch(_error){return showError(bi('Piano not found.','A zongora nem található.'));}
@@ -1983,10 +2036,9 @@ async function renderContactsTable(data){
  const pageRows=filtered.slice(start,start+CLIENTS_PER_PAGE);
  const pagination=clientPaginationHtml(currentClientPage,totalPages,filtered.length);
  const s=schemas.contacts;
- $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}" oninput="currentClientPage=1;render('contacts')"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
  const input=document.getElementById("clientSearchInput");
  if(input){input.removeAttribute("oninput");input.oninput=()=>{currentClientSearch=input.value;currentClientPage=1;renderContactResults();};}
- if(input&&!isCompactViewport()){ input.focus({preventScroll:true}); input.setSelectionRange(input.value.length,input.value.length); }
  requestAnimationFrame(setupContactTableScroll);
 }
 function contactsRowsMarkup(pageRows){
@@ -3140,8 +3192,8 @@ function localizedErrorMessage(error){
   hu:{EVENT_IMAGE_REQUIRED:"Mentés vagy publikálás előtt tölts fel eseményképet.",INVALID_EVENT_IMAGE_TYPE:"JPG vagy PNG formátumú eseményképet használj.",INVALID_EVENT_IMAGE:"A kiválasztott fájl nem érvényes eseménykép.",EVENT_IMAGE_TOO_SMALL:"Az eseménykép mérete legalább 1600×900 pixel legyen."}
  };
  const eventCommerceErrors={
-  en:{EVENT_CANCEL_REQUIRED:"This event already has invitations, bookings, tickets, payments, or other retained records. Cancel the event instead; its financial history cannot be deleted.",EVENT_CANCELLATION_REASON_REQUIRED:"Enter the organizer’s cancellation notice.",STRIPE_SANDBOX_NOT_CONFIGURED:"Stripe Sandbox is not configured on the ERP service.",EVENT_NOT_AVAILABLE_FOR_CHECKOUT:"This event is not available for ticket checkout.",INVALID_TICKET_QUANTITY:"Enter a valid whole number of tickets.",STRIPE_PAYMENT_NOT_FOUND:"No Stripe Sandbox payment is linked to this ticket.",STRIPE_REFUND_FAILED:"The Stripe Sandbox refund could not be completed.",INVALID_STRIPE_WEBHOOK:"Stripe rejected the webhook signature."},
-  hu:{EVENT_CANCEL_REQUIRED:"Az eseményhez már meghívás, foglalás, jegy, fizetés vagy más megőrzendő rekord tartozik. Az eseményt le kell mondani; pénzügyi előzménye nem törölhető.",EVENT_CANCELLATION_REASON_REQUIRED:"Add meg a szervező lemondási tájékoztatását.",STRIPE_SANDBOX_NOT_CONFIGURED:"A Stripe Sandbox nincs beállítva az ERP-szolgáltatásban.",EVENT_NOT_AVAILABLE_FOR_CHECKOUT:"Ehhez az eseményhez jelenleg nem indítható jegyvásárlás.",INVALID_TICKET_QUANTITY:"Érvényes egész jegydarabszámot adj meg.",STRIPE_PAYMENT_NOT_FOUND:"A jegyhez nem tartozik Stripe Sandbox-fizetés.",STRIPE_REFUND_FAILED:"A Stripe Sandbox-visszatérítés nem hajtható végre.",INVALID_STRIPE_WEBHOOK:"A Stripe elutasította a webhook aláírását."}
+  en:{EVENT_CANCEL_REQUIRED:"This event already has invitations, bookings, tickets, payments, or other retained records. Cancel the event instead; its financial history cannot be deleted.",EVENT_CANCELLATION_REASON_REQUIRED:"Enter the organizer’s cancellation notice.",EVENT_DELETION_REASON_REQUIRED:"Enter a deletion reason before removing the event.",STRIPE_SANDBOX_NOT_CONFIGURED:"Stripe Sandbox is not configured on the ERP service.",EVENT_NOT_AVAILABLE_FOR_CHECKOUT:"This event is not available for ticket checkout.",INVALID_TICKET_QUANTITY:"Enter a valid whole number of tickets.",STRIPE_PAYMENT_NOT_FOUND:"No Stripe Sandbox payment is linked to this ticket.",STRIPE_REFUND_FAILED:"The Stripe Sandbox refund could not be completed.",INVALID_STRIPE_WEBHOOK:"Stripe rejected the webhook signature."},
+  hu:{EVENT_CANCEL_REQUIRED:"Az eseményhez már meghívás, foglalás, jegy, fizetés vagy más megőrzendő rekord tartozik. Az eseményt le kell mondani; pénzügyi előzménye nem törölhető.",EVENT_CANCELLATION_REASON_REQUIRED:"Add meg a szervező lemondási tájékoztatását.",EVENT_DELETION_REASON_REQUIRED:"A törlés előtt add meg a törlési indokot.",STRIPE_SANDBOX_NOT_CONFIGURED:"A Stripe Sandbox nincs beállítva az ERP-szolgáltatásban.",EVENT_NOT_AVAILABLE_FOR_CHECKOUT:"Ehhez az eseményhez jelenleg nem indítható jegyvásárlás.",INVALID_TICKET_QUANTITY:"Érvényes egész jegydarabszámot adj meg.",STRIPE_PAYMENT_NOT_FOUND:"A jegyhez nem tartozik Stripe Sandbox-fizetés.",STRIPE_REFUND_FAILED:"A Stripe Sandbox-visszatérítés nem hajtható végre.",INVALID_STRIPE_WEBHOOK:"A Stripe elutasította a webhook aláírását."}
  };
  if(eventCommerceErrors[currentLang]?.[code])return eventCommerceErrors[currentLang][code];
  if(eventUploadErrors[currentLang]?.[code])return eventUploadErrors[currentLang][code];
@@ -3239,7 +3291,7 @@ function eventDateLabel(value){if(!value)return '—';return new Intl.DateTimeFo
 function eventCapacityLabel(row){const capacity=row.capacity||{};return `${Number(capacity.occupied||0)} / ${Number(capacity.total||row.capacity_total||0)}`;}
 function eventPriceLabel(row){return row.access_type==='PUBLIC_PAID'?`$${(Number(row.price_cents||0)/100).toFixed(2)}`:bi('No charge','Díjmentes');}
 function eventDescriptionPreview(row,max=190){const text=String(currentLang==='hu'?(row.description_hu||row.short_description_hu||''):(row.description_en||row.short_description_en||'')).replace(/\s+/g,' ').trim();return text.length>max?`${text.slice(0,max).replace(/\s+\S*$/,'').trim()}…`:text;}
-function eventImagePreviewUrl(value){const url=String(value||'');return url?`${url}${url.includes('?')?'&':'?'}v=${Date.now()}`:'';}
+function eventImagePreviewUrl(value){const url=adminAssetUrl(value);return url?`${url}${url.includes('?')?'&':'?'}v=${Date.now()}`:'';}
 function eventLocalInput(value){if(!value)return '';const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'}).formatToParts(new Date(value)).reduce((out,part)=>({...out,[part.type]:part.value}),{});return `${parts.year}-${parts.month}-${parts.day}T${parts.hour==='24'?'00':parts.hour}:${parts.minute}`;}
 function eventCategoryOptions(selected=''){return eventAdminCategories.filter(item=>Number(item.active)||item.id===selected).map(item=>`<option value="${htmlText(item.id)}" ${item.id===selected?'selected':''}>${htmlText(currentLang==='hu'?item.name_hu:item.name_en)}</option>`).join('');}
 function eventArtistOptions(selected=''){return `<option value="">${bi('Unlisted or no linked artist','Nem listázott vagy nincs kapcsolt művész')}</option>`+eventAdminArtists.map(item=>`<option value="${htmlText(item.id)}" data-name="${htmlText(item.name)}" ${item.id===selected?'selected':''}>${htmlText(item.name)}</option>`).join('');}
@@ -3481,7 +3533,7 @@ async function closeEventAttendance(id,force=false){
  try{const report=await api(`/api/events/${encodeURIComponent(id)}/attendance/close`,{method:'POST',body:JSON.stringify(force?{force:true}:{})});showToast(`${bi('Attendance report created.','Attendance report elkészült.')}: ${Number(report.tickets?.present||0)}/${Number(report.tickets?.total||0)}`,'success');await renderEvents();await openEventDetails(id);}catch(error){showError(error);}
 }
 async function voidEventTicket(ticketId){if(!await appConfirm(bi('Void this invitation or complimentary ticket? Its capacity will be released.','Érvénytelenítjük ezt a meghívó- vagy tiszteletjegyet? A férőhely felszabadul.')))return;try{await api(`/api/events/tickets/${encodeURIComponent(ticketId)}/void`,{method:'POST',body:'{}'});showToast(bi('Ticket voided and capacity released.','A jegy érvénytelenítve, a férőhely felszabadult.'),'success');if(eventAdminSelectedId)await openEventDetails(eventAdminSelectedId);}catch(error){showError(error)}}
-async function deleteEventRecord(id){const superadmin=isSuperadmin(),question=superadmin?bi('Permanently delete this event and every related event record?','Véglegesen töröljük az eseményt és minden kapcsolódó eseményrekordot?'):bi('Delete this event? If bookings or financial records exist, use organizer cancellation instead.','Töröljük az eseményt? Ha foglalási vagy pénzügyi rekord tartozik hozzá, helyette szervezői lemondást kell használni.');if(!await appConfirm(question,{type:'error',confirmText:superadmin?bi('Delete permanently','Végleges törlés'):bi('Delete event','Esemény törlése')}))return;if(superadmin){const confirmation=await appPrompt(bi('Type DELETE EVENT to confirm permanent deletion.','A végleges törléshez írd be: DELETE EVENT'),{type:'error',confirmText:bi('Confirm permanent deletion','Végleges törlés megerősítése')});if(confirmation!=='DELETE EVENT')return;}try{await api(`/api/events/${id}`,{method:'DELETE'});eventAdminSelectedId=null;closeModal();showToast(bi('Event deleted.','Esemény törölve.'),'success');await renderEvents();}catch(error){showError(error)}}
+async function deleteEventRecord(id){const superadmin=isSuperadmin(),question=superadmin?bi('Permanently delete this event and every related event record?','Véglegesen töröljük az eseményt és minden kapcsolódó eseményrekordot?'):bi('Delete this event? If bookings or financial records exist, use organizer cancellation instead.','Töröljük az eseményt? Ha foglalási vagy pénzügyi rekord tartozik hozzá, helyette szervezői lemondást kell használni.');if(!await appConfirm(question,{type:'error',confirmText:superadmin?bi('Delete permanently','Végleges törlés'):bi('Delete event','Esemény törlése')}))return;const reason=await appPrompt(bi('Required deletion reason','Kötelező törlési indok'),{type:'error'});if(reason===null||!String(reason).trim())return;if(superadmin){const confirmation=await appPrompt(bi('Type DELETE EVENT to confirm permanent deletion.','A végleges törléshez írd be: DELETE EVENT'),{type:'error',confirmText:bi('Confirm permanent deletion','Végleges törlés megerősítése')});if(confirmation!=='DELETE EVENT')return;}try{await api(`/api/events/${id}`,{method:'DELETE',body:JSON.stringify({reason:String(reason).trim()})});eventAdminSelectedId=null;closeModal();showToast(bi('Event deleted.','Esemény törölve.'),'success');await renderEvents();}catch(error){showError(error)}}
 async function downloadEventInterest(id){const response=await fetch(`/api/event-repeat-interest/${encodeURIComponent(id)}.csv`,{headers:{Authorization:`Bearer ${token}`}});if(!response.ok)return showError((await response.json()).error);const blob=await response.blob(),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`event-interest-${id}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000)}
 async function relaunchEvent(id){const source=eventAdminRows.find(row=>row.id===id);if(!source)return;const start=await appPrompt(bi('New start time (YYYY-MM-DDTHH:MM, New York time)','Új kezdés (ÉÉÉÉ-HH-NNTÓÓ:PP, New York-i idő)'),{initialValue:String(source.start_local||'')});if(!start)return;const end=await appPrompt(bi('New end time (YYYY-MM-DDTHH:MM, New York time)','Új befejezés (ÉÉÉÉ-HH-NNTÓÓ:PP, New York-i idő)'),{initialValue:String(source.end_local||'')});if(!end)return;try{const created=await api(`/api/events/${encodeURIComponent(id)}/relaunch`,{method:'POST',body:JSON.stringify({start_local:start,end_local:end})});showToast(bi('A new editable event draft was created. Publish it after review.','Új szerkeszthető eseménypiszkozat készült. Ellenőrzés után publikáld.'),'success');await renderEvents();openEventEditor(created.id);}catch(error){showError(error)}}
 async function notifyEventInterest(sourceId,newEventId){if(!await appConfirm(bi('Send the bilingual new-date announcement to every not-yet-notified requester?','Kiküldjük a kétnyelvű új időpont értesítést minden még nem értesített érdeklődőnek?')))return;try{const result=await api(`/api/events/${encodeURIComponent(sourceId)}/notify-interest`,{method:'POST',body:JSON.stringify({new_event_id:newEventId})});await appAlert(`${bi('Sent','Elküldve')}: ${Number(result.sent||0)} · ${bi('Failed','Sikertelen')}: ${Number(result.failed||0)}`,result.failed?'warning':'success');}catch(error){showError(error)}}
@@ -3655,6 +3707,16 @@ function websiteGalleryText(value){
  if(!Array.isArray(rows)){try{rows=JSON.parse(String(value||'[]'))}catch(_error){rows=[]}}
  return (Array.isArray(rows)?rows:[]).map(item=>{const entry=typeof item==='string'?{url:item}:item||{};return [entry.url||entry.image_url||'',entry.alt_en||'',entry.alt_hu||''].join(' | ')}).filter(line=>line.split('|')[0].trim()).join('\n');
 }
+function adminAssetUrl(value){
+ const raw=String(value||'').trim();
+ if(!raw)return '';
+ if(/^(?:https?:|data:|blob:|\/\/)/i.test(raw))return raw;
+ return `/${raw.replace(/^\.?\//,'').replace(/^\/+/,'')}`;
+}
+function adminImagePreviewMarkup(value,alt='',className=''){
+ const url=adminAssetUrl(value),label=htmlText(alt||bi('Image','Kép'));
+ return `<div class="admin-image-frame ${htmlText(className)}">${url?`<img src="${htmlText(url)}" alt="${label}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false">`:''}<span class="admin-image-placeholder"${url?' hidden':''}>${bi('Image unavailable','A kép nem tölthető be')}</span></div>`;
+}
 async function websiteGalleryPayload(data){
  const gallery=String(data.get('gallery_text')||'').split(/\r?\n/).map(line=>{const [url,alt_en='',alt_hu='']=line.split('|').map(value=>value.trim());return url?{url,alt_en,alt_hu}:null}).filter(Boolean);
  for(const file of data.getAll('gallery_images'))if(file instanceof File&&file.size)gallery.push({url:await uploadWebsiteCollectionImage(file),alt_en:'',alt_hu:''});
@@ -3664,7 +3726,7 @@ function publicCatalogCard(row,type){
  const title=currentLang==='hu'?row.title_hu:row.title_en;
  const summary=currentLang==='hu'?row.summary_hu:row.summary_en;
  const status=type==='piano'?htmlText(row.availability_status):Number(row.visible)?bi('Visible','Látható'):bi('Hidden','Rejtett');
- return `<article class="website-catalog-admin-card">${row.image_url?`<img src="${htmlText(row.image_url)}" alt="">`:''}<div><span class="event-status">${status}</span>${Number(row.featured)?`<span class="event-status">${bi('Featured','Kiemelt')}</span>`:''}<h3>${htmlText(title)}</h3>${type==='piano'?`<p class="muted">${htmlText([row.brand,row.model].filter(Boolean).join(' · '))}</p>`:''}<p>${htmlText(summary||'')}</p><small>${htmlText(row.slug_en||'')} · ${htmlText(row.slug_hu||'')}</small></div><div class="actions"><button type="button" class="small" onclick="${type==='piano'?'openShowroomPianoEditor':'openWebsiteServiceEditor'}('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button><button type="button" class="small danger-btn" onclick="deleteWebsiteCatalogRecord('${type}','${htmlText(row.id)}')">${bi('Delete','Törlés')}</button></div></article>`;
+ return `<article class="website-catalog-admin-card">${adminImagePreviewMarkup(row.image_url,title,'catalog-image') }<div><span class="event-status">${status}</span>${Number(row.featured)?`<span class="event-status">${bi('Featured','Kiemelt')}</span>`:''}<h3>${htmlText(title)}</h3>${type==='piano'?`<p class="muted">${htmlText([row.brand,row.model].filter(Boolean).join(' · '))}</p>`:''}<p>${htmlText(summary||'')}</p><small>${htmlText(row.slug_en||'')} · ${htmlText(row.slug_hu||'')}</small></div><div class="actions"><button type="button" class="small" onclick="${type==='piano'?'openShowroomPianoEditor':'openWebsiteServiceEditor'}('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button><button type="button" class="small danger-btn" onclick="deleteWebsiteCatalogRecord('${type}','${htmlText(row.id)}')">${bi('Delete','Törlés')}</button></div></article>`;
 }
 async function renderWebsiteServices(){
  if(!isAdmin())return showError('PERMISSION_DENIED');websiteServiceRows=await api('/api/website-services');const box=$('#website_services');
@@ -3711,12 +3773,12 @@ async function deleteWebsiteCatalogRecord(type,id){
 
 let websiteArtistRows=[];
 let websiteMediaRows=[];
-function websiteAssetUrl(value){const url=String(value||'');return url.startsWith('/uploads/')?url:url;}
+function websiteAssetUrl(value){return adminAssetUrl(value);}
 function websiteAdminCard(row,type){
  const title=type==='artist'?row.name:row.file_name;
  const image=type==='artist'?row.portrait_url:row.file_url;
  const meta=type==='artist'?(currentLang==='hu'?row.role_hu:row.role_en):`${row.width||0}×${row.height||0} · ${Math.round(Number(row.file_size||0)/1024)} KB`;
- return `<article class="website-catalog-admin-card"><img src="${htmlText(websiteAssetUrl(image))}" alt=""><div><span class="event-status">${type==='artist'?(Number(row.published)?bi('Published','Publikált'):bi('Draft','Piszkozat')):htmlText(row.usage_type||'GENERAL')}</span><h3>${htmlText(title)}</h3><p class="muted">${htmlText(meta||'')}</p></div><div class="actions"><button type="button" class="small" onclick="${type==='artist'?'openWebsiteArtistEditor':'openWebsiteMediaEditor'}('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button>${type==='artist'?`<button type="button" class="small danger-btn" onclick="deleteWebsiteArtist('${htmlText(row.id)}')">${bi('Delete','Törlés')}</button>`:`<button type="button" class="small danger-btn" onclick="deleteWebsiteMedia('${htmlText(row.id)}')">${bi('Delete','Törlés')}</button>`}</div></article>`;
+ return `<article class="website-catalog-admin-card">${adminImagePreviewMarkup(image,title,'catalog-image')}<div><span class="event-status">${type==='artist'?(Number(row.published)?bi('Published','Publikált'):bi('Draft','Piszkozat')):htmlText(row.usage_type||'GENERAL')}</span><h3>${htmlText(title)}</h3><p class="muted">${htmlText(meta||'')}</p></div><div class="actions"><button type="button" class="small" onclick="${type==='artist'?'openWebsiteArtistEditor':'openWebsiteMediaEditor'}('${htmlText(row.id)}')">${bi('Edit','Szerkesztés')}</button>${type==='artist'?`<button type="button" class="small danger-btn" onclick="deleteWebsiteArtist('${htmlText(row.id)}')">${bi('Delete','Törlés')}</button>`:`<button type="button" class="small danger-btn" onclick="deleteWebsiteMedia('${htmlText(row.id)}')">${bi('Delete','Törlés')}</button>`}</div></article>`;
 }
 async function renderWebsiteArtists(){
  if(!isAdmin())return showError('PERMISSION_DENIED');websiteArtistRows=await api('/api/website-artists');const box=$('#website_artists');
@@ -3757,7 +3819,7 @@ async function renderMarketingOverview(){
  box.innerHTML=`${mobileBackHeader(bi('Marketing Overview','Marketing áttekintő'))}<div class="panel marketing-shell"><div class="toolbar"><div><p class="event-kicker">${bi('Verified data only','Csak ellenőrzött adatok')}</p><h2>${bi('Marketing Overview','Marketing áttekintő')}</h2><p class="muted">${bi('Disconnected providers remain visibly disconnected; this dashboard never invents performance data.','A nem csatlakoztatott szolgáltatók láthatóan leválasztva maradnak; ez az áttekintő nem talál ki teljesítményadatokat.')}</p></div><div class="actions"><button class="ghost-btn" onclick="installWebsiteSamples()">${bi('Install editable samples','Szerkeszthető minták telepítése')}</button>${isSuperadmin()?`<button class="danger-btn" onclick="removeWebsiteSamples()">${bi('Remove sample content','Mintatartalom eltávolítása')}</button>`:''}</div></div><section class="admin-module-grid">${moduleCards}</section><div class="marketing-kpis"><article><small>${bi('Website leads','Weboldali érdeklődők')}</small><strong>${leadTotal}</strong></article><article><small>${bi('Event return requests','Esemény-újraigénylések')}</small><strong>${Number(data.event_interest?.requests||0)}</strong></article><article><small>${bi('Consented measured actions','Hozzájárult mért műveletek')}</small><strong>${metrics.reduce((sum,row)=>sum+Number(row.count||0),0)}</strong></article></div><div class="integration-admin-grid">${(data.integrations||[]).map(integrationCard).join('')}</div><div class="table-wrap"><table><thead><tr><th>${bi('Measured action','Mért művelet')}</th><th>${bi('Count','Darab')}</th><th>${bi('Anonymous sessions','Anonim munkamenetek')}</th></tr></thead><tbody>${metrics.map(row=>`<tr><td>${htmlText(row.event_name)}</td><td>${Number(row.count||0)}</td><td>${Number(row.unique_sessions||0)}</td></tr>`).join('')||`<tr><td colspan="3">${bi('No consented first-party measurements yet.','Még nincs hozzájárult belső mérési adat.')}</td></tr>`}</tbody></table></div></div>`;applyLanguageToDOM(box);
 }
 async function toggleAdminModule(key,enabled){if(!isSuperadmin())return showError('SUPERADMIN_REQUIRED');try{await api(`/api/admin/modules/${encodeURIComponent(key)}`,{method:'PUT',body:JSON.stringify({enabled})});await loadAdminModuleState();renderNavigation();await render(currentView,{noHistory:true});}catch(error){showError(error)}}
-async function installWebsiteSamples(){try{const result=await api('/api/demo-content/install',{method:'POST',body:'{}'});showToast(`${bi('Samples installed','Minták telepítve')}: ${Object.values(result.installed||{}).reduce((sum,value)=>sum+Number(value||0),0)}`,'success');await renderMarketingOverview();}catch(error){showError(error)}}
+// Automatic and manual sample installation are intentionally unavailable.
 async function removeWebsiteSamples(){if(!await appConfirm(bi('Remove only the marked sample website records? Customer pianos and real ERP data remain untouched.','Csak a megjelölt weboldali mintarecordokat távolítsuk el? Az ügyfélzongorák és a valós ERP-adatok érintetlenek maradnak.'),{type:'error',confirmText:bi('Remove samples','Minták eltávolítása')}))return;try{await api('/api/demo-content',{method:'DELETE'});showToast(bi('Sample content removed.','A mintatartalom eltávolítva.'),'success');await renderMarketingOverview();}catch(error){showError(error)}}
 async function renderMarketingIntegrations(){if(!isAdmin())return showError('PERMISSION_DENIED');const rows=await api('/api/marketing/integrations'),box=$('#tracking_cookies');window.__marketingIntegrations=rows;box.innerHTML=`${mobileBackHeader(bi('Tracking & Cookies','Követési és cookie-beállítások'))}<div class="panel"><div class="toolbar"><div><p class="event-kicker">${bi('Consent-first integrations','Hozzájárulás-alapú integrációk')}</p><h2>${bi('Tracking & provider connections','Követés és szolgáltatói kapcsolatok')}</h2><p class="muted">${bi('Public tracking scripts load only after the visitor’s explicit choice. Secret configuration is restricted to the superadmin.','A nyilvános mérőkódok csak a látogató kifejezett választása után töltődnek be. Titkos beállítást kizárólag a szuperadmin módosíthat.')}</p></div></div><div class="integration-admin-grid">${rows.map(integrationCard).join('')}</div></div>`;applyLanguageToDOM(box)}
 function integrationFields(provider,row){const config=row?.config||{};if(provider==='GA4')return `<div class="field full"><label>GA4 Measurement ID</label><input name="measurement_id" value="${htmlText(config.measurement_id||'')}" placeholder="G-XXXXXXXXXX"></div>`;if(provider==='CLARITY')return `<div class="field full"><label>Microsoft Clarity Project ID</label><input name="project_id" value="${htmlText(config.project_id||'')}"></div>`;if(provider==='SEARCH_CONSOLE')return `<div class="field full"><label>Search Console property</label><input name="property_url" value="${htmlText(config.property_url||'')}" placeholder="sc-domain:klavierhaus.com"></div>`;return `<div class="field full"><label>Google OAuth Client ID</label><input name="client_id" value="${htmlText(config.client_id||'')}" placeholder="...apps.googleusercontent.com"></div><div class="field full"><label>Google OAuth Client Secret</label><input name="secret" type="password" autocomplete="new-password" placeholder="${row?.has_secret?bi('Leave empty to keep the stored secret','Hagyd üresen a tárolt titok megtartásához'):''}"></div>`;}
