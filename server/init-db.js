@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { backfillUserCalendarColors } = require("./calendar-colors");
-const { SAMPLE_VERSION_KEY, installSampleContent } = require("./sample-content");
+const { SAMPLE_VERSION_KEY } = require("./sample-content");
 const { nextTicketCode } = require("./ticket-code");
 const { parseGuestName } = require("./name-format");
 require("dotenv").config();
@@ -522,10 +522,8 @@ function purgeLegacyRoundOneEvents() {
 }
 
 function runMigrations() {
-  // Remove the explicitly identified historical demo events before creating
-  // the migration backup. They must not survive in a backup as recoverable
-  // business data because the requested cleanup is intentionally permanent.
-  purgeLegacyRoundOneEvents();
+  // Startup migrations must never delete existing business or sample records.
+  // Historical content is preserved; removal is an explicit administrator action.
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
@@ -804,17 +802,8 @@ function runMigrations() {
     log('Enabled all notification preferences for existing users');
   }
   assertPreservedBusinessCounts(preservedCounts);
-  const autoInstallSamples = process.env.WEBSITE_AUTO_INSTALL_SAMPLES === undefined
-    ? Boolean(String(process.env.WEBSITE_BASE_URL || "").trim())
-    : String(process.env.WEBSITE_AUTO_INSTALL_SAMPLES).toLowerCase() !== "false";
-  if (autoInstallSamples) {
-    const sampleResult = installSampleContent({ db, publicWebsiteUrl: process.env.WEBSITE_BASE_URL, updatedBy: "SYSTEM" });
-    log(sampleResult.alreadyInstalled ? "Editable public sample content already present" : `Editable public sample content installed: ${JSON.stringify(sampleResult.installed)}`);
-  }
-  // Sample content includes the three historical round-one demo events. Run
-  // the hard purge after optional sample installation so they cannot be
-  // reintroduced after the one-time purge marker is written.
-  purgeLegacyRoundOneEvents();
+  // Automatic sample installation was intentionally removed. Existing rows
+  // remain untouched and restarts never create new sample records.
   const foreignKeyErrors = db.prepare("PRAGMA foreign_key_check").all();
   if (foreignKeyErrors.length) throw new Error(`Foreign-key integrity check failed: ${JSON.stringify(foreignKeyErrors.slice(0, 10))}`);
   const integrity = db.prepare("PRAGMA integrity_check").all();
