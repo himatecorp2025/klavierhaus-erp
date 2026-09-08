@@ -824,6 +824,8 @@ function registerEventRoutes(options) {
     const event = service.eventById(req.params.id);
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
     const superadmin = req.user.role === "SUPERADMIN" || Number(req.user.is_superadmin || 0) === 1;
+    const reason = cleanText(req.body?.reason || req.body?.deletion_reason, 2000);
+    if (!reason) return res.status(400).json({ error: "EVENT_DELETION_REASON_REQUIRED" });
     const dependencies = db.prepare(`SELECT
       (SELECT COUNT(*) FROM event_invitations WHERE event_id=? AND status='ACCEPTED') invitations,
       (SELECT COUNT(*) FROM event_tickets WHERE event_id=?) tickets,
@@ -838,7 +840,7 @@ function registerEventRoutes(options) {
     const before = service.eventResponse(event);
     db.prepare("DELETE FROM events WHERE id=?").run(event.id);
     removeStoredEventImage(event.hero_image_url);
-    audit(req, "DELETE", "events", event.id, before, null, 1, superadmin ? "Permanent superadmin deletion" : "Deletion without related records");
+    audit(req, "DELETE", "events", event.id, before, null, 1, `${superadmin ? "Permanent superadmin deletion" : "Deletion without related records"}; reason: ${reason}`);
     res.json({ ok: true });
   });
 
