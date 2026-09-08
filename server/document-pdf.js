@@ -434,8 +434,7 @@ function ticketPage({ event, ticket, index, pageCount, metrics, logoResources })
     ticketBackground(palette),
     palette.texture ? ticketTexture(palette) : "",
     `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    `${palette.border} rg 14 205 4 4 re f\n`,
-    logoCommand(hasLogo, 44, 173, 58, 60, palette.logoResource),
+    logoCommand(hasLogo, 44, 174, 58, 58, palette.logoResource),
     textCommand("KLAVIERHAUS", hasLogo ? 136 : 44, 194, 16, palette.wordmark, { tracking: 1.2 }),
     textCommand("ADMISSION TICKET", 44, 158, 8.5, palette.label, { tracking: 1.1 }),
     textCommand(truncate(title, 330, 21, metrics), 44, 132, 21, palette.title, { bold: true, tracking: 0.4 }),
@@ -465,8 +464,8 @@ function ticketBackPage({ palette, logoResources, metrics }) {
     ticketBackground(palette),
     palette.texture ? ticketTexture(palette) : "",
     `${palette.border} RG 2.5 w 14 14 ${number(BOARDING_PASS.width - 28)} ${number(BOARDING_PASS.height - 28)} re S\n`,
-    logoCommand(hasLogo, 244, 99, 124, 129, palette.logoResource),
-    centeredTextCommand("KLAVIERHAUS", 72, 22, palette.wordmark, metrics, { tracking: 1.4 })
+    logoCommand(hasLogo, 244, 80, 124, 124, palette.logoResource),
+    centeredTextCommand("KLAVIERHAUS", 53, 22, palette.wordmark, metrics, { tracking: 1.4 })
   ].join("");
 }
 
