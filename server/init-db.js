@@ -604,6 +604,7 @@ function runMigrations() {
     ensureColumn("knowledge_base", "workflow_id", "TEXT");
     if (tableExists("workshop_workflows")) ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
     if (tableExists("workflow_stages")) {
+      ensureColumn("workflow_stages", "card_title", "TEXT");
       ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
       ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
