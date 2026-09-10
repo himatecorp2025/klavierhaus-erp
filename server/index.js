@@ -27,6 +27,7 @@ const {
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  createCustomerConversationUpload,
   uploadErrorHandler
 } = require("./upload-middleware");
 let webpush=null;
@@ -112,7 +113,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
 ]);
 
 function seedDefaultPermissions(){
-  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
     ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
@@ -277,6 +278,7 @@ const brandingUpload=createBrandingUpload(UPLOAD_DIR);
 const eventImageUpload=createEventImageUpload(EVENT_IMAGE_DIR);
 const websiteImageUpload=createWebsiteImageUpload(WEBSITE_IMAGE_DIR);
 const clientImportUpload=createClientImportUpload();
+const customerConversationUpload=createCustomerConversationUpload(UPLOAD_DIR);
 function imageDimensions(filePath){
   const b=fs.readFileSync(filePath);
   if(b.length>=24 && b.toString('hex',0,8)==='89504e470d0a1a0a') return {type:'image/png',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};
@@ -790,7 +792,9 @@ registerBusinessOperationsRoutes({
   uploadDir:UPLOAD_DIR,
   env:process.env,
   documentService: businessDocuments,
-  ticketService
+  ticketService,
+  customerConversationUpload,
+  notifyUser: createNotification
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
@@ -2376,7 +2380,7 @@ app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{co
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
-  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'];
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','customer_inbox.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
@@ -2487,7 +2491,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     }
 
     if(exists("role_permissions")){
-      const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view'];
+      const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
         ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
@@ -2532,4 +2536,4 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 app.use(uploadErrorHandler);
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
-app.listen(PORT,()=>console.log(`Klavierhaus v6.6.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
+    app.listen(PORT,()=>console.log(`Klavierhaus v6.7.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
