@@ -80,14 +80,25 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
 
   const created = await request(baseUrl, "/api/workflows", { token: managerToken, method: "POST", body: {
     client_id: "C-WF", piano_id: "P-WF", planned_job_id: "PLN-WF", mode: "INBOUND", title: "WF API lifecycle", final_due_at: "2099-09-30T17:00",
-    preliminary_inspection: "DONE", preliminary_assessment: "NOT_DONE", preliminary_quote: "NOT_REQUIRED", preliminary_meeting: "DONE"
+    preliminary_inspection: "DONE", preliminary_assessment: "NOT_DONE", preliminary_quote: "NOT_REQUIRED", preliminary_meeting: "DONE",
+    first_stage_assignee_id: "U-MANAGER-WF",
+    stage_assignee_INBOUND: "U-MANAGER-WF",
+    stage_assignee_ASSESSMENT: "U-STAFF-WF",
+    stage_assignee_ACOUSTICS: "U-STAFF-WF",
+    stage_assignee_MECHANICS: "U-MANAGER-WF",
+    stage_assignee_VOICING: "U-STAFF-WF",
+    stage_assignee_FINISH: "U-MANAGER-WF",
+    stage_assignee_FINAL_HANDOVER: "U-ADMIN-WF"
   } });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
   const workflowId = created.payload.id;
   const inbound = created.payload.stages.find((stage) => stage.stage_order === 0);
   const assessment = created.payload.stages.find((stage) => stage.stage_order === 1);
   assert.equal(inbound.status, "WAITING");
+  assert.equal(inbound.effective_status, "ASSIGNED");
+  assert.equal(created.payload.workflow_owner_id, "U-MANAGER-WF");
   assert.equal(assessment.status, "WAITING");
+  assert.equal(assessment.assigned_user_id, "U-STAFF-WF");
 
   const blocked = await request(baseUrl, `/api/workflows/${workflowId}/stages/${assessment.id}`, { token: staffToken, method: "PATCH", body: { status: "IN_PROGRESS", details: "Cannot start before arrival" } });
   assert.equal(blocked.status, 400);
@@ -105,7 +116,7 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
   assert.equal(managerDeadline.status, 200, JSON.stringify(managerDeadline.payload));
   const managerFinalDeadline = await request(baseUrl, `/api/workflows/${workflowId}`, { token: managerToken, method: "PATCH", body: { final_due_at: "2099-10-01T17:00" } });
   assert.equal(managerFinalDeadline.status, 400);
-  assert.equal(managerFinalDeadline.payload.error, "FINAL_DEADLINE_ADMIN_ONLY");
+  assert.equal(managerFinalDeadline.payload.error, "FINAL_DEADLINE_IMMUTABLE");
 
   const reserved = await request(baseUrl, `/api/workflows/${workflowId}/materials`, { token: staffToken, method: "POST", body: { source_type: "CENTRAL_INVENTORY", inventory_item_id: "I-WF", item_name: "Replacement string", requested_quantity: 2, unit_cost: 12 } });
   assert.equal(reserved.status, 201, JSON.stringify(reserved.payload));
@@ -133,6 +144,11 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
   }
   const finalStage = (await request(baseUrl, `/api/workflows/${workflowId}`, { token: staffToken })).payload.stages.find((stage) => stage.stage_order === 6);
   assert.equal(finalStage.status, "COMPLETED");
+  const completedWorkflow = (await request(baseUrl, `/api/workflows/${workflowId}`, { token: staffToken })).payload;
+  for (const stage of completedWorkflow.stages.filter((item) => item.status !== "NOT_REQUIRED")) {
+    const closedStageFinance = await request(baseUrl, `/api/workflows/${workflowId}/stages/${stage.id}/financial-close`, { token: adminToken, method: "POST", body: { reason: "Reviewed in workflow test" } });
+    assert.equal(closedStageFinance.status, 200, `${stage.stage_order} finance close: ${JSON.stringify(closedStageFinance.payload)}`);
+  }
   const managerFinalize = await request(baseUrl, `/api/workflows/${workflowId}/finalize`, { token: managerToken, method: "POST", body: { closure_reason: "Manager may not post financial close" } });
   assert.equal(managerFinalize.status, 403);
   const finalized = await request(baseUrl, `/api/workflows/${workflowId}/finalize`, { token: adminToken, method: "POST", body: { closure_reason: "Completed restoration with itemized lines" } });
