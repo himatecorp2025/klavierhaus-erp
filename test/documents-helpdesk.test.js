@@ -232,14 +232,14 @@ test("document and helpdesk HTTP routes work end to end with admin authenticatio
   assert.equal(conversations.status, 200);
   assert.equal(conversations.payload.length, 1);
   const conversationId = conversations.payload[0].id;
-  const assigned = await jsonRequest(baseUrl, `/api/customer-conversations/${encodeURIComponent(conversationId)}`, { token, method: "PATCH", body: { assigned_user_id: "ROUTE-ADMIN", status: "CLOSED" } });
+  const assigned = await jsonRequest(baseUrl, `/api/customer-conversations/${encodeURIComponent(conversationId)}`, { token, method: "PATCH", body: { assigned_user_id: "ROUTE-ADMIN", status: "CLOSED", closure_note: "Support request completed during route verification." } });
   assert.equal(assigned.status, 200, JSON.stringify(assigned.payload));
   assert.equal(assigned.payload.status, "CLOSED");
   assert.equal(assigned.payload.assigned_user_name, "Route Admin");
-  const report = await jsonRequest(baseUrl, `/api/customer-conversations/${encodeURIComponent(conversationId)}/report`, { token });
+  const report = await binaryRequest(baseUrl, `/api/customer-conversations/${encodeURIComponent(conversationId)}/report`, token);
   assert.equal(report.status, 200);
-  assert.equal(report.payload.report_type, "CUSTOMER_HELPDESK_CONVERSATION");
-  assert.ok(report.payload.messages.length >= 2);
+  assert.match(report.contentType, /application\/pdf/);
+  assert.ok(report.body.length > 1000);
   const acknowledgementHistory = await jsonRequest(baseUrl, "/api/notifications/acknowledgements", { token });
   assert.equal(acknowledgementHistory.status, 200);
   assert.ok(Array.isArray(acknowledgementHistory.payload));
