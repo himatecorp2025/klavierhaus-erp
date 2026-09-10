@@ -1300,6 +1300,10 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   due_at TEXT,
   details TEXT,
   block_reason TEXT,
+  financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','CLOSED')),
+  financial_closed_at TEXT,
+  financial_closed_by_user_id TEXT,
+  financial_closure_reason TEXT,
   preliminary_inspection TEXT CHECK(preliminary_inspection IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_inspection IS NULL),
   preliminary_assessment TEXT CHECK(preliminary_assessment IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_assessment IS NULL),
   preliminary_quote TEXT CHECK(preliminary_quote IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_quote IS NULL),
@@ -1311,7 +1315,8 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(workflow_id,stage_code),
   FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS workflow_stage_transfers (
