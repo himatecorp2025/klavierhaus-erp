@@ -143,28 +143,37 @@ function migrateWebsiteContactLeadStatuses() {
   })();
 }
 
-function migrateCustomerConversationCategories() {
+function migrateCustomerConversationSchema() {
   if (!tableExists("customer_conversations")) return;
   const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql || "").toUpperCase();
-  if (sql.includes("'TECHNICAL'")) return;
-  log("Adding the TECHNICAL customer conversation category while preserving existing conversations");
+  const columns = tableColumns("customer_conversations");
+  const nameNullable = !db.prepare("PRAGMA table_info(customer_conversations)").all().find((row) => row.name === "name")?.notnull;
+  const emailNullable = !db.prepare("PRAGMA table_info(customer_conversations)").all().find((row) => row.name === "email")?.notnull;
+  const ready = sql.includes("'TICKET'") && sql.includes("'BILLING'") && sql.includes("'REPAIR'") && nameNullable && emailNullable
+    && ["visitor_token_hash", "assigned_role", "last_activity_at", "auto_closed_at", "closure_note", "reopen_reason", "reopened_at", "reopened_by_user_id"].every((column) => columns.has(column));
+  if (ready) return;
+  log("Migrating customer conversation schema while preserving existing conversations");
   db.pragma("foreign_keys = OFF");
   try {
     db.transaction(() => {
       db.exec(`CREATE TABLE customer_conversations_new (
-        id TEXT PRIMARY KEY,public_token_hash TEXT NOT NULL UNIQUE,public_token_encrypted TEXT,name TEXT NOT NULL,email TEXT NOT NULL,
+        id TEXT PRIMARY KEY,public_token_hash TEXT NOT NULL UNIQUE,public_token_encrypted TEXT,visitor_token_hash TEXT,name TEXT,email TEXT,
         language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-        category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
+        category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','TICKET','BILLING','REPAIR','GENERAL','OTHER')),
         service_id TEXT,piano_id TEXT,event_id TEXT,ticket_id TEXT,
         status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
-        assigned_user_id TEXT,consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),source_path TEXT,
-        metadata_json TEXT NOT NULL DEFAULT '{}',last_message_at TEXT,closed_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        assigned_user_id TEXT,assigned_role TEXT,consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),source_path TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',last_message_at TEXT,last_activity_at TEXT,closed_at TEXT,auto_closed_at TEXT,closure_note TEXT,
+        reopen_reason TEXT,reopened_at TEXT,reopened_by_user_id TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
         FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
-        FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+        FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
       )`);
-      db.exec(`INSERT INTO customer_conversations_new(id,public_token_hash,public_token_encrypted,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,consent_contact,source_path,metadata_json,last_message_at,closed_at,created_at,updated_at)
-        SELECT id,public_token_hash,public_token_encrypted,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,consent_contact,source_path,metadata_json,last_message_at,closed_at,created_at,updated_at FROM customer_conversations`);
+      const source = (column, fallback) => columns.has(column) ? `c.${column}` : fallback;
+      db.exec(`INSERT INTO customer_conversations_new(id,public_token_hash,public_token_encrypted,visitor_token_hash,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,assigned_role,consent_contact,source_path,metadata_json,last_message_at,last_activity_at,closed_at,auto_closed_at,closure_note,reopen_reason,reopened_at,reopened_by_user_id,created_at,updated_at)
+        SELECT ${source("id", "NULL")},${source("public_token_hash", "NULL")},${source("public_token_encrypted", "NULL")},${source("public_token_hash", "NULL")},${source("name", "NULL")},${source("email", "NULL")},${source("language", "'en'")},
+          CASE WHEN ${source("category", "'GENERAL'")} IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','TICKET','BILLING','REPAIR','GENERAL','OTHER') THEN ${source("category", "'GENERAL'")} ELSE 'GENERAL' END,
+          ${source("service_id", "NULL")},${source("piano_id", "NULL")},${source("event_id", "NULL")},${source("ticket_id", "NULL")},${source("status", "'OPEN'")},${source("assigned_user_id", "NULL")},NULL,COALESCE(${source("consent_contact", "0")},0),${source("source_path", "NULL")},COALESCE(${source("metadata_json", "'{}'")},'{}'),${source("last_message_at", "NULL")},${source("last_message_at", "NULL")},${source("closed_at", "NULL")},NULL,NULL,NULL,NULL,NULL,${source("created_at", "CURRENT_TIMESTAMP")},${source("updated_at", "CURRENT_TIMESTAMP")} FROM customer_conversations c`);
       db.exec("DROP TABLE customer_conversations");
       db.exec("ALTER TABLE customer_conversations_new RENAME TO customer_conversations");
     })();
@@ -681,7 +690,7 @@ function runMigrations() {
   migrateColumns();
   migrateEventTicketData();
   migrateWebsiteContactLeadStatuses();
-  migrateCustomerConversationCategories();
+  migrateCustomerConversationSchema();
   migrateEventArtistForeignKey();
   migrateUsersRoleConstraint();
   backfillUserCalendarColors(db, log);
@@ -767,7 +776,11 @@ function runMigrations() {
   ensureIndex("idx_website_tracking_events", "CREATE INDEX IF NOT EXISTS idx_website_tracking_events ON website_tracking_events(event_name,created_at DESC)");
   ensureIndex("idx_customer_conversations_status", "CREATE INDEX IF NOT EXISTS idx_customer_conversations_status ON customer_conversations(status,updated_at DESC)");
   ensureIndex("idx_customer_conversations_email", "CREATE INDEX IF NOT EXISTS idx_customer_conversations_email ON customer_conversations(lower(trim(email)),updated_at DESC)");
+  ensureIndex("idx_customer_conversations_visitor_token", "CREATE INDEX IF NOT EXISTS idx_customer_conversations_visitor_token ON customer_conversations(visitor_token_hash,updated_at DESC)");
   ensureIndex("idx_customer_messages_conversation", "CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation ON customer_messages(conversation_id,created_at)");
+  ensureIndex("idx_customer_message_attachments_message", "CREATE INDEX IF NOT EXISTS idx_customer_message_attachments_message ON customer_message_attachments(message_id,created_at)");
+  ensureIndex("idx_customer_conversation_events_conversation", "CREATE INDEX IF NOT EXISTS idx_customer_conversation_events_conversation ON customer_conversation_events(conversation_id,created_at,id)");
+  ensureIndex("idx_support_holidays_date", "CREATE UNIQUE INDEX IF NOT EXISTS idx_support_holidays_date ON support_holidays(holiday_date)");
   ensureIndex("idx_communication_deliveries_status", "CREATE INDEX IF NOT EXISTS idx_communication_deliveries_status ON communication_deliveries(status,updated_at DESC)");
 
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
