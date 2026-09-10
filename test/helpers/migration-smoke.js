@@ -24,13 +24,13 @@ try {
     reviews: db.prepare("SELECT COUNT(*) AS count FROM website_reviews WHERE is_sample=1").get().count,
     events: db.prepare("SELECT COUNT(*) AS count FROM events WHERE is_sample=1").get().count
   };
-  if (JSON.stringify(counts) !== JSON.stringify({ artists: 3, services: 3, pianos: 6, reviews: 3, events: 0 })) throw new Error(`SAMPLE_COUNTS_INVALID:${JSON.stringify(counts)}`);
+  if (JSON.stringify(counts) !== JSON.stringify({ artists: 0, services: 0, pianos: 0, reviews: 0, events: 0 })) throw new Error(`SAMPLE_COUNTS_INVALID:${JSON.stringify(counts)}`);
   if (db.prepare("PRAGMA integrity_check").get().integrity_check !== "ok") throw new Error("SQLITE_INTEGRITY_FAILED");
   if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("SQLITE_FOREIGN_KEY_FAILED");
   const artistForeignKey = db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   if (!artistForeignKey) throw new Error("EVENT_ARTIST_FOREIGN_KEY_MISSING");
   db.close();
-  console.log("migration smoke check passed (two runs, samples, integrity, foreign keys)");
+  console.log("migration smoke check passed (two runs, no auto-samples, integrity, foreign keys)");
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }
