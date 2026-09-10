@@ -616,28 +616,37 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   id TEXT PRIMARY KEY,
   public_token_hash TEXT NOT NULL UNIQUE,
   public_token_encrypted TEXT,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL,
+  visitor_token_hash TEXT,
+  name TEXT,
+  email TEXT,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','GENERAL')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','TICKET','BILLING','REPAIR','GENERAL','OTHER')),
   service_id TEXT,
   piano_id TEXT,
   event_id TEXT,
   ticket_id TEXT,
   status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
   assigned_user_id TEXT,
+  assigned_role TEXT,
   consent_contact INTEGER NOT NULL DEFAULT 0 CHECK(consent_contact IN (0,1)),
   source_path TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
   last_message_at TEXT,
+  last_activity_at TEXT,
   closed_at TEXT,
+  auto_closed_at TEXT,
+  closure_note TEXT,
+  reopen_reason TEXT,
+  reopened_at TEXT,
+  reopened_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
   FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
   FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
-  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS customer_messages (
@@ -652,6 +661,48 @@ CREATE TABLE IF NOT EXISTS customer_messages (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
   FOREIGN KEY(sender_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS customer_message_attachments (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  stored_name TEXT NOT NULL UNIQUE,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK(file_size >= 0),
+  sha256 TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(message_id) REFERENCES customer_messages(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer_conversation_events (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  actor_user_id TEXT,
+  actor_name TEXT,
+  actor_role TEXT,
+  from_status TEXT,
+  to_status TEXT,
+  details TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS support_holidays (
+  id TEXT PRIMARY KEY,
+  holiday_date TEXT NOT NULL UNIQUE,
+  label_en TEXT NOT NULL,
+  label_hu TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  is_system INTEGER NOT NULL DEFAULT 0 CHECK(is_system IN (0,1)),
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS communication_deliveries (
