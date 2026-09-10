@@ -119,7 +119,9 @@ function migrationRequiresBackup() {
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const attendancePauseColumnsMissing = tableExists("event_attendance_sessions") && ["paused_at", "paused_by_user_id", "resumed_at", "resumed_by_user_id"].some((column) => !tableColumns("event_attendance_sessions").has(column));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing;
+  const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
+  const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -599,6 +601,8 @@ function runMigrations() {
     // Financial items.
     ensureColumn("financial_items", "source_type", "TEXT");
     ensureColumn("financial_items", "source_id", "TEXT");
+    ensureColumn("knowledge_base", "workflow_id", "TEXT");
+    if (tableExists("workshop_workflows")) ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
 
     // Public events and Stripe Sandbox. These nullable additions preserve every
     // existing event and ticket while enabling cancellation and payment links.
@@ -670,7 +674,7 @@ function runMigrations() {
       purchase_price: "REAL DEFAULT 0", manufacturing_cost: "REAL DEFAULT 0", quantity: "REAL DEFAULT 1",
       unit: "TEXT", condition_status: "TEXT", location: "TEXT", linked_piano_id: "TEXT",
       linked_client_id: "TEXT", status: "TEXT DEFAULT 'In Stock'", notes: "TEXT", deleted_at: "TEXT",
-      deleted_by: "TEXT", created_by: "TEXT", created_by_user_id: "TEXT"
+      deleted_by: "TEXT", created_by: "TEXT", created_by_user_id: "TEXT", reserved_quantity: "REAL DEFAULT 0"
     };
     for (const [name, definition] of Object.entries(inventoryColumns)) ensureColumn("inventory_items", name, definition);
 
@@ -682,7 +686,7 @@ function runMigrations() {
       expected_revenue: "REAL DEFAULT 0", probability: "TEXT DEFAULT '100% - Biztos'",
       estimated_hours: "REAL DEFAULT 0", target_date: "TEXT", status: "TEXT", block_reason: "TEXT",
       next_step: "TEXT", notes: "TEXT", converted_job_id: "TEXT", created_by: "TEXT",
-      created_by_user_id: "TEXT", archived_at: "TEXT", archived_by: "TEXT"
+      created_by_user_id: "TEXT", archived_at: "TEXT", archived_by: "TEXT", workflow_id: "TEXT"
     };
     for (const [name, definition] of Object.entries(plannedColumns)) ensureColumn("planned_jobs", name, definition);
   });
