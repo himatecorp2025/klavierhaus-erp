@@ -82,6 +82,7 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
     client_id: "C-WF", piano_id: "P-WF", planned_job_id: "PLN-WF", mode: "INBOUND", title: "WF API lifecycle", final_due_at: "2099-09-30T17:00",
     preliminary_inspection: "DONE", preliminary_assessment: "NOT_DONE", preliminary_quote: "NOT_REQUIRED", preliminary_meeting: "DONE",
     first_stage_assignee_id: "U-MANAGER-WF",
+    stage_card_title_INBOUND: "Arrival from client home",
     stage_assignee_INBOUND: "U-MANAGER-WF",
     stage_assignee_ASSESSMENT: "U-STAFF-WF",
     stage_assignee_ACOUSTICS: "U-STAFF-WF",
@@ -96,6 +97,7 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
   const assessment = created.payload.stages.find((stage) => stage.stage_order === 1);
   assert.equal(inbound.status, "WAITING");
   assert.equal(inbound.effective_status, "ASSIGNED");
+  assert.equal(inbound.card_title, "Arrival from client home");
   assert.equal(created.payload.workflow_owner_id, "U-MANAGER-WF");
   assert.equal(assessment.status, "WAITING");
   assert.equal(assessment.assigned_user_id, "U-STAFF-WF");
@@ -106,6 +108,9 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
 
   const arrived = await request(baseUrl, `/api/workflows/${workflowId}/stages/${inbound.id}`, { token: staffToken, method: "PATCH", body: { status: "COMPLETED", details: "Piano received" } });
   assert.equal(arrived.status, 200, JSON.stringify(arrived.payload));
+  const renamed = await request(baseUrl, `/api/workflows/${workflowId}/stages/${inbound.id}`, { token: staffToken, method: "PATCH", body: { card_title: "Piano received at Klavierhaus" } });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.payload));
+  assert.equal(renamed.payload.stages.find((stage) => stage.id === inbound.id).card_title, "Piano received at Klavierhaus");
   const started = await request(baseUrl, `/api/workflows/${workflowId}/stages/${assessment.id}`, { token: staffToken, method: "PATCH", body: { status: "IN_PROGRESS", details: "Detailed assessment started" } });
   assert.equal(started.status, 200, JSON.stringify(started.payload));
 
