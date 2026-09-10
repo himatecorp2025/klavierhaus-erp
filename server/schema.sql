@@ -1294,6 +1294,7 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   stage_order INTEGER NOT NULL,
   name_snapshot_en TEXT NOT NULL,
   name_snapshot_hu TEXT NOT NULL,
+  card_title TEXT,
   status TEXT NOT NULL DEFAULT 'WAITING' CHECK(status IN ('WAITING','IN_PROGRESS','COMPLETED','BLOCKED','NOT_REQUIRED','ABORTED')),
   assigned_user_id TEXT,
   assigned_to TEXT,
