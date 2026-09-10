@@ -20,6 +20,7 @@ const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
+const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -97,6 +98,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "seo_keywords", group_key: "marketing", label_en: "SEO & Keywords", label_hu: "SEO és kulcsszavak" },
   { key: "heatmap", group_key: "marketing", label_en: "Consent Heatmap", label_hu: "Hozzájárulásos hőtérkép" },
   { key: "scheduler", group_key: "technical", label_en: "Scheduler", label_hu: "Naptár" },
+  { key: "workshop_workflow", group_key: "technical", label_en: "Workshop Workflow", label_hu: "Műhely workflow" },
   { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
   { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
   { key: "pianos", group_key: "technical", label_en: "Client Pianos", label_hu: "Ügyfélzongorák" },
@@ -113,7 +115,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
 ]);
 
 function seedDefaultPermissions(){
-  const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
+  const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
     ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
@@ -794,6 +796,17 @@ registerBusinessOperationsRoutes({
   documentService: businessDocuments,
   ticketService,
   customerConversationUpload,
+  notifyUser: createNotification
+});
+registerWorkshopWorkflowRoutes({
+  app,
+  db,
+  auth,
+  permit,
+  requireSuperadmin,
+  rid,
+  nowISO,
+  upload,
   notifyUser: createNotification
 });
 setInterval(()=>{
@@ -2296,7 +2309,17 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
     WHERE jl.log_type IN ('Full','Partial','Failed')
     ORDER BY jl.created_at DESC
   `).all();
-  res.json(rows);
+  const workflowRows=db.prepare(`SELECT wc.id AS workflow_closed_id,wc.workflow_id,w.id AS log_id,w.workflow_key AS job_key,w.title,
+      c.name AS client_name,COALESCE(p.display_name,TRIM(COALESCE(p.brand,'')||' '||COALESCE(p.model,''))) AS piano_name,
+      'Workshop Workflow' AS job_type,wf.name AS responsible_at_close,u.name AS closed_by,wc.closed_at AS closed_at,
+      'Workflow' AS close_type,wc.net_total AS billed_amount,'Not applicable' AS payment_method,
+      NULL AS invoice_number,NULL AS document_path,wc.closure_reason AS close_description,NULL AS next_job_id,NULL AS next_job_key,NULL AS next_job_title
+    FROM workflow_closed_jobs wc JOIN workshop_workflows w ON w.id=wc.workflow_id
+    JOIN contacts c ON c.id=wc.client_id JOIN pianos p ON p.id=wc.piano_id
+    LEFT JOIN users u ON u.id=wc.closed_by_user_id
+    LEFT JOIN users wf ON wf.id=w.transport_responsible_user_id
+    ORDER BY wc.closed_at DESC`).all();
+  res.json([...rows,...workflowRows].sort((a,b)=>String(b.closed_at||'').localeCompare(String(a.closed_at||''))));
 });
 
 
@@ -2491,7 +2514,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     }
 
     if(exists("role_permissions")){
-      const commonView=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
+      const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
         ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
@@ -2536,4 +2559,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 app.use(uploadErrorHandler);
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
-    app.listen(PORT,()=>console.log(`Klavierhaus v6.7.0 notifications running on http://localhost:${PORT}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
+function startServer(port = PORT) {
+  return app.listen(port, () => console.log(`Klavierhaus v6.7.0 notifications running on http://localhost:${port}; push=${PUSH_CONFIGURED?'configured':'not configured'}`));
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, db, startServer };
