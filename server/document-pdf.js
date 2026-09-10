@@ -550,4 +550,4 @@ function generateInvoicePdf({ company = {}, event, payment, tickets = [], invoic
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, ticketDesignType, ticketPalette };
+module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
