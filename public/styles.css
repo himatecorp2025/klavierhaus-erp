@@ -809,3 +809,16 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
 .workflow-shell{--workflow-stage-count:7}
 .workflow-shell .workflow-stage-head{grid-template-columns:repeat(var(--workflow-stage-count),minmax(130px,1fr))}
 .workflow-shell .workflow-stage-grid{grid-template-columns:repeat(var(--workflow-stage-count),minmax(130px,1fr))}
+
+/* Workflow board header alignment and explicit New York timezone indicator. */
+.workflow-board-head>div:not(.workflow-stage-head){display:flex;align-items:center;justify-content:center;min-height:78px;text-align:center}
+.workflow-stage-head{align-items:stretch}
+.workflow-stage-head span.workflow-stage-heading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:78px;padding:10px 8px;text-align:center}
+.workflow-stage-heading strong{color:var(--gold);font-size:16px;line-height:1;font-weight:950}
+.workflow-stage-heading b{max-width:100%;font-size:11px;line-height:1.22;overflow-wrap:anywhere;text-align:center}
+.workflow-piano-cell{justify-content:center}
+.workflow-row-meta{justify-content:center;text-align:center}
+.workflow-timezone{display:flex;align-items:center;justify-content:center;gap:9px;align-self:center;min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap}
+.workflow-timezone strong{color:var(--gold);letter-spacing:.04em}
+.workflow-timezone b{color:var(--text);font-variant-numeric:tabular-nums}
+@media(max-width:900px){.workflow-timezone{width:100%;justify-content:space-between;white-space:normal}.workflow-stage-head span.workflow-stage-heading{min-height:86px}}
