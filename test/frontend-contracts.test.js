@@ -111,6 +111,13 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(appSource, /workflowCompleteStage/);
   assert.match(appSource, /workflowCardTitle_/);
   assert.match(appSource, /workflowEnsurePhaseCardTitleField/);
+  assert.match(appSource, /workflow-piano-copy/);
+  assert.match(appSource, /workflowShowFullEventLog/);
+  assert.match(appSource, /function workflowEventLogMarkup\(stage,limit=3\)/);
+  assert.match(appSource, /assignment_mode="INHERIT_PREVIOUS"/);
+  assert.match(appSource, /WORKFLOW_TRANSFER_REASON_REQUIRED/);
+  assert.match(styles, /\.workflow-event-log-modal/);
+  assert.match(styles, /\.workflow-next-stage-modal/);
   assert.match(styles, /\.workflow-shell \.workflow-stage-heading/);
   assert.match(styles, /\.workflow-shell \.workflow-final-closure/);
   assert.match(styles, /body\[data-current-view="workshop_workflow"\] \.main-header\{display:none\}/);
