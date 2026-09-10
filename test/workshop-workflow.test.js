@@ -174,6 +174,30 @@ test("workshop workflow lifecycle enforces stage, deadline, material, finance an
   assert.deepEqual(afterDeleteDb.prepare("SELECT quantity,reserved_quantity FROM inventory_items WHERE id='I-WF'").get(), { quantity: 4, reserved_quantity: 0 });
   afterDeleteDb.close();
 
+  const inheritedWorkflow = await request(baseUrl, "/api/workflows", { token: adminToken, method: "POST", body: {
+    client_id: "C-WF", piano_id: "P-WF", mode: "INBOUND", title: "WF automatic responsible inheritance", final_due_at: "2099-09-30T17:00",
+    preliminary_inspection: "DONE", preliminary_assessment: "DONE", preliminary_quote: "NOT_REQUIRED", preliminary_meeting: "DONE",
+    first_stage_assignee_id: "U-ADMIN-WF"
+  } });
+  assert.equal(inheritedWorkflow.status, 201, JSON.stringify(inheritedWorkflow.payload));
+  const inheritedWorkflowId = inheritedWorkflow.payload.id;
+  const inheritedInbound = inheritedWorkflow.payload.stages.find((stage) => stage.stage_order === 0);
+  const inheritedAssessment = inheritedWorkflow.payload.stages.find((stage) => stage.stage_order === 1);
+  const inheritedCompletion = await request(baseUrl, `/api/workflows/${inheritedWorkflowId}/stages/${inheritedInbound.id}`, { token: adminToken, method: "PATCH", body: { status: "COMPLETED" } });
+  assert.equal(inheritedCompletion.status, 200, JSON.stringify(inheritedCompletion.payload));
+  assert.equal(inheritedCompletion.payload.next_stage_activation.assignment_mode, "INHERIT_PREVIOUS");
+  assert.equal(inheritedCompletion.payload.next_stage_activation.inherited_assignee_id, "U-ADMIN-WF");
+  const inheritedActivation = await request(baseUrl, `/api/workflows/${inheritedWorkflowId}/stages/${inheritedAssessment.id}/activate`, { token: adminToken, method: "POST", body: {
+    start_now: true, assigned_user_id: "U-ADMIN-WF", assignment_mode: "INHERIT_PREVIOUS", source_stage_id: inheritedInbound.id
+  } });
+  assert.equal(inheritedActivation.status, 200, JSON.stringify(inheritedActivation.payload));
+  const inheritedAssessmentAfter = inheritedActivation.payload.stages.find((stage) => stage.id === inheritedAssessment.id);
+  assert.equal(inheritedAssessmentAfter.status, "IN_PROGRESS");
+  assert.equal(inheritedAssessmentAfter.assigned_user_id, "U-ADMIN-WF");
+  assert.ok(inheritedAssessmentAfter.event_log.some((event) => event.action === "WORKFLOW_STAGE_ASSIGNEE_INHERITED"));
+  const inheritedDelete = await request(baseUrl, `/api/workflows/${inheritedWorkflowId}`, { token: superToken, method: "DELETE", body: { reason: "Remove automatic inheritance test workflow" } });
+  assert.equal(inheritedDelete.status, 200, JSON.stringify(inheritedDelete.payload));
+
   const customDefinitions = await request(baseUrl, "/api/workflow/stage-definitions", { token: adminToken, method: "PUT", body: { stages: [...definitions.payload.stages.map((stage) => ({ code: stage.code, name_en: stage.name_en, name_hu: stage.name_hu, sort_order: stage.sort_order, active: stage.active !== 0 })), { code: "CUSTOM_QA", name_en: "Quality Gate", name_hu: "Minőségellenőrzés", sort_order: 7, active: true }] } });
   assert.equal(customDefinitions.status, 200, JSON.stringify(customDefinitions.payload));
   assert.ok(customDefinitions.payload.stages.some((stage) => stage.code === "CUSTOM_QA"));
