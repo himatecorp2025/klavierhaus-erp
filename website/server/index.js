@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const express = require("express");
 const compression = require("compression");
+const multer = require("multer");
 const { createEventClient } = require("./event-client");
 const {
   VERSION,
@@ -176,6 +177,13 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
     return `<li><a href="${escapeHtml(getRoute(item.key, language))}"${active}>${escapeHtml(item.label)}</a></li>`;
   }).join("");
 
+  const chatCopy = language === "hu" ? {
+    welcome: "Üdvözöljük a Klavierhausnál. Miben segíthetünk?",
+    title: "Személyes segítség, diszkréten.", lead: "Írjon nekünk — csapatunk rövidesen válaszol.", name: "Név (opcionális)", email: "E-mail-cím (opcionális)", topic: "Téma", message: "Üzenet", attachments: "Csatolmányok (legfeljebb 10 fájl, fájlonként 50 MB)", consent: "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot.", send: "Üzenet küldése", lookup: "Korábbi beszélgetések keresése", lookupPlaceholder: "E-mail-cím a korábbi ügyekhez", lookupSend: "Keresés", close: "Bezárás"
+  } : {
+    welcome: "Welcome to Klavierhaus. How may we assist you?",
+    title: "Personal assistance, discreetly.", lead: "Send us a message — our team will reply shortly.", name: "Name (optional)", email: "Email (optional)", topic: "Topic", message: "Message", attachments: "Attachments (up to 10 files, 50 MB each)", consent: "I consent to being contacted about this enquiry.", send: "Send message", lookup: "Find previous conversations", lookupPlaceholder: "Email address for previous cases", lookupSend: "Find", close: "Close"
+  };
   return `<a class="skip-link" href="#main-content">${escapeHtml(copy.skipLabel)}</a>
   <header class="site-header" data-site-header>
     <a class="brand" href="${escapeHtml(getRoute("home", language))}" aria-label="${escapeHtml(copy.brandAriaLabel)}">
@@ -196,18 +204,25 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
     </div>
   </header>
   <aside class="customer-chat" data-customer-chat data-language="${escapeHtml(language)}">
-    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel">${language === "hu" ? "Kapcsolat" : "Contact"}</button>
+    <div class="customer-chat__welcome" data-chat-welcome role="status"><span>${escapeHtml(chatCopy.welcome)}</span><button type="button" data-chat-welcome-close aria-label="${escapeHtml(chatCopy.close)}">×</button></div>
+    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span aria-hidden="true">✦</span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
-      <div class="customer-chat__heading"><p class="eyebrow">Klavierhaus</p><h2>${language === "hu" ? "Miben segíthetünk?" : "How can we help?"}</h2><p>${language === "hu" ? "Írjon nekünk, és csapata rövidesen válaszol." : "Send us a message and our team will reply shortly."}</p></div>
+      <div class="customer-chat__heading"><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div>
       <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
       <form data-chat-form>
-        <label>${language === "hu" ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label>
-        <label>${language === "hu" ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
-        <label>${language === "hu" ? "Téma" : "Topic"}<select name="category"><option value="GENERAL">${language === "hu" ? "Általános" : "General"}</option><option value="SERVICE">${language === "hu" ? "Szolgáltatás" : "Service"}</option><option value="PIANO">${language === "hu" ? "Zongora" : "Piano"}</option><option value="EVENT">${language === "hu" ? "Esemény" : "Event"}</option><option value="REFUND">${language === "hu" ? "Visszatérítés" : "Refund"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát konzultáció" : "Private consultation"}</option></select></label>
-        <label>${language === "hu" ? "Üzenet" : "Message"}<textarea name="message" maxlength="5000" rows="3" required></textarea></label>
-        <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${language === "hu" ? "Hozzájárulok a kapcsolatfelvételhez." : "I consent to being contacted."}</label>
-        <button class="button button--primary" type="submit">${language === "hu" ? "Üzenet küldése" : "Send message"}</button>
+        <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name"></label>
+        <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email"></label>
+        <label>${escapeHtml(chatCopy.topic)}<select name="category"><option value="GENERAL">${language === "hu" ? "Általános kérdés" : "General question"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="TICKET">${language === "hu" ? "Jegy nem érkezett meg / nem nyomtatható" : "Ticket missing / cannot print"}</option><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="PIANO">${language === "hu" ? "Zongora vagy showroom" : "Piano or showroom"}</option><option value="EVENT">${language === "hu" ? "Esemény" : "Event"}</option><option value="REFUND">${language === "hu" ? "Jegyvisszaváltás" : "Ticket refund"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private consultation / appointment"}</option><option value="REPAIR">${language === "hu" ? "Javítás / szerviz" : "Repair / service"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
+        <label>${escapeHtml(chatCopy.message)}<textarea name="message" maxlength="5000" rows="3" required></textarea></label>
+        <label>${escapeHtml(chatCopy.attachments)}<input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"></label>
+        <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
+        <button class="button button--primary" type="submit">${escapeHtml(chatCopy.send)}</button>
         <p class="form-result" data-chat-result aria-live="polite"></p>
+      </form>
+      <form class="customer-chat__lookup" data-chat-lookup-form>
+        <label>${escapeHtml(chatCopy.lookup)}<input name="lookup_email" type="email" placeholder="${escapeHtml(chatCopy.lookupPlaceholder)}" autocomplete="email" required></label>
+        <button class="button button--ghost" type="submit">${escapeHtml(chatCopy.lookupSend)}</button>
+        <p class="form-result" data-chat-lookup-result aria-live="polite"></p>
       </form>
     </div>
   </aside>`;
@@ -1173,6 +1188,20 @@ function createApp(options = {}) {
     timeoutMs: options.eventApiTimeoutMs ?? process.env.EVENT_API_TIMEOUT_MS,
     fetchImpl: options.fetchImpl
   });
+  const customerChatUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+    fileFilter: (_req, file, callback) => {
+      const extension = path.extname(file.originalname || "").toLowerCase();
+      const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".pdf", ".doc", ".docx"]);
+      callback(allowed.has(extension) ? null : new Error("INVALID_CUSTOMER_ATTACHMENT"), allowed.has(extension));
+    }
+  });
+  const customerChatUploadMiddleware = (req, res, next) => customerChatUpload.array("attachments", 10)(req, res, (error) => {
+    if (!error) return next();
+    const code = error.code === "LIMIT_FILE_SIZE" ? "CUSTOMER_ATTACHMENT_TOO_LARGE" : error.message || "INVALID_CUSTOMER_ATTACHMENT";
+    return res.status(400).json({ error: code });
+  });
   async function loadSeoConfig() {
     if (!eventClient.configured) return null;
     try { return await eventClient.seoConfig(); } catch (_error) { return null; }
@@ -1289,17 +1318,29 @@ function createApp(options = {}) {
     try { const result = await eventClient.createLead(req.body || {}); res.status(201).json(result); }
     catch (error) { res.status(error.status || 400).json({ error: error.code || "CONTACT_REQUEST_FAILED" }); }
   });
-  app.post("/api/site/customer-conversations", async (req, res) => {
-    try { const result = await eventClient.createCustomerConversation(req.body || {}); res.status(201).json(result); }
+  app.post("/api/site/customer-conversations", customerChatUploadMiddleware, async (req, res) => {
+    try { const result = await eventClient.createCustomerConversation(req.body || {}, req.files || []); res.status(201).json(result); }
     catch (error) { res.status(error.status || 400).json({ error: error.code || "CONVERSATION_REQUEST_FAILED" }); }
+  });
+  app.post("/api/site/customer-conversations/lookup", async (req, res) => {
+    try { res.setHeader("Cache-Control", "no-store"); res.json(await eventClient.lookupCustomerConversations(req.body?.email || "")); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "CONVERSATION_LOOKUP_FAILED" }); }
   });
   app.get("/api/site/customer-conversations/:token", async (req, res) => {
     try { res.setHeader("Cache-Control", "no-store"); res.json(await eventClient.customerConversation(req.params.token)); }
     catch (error) { res.status(error.status || 404).json({ error: error.code || "CONVERSATION_NOT_FOUND" }); }
   });
-  app.post("/api/site/customer-conversations/:token/messages", async (req, res) => {
-    try { res.status(201).json(await eventClient.customerConversationMessage(req.params.token, req.body || {})); }
+  app.post("/api/site/customer-conversations/:token/messages", customerChatUploadMiddleware, async (req, res) => {
+    try { res.status(201).json(await eventClient.customerConversationMessage(req.params.token, req.body || {}, req.files || [])); }
     catch (error) { res.status(error.status || 400).json({ error: error.code || "MESSAGE_SEND_FAILED" }); }
+  });
+  app.get("/api/site/customer-conversations/:token/attachments/:attachmentId", async (req, res) => {
+    try {
+      const result = await eventClient.customerConversationAttachment(req.params.token, req.params.attachmentId);
+      if (result.contentType) res.setHeader("Content-Type", result.contentType);
+      if (result.contentDisposition) res.setHeader("Content-Disposition", result.contentDisposition);
+      res.send(result.buffer);
+    } catch (error) { res.status(error.status || 404).json({ error: error.code || "CUSTOMER_ATTACHMENT_NOT_FOUND" }); }
   });
   app.post("/api/site/events/:eventId/repeat-interest", async (req, res) => {
     try { const result = await eventClient.repeatInterest(req.params.eventId, req.body || {}); res.status(201).json(result); }
