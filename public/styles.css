@@ -1382,3 +1382,217 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
   .workflow-shell .workflow-board-filter-row .workflow-board-date{grid-column:auto}
   .workflow-shell .workflow-drawer-head h2{font-size:21px}
 }
+
+/* Final workflow reference surface: keep the board and the phase drawer visually consistent. */
+body[data-current-view="workshop_workflow"] .main-header{display:none}
+body[data-current-view="workshop_workflow"] .main{padding-top:10px}
+.workflow-shell{
+  --workflow-board-bg:#071522;
+  --workflow-board-panel:#0a1c2d;
+  --workflow-board-head:#122a43;
+  --workflow-board-border:#294863;
+  --workflow-gold:#e1b957;
+  min-height:calc(100vh - 22px);
+  color:#edf2f6
+}
+.workflow-shell .workflow-board-panel{padding:0;overflow:hidden;border-color:var(--workflow-board-border);border-radius:11px;background:var(--workflow-board-bg);box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.workflow-shell .workflow-toolbar{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:20px;
+  min-height:126px;
+  margin:0;
+  padding:22px 34px 20px;
+  border-bottom:1px solid var(--workflow-board-border);
+  background:linear-gradient(115deg,#10263c 0%,#0d2136 55%,#122a43 100%)
+}
+.workflow-shell .workflow-toolbar-copy h2{margin:0;color:#f6f0e4;font-family:Georgia,"Times New Roman",serif;font-size:clamp(34px,3.8vw,52px);font-weight:500;letter-spacing:-.025em;line-height:1.05}
+.workflow-shell .workflow-toolbar-copy p{margin:8px 0 0;color:#e8edf1;font-family:Georgia,"Times New Roman",serif;font-size:clamp(17px,1.6vw,23px);font-weight:600}
+.workflow-shell .workflow-toolbar-clock{min-width:300px;align-items:flex-start;gap:6px;color:#eef2f5;text-align:left}
+.workflow-shell .workflow-toolbar-clock strong{color:#f7f0e3;font-size:21px;font-weight:800}
+.workflow-shell .workflow-toolbar-clock span{color:#e5ebf0;font-size:17px;font-weight:800}
+.workflow-shell .workflow-toolbar-clock time{margin-left:22px;color:#fff;font-size:20px;font-weight:950}
+.workflow-shell .workflow-board-controls{display:grid;grid-template-columns:1fr;gap:20px;margin:0;padding:22px 34px 24px;border:0;border-bottom:1px solid var(--workflow-board-border);border-radius:0;background:#071522}
+.workflow-shell .workflow-day-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.workflow-shell .workflow-day-actions button{min-height:57px;padding:13px 22px;border:1px solid #41627e;border-radius:9px;background:#0f243a;color:#eef2f4;font-size:17px;font-weight:850;white-space:nowrap}
+.workflow-shell .workflow-day-actions button:hover{background:#1a3b5e;color:#fff}
+.workflow-shell .workflow-day-actions .workflow-today-btn{min-width:120px;border-color:#edc961;background:#e0b951;color:#111a22}
+.workflow-shell .workflow-day-actions .workflow-today-btn:hover{background:#f1d274;color:#111a22}
+.workflow-shell .workflow-date-picker{display:flex;align-items:center;gap:14px;min-height:57px;padding:0 18px;border:1px solid #41627e;border-radius:9px;background:#0f243a;color:#eef2f4;cursor:pointer}
+.workflow-shell .workflow-date-picker span{font-size:24px;color:#eef2f4}
+.workflow-shell .workflow-date-picker input{width:190px;min-width:0;padding:0;border:0;background:transparent;color:#eef2f4;font-size:16px;font-weight:850;cursor:pointer}
+.workflow-shell .workflow-date-picker input::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9}
+.workflow-shell .workflow-stage-settings{font-size:14px!important;opacity:.9}
+.workflow-shell .workflow-board-filter-row{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) auto minmax(230px,.8fr);align-items:end;gap:24px;min-width:0}
+.workflow-shell .workflow-board-filter-row label{min-width:0;color:#edf1f5;font-size:16px;font-weight:850}
+.workflow-shell .workflow-board-filter-row label select{min-height:52px;margin-top:8px;padding:11px 14px;border-color:#41627e;border-radius:9px;background:#0f243a;color:#eef2f4;font-size:16px;font-weight:800}
+.workflow-shell .workflow-overdue-toggle{display:flex;align-items:center;gap:12px;min-height:52px;white-space:nowrap}
+.workflow-shell .workflow-overdue-toggle input{position:absolute;opacity:0;pointer-events:none}
+.workflow-shell .workflow-overdue-toggle i{position:relative;display:block;width:65px;height:34px;border:1px solid #53708b;border-radius:999px;background:#263e56;transition:background .16s ease,border-color .16s ease}
+.workflow-shell .workflow-overdue-toggle i::after{content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:#d9e0e6;transition:transform .16s ease}
+.workflow-shell .workflow-overdue-toggle input:checked+i{border-color:#e1b957;background:#98413b}
+.workflow-shell .workflow-overdue-toggle input:checked+i::after{transform:translateX(31px);background:#fff2cf}
+.workflow-shell .workflow-new-btn{justify-self:end;min-height:57px;padding:13px 24px;border:1px solid #f0cd6d;border-radius:9px;background:linear-gradient(135deg,#f3d47c,#c9972f);color:#14202a;font-size:17px;font-weight:900;white-space:nowrap}
+.workflow-shell .workflow-new-btn:hover{background:linear-gradient(135deg,#ffe39a,#e3b84b);color:#101820}
+.workflow-shell .workflow-board-scroll{overflow:auto;border:0;border-radius:0;background:var(--workflow-board-bg);scrollbar-width:thin;scrollbar-color:#d8b35c #10243a}
+.workflow-shell .workflow-board-scroll::-webkit-scrollbar{width:11px;height:11px}
+.workflow-shell .workflow-board-scroll::-webkit-scrollbar-track{background:#10243a}
+.workflow-shell .workflow-board-scroll::-webkit-scrollbar-thumb{border:2px solid #10243a;border-radius:10px;background:#d8b35c}
+.workflow-shell .workflow-board-head,.workflow-shell .workflow-row{grid-template-columns:280px minmax(1260px,1fr);min-width:1540px}
+.workflow-shell .workflow-board-head{background:var(--workflow-board-head);color:#edf2f5;font-size:16px;letter-spacing:.055em}
+.workflow-shell .workflow-board-head>div{padding:0;border-right:1px solid var(--workflow-board-border)}
+.workflow-shell .workflow-piano-heading{display:grid;place-items:center;min-height:112px;font-size:20px;font-weight:950;text-transform:uppercase}
+.workflow-shell .workflow-stage-head{grid-template-columns:repeat(var(--workflow-stage-count),minmax(180px,1fr));min-height:112px}
+.workflow-shell .workflow-stage-heading{display:flex;align-items:center;justify-content:center;gap:4px;padding:16px 13px;border-right:1px solid var(--workflow-board-border);text-align:center;line-height:1.25}
+.workflow-shell .workflow-stage-heading strong{font-size:19px;white-space:nowrap}
+.workflow-shell .workflow-stage-heading b{font-size:17px;font-weight:950}
+.workflow-shell .workflow-row{min-height:218px;background:#081a2b;border-bottom:1px solid var(--workflow-board-border)}
+.workflow-shell .workflow-piano-cell{display:flex;flex-direction:row;align-items:center;gap:16px;padding:20px 18px;border-right:1px solid var(--workflow-board-border);background:#102a43}
+.workflow-shell .workflow-piano-visual{display:grid;place-items:center;flex:0 0 91px;width:91px;height:111px;border:2px solid #5b6f82;border-radius:6px;background:linear-gradient(150deg,#10141a,#263847 60%,#0b1117);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.workflow-shell .workflow-piano-visual span{color:#dcb461;font-size:55px;line-height:1;transform:rotate(-18deg)}
+.workflow-shell .workflow-piano-facts{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.workflow-shell .workflow-piano-facts .workflow-piano-name{color:#f4f7f9;font-size:18px;font-weight:950;line-height:1.2}
+.workflow-shell .workflow-piano-facts .workflow-client-name{color:#d4dce4;font-size:16px;font-weight:800}
+.workflow-shell .workflow-piano-facts .workflow-final-deadline{color:#e6c45e;font-size:16px;font-weight:950;line-height:1.25;font-variant-numeric:tabular-nums}
+.workflow-shell .workflow-row-open{order:5;width:100%;margin-top:7px;padding:9px 10px;border:1px solid #4b6b86;border-radius:8px;background:transparent;color:#e8edf2;text-align:center;font-size:13px;font-weight:850;white-space:nowrap}
+.workflow-shell .workflow-row-open:hover{background:#1b3c5d;color:#fff}
+.workflow-shell .workflow-stage-grid{grid-template-columns:repeat(var(--workflow-stage-count),minmax(180px,1fr));min-width:0;align-items:stretch}
+.workflow-shell .workflow-stage-card{display:block;min-width:0;min-height:184px;margin:10px 9px;padding:0;border:2px solid #3f5b75;border-radius:12px;background:#263f5d;color:#f5f6f7;text-align:left;box-shadow:0 4px 12px rgba(0,0,0,.16);transition:transform .16s ease,filter .16s ease,background .16s ease}
+.workflow-shell .workflow-stage-card:hover{transform:translateY(-2px);filter:brightness(1.08);color:inherit}
+.workflow-shell .workflow-stage-card-inner{display:flex;flex-direction:column;gap:9px;height:100%;min-width:0;padding:14px 14px 12px}
+.workflow-shell .workflow-stage-status{display:flex;align-items:center;gap:9px;min-width:0}
+.workflow-shell .workflow-stage-status em{font-style:normal;font-size:17px;font-weight:950;line-height:1.15;overflow-wrap:anywhere}
+.workflow-shell .workflow-status-dot,.workflow-shell .workflow-status-icon{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border-radius:50%;background:#e8eef4;color:#122334;font-size:15px;font-weight:950;line-height:1}
+.workflow-shell .workflow-stage-due{font-size:16px;font-weight:900;line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.workflow-shell .workflow-stage-title{font-size:17px;font-weight:850;line-height:1.25;overflow-wrap:anywhere}
+.workflow-shell .workflow-stage-card-footer{display:flex;align-items:center;gap:8px;margin-top:auto;min-width:0;font-size:15px;font-weight:850}
+.workflow-shell .workflow-stage-assignee{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workflow-shell .workflow-assignee-avatar{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border:2px solid rgba(255,255,255,.65);border-radius:50%;background:#d6dbe0;color:#213041;font-size:15px;font-weight:950}
+.workflow-shell .workflow-stage-document{margin-left:auto;font-size:26px;line-height:1}
+.workflow-shell .workflow-stage-empty{display:grid;place-items:center;min-height:218px;border-right:1px solid var(--workflow-board-border);color:#8192a4;font-size:27px;font-weight:900}
+.workflow-shell .workflow-stage-empty--inactive{color:#586b7c}
+.workflow-shell .workflow-stage-card.status-waiting{border-color:#a34857;background:#5d2935;color:#fff1f1}
+.workflow-shell .workflow-stage-card.status-waiting .workflow-status-dot{background:#ff5964}
+.workflow-shell .workflow-stage-card.status-assigned{border-color:#e2a52e;background:#bd7710;color:#111820}
+.workflow-shell .workflow-stage-card.status-assigned .workflow-status-dot{background:#111820}
+.workflow-shell .workflow-stage-card.status-in-progress{border-color:#d3a52d;background:#604b18;color:#fff1b7}
+.workflow-shell .workflow-stage-card.status-in-progress .workflow-status-dot{background:#ffd34d}
+.workflow-shell .workflow-stage-card.status-completed{border-color:#1ec494;background:#095a4b;color:#e8fff7}
+.workflow-shell .workflow-stage-card.status-completed .workflow-status-icon{background:#61e3bd;color:#073328}
+.workflow-shell .workflow-stage-card.status-overdue{border-color:#fb5260;background:#64252e;color:#fff0f0}
+.workflow-shell .workflow-stage-card.status-overdue .workflow-status-icon{background:#ff5b62;color:#2a0e14}
+.workflow-shell .workflow-stage-card.status-blocked{border-color:#e1a330;background:#75491b;color:#fff3cc}
+.workflow-shell .workflow-stage-card.status-not-required{border-color:#596876;background:#394752;color:#d6dde2}
+.workflow-shell .workflow-stage-card.status-aborted{border-color:#65717d;background:#303b46;color:#e8edf0}
+.workflow-shell .workflow-empty{min-width:1540px}
+.workflow-shell button.workflow-stage-empty{width:100%;padding:0;border:0;background:transparent;cursor:pointer;text-align:center}
+
+.workflow-shell.has-workflow-drawer .workflow-board-panel{margin-right:min(760px,44vw);transition:margin-right .24s ease}
+.workflow-shell .workflow-drawer{position:absolute;top:0;right:0;width:min(760px,44vw);min-width:560px;height:100%;min-height:720px;border:1px solid #365975;border-radius:10px;background:#071a2c;box-shadow:-24px 12px 70px rgba(0,0,0,.45);animation:workflowDrawerIn .24s ease both}
+.workflow-shell .workflow-drawer-head{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;align-items:center;gap:14px;padding:20px 22px;border-bottom:1px solid #294863;background:#0b2036}
+.workflow-shell .workflow-drawer-head h2{margin:0;color:#f4f7fa;font-family:Inter,Arial,sans-serif;font-size:25px;font-weight:900}
+.workflow-shell .workflow-drawer-head .muted{margin:7px 0 0;color:#9fb2c7;font-size:16px;font-weight:800;overflow-wrap:anywhere}
+.workflow-shell .workflow-drawer-back,.workflow-shell .workflow-drawer-head .modal-close{display:grid;width:40px;height:40px;place-items:center;padding:0;border:1px solid #5c7891;border-radius:8px;background:transparent;color:#eff3f6;font-size:30px;line-height:1}
+.workflow-shell .workflow-drawer-back:hover,.workflow-shell .workflow-drawer-head .modal-close:hover{background:#1b3c5d;color:#fff}
+.workflow-shell .workflow-drawer-scroll{overflow-x:hidden;overflow-y:auto;min-height:0;padding:18px 22px 132px;background:#071a2c;scrollbar-width:thin;scrollbar-color:#d8b35c #10243a}
+.workflow-shell .workflow-drawer-scroll::-webkit-scrollbar{width:11px;height:11px}
+.workflow-shell .workflow-drawer-scroll::-webkit-scrollbar-track{border-radius:10px;background:#10243a}
+.workflow-shell .workflow-drawer-scroll::-webkit-scrollbar-thumb{border:2px solid #10243a;border-radius:10px;background:#d8b35c}
+.workflow-shell .workflow-drawer-piano-context{display:grid;grid-template-columns:170px minmax(0,1fr);align-items:center;gap:22px;margin-bottom:22px;padding:14px;border:1px solid #274b68;background:#0d263d}
+.workflow-shell .workflow-drawer-piano-visual{display:grid;place-items:center;width:170px;height:137px;border:2px solid #5c7891;border-radius:8px;background:linear-gradient(150deg,#10141a,#263847 60%,#0b1117);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.workflow-shell .workflow-drawer-piano-visual span{color:#dcb461;font-size:76px;line-height:1;transform:rotate(-18deg)}
+.workflow-shell .workflow-drawer-piano-context strong{color:#eff3f6;font-size:24px;font-weight:950;line-height:1.15}
+.workflow-shell .workflow-drawer-piano-context p{margin:11px 0 0;color:#b7c4d1;font-size:17px;font-weight:700}
+.workflow-shell .workflow-drawer-piano-context p b{color:#f2f5f7}
+.workflow-shell .workflow-phase-fields-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px}
+.workflow-shell .workflow-phase-fields-grid label,.workflow-shell .workflow-phase-detail-field{display:flex;flex-direction:column;gap:7px;color:#d3dce5;font-size:16px;font-weight:850}
+.workflow-shell .workflow-phase-fields-grid select,.workflow-shell .workflow-phase-fields-grid input,.workflow-shell .workflow-phase-detail-field textarea{width:100%;min-height:53px;padding:12px 14px;border-color:#46657f;border-radius:9px;background:#081a2d;color:#eef3f6;font-size:16px;font-weight:800}
+.workflow-shell .workflow-phase-fields-grid select{appearance:auto}
+.workflow-shell .workflow-phase-detail-field{margin-top:17px}
+.workflow-shell .workflow-phase-detail-field textarea{min-height:96px;resize:vertical;line-height:1.35}
+.workflow-shell .workflow-readonly-select{opacity:1;color:#eef3f6!important}
+.workflow-shell .workflow-phase-split{display:grid;grid-template-columns:1fr 1fr;margin-top:18px;border-top:1px solid #294863;border-bottom:1px solid #294863}
+.workflow-shell .workflow-phase-split>section{min-width:0;padding:18px 14px 20px 0}
+.workflow-shell .workflow-phase-split>section+section{padding:18px 0 20px 22px;border-left:1px solid #294863}
+.workflow-shell .workflow-phase-split h3{margin:0 0 12px;color:#dce5ec;font-size:18px}
+.workflow-shell .workflow-phase-split p,.workflow-shell .workflow-phase-split small{color:#aebdcb;font-size:15px;line-height:1.35}
+.workflow-shell .workflow-material-status{color:#e6ba3f;font-size:18px}
+.workflow-shell .workflow-phase-split button{min-width:130px;margin-top:7px}
+.workflow-shell .workflow-phase-split select,.workflow-shell .workflow-phase-split textarea{width:100%;padding:11px 12px;border-color:#46657f;border-radius:8px;background:#081a2d;color:#edf2f6;font-size:15px;font-weight:800}
+.workflow-shell .workflow-phase-split textarea{margin-top:10px;resize:vertical}
+.workflow-shell .workflow-event-log-block{padding:20px 0;border-bottom:1px solid #294863}
+.workflow-shell .workflow-event-log-block h3{margin:0;color:#f0f3f6;font-size:20px}
+.workflow-shell .workflow-text-link{padding:0;border:0;background:transparent;color:#bdc9d4;text-decoration:underline;font-size:14px}
+.workflow-shell .workflow-event-log{position:relative;gap:0;margin-top:14px;padding-left:4px}
+.workflow-shell .workflow-event-log::before{content:"";position:absolute;top:8px;bottom:10px;left:9px;width:2px;background:#597086}
+.workflow-shell .workflow-event-log-row{position:relative;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:7px 0}
+.workflow-shell .workflow-event-dot{position:relative;z-index:1;width:14px;height:14px;margin:2px 0 0;border:2px solid #aac0d2;background:#d9e2e8;box-shadow:0 0 0 3px #071a2c}
+.workflow-shell .workflow-event-log-row:first-child .workflow-event-dot{background:#ff5a63;border-color:#ff7b82}
+.workflow-shell .workflow-event-log-row b{color:#edf2f6;font-size:16px}
+.workflow-shell .workflow-event-log-row small{color:#91a5b9;font-size:13px}
+.workflow-shell .workflow-event-log-row p{color:#bfccd6;font-size:14px}
+.workflow-shell .workflow-drawer-disclosure{margin-top:16px;border:1px solid #294863;background:#0b2036}
+.workflow-shell .workflow-drawer-disclosure summary{padding:14px 16px;color:#e8edf2;cursor:pointer;font-size:16px;font-weight:900;list-style:none}
+.workflow-shell .workflow-drawer-disclosure summary::-webkit-details-marker{display:none}
+.workflow-shell .workflow-drawer-disclosure summary span{float:right;color:#d8b35c;font-size:13px}
+.workflow-shell .workflow-drawer-disclosure>div{padding:0 16px 16px}
+.workflow-shell .workflow-phase-secondary-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:10px}
+.workflow-shell .workflow-phase-actions{position:sticky;bottom:-1px;z-index:4;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:20px -22px 0;padding:16px 22px;border-top:1px solid #294863;background:#0b2036;box-shadow:0 -14px 28px rgba(0,0,0,.25)}
+.workflow-shell .workflow-phase-actions button{min-height:56px;border-radius:8px;font-size:17px;font-weight:900}
+.workflow-shell .workflow-transfer-btn{border:1px solid #edc86b;background:#e0b951;color:#141d24}
+.workflow-shell .workflow-complete-btn{border:1px solid #38d49e;background:#158a6b;color:#effff9}
+.workflow-shell .workflow-complete-btn:disabled{opacity:.5;cursor:not-allowed}
+.workflow-shell .workflow-final-closure{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:20px;padding:18px;border:1px solid #80662e;border-radius:8px;background:#0b2036}
+.workflow-shell .workflow-final-closure>div{display:flex;align-items:flex-start;gap:14px;min-width:0}
+.workflow-shell .workflow-final-lock{color:#e8c45e;font-size:28px;line-height:1}
+.workflow-shell .workflow-final-closure h3{margin:0;color:#e8c45e;font-size:19px}
+.workflow-shell .workflow-final-closure p{margin:7px 0 0;color:#b8c4ce;font-size:14px;line-height:1.4}
+.workflow-shell .workflow-final-close-btn{min-height:48px;padding:10px 14px;border:1px solid #40607c;border-radius:8px;background:#152c43;color:#6f8294;font-size:14px;font-weight:900;white-space:nowrap}
+.workflow-shell .workflow-final-closure.is-ready .workflow-final-close-btn{border-color:#36c996;background:#147d61;color:#effff9}
+
+@media(max-width:1250px){
+  .workflow-shell.has-workflow-drawer .workflow-board-panel{margin-right:min(690px,48vw)}
+  .workflow-shell .workflow-drawer{width:min(690px,48vw);min-width:520px}
+  .workflow-shell .workflow-toolbar,.workflow-shell .workflow-board-controls{padding-inline:22px}
+}
+@media(max-width:900px){
+  body[data-current-view="workshop_workflow"] .main{padding-top:0}
+  .workflow-shell{min-height:0}
+  .workflow-shell .workflow-toolbar{grid-template-columns:1fr;min-height:0;padding:22px 18px 20px}
+  .workflow-shell .workflow-toolbar-clock{min-width:0}
+  .workflow-shell .workflow-toolbar-clock strong{font-size:18px}
+  .workflow-shell .workflow-toolbar-clock span{font-size:15px}
+  .workflow-shell .workflow-toolbar-clock time{font-size:17px}
+  .workflow-shell .workflow-board-controls{padding:17px 18px 19px;gap:16px}
+  .workflow-shell .workflow-day-actions{gap:8px}
+  .workflow-shell .workflow-day-actions button,.workflow-shell .workflow-date-picker{min-height:48px;padding:10px 13px;font-size:14px}
+  .workflow-shell .workflow-date-picker input{width:150px;font-size:14px}
+  .workflow-shell .workflow-board-filter-row{grid-template-columns:1fr 1fr;gap:12px}
+  .workflow-shell .workflow-board-filter-row label{font-size:14px}
+  .workflow-shell .workflow-new-btn{justify-self:stretch;grid-column:1/-1;min-height:48px;font-size:15px}
+  .workflow-shell .workflow-board-head,.workflow-shell .workflow-row{min-width:1540px}
+  .workflow-shell .workflow-drawer{position:fixed;inset:0;width:100vw;min-width:0;height:100dvh;min-height:100dvh;border-radius:0;z-index:40}
+  .workflow-shell .workflow-drawer-head{padding:calc(16px + env(safe-area-inset-top)) 18px 16px}
+  .workflow-shell .workflow-drawer-scroll{padding:16px 18px calc(126px + env(safe-area-inset-bottom))}
+  .workflow-shell .workflow-phase-actions{margin-inline:-18px;padding-inline:18px}
+}
+@media(max-width:560px){
+  .workflow-shell .workflow-toolbar-copy h2{font-size:35px}
+  .workflow-shell .workflow-day-actions button span{display:none}
+  .workflow-shell .workflow-date-picker{flex:1;min-width:145px}
+  .workflow-shell .workflow-date-picker input{width:100%}
+  .workflow-shell .workflow-board-filter-row{grid-template-columns:1fr}
+  .workflow-shell .workflow-overdue-toggle{justify-content:space-between}
+  .workflow-shell .workflow-drawer-piano-context{grid-template-columns:100px minmax(0,1fr);gap:13px;padding:10px}
+  .workflow-shell .workflow-drawer-piano-visual{width:100px;height:86px}
+  .workflow-shell .workflow-drawer-piano-visual span{font-size:48px}
+  .workflow-shell .workflow-drawer-piano-context strong{font-size:18px}
+  .workflow-shell .workflow-drawer-piano-context p{margin-top:6px;font-size:13px}
+  .workflow-shell .workflow-phase-fields-grid,.workflow-shell .workflow-phase-split{grid-template-columns:1fr}
+  .workflow-shell .workflow-phase-split>section,.workflow-shell .workflow-phase-split>section+section{padding:16px 0;border-left:0}
+  .workflow-shell .workflow-phase-split>section+section{border-top:1px solid #294863}
+  .workflow-shell .workflow-phase-actions{gap:7px;padding-inline:12px;margin-inline:-18px}
+  .workflow-shell .workflow-phase-actions button{min-height:50px;padding:8px 6px;font-size:14px}
+  .workflow-shell .workflow-final-closure{align-items:stretch;flex-direction:column}
+}
