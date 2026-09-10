@@ -603,6 +603,12 @@ function runMigrations() {
     ensureColumn("financial_items", "source_id", "TEXT");
     ensureColumn("knowledge_base", "workflow_id", "TEXT");
     if (tableExists("workshop_workflows")) ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
+    if (tableExists("workflow_stages")) {
+      ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
+      ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
+      ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
+      ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
+    }
 
     // Public events and Stripe Sandbox. These nullable additions preserve every
     // existing event and ticket while enabling cancellation and payment links.
