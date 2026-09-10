@@ -59,9 +59,20 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   }
 
   function stageRows(workflowId) {
-    return db.prepare(`SELECT s.*,u.name AS assigned_user_name
+    const rows = db.prepare(`SELECT s.*,u.name AS assigned_user_name
       FROM workflow_stages s LEFT JOIN users u ON u.id=s.assigned_user_id
       WHERE s.workflow_id=? ORDER BY s.stage_order,s.id`).all(workflowId);
+    const now = localDateTimeFromISO(nowISO());
+    return rows.map((stage) => {
+      const isOverdue = Boolean(stage.due_at && !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status) && stage.due_at < now);
+      const effectiveStatus = isOverdue ? "OVERDUE" : (stage.status === "WAITING" && stage.assigned_user_id ? "ASSIGNED" : stage.status);
+      return { ...stage, assigned_to: stage.assigned_to || stage.assigned_user_name || null, is_overdue: isOverdue, effective_status: effectiveStatus, event_log: stageEventRows(stage.id) };
+    });
+  }
+
+  function stageEventRows(stageId) {
+    return db.prepare(`SELECT id,action,user_name,user_role,details,event_time AS created_at,old_value,new_value
+      FROM audit_log WHERE module='workshop_workflow' AND record_id=? ORDER BY event_time DESC LIMIT 40`).all(stageId);
   }
 
   function financialRows(workflowId) {
@@ -91,6 +102,8 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const summary = signedFinanceSummary(lines);
     return {
       ...row,
+      workflow_owner_id: row.created_by_user_id || null,
+      workflow_owner_name: row.created_by_name || userById(row.created_by_user_id)?.name || null,
       stages,
       financial_lines: lines,
       materials,
@@ -124,8 +137,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,
       p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.location AS piano_location,
+      cu.name AS created_by_name,
       tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
       FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id
+      LEFT JOIN users cu ON cu.id=w.created_by_user_id
       LEFT JOIN users tu ON tu.id=w.transport_responsible_user_id
       LEFT JOIN users u ON u.id=w.financial_closed_by_user_id ${where}
       ORDER BY CASE WHEN w.current_status='ACTIVE' THEN 0 ELSE 1 END,w.final_due_at,w.updated_at DESC`).all(...values);
@@ -146,15 +161,34 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
 
   function stageCanStart(workflow, stage) {
     if (stage.stage_order === 0) return true;
-    if (workflow.mode === "INBOUND") {
-      const inbound = db.prepare("SELECT status FROM workflow_stages WHERE workflow_id=? AND stage_order=0").get(workflow.id);
-      if (!inbound || !["COMPLETED", "NOT_REQUIRED"].includes(inbound.status)) return false;
-    }
-    if (stage.stage_order > 1) {
-      const previous = db.prepare("SELECT status FROM workflow_stages WHERE workflow_id=? AND stage_order=?").get(workflow.id, stage.stage_order - 1);
-      if (!previous || !["COMPLETED", "NOT_REQUIRED"].includes(previous.status)) return false;
-    }
-    return true;
+    const previousStages = db.prepare("SELECT status FROM workflow_stages WHERE workflow_id=? AND stage_order<? ORDER BY stage_order").all(workflow.id, stage.stage_order);
+    return previousStages.every((previous) => ["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(previous.status));
+  }
+
+  function activeStageRows(workflowId) {
+    return stageRows(workflowId).filter((stage) => stage.status !== "NOT_REQUIRED");
+  }
+
+  function nextStageFor(workflowId, stageOrder) {
+    return stageRows(workflowId).find((stage) => stage.stage_order > stageOrder && stage.status !== "NOT_REQUIRED") || null;
+  }
+
+  function recordStageTransfer(workflow, stage, assignee, reason, actor) {
+    if (!assignee || assignee.id === stage.assigned_user_id) return;
+    if (!clean(reason, 2000)) throw error("WORKFLOW_TRANSFER_REASON_REQUIRED");
+    db.prepare(`INSERT INTO workflow_stage_transfers(id,workflow_id,stage_id,from_user_id,to_user_id,reason,transferred_by_user_id)
+      VALUES(?,?,?,?,?,?,?)`).run(rid("WFT"), workflow.id, stage.id, stage.assigned_user_id || null, assignee.id, clean(reason, 2000), actor.id);
+  }
+
+  function activateNextStage(workflow, completedStage, req) {
+    const next = nextStageFor(workflow.id, completedStage.stage_order);
+    if (!next || !stageCanStart(workflow, next)) return null;
+    return {
+      mode: "CONFIRM",
+      stage: next,
+      current_assignee_id: next.assigned_user_id || completedStage.assigned_user_id || null,
+      message: "The next workflow phase is ready for activation"
+    };
   }
 
   function validatePreliminary(body) {
@@ -250,25 +284,46 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const finalDueAt = localDateTime(body.final_due_at);
       if (!title || !finalDueAt) throw error("WORKFLOW_TITLE_AND_FINAL_DEADLINE_REQUIRED");
       const prelim = validatePreliminary(body);
-      const assigned = userById(validId(body.transport_responsible_user_id));
-      if (body.transport_responsible_user_id && !assigned) throw error("WORKFLOW_RESPONSIBLE_NOT_FOUND");
+      const stageDefinitions = definitions(true).sort((a, b) => a.sort_order - b.sort_order || String(a.id).localeCompare(String(b.id)));
+      const explicitStageSelection = Object.keys(body).some((key) => key.startsWith("stage_enabled_"));
+      const selectedDefinitions = stageDefinitions.filter((definition) => {
+        if (mode === "ON_SITE" && definition.code === "INBOUND") return false;
+        if (!explicitStageSelection) return true;
+        return ["1", "true", "on", "yes"].includes(String(body[`stage_enabled_${definition.code}`] || "").toLowerCase());
+      });
+      if (!selectedDefinitions.length) throw error("WORKFLOW_ACTIVE_PHASE_REQUIRED");
+      const firstDefinition = selectedDefinitions[0];
+      const firstAssigneeId = validId(body.first_stage_assignee_id || body[`stage_assignee_${firstDefinition.code}`] || (firstDefinition.code === "INBOUND" ? body.transport_responsible_user_id : ""));
+      const firstAssignee = userById(firstAssigneeId);
+      if (!firstAssignee) throw error("WORKFLOW_FIRST_PHASE_RESPONSIBLE_REQUIRED");
+      const stageAssignees = new Map();
+      selectedDefinitions.forEach((definition) => {
+        const requestedId = validId(body[`stage_assignee_${definition.code}`] || (definition.code === firstDefinition.code ? firstAssigneeId : ""));
+        if (!requestedId) return;
+        const assignee = userById(requestedId);
+        if (!assignee) throw error("WORKFLOW_RESPONSIBLE_NOT_FOUND");
+        stageAssignees.set(definition.code, assignee);
+      });
+      const transportAssignee = stageAssignees.get("INBOUND") || userById(validId(body.transport_responsible_user_id));
+      if (body.transport_responsible_user_id && !transportAssignee) throw error("WORKFLOW_RESPONSIBLE_NOT_FOUND");
       const id = rid("WF");
       const key = `WF-${new Date().getFullYear()}-${id.slice(-8)}`;
       const transaction = db.transaction(() => {
         db.prepare(`INSERT INTO workshop_workflows(id,workflow_key,client_id,piano_id,mode,planned_job_id,title,description,current_status,financial_status,final_due_at,timezone,current_location,transport_address,transport_responsible_user_id,transport_responsible_name,transport_note,final_handover_type,created_by_user_id)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          id, key, clientId, pianoId, mode, plannedJobId || null, title, clean(body.description), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), assigned?.id || null, assigned?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
+          id, key, clientId, pianoId, mode, plannedJobId || null, title, clean(body.description), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
         );
         if (plannedJobId) db.prepare("UPDATE planned_jobs SET workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id, plannedJobId);
-        const stageDefinitions = definitions(false);
         const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,status,assigned_user_id,assigned_to,due_at,details,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
         stageDefinitions.forEach((definition, index) => {
-          const stageStatus = mode === "ON_SITE" && index === 0 ? "NOT_REQUIRED" : "WAITING";
-          const due = index === stageDefinitions.length - 1 ? finalDueAt : localDateTime(body[`stage_due_${definition.code}`]);
-          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, stageStatus, null, null, due || null, "", index === 0 && mode === "INBOUND" ? prelim.preliminary_inspection : null, index === 0 && mode === "INBOUND" ? prelim.preliminary_assessment : null, index === 0 && mode === "INBOUND" ? prelim.preliminary_quote : null, index === 0 && mode === "INBOUND" ? prelim.preliminary_meeting : null, index === 0 ? numeric(body.preliminary_quote_amount) : 0);
+          const relevant = selectedDefinitions.some((selected) => selected.code === definition.code);
+          const assignedStage = relevant ? stageAssignees.get(definition.code) : null;
+          const stageStatus = relevant ? "WAITING" : "NOT_REQUIRED";
+          const due = relevant && definition.code === "FINAL_HANDOVER" ? finalDueAt : (relevant ? localDateTime(body[`stage_due_${definition.code}`]) : "");
+          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, stageStatus, assignedStage?.id || null, assignedStage?.name || null, due || null, "", definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_inspection : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_assessment : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_quote : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_meeting : null, definition.code === "INBOUND" && relevant ? numeric(body.preliminary_quote_amount) : 0);
         });
-        directAudit(req, "WORKFLOW_CREATED", id, null, { workflow_key: key, client_id: clientId, piano_id: pianoId, mode }, "Workshop workflow created");
+        directAudit(req, "WORKFLOW_CREATED", id, null, { workflow_key: key, client_id: clientId, piano_id: pianoId, mode, main_responsible_user_id: req.user.id, first_stage_id: firstDefinition.code, active_stage_codes: selectedDefinitions.map((definition) => definition.code) }, "Workshop workflow created");
       });
       transaction();
       res.status(201).json(decorateWorkflow(workflowById(id), true));
@@ -285,11 +340,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.description !== undefined) { changes.push("description=?"); values.push(clean(body.description)); }
       if (body.final_handover_type !== undefined) { changes.push("final_handover_type=?"); values.push(body.final_handover_type === "ON_SITE" ? "ON_SITE" : "DELIVERY"); }
       if (body.final_due_at !== undefined) {
-        if (!isAdmin(req.user)) throw error("FINAL_DEADLINE_ADMIN_ONLY");
-        const due = localDateTime(body.final_due_at); if (!due) throw error("INVALID_FINAL_DEADLINE");
-        changes.push("final_due_at=?"); values.push(due);
-        const finalStage = db.prepare("SELECT id FROM workflow_stages WHERE workflow_id=? AND stage_order=(SELECT MAX(stage_order) FROM workflow_stages WHERE workflow_id=?)").get(workflow.id, workflow.id);
-        if (finalStage) db.prepare("UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(due, finalStage.id);
+        throw error("FINAL_DEADLINE_IMMUTABLE");
       }
       if (!changes.length) return res.json(decorateWorkflow(workflow, true));
       values.push(workflow.id);
@@ -308,7 +359,9 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.status !== undefined) {
         const status = clean(body.status, 30).toUpperCase();
         if (!STATUS.has(status)) throw error("INVALID_WORKFLOW_STAGE_STATUS");
+        if (stage.status === "NOT_REQUIRED" && status !== "NOT_REQUIRED") throw error("WORKFLOW_STAGE_MUST_BE_ACTIVATED");
         if (status === "IN_PROGRESS" && !stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
+        if (status === "IN_PROGRESS" && !validId(body.assigned_user_id || stage.assigned_user_id)) throw error("WORKFLOW_RESPONSIBLE_REQUIRED_TO_START");
         if (status === "COMPLETED" && stage.stage_order > 0 && !stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
         if (stage.stage_order === 0 && workflow.mode === "INBOUND" && status === "COMPLETED" && [stage.preliminary_inspection, stage.preliminary_assessment, stage.preliminary_quote, stage.preliminary_meeting].some((value) => !value)) throw error("INBOUND_PRELIMINARY_FIELDS_REQUIRED");
         changes.push("status=?"); values.push(status);
@@ -320,9 +373,8 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.due_at !== undefined) {
         if (!isAdmin(req.user) && !(req.user.role === "MANAGER" && stage.stage_order < 6)) throw error("STAGE_DEADLINE_NOT_ALLOWED");
         const due = localDateTime(body.due_at); if (!due) throw error("INVALID_STAGE_DEADLINE");
-        if (stage.stage_order === 6 && !isAdmin(req.user)) throw error("FINAL_DEADLINE_ADMIN_ONLY");
+        if (stage.stage_code === "FINAL_HANDOVER") throw error("FINAL_DEADLINE_IMMUTABLE");
         changes.push("due_at=?"); values.push(due);
-        if (stage.stage_order === 6 && isAdmin(req.user)) db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(due, workflow.id);
       }
       if (body.assigned_user_id !== undefined) {
         const assignee = userById(validId(body.assigned_user_id));
@@ -349,6 +401,49 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const updatedStage = stageById(stage.id);
       directAudit(req, "WORKFLOW_STAGE_UPDATED", stage.id, stage, updatedStage, "Workshop stage updated");
       notifyAssigned(updatedStage, workflow, req.user);
+      const response = decorateWorkflow(workflowById(workflow.id), true);
+      if (body.status && clean(body.status, 30).toUpperCase() === "COMPLETED") response.next_stage_activation = activateNextStage(workflow, updatedStage, req);
+      res.json(response);
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
+  app.post("/api/workflows/:id/stages/:stageId/activate", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
+    try {
+      const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
+      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+      if (!["NOT_REQUIRED", "WAITING"].includes(stage.status)) throw error("WORKFLOW_STAGE_ALREADY_ACTIVE");
+      if (!stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
+      const startNow = body.start_now === true || String(body.start_now).toLowerCase() === "true";
+      const assigneeId = validId(body.assigned_user_id || stage.assigned_user_id);
+      const assignee = assigneeId ? userById(assigneeId) : null;
+      if (assigneeId && !assignee) throw error("WORKFLOW_ASSIGNEE_NOT_FOUND");
+      if (startNow && !assignee) throw error("WORKFLOW_RESPONSIBLE_REQUIRED_TO_START");
+      if (body.due_at !== undefined && stage.stage_code === "FINAL_HANDOVER") throw error("FINAL_DEADLINE_IMMUTABLE");
+      const due = body.due_at === undefined ? stage.due_at : localDateTime(body.due_at);
+      if (body.due_at !== undefined && !due) throw error("INVALID_STAGE_DEADLINE");
+      if (due && !isAdmin(req.user) && !(req.user.role === "MANAGER" && stage.stage_order < 6) && due !== stage.due_at) throw error("STAGE_DEADLINE_NOT_ALLOWED");
+      if (assignee && assignee.id !== stage.assigned_user_id && stage.status !== "NOT_REQUIRED") recordStageTransfer(workflow, stage, assignee, body.reason, req.user);
+      const nextStatus = startNow ? "IN_PROGRESS" : "WAITING";
+      db.prepare(`UPDATE workflow_stages SET status=?,assigned_user_id=?,assigned_to=?,due_at=?,started_at=CASE WHEN ?='IN_PROGRESS' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(nextStatus, assignee?.id || null, assignee?.name || null, due || null, nextStatus, nowISO(), stage.id);
+      db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+      const updated = stageById(stage.id);
+      directAudit(req, "WORKFLOW_STAGE_ACTIVATED", stage.id, stage, updated, startNow ? "Workflow stage activated and started" : "Workflow stage activated");
+      notifyAssigned(updated, workflow, req.user);
+      res.json(decorateWorkflow(workflowById(workflow.id), true));
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
+  app.post("/api/workflows/:id/stages/:stageId/abort", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
+    try {
+      const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), reason = clean(req.body?.reason, 2000);
+      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+      if (["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status)) throw error("WORKFLOW_STAGE_NOT_ABORTABLE");
+      if (!reason) throw error("WORKFLOW_STAGE_ABORT_REASON_REQUIRED");
+      db.prepare("UPDATE workflow_stages SET status='ABORTED',block_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(reason, stage.id);
+      db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+      const updated = stageById(stage.id);
+      directAudit(req, "WORKFLOW_STAGE_ABORTED", stage.id, stage, updated, reason);
       res.json(decorateWorkflow(workflowById(workflow.id), true));
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
@@ -468,13 +563,53 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
+  app.patch("/api/workflows/:id/financial-lines/:lineId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
+    try {
+      const workflow = requireWorkflow(req.params.id);
+      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+      const line = db.prepare("SELECT * FROM workflow_financial_lines WHERE id=? AND workflow_id=?").get(req.params.lineId, workflow.id);
+      if (!line) throw error("WORKFLOW_FINANCIAL_LINE_NOT_FOUND");
+      if (line.stage_id) {
+        const stage = requireStage(line.stage_id, workflow.id);
+        if (stage.financial_status === "CLOSED") throw error("WORKFLOW_STAGE_FINANCE_CLOSED");
+      }
+      const body = req.body || {}, changes = [], values = [];
+      if (body.title !== undefined) { const title = clean(body.title, 240); if (!title) throw error("FINANCIAL_LINE_TITLE_REQUIRED"); changes.push("title=?"); values.push(title); }
+      if (body.description !== undefined) { changes.push("description=?"); values.push(clean(body.description)); }
+      if (body.amount !== undefined) { const amount = numeric(body.amount, NaN); if (!Number.isFinite(amount) || amount < 0) throw error("INVALID_FINANCIAL_LINE_AMOUNT"); changes.push("amount=?"); values.push(amount); }
+      if (body.billing_status !== undefined) { const billingStatus = String(body.billing_status).toUpperCase(); if (!["CHARGEABLE", "WARRANTY", "FREE", "COMPENSATION", "CREDIT"].includes(billingStatus)) throw error("INVALID_BILLING_STATUS"); changes.push("billing_status=?"); values.push(billingStatus); }
+      if (!changes.length) return res.json({ line: financialRows(workflow.id).find((item) => item.id === line.id), summary: signedFinanceSummary(financialRows(workflow.id)) });
+      values.push(line.id);
+      db.prepare(`UPDATE workflow_financial_lines SET ${changes.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...values);
+      const updated = db.prepare("SELECT * FROM workflow_financial_lines WHERE id=?").get(line.id);
+      directAudit(req, "WORKFLOW_FINANCIAL_LINE_UPDATED", line.id, line, updated, "Workflow financial line updated");
+      res.json({ line: financialRows(workflow.id).find((item) => item.id === line.id), summary: signedFinanceSummary(financialRows(workflow.id)) });
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_FINANCIAL_LINE_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
+  app.post("/api/workflows/:id/stages/:stageId/financial-close", auth, permit("ADMIN"), (req, res) => {
+    try {
+      const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id);
+      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+      if (stage.status === "NOT_REQUIRED") throw error("WORKFLOW_STAGE_NOT_RELEVANT");
+      if (!["COMPLETED", "ABORTED"].includes(stage.status)) throw error("WORKFLOW_STAGE_NOT_COMPLETE");
+      if (stage.financial_status === "CLOSED") throw error("WORKFLOW_STAGE_FINANCE_ALREADY_CLOSED");
+      const closedAt = nowISO(), reason = clean(req.body?.reason, 2000);
+      db.prepare("UPDATE workflow_stages SET financial_status='CLOSED',financial_closed_at=?,financial_closed_by_user_id=?,financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closedAt, req.user.id, reason || null, stage.id);
+      const updated = stageById(stage.id);
+      directAudit(req, "WORKFLOW_STAGE_FINANCIAL_CLOSED", stage.id, stage, updated, reason || "Workflow stage financial data closed");
+      res.json(decorateWorkflow(workflowById(workflow.id), true));
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
   app.post("/api/workflows/:id/finalize", auth, permit("ADMIN"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id);
       if (workflow.financial_status === "CLOSED") throw error("WORKFLOW_ALREADY_FINANCIALLY_CLOSED");
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const stages = stageRows(workflow.id);
-      if (stages.some((stage) => !["COMPLETED", "NOT_REQUIRED"].includes(stage.status))) throw error("WORKFLOW_STAGES_NOT_COMPLETE");
+      if (stages.some((stage) => !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status))) throw error("WORKFLOW_STAGES_NOT_COMPLETE");
+      if (stages.some((stage) => stage.status !== "NOT_REQUIRED" && stage.financial_status !== "CLOSED")) throw error("WORKFLOW_STAGE_FINANCE_NOT_CLOSED");
       const lines = financialRows(workflow.id), summary = signedFinanceSummary(lines), closureReason = clean(req.body?.closure_reason, 2000);
       if (summary.net_total === 0 && !closureReason) throw error("ZERO_WORKFLOW_CLOSE_REASON_REQUIRED");
       const closedAt = nowISO(), closedId = rid("WCJ");
