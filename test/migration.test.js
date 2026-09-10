@@ -16,6 +16,7 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   const legacySchema = currentSchema
     .replace("  calendar_color TEXT,\n", "")
     .replace("  contact_email TEXT,\n", "")
+    .replace("  card_title TEXT,\n", "")
     .replace("  planned_minutes INTEGER DEFAULT 0,\n", "")
     .replace(/-- Existing accounts remain verified by default[\s\S]*?CREATE TABLE IF NOT EXISTS contacts \(/, "CREATE TABLE IF NOT EXISTS contacts (");
   const db = new Database(dbPath);
@@ -41,10 +42,12 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   const migrated = new Database(dbPath, { readonly: true });
   const columns = migrated.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
   const jobColumns = migrated.prepare("PRAGMA table_info(jobs)").all().map((column) => column.name);
+  const workflowStageColumns = migrated.prepare("PRAGMA table_info(workflow_stages)").all().map((column) => column.name);
   assert.ok(columns.includes("calendar_color"));
   assert.ok(columns.includes("google_calendar_email"));
   assert.ok(columns.includes("contact_email"));
   assert.ok(jobColumns.includes("planned_minutes"));
+  assert.ok(workflowStageColumns.includes("card_title"));
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_integrations'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_calendar_events'").get());
   assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_activations'").get());
