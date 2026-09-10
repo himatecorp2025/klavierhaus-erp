@@ -73,7 +73,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
 
   function stageEventRows(stageId) {
     return db.prepare(`SELECT id,action,user_name,user_role,details,event_time AS created_at,old_value,new_value
-      FROM audit_log WHERE module='workshop_workflow' AND record_id=? ORDER BY event_time DESC LIMIT 40`).all(stageId);
+      FROM audit_log WHERE module='workshop_workflow' AND record_id=? ORDER BY event_time DESC`).all(stageId);
   }
 
   function financialRows(workflowId) {
@@ -184,10 +184,14 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   function activateNextStage(workflow, completedStage, req) {
     const next = nextStageFor(workflow.id, completedStage.stage_order);
     if (!next || !stageCanStart(workflow, next)) return null;
+    const inheritedAssigneeId = completedStage.assigned_user_id || null;
     return {
       mode: "CONFIRM",
       stage: next,
-      current_assignee_id: next.assigned_user_id || completedStage.assigned_user_id || null,
+      current_assignee_id: next.assigned_user_id || inheritedAssigneeId,
+      inherited_assignee_id: inheritedAssigneeId,
+      source_stage_id: completedStage.id,
+      assignment_mode: next.assigned_user_id ? "KEEP_EXISTING" : (inheritedAssigneeId ? "INHERIT_PREVIOUS" : "REQUIRES_ASSIGNMENT"),
       message: "The next workflow phase is ready for activation"
     };
   }
@@ -417,20 +421,32 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (!["NOT_REQUIRED", "WAITING"].includes(stage.status)) throw error("WORKFLOW_STAGE_ALREADY_ACTIVE");
       if (!stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
       const startNow = body.start_now === true || String(body.start_now).toLowerCase() === "true";
+      const assignmentMode = clean(body.assignment_mode, 40).toUpperCase() || "MANUAL";
       const assigneeId = validId(body.assigned_user_id || stage.assigned_user_id);
       const assignee = assigneeId ? userById(assigneeId) : null;
       if (assigneeId && !assignee) throw error("WORKFLOW_ASSIGNEE_NOT_FOUND");
       if (startNow && !assignee) throw error("WORKFLOW_RESPONSIBLE_REQUIRED_TO_START");
+      let inheritedAssignee = null;
+      if (assignmentMode === "INHERIT_PREVIOUS") {
+        const sourceStage = requireStage(validId(body.source_stage_id), workflow.id);
+        const expectedNext = nextStageFor(workflow.id, sourceStage.stage_order);
+        if (sourceStage.status !== "COMPLETED" || !sourceStage.assigned_user_id || expectedNext?.id !== stage.id || assignee?.id !== sourceStage.assigned_user_id) throw error("WORKFLOW_AUTO_ASSIGNMENT_INVALID");
+        inheritedAssignee = sourceStage.assigned_user_id;
+        if (stage.assigned_user_id && stage.assigned_user_id !== inheritedAssignee) throw error("WORKFLOW_AUTO_ASSIGNMENT_CONFLICT");
+      } else if (!["MANUAL", "KEEP_EXISTING"].includes(assignmentMode)) {
+        throw error("WORKFLOW_ASSIGNMENT_MODE_INVALID");
+      }
       if (body.due_at !== undefined && stage.stage_code === "FINAL_HANDOVER") throw error("FINAL_DEADLINE_IMMUTABLE");
       const due = body.due_at === undefined ? stage.due_at : localDateTime(body.due_at);
       if (body.due_at !== undefined && !due) throw error("INVALID_STAGE_DEADLINE");
       if (due && !isAdmin(req.user) && !(req.user.role === "MANAGER" && stage.stage_order < 6) && due !== stage.due_at) throw error("STAGE_DEADLINE_NOT_ALLOWED");
-      if (assignee && assignee.id !== stage.assigned_user_id && stage.status !== "NOT_REQUIRED") recordStageTransfer(workflow, stage, assignee, body.reason, req.user);
+      if (assignee && assignee.id !== stage.assigned_user_id && stage.status !== "NOT_REQUIRED" && assignmentMode !== "INHERIT_PREVIOUS") recordStageTransfer(workflow, stage, assignee, body.reason, req.user);
       const nextStatus = startNow ? "IN_PROGRESS" : "WAITING";
       db.prepare(`UPDATE workflow_stages SET status=?,assigned_user_id=?,assigned_to=?,due_at=?,started_at=CASE WHEN ?='IN_PROGRESS' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(nextStatus, assignee?.id || null, assignee?.name || null, due || null, nextStatus, nowISO(), stage.id);
       db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
       const updated = stageById(stage.id);
+      if (inheritedAssignee) directAudit(req, "WORKFLOW_STAGE_ASSIGNEE_INHERITED", stage.id, stage, updated, "Previous completed phase responsible was inherited automatically");
       directAudit(req, "WORKFLOW_STAGE_ACTIVATED", stage.id, stage, updated, startNow ? "Workflow stage activated and started" : "Workflow stage activated");
       notifyAssigned(updated, workflow, req.user);
       res.json(decorateWorkflow(workflowById(workflow.id), true));
