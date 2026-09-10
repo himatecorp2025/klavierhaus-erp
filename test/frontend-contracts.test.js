@@ -42,7 +42,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.1-workflow-create-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.2-workflow-status-responsibility-ui12/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -79,7 +79,25 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.1-workflow-create-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.2-workflow-status-responsibility-ui12/);
+});
+
+test("workflow responsibility cards use the approved status priority and phase-only drawer", () => {
+  assert.match(appSource, /effective_status/);
+  assert.match(appSource, /ASSIGNED:bi\(/);
+  assert.match(appSource, /OVERDUE:bi\(/);
+  assert.match(appSource, /workflowStageCard\(stage\)/);
+  assert.match(appSource, /workflowPhaseDrawerMarkup\(workflow,stage\)/);
+  assert.match(appSource, /workflowHandleNextStageActivation/);
+  assert.match(appSource, /stage_enabled_/);
+  assert.match(appSource, /stage_assignee_/);
+  assert.match(appSource, /workflowCreatePhaseChecklistMarkup/);
+  assert.match(styles, /\.workflow-stage-card\.status-assigned\{background:#c77c18;color:#111\}/);
+  assert.match(styles, /\.workflow-stage-card\.status-in-progress\{background:#f1d42a;color:#111\}/);
+  assert.match(styles, /\.workflow-stage-card\.status-overdue\{background:#c93838;color:#fff\}/);
+  assert.match(styles, /\.workflow-stage-card\.status-not-required\{background:#717985/);
+  assert.match(styles, /\.workflow-stage-card\.status-aborted\{background:#3e4652/);
+  assert.match(styles, /has-workflow-drawer/);
 });
 
 test("individual ticket save refreshes the ticket list without reopening event management", () => {
