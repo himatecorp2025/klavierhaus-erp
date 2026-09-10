@@ -1,10 +1,10 @@
 const DEFAULT_STAGES = [
   ["INBOUND", "Arrival & Transport", "Beérkezés és beszállítás"],
   ["ASSESSMENT", "Assessment & Plan", "Állapotfelmérés és terv"],
-  ["ACOUSTICS", "Acoustics & Tuning", "Akusztika és tőkézés"],
+  ["ACOUSTICS", "Acoustics & Tone Treatment", "Akusztika és törőkezelés"],
   ["MECHANICS", "Mechanics & Keyboard", "Mechanika és billentyűzet"],
   ["VOICING", "Voicing & Tuning", "Intonálás és hangolás"],
-  ["FINISH", "Finish / Cabinet Repair", "Finis / házjavítás"],
+  ["FINISH", "Restoration & Internal Repairs", "Restaurálás és belső javítás"],
   ["FINAL_HANDOVER", "Final Inspection & Delivery", "Végső ellenőrzés és kiszállítás"]
 ];
 
@@ -46,6 +46,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const insert = db.prepare(`INSERT OR IGNORE INTO workflow_stage_definitions
       (id,code,name_en,name_hu,sort_order,active,is_system) VALUES(?,?,?,?,?,1,1)`);
     DEFAULT_STAGES.forEach(([code, en, hu], index) => insert.run(`WSD-${code}`, code, en, hu, index));
+    const renameLegacy = db.prepare(`UPDATE workflow_stage_definitions SET name_en=?,name_hu=?,updated_at=CURRENT_TIMESTAMP
+      WHERE code=? AND name_en=? AND name_hu=?`);
+    renameLegacy.run("Acoustics & Tone Treatment", "Akusztika és törőkezelés", "ACOUSTICS", "Acoustics & Tuning", "Akusztika és tőkézés");
+    renameLegacy.run("Restoration & Internal Repairs", "Restaurálás és belső javítás", "FINISH", "Finish / Cabinet Repair", "Finis / házjavítás");
   }
   seedDefinitions();
 
