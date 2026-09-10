@@ -42,7 +42,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-frontend-visual-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.4-workflow-reference-layout-ui12/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -79,7 +79,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-frontend-visual-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.4-workflow-reference-layout-ui12/);
 });
 
 test("workflow responsibility cards use the approved status priority and phase-only drawer", () => {
@@ -98,6 +98,13 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(styles, /\.workflow-stage-card\.status-not-required\{background:#717985/);
   assert.match(styles, /\.workflow-stage-card\.status-aborted\{background:#3e4652/);
   assert.match(styles, /has-workflow-drawer/);
+  assert.match(appSource, /workflow-toolbar-clock/);
+  assert.match(appSource, /Pianos","Zongorák/);
+  assert.match(appSource, /flatMap\(group=>group\.rows\)/);
+  assert.doesNotMatch(appSource, /class="workflow-piano-group-head"/);
+  assert.doesNotMatch(appSource, /class="workflow-row-meta"/);
+  assert.match(styles, /\.workflow-drawer-scroll::-webkit-scrollbar-thumb/);
+  assert.match(styles, /\.workflow-toolbar-clock/);
 });
 
 test("individual ticket save refreshes the ticket list without reopening event management", () => {
