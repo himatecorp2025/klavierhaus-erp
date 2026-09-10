@@ -59,14 +59,15 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   }
 
   function stageRows(workflowId) {
-    const rows = db.prepare(`SELECT s.*,u.name AS assigned_user_name
+    const rows = db.prepare(`SELECT s.*,u.name AS assigned_user_name,w.title AS workflow_title
       FROM workflow_stages s LEFT JOIN users u ON u.id=s.assigned_user_id
+      LEFT JOIN workshop_workflows w ON w.id=s.workflow_id
       WHERE s.workflow_id=? ORDER BY s.stage_order,s.id`).all(workflowId);
     const now = localDateTimeFromISO(nowISO());
     return rows.map((stage) => {
       const isOverdue = Boolean(stage.due_at && !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status) && stage.due_at < now);
       const effectiveStatus = isOverdue ? "OVERDUE" : (stage.status === "WAITING" && stage.assigned_user_id ? "ASSIGNED" : stage.status);
-      return { ...stage, assigned_to: stage.assigned_to || stage.assigned_user_name || null, is_overdue: isOverdue, effective_status: effectiveStatus, event_log: stageEventRows(stage.id) };
+      return { ...stage, card_title: stage.card_title || stage.workflow_title || null, assigned_to: stage.assigned_to || stage.assigned_user_name || null, is_overdue: isOverdue, effective_status: effectiveStatus, event_log: stageEventRows(stage.id) };
     });
   }
 
@@ -314,14 +315,15 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           id, key, clientId, pianoId, mode, plannedJobId || null, title, clean(body.description), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
         );
         if (plannedJobId) db.prepare("UPDATE planned_jobs SET workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id, plannedJobId);
-        const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,status,assigned_user_id,assigned_to,due_at,details,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,card_title,status,assigned_user_id,assigned_to,due_at,details,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
         stageDefinitions.forEach((definition, index) => {
           const relevant = selectedDefinitions.some((selected) => selected.code === definition.code);
           const assignedStage = relevant ? stageAssignees.get(definition.code) : null;
           const stageStatus = relevant ? "WAITING" : "NOT_REQUIRED";
           const due = relevant && definition.code === "FINAL_HANDOVER" ? finalDueAt : (relevant ? localDateTime(body[`stage_due_${definition.code}`]) : "");
-          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, stageStatus, assignedStage?.id || null, assignedStage?.name || null, due || null, "", definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_inspection : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_assessment : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_quote : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_meeting : null, definition.code === "INBOUND" && relevant ? numeric(body.preliminary_quote_amount) : 0);
+          const cardTitle = relevant ? clean(body[`stage_card_title_${definition.code}`] || body[`stage_title_${definition.code}`] || title, 240) : null;
+          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, cardTitle, stageStatus, assignedStage?.id || null, assignedStage?.name || null, due || null, "", definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_inspection : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_assessment : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_quote : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_meeting : null, definition.code === "INBOUND" && relevant ? numeric(body.preliminary_quote_amount) : 0);
         });
         directAudit(req, "WORKFLOW_CREATED", id, null, { workflow_key: key, client_id: clientId, piano_id: pianoId, mode, main_responsible_user_id: req.user.id, first_stage_id: firstDefinition.code, active_stage_codes: selectedDefinitions.map((definition) => definition.code) }, "Workshop workflow created");
       });
@@ -369,6 +371,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         if (status === "COMPLETED") { changes.push("completed_at=?"); values.push(nowISO()); }
       }
       if (body.details !== undefined) { changes.push("details=?"); values.push(clean(body.details)); }
+      if (body.card_title !== undefined) { changes.push("card_title=?"); values.push(clean(body.card_title, 240)); }
       if (body.block_reason !== undefined) { changes.push("block_reason=?"); values.push(clean(body.block_reason, 2000)); }
       if (body.due_at !== undefined) {
         if (!isAdmin(req.user) && !(req.user.role === "MANAGER" && stage.stage_order < 6)) throw error("STAGE_DEADLINE_NOT_ALLOWED");
