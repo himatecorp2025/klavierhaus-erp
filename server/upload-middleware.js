@@ -1,5 +1,6 @@
 const path = require("path");
 const crypto = require("crypto");
+const fs = require("fs");
 const multer = require("multer");
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp"]);
@@ -126,6 +127,33 @@ function createPianoImportUpload(){
   });
 }
 
+const CUSTOMER_ATTACHMENT_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp",
+  ".pdf", ".doc", ".docx"
+]);
+const CUSTOMER_ATTACHMENT_MIMES = new Set([
+  ...IMAGE_MIMES, "image/heic-sequence", "image/heif-sequence",
+  "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+]);
+
+function createCustomerConversationUpload(uploadDir){
+  const target = path.join(uploadDir, "customer-conversations");
+  fs.mkdirSync(target, { recursive: true });
+  return multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, target),
+      filename: (_req, file, cb) => cb(null, `attachment-${Date.now()}-${crypto.randomBytes(12).toString("hex")}${path.extname(file.originalname || "").toLowerCase()}`)
+    }),
+    limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+    fileFilter: (_req, file, cb) => {
+      const extension = path.extname(file.originalname || "").toLowerCase();
+      const mime = String(file.mimetype || "").toLowerCase();
+      const allowed = CUSTOMER_ATTACHMENT_EXTENSIONS.has(extension) && CUSTOMER_ATTACHMENT_MIMES.has(mime);
+      cb(allowed ? null : new Error("INVALID_CUSTOMER_ATTACHMENT"), allowed);
+    }
+  });
+}
+
 function uploadErrorHandler(err,req,res,next){
   if(!err) return next();
   if(err instanceof multer.MulterError){
@@ -145,6 +173,7 @@ module.exports={
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  createCustomerConversationUpload,
   inspectImageFile,
   uploadErrorHandler
 };
