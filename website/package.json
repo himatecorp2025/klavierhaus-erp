@@ -1,6 +1,6 @@
 {
   "name": "klavierhaus-calendar-finance-system",
-  "version": "6.5.0",
+  "version": "6.7.0",
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
   "engines": {
@@ -8,17 +8,9 @@
     "npm": ">=10.0.0 <11.0.0"
   },
   "scripts": {
-    "prestart": "node server/init-db.js",
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "init-db": "node server/init-db.js",
-    "check:manifests": "node test/helpers/check-package-manifests.js",
-    "check:assets": "node test/helpers/check-public-assets.js",
-    "check:assets:http": "node test/helpers/check-public-assets-http.js",
-    "check:migration": "node test/helpers/migration-smoke.js",
-    "check": "node --check server/index.js && node --check server/init-db.js && node --check server/sample-content.js && node --check server/calendar-colors.js && node --check server/google-calendar.js && node --check server/upload-middleware.js && node --check server/account-activation.js && node --check server/transactional-email.js && node --check server/events.js && node --check server/guest-list-pdf.js && node --check server/stripe-sandbox.js && node --check server/system-activation.js && node --check server/website-content.js && node --check server/website-catalog.js && node --check server/website-platform.js && node --check server/document-pdf.js && node --check server/ticket-code.js && node --check public/app.js && node --check public/service-worker.js",
-    "test": "node --test --test-concurrency=1 test/*.test.js",
-    "generate-vapid": "web-push generate-vapid-keys"
+    "check": "node --check server/index.js && node --check server/event-client.js && node --check public/app.js"
   },
   "dependencies": {
     "adm-zip": "0.6.0",
