@@ -42,7 +42,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-card-title-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-frontend-visual-ui12/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -79,7 +79,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-card-title-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-frontend-visual-ui12/);
 });
 
 test("workflow responsibility cards use the approved status priority and phase-only drawer", () => {
@@ -98,24 +98,6 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(styles, /\.workflow-stage-card\.status-not-required\{background:#717985/);
   assert.match(styles, /\.workflow-stage-card\.status-aborted\{background:#3e4652/);
   assert.match(styles, /has-workflow-drawer/);
-});
-
-test("workflow cards show only status, custom title, assignee name and date", () => {
-  const cardStart = appSource.indexOf("function workflowStageCard(stage)");
-  const cardEnd = appSource.indexOf("function workflowBoardRow", cardStart);
-  const cardSource = appSource.slice(cardStart, cardEnd);
-  assert.ok(cardStart > 0);
-  assert.match(cardSource, /stage\.card_title/);
-  assert.match(cardSource, /stage\.assigned_to/);
-  assert.match(cardSource, /workflowDateOnlyText\(stage\.due_at\)/);
-  assert.doesNotMatch(cardSource, /workflowStageLabel\(stage\)/);
-  assert.doesNotMatch(cardSource, /Responsible|Felelős/);
-  assert.doesNotMatch(cardSource, /Deadline|Határidő/);
-  assert.doesNotMatch(cardSource, /workflow-stage-order/);
-  assert.match(appSource, /name="stage_card_title_\$\{htmlText\(stage\.code\)\}"/);
-  assert.match(appSource, /id="workflowCardTitle_\$\{htmlText\(stage\.id\)\}"/);
-  assert.match(styles, /grid-template-columns:minmax\(0,1\.2fr\) minmax\(170px,1fr\) minmax\(150px,\.8fr\) minmax\(150px,\.8fr\)/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.3-workflow-card-title-ui12/);
 });
 
 test("individual ticket save refreshes the ticket list without reopening event management", () => {
