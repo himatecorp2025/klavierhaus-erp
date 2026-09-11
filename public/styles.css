@@ -1697,11 +1697,11 @@ body[data-current-view="workshop_workflow"] .main{padding-top:10px}
 .workflow-shell .workflow-date-picker .workflow-date-value{display:block;min-width:0;overflow:hidden;color:#eef3f6;font-size:14px;font-weight:900;line-height:1.25;text-overflow:ellipsis;white-space:nowrap;pointer-events:none}
 .workflow-shell .workflow-date-picker .workflow-date-picker-icon{display:grid;place-items:center;flex:0 0 18px;width:18px;height:18px;color:#e3bf5b;pointer-events:none}
 .workflow-shell .workflow-date-picker-icon .workflow-control-icon{width:18px;height:18px}
-.workflow-shell .workflow-date-picker input.workflow-date-input{position:absolute!important;inset:0!important;z-index:2;width:100%!important;height:100%!important;min-width:0!important;margin:0!important;padding:0!important;border:0!important;opacity:0!important;cursor:pointer;appearance:none;color-scheme:dark}
+.workflow-shell .workflow-date-picker input.workflow-date-input{position:absolute!important;inset:0!important;z-index:2;width:100%!important;height:100%!important;min-width:0!important;margin:0!important;padding:0!important;border:0!important;opacity:0!important;pointer-events:none!important;cursor:pointer;appearance:none;color-scheme:dark}
 .workflow-shell .workflow-date-picker input.workflow-date-input::-webkit-calendar-picker-indicator{display:none!important;width:0!important;height:0!important;opacity:0!important}
 .workflow-shell .workflow-date-picker input.workflow-date-input::-webkit-inner-spin-button{display:none!important}
 .workflow-shell .workflow-date-picker input.workflow-date-input::-moz-calendar-picker-indicator{display:none!important}
-.workflow-shell .workflow-date-picker:focus-within{border-color:#e3bf5b;box-shadow:0 0 0 3px rgba(227,191,91,.18)}
+.workflow-shell .workflow-date-picker:focus,.workflow-shell .workflow-date-picker:focus-within{outline:none;border-color:#e3bf5b;box-shadow:0 0 0 3px rgba(227,191,91,.18)}
 
 /* Full workflow event-log surface: every phase remains visible, including future and non-relevant phases. */
 body.workflow-event-log-open{overflow:hidden}
