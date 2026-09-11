@@ -1691,3 +1691,77 @@ body[data-current-view="workshop_workflow"] .main{padding-top:10px}
   .workflow-shell .workflow-date-picker,
   .workflow-shell .workflow-date-picker input{font-size:14px}
 }
+
+/* Workflow toolbar: the date is one accessible control with one visible custom icon. */
+.workflow-shell .workflow-date-picker{position:relative;min-width:236px;justify-content:space-between;overflow:hidden;isolation:isolate}
+.workflow-shell .workflow-date-picker .workflow-date-value{display:block;min-width:0;overflow:hidden;color:#eef3f6;font-size:14px;font-weight:900;line-height:1.25;text-overflow:ellipsis;white-space:nowrap;pointer-events:none}
+.workflow-shell .workflow-date-picker .workflow-date-picker-icon{display:grid;place-items:center;flex:0 0 18px;width:18px;height:18px;color:#e3bf5b;pointer-events:none}
+.workflow-shell .workflow-date-picker-icon .workflow-control-icon{width:18px;height:18px}
+.workflow-shell .workflow-date-picker input.workflow-date-input{position:absolute!important;inset:0!important;z-index:2;width:100%!important;height:100%!important;min-width:0!important;margin:0!important;padding:0!important;border:0!important;opacity:0!important;cursor:pointer;appearance:none;color-scheme:dark}
+.workflow-shell .workflow-date-picker input.workflow-date-input::-webkit-calendar-picker-indicator{display:none!important;width:0!important;height:0!important;opacity:0!important}
+.workflow-shell .workflow-date-picker input.workflow-date-input::-webkit-inner-spin-button{display:none!important}
+.workflow-shell .workflow-date-picker input.workflow-date-input::-moz-calendar-picker-indicator{display:none!important}
+.workflow-shell .workflow-date-picker:focus-within{border-color:#e3bf5b;box-shadow:0 0 0 3px rgba(227,191,91,.18)}
+
+/* Full workflow event-log surface: every phase remains visible, including future and non-relevant phases. */
+body.workflow-event-log-open{overflow:hidden}
+.workflow-full-log-modal-card{width:min(1180px,calc(100vw - 32px));max-height:min(92vh,960px)}
+.workflow-full-log-modal-card .workflow-event-log-modal-scroll{padding:22px 26px 28px}
+.workflow-full-log-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:24px;padding:14px;border:1px solid #34556f;border-radius:10px;background:#0b2036}
+.workflow-full-log-field{min-width:0;padding:10px 12px;border:1px solid #294863;border-radius:8px;background:#0d2740}
+.workflow-full-log-field>span{display:block;margin-bottom:5px;color:#9eb2c4;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+.workflow-full-log-field>b{display:block;color:#f0f4f7;font-size:14px;font-weight:900;line-height:1.35;overflow-wrap:anywhere}
+.workflow-full-log-field.is-overdue{border-color:#a8444a;background:#401d2a}
+.workflow-full-log-field.is-overdue>b{color:#ffb2ae}
+.workflow-full-log-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 14px;padding:0 2px}
+.workflow-full-log-heading h3{margin:3px 0 0;color:#f1f4f6;font-size:22px;font-weight:950}
+.workflow-full-log-heading>span{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border:1px solid #80662e;border-radius:50%;background:#1b3044;color:#e3bf5b;font-size:14px;font-weight:950}
+.workflow-full-log-phases{display:grid;gap:14px}
+.workflow-full-log-phase{overflow:hidden;border:1px solid #3b5f7a;border-left:5px solid #c77c18;border-radius:10px;background:#102d48;box-shadow:0 8px 22px rgba(0,0,0,.18)}
+.workflow-full-log-phase.status-assigned{border-left-color:#c77c18;background:#172d42}
+.workflow-full-log-phase.status-in-progress{border-left-color:#f1d42a;background:#26354a}
+.workflow-full-log-phase.status-completed{border-left-color:#2fc28e;background:#123b3a}
+.workflow-full-log-phase.status-overdue{border-left-color:#d8444c;background:#401f2c}
+.workflow-full-log-phase.status-blocked{border-left-color:#e89b43;background:#3b2d28}
+.workflow-full-log-phase.status-not-required{border-left-color:#7b8490;background:#303844}
+.workflow-full-log-phase.status-aborted{border-left-color:#606a77;background:#252d38}
+.workflow-full-log-phase-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border-bottom:1px solid rgba(157,184,204,.22);background:rgba(5,17,29,.2)}
+.workflow-full-log-phase-title{display:flex;align-items:center;gap:12px;min-width:0}
+.workflow-full-log-phase-title .workflow-stage-order{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border:1px solid currentColor;border-radius:50%;color:#e3bf5b;font-size:15px;font-weight:950}
+.workflow-full-log-phase-title .event-kicker{margin:0;color:#aebdcb;font-size:10px}
+.workflow-full-log-phase-title h3{margin:3px 0 3px;color:#f0f4f7;font-size:18px;font-weight:950;line-height:1.2}
+.workflow-full-log-phase-title small{color:#c7d4de;font-size:13px;font-weight:850}
+.workflow-full-log-status{flex:0 0 auto;padding:7px 10px;border:1px solid currentColor;border-radius:6px;color:#f6d96b;font-size:12px;font-weight:950;letter-spacing:.04em;text-transform:uppercase}
+.status-completed .workflow-full-log-status{color:#6fe0b3}
+.status-overdue .workflow-full-log-status{color:#ff999e}
+.status-not-required .workflow-full-log-status,.status-aborted .workflow-full-log-status{color:#c2c9d0}
+.workflow-full-log-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding:14px 18px 0}
+.workflow-full-log-description{margin:14px 18px 0;padding:12px 14px;border:1px solid rgba(157,184,204,.24);border-radius:8px;background:rgba(5,17,29,.22)}
+.workflow-full-log-description>span{display:block;margin-bottom:5px;color:#b9c9d5;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+.workflow-full-log-description>p{margin:0;color:#eef3f6;font-size:14px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.workflow-full-log-history{margin:14px 18px 18px;padding:12px 14px;border-top:1px solid rgba(157,184,204,.24)}
+.workflow-full-log-history-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.workflow-full-log-history-head h4{margin:0;color:#e9eff3;font-size:15px;font-weight:950}
+.workflow-full-log-history-head>span{color:#e3bf5b;font-size:13px;font-weight:950}
+.workflow-full-log-history .workflow-event-log{margin-top:0}
+.workflow-full-log-empty{margin:0;color:#aebdcb;font-size:14px;font-style:italic}
+.workflow-full-log-phase.status-not-required .workflow-full-log-field,.workflow-full-log-phase.status-not-required .workflow-full-log-description{border-color:#59636e;background:rgba(12,18,25,.22)}
+.workflow-full-log-phase.status-not-required .workflow-full-log-phase-title h3,.workflow-full-log-phase.status-not-required .workflow-full-log-description>p{color:#d0d5da}
+
+@media(max-width:900px){
+  .workflow-full-log-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .workflow-full-log-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .workflow-full-log-modal-card .workflow-event-log-modal-scroll{padding:18px 18px 22px}
+}
+@media(max-width:600px){
+  .workflow-shell .workflow-date-picker{min-width:0;flex:1}
+  .workflow-shell .workflow-date-value{font-size:13px}
+  .workflow-full-log-modal-card{width:100%;max-height:94vh}
+  .workflow-full-log-summary,.workflow-full-log-fields{grid-template-columns:1fr}
+  .workflow-full-log-phase-head{align-items:flex-start;flex-direction:column}
+  .workflow-full-log-status{align-self:flex-start}
+  .workflow-full-log-phase-title h3{font-size:16px}
+  .workflow-full-log-description,.workflow-full-log-history{margin-inline:12px}
+  .workflow-full-log-fields{padding-inline:12px}
+  .workflow-full-log-phase-head{padding-inline:12px}
+}
