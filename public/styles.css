@@ -1824,3 +1824,30 @@ body.workflow-event-log-open{overflow:hidden}
   .workflow-full-log-fields{padding-inline:12px}
   .workflow-full-log-phase-head{padding-inline:12px}
 }
+
+/* Compact workflow date control: keep the label and icon beside each other
+   at the same scale as the surrounding toolbar buttons. */
+.workflow-shell .workflow-date-picker{
+  flex:0 0 auto!important;
+  min-width:0!important;
+  width:max-content!important;
+  max-width:min(248px,calc(100vw - 32px));
+  flex-wrap:nowrap!important;
+  justify-content:center!important;
+  gap:9px!important;
+}
+.workflow-shell .workflow-date-picker .workflow-date-value{
+  flex:0 1 auto;
+  width:auto;
+  max-width:calc(100% - 27px);
+  text-align:left;
+}
+.workflow-shell .workflow-date-picker .workflow-date-picker-icon{
+  flex:0 0 18px;
+  width:18px;
+  height:18px;
+  color:currentColor;
+}
+@media(max-width:600px){
+  .workflow-shell .workflow-date-picker{max-width:calc(100vw - 32px)}
+}
