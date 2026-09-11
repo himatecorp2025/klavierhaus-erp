@@ -10,6 +10,7 @@ const styles = fs.readFileSync(path.join(projectRoot, "public", "styles.css"), "
 const websiteStyles = fs.readFileSync(path.join(projectRoot, "website", "public", "design-v3.css"), "utf8");
 const serviceWorker = fs.readFileSync(path.join(projectRoot, "public", "service-worker.js"), "utf8");
 const serverSource = fs.readFileSync(path.join(projectRoot, "server", "index.js"), "utf8");
+const websiteServer = fs.readFileSync(path.join(projectRoot, "website", "server", "index.js"), "utf8");
 
 test("scheduler places the status legend before the calendar and has no employee legend markup", () => {
   const schedulerStart = appSource.indexOf("async function renderScheduler()");
@@ -42,7 +43,7 @@ test("calendar status colors and warning icons follow the approved priority", ()
 });
 
 test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.6-workflow-date-picker-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.7-workflow-date-picker-arrows/);
   assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
@@ -79,7 +80,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.6-workflow-date-picker-ui12/);
+  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.7-workflow-date-picker-arrows/);
 });
 
 test("workflow responsibility cards use the approved status priority and phase-only drawer", () => {
@@ -157,6 +158,23 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(styles, /\.workflow-shell \.workflow-stage-heading/);
   assert.match(styles, /\.workflow-shell \.workflow-final-closure/);
   assert.match(styles, /body\[data-current-view="workshop_workflow"\] \.main-header\{display:none\}/);
+});
+
+test("workflow date control is compact and public arrows use the shared SVG contract", () => {
+  assert.match(appSource, /<span class="workflow-date-picker-icon" aria-hidden="true"><\/span><span class="workflow-date-value">/);
+  assert.match(styles, /\.workflow-shell \.workflow-date-picker\{[\s\S]*flex:0 0 auto!important;/);
+  assert.match(styles, /width:max-content!important/);
+  assert.match(styles, /flex-wrap:nowrap!important/);
+  assert.match(styles, /justify-content:center!important/);
+  assert.match(styles, /gap:9px!important/);
+  assert.match(websiteServer, /function renderPublicArrow\(direction = "external"\)/);
+  assert.match(websiteServer, /class="button-arrow-icon button-arrow-icon--/);
+  assert.match(websiteServer, /renderPublicArrow\("previous"\)/);
+  assert.match(websiteServer, /renderPublicArrow\("next"\)/);
+  assert.ok((websiteServer.match(/renderPublicArrow\("external"\)/g) || []).length >= 10);
+  assert.doesNotMatch(websiteServer, /↗|←|→/);
+  assert.match(websiteStyles, /\.button-arrow-icon path\{[\s\S]*stroke:currentColor/);
+  assert.match(websiteStyles, /\.header-consultation,\s*\.header-consultation:hover\{[\s\S]*color:var\(--ivory\)/);
 });
 
 test("the admin date system replaces native date controls with one themed picker", () => {
