@@ -918,6 +918,7 @@ async function boot(){
  };
  initMobileAppShell();
  initCustomSelectSystem();
+ initAdminDatePickerSystem();
  initNotificationCenter();
  initNotificationActivationGate();
  const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
@@ -1280,6 +1281,7 @@ async function render(v,opts={}){
   ensureViewBackHeader(target,v);
   applyLanguageToDOM(target);
   enhanceCustomSelects(target);
+  enhanceAdminDatePickers(target);
  }finally{
   target.classList.remove("i18n-rendering");
  }
@@ -1393,27 +1395,110 @@ function workflowToolbarIcon(kind){
  };
  return `<svg class="workflow-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[kind]||paths.date}</svg>`;
 }
-function workflowOpenDatePicker(inputOrId){
- const input=typeof inputOrId==="string"?document.getElementById(inputOrId):inputOrId;
- if(!input)return;
- try{if(typeof input.showPicker==="function"){input.showPicker();return;}}catch(_error){}
- try{input.focus({preventScroll:true});}catch(_error){input.focus();}
- try{input.click();}catch(_error){}
+let activeAdminDatePicker=null;
+let adminDatePickerObserver=null;
+function adminDatePickerIcon(){return '<svg class="admin-date-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 10h17M7.5 14h2M12 14h2M16.5 14h.01M7.5 17.5h2M12 17.5h2M16.5 17.5h.01"/></svg>';}
+function adminDatePickerInputType(input){return input?.type==="datetime-local"?"datetime-local":"date";}
+function adminDatePickerDateKey(value){const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return match?match[0]:"";}
+function adminDatePickerMonthKey(value){const dateKey=adminDatePickerDateKey(value);return dateKey?dateKey.slice(0,7):nyDateKey().slice(0,7);}
+function adminDatePickerParseKey(value){const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);if(!year||month<1||month>12||day<1||day>31)return null;return {year,month,day};}
+function adminDatePickerMonthParts(monthKey){const match=String(monthKey||"").match(/^(\d{4})-(\d{2})$/);return match?{year:Number(match[1]),month:Number(match[2])}:adminDatePickerMonthParts(nyDateKey().slice(0,7));}
+function adminDatePickerMonthOffset(monthKey,offset){const parts=adminDatePickerMonthParts(monthKey);const date=new Date(Date.UTC(parts.year,parts.month-1+Number(offset||0),1));return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,"0")}`;}
+function adminDatePickerMonthLabel(monthKey){const parts=adminDatePickerMonthParts(monthKey);try{return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"UTC",year:"numeric",month:"long"}).format(new Date(Date.UTC(parts.year,parts.month-1,1)));}catch(_error){return monthKey;}}
+function adminDatePickerDisplayValue(input){
+ const value=String(input?.value||"");
+ const key=adminDatePickerDateKey(value),parts=adminDatePickerParseKey(key);
+ if(!parts)return bi("Choose a date","Válassz dátumot");
+ try{
+  const options={timeZone:"UTC",year:"numeric",month:"long",day:"numeric"};
+  if(adminDatePickerInputType(input)==="datetime-local"){options.hour="2-digit";options.minute="2-digit";options.hour12=false;}
+  const time=adminDatePickerInputType(input)==="datetime-local"?(value.slice(11,16)||"00:00"):"12:00";
+  return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",options).format(new Date(`${key}T${time}:00Z`));
+ }catch(_error){return value.replace("T"," ");}
 }
+function adminDatePickerWeekdays(){return Array.from({length:7},(_,index)=>{const date=new Date(Date.UTC(2024,0,1+index));try{return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"UTC",weekday:"short"}).format(date).replace(/\.$/,"");}catch(_error){return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][index];}});}
+function adminDatePickerSetValue(input,key){
+ const type=adminDatePickerInputType(input),time=String(input.value||"").slice(11,16)||"09:00";
+ const value=type==="datetime-local"?`${key}T${time}`:key;
+ input.value=value;
+ input.dispatchEvent(new Event("input",{bubbles:true}));
+ input.dispatchEvent(new Event("change",{bubbles:true}));
+}
+function adminDatePickerSync(input){
+ const control=input?.closest?.(".admin-date-control"),trigger=control?.querySelector(".admin-date-control-trigger"),value=trigger?.querySelector(".admin-date-control-value");
+ if(!control||!trigger||!value)return;
+ value.textContent=adminDatePickerDisplayValue(input);
+ trigger.disabled=Boolean(input.disabled);
+ trigger.setAttribute("aria-expanded",String(activeAdminDatePicker?.input===input));
+ control.classList.toggle("is-disabled",Boolean(input.disabled));
+ control.classList.toggle("has-value",Boolean(input.value));
+}
+function adminDatePickerPosition(state){
+ const anchor=state?.anchor,popover=state?.popover;if(!anchor||!popover)return;
+ const rect=anchor.getBoundingClientRect(),width=Math.min(360,window.innerWidth-24),height=popover.offsetHeight||420;
+ let left=Math.max(12,Math.min(rect.left,window.innerWidth-width-12)),top=rect.bottom+8;
+ if(top+height>window.innerHeight-12&&rect.top-height-8>=12)top=rect.top-height-8;
+ popover.style.left=`${Math.round(left)}px`;popover.style.top=`${Math.round(top)}px`;popover.style.width=`${Math.round(width)}px`;
+}
+function adminDatePickerClose(){
+ const state=activeAdminDatePicker;if(!state)return;
+ state.anchor?.setAttribute("aria-expanded","false");
+ state.popover?.remove();
+ activeAdminDatePicker=null;
+ adminDatePickerSync(state.input);
+}
+function adminDatePickerMarkup(state){
+ const input=state.input,monthKey=state.monthKey,parts=adminDatePickerMonthParts(monthKey),selected=adminDatePickerDateKey(input.value),selectedParts=adminDatePickerParseKey(selected),today=nyDateKey();
+ const firstWeekday=(new Date(Date.UTC(parts.year,parts.month-1,1)).getUTCDay()+6)%7,daysInMonth=new Date(Date.UTC(parts.year,parts.month,0)).getUTCDate();
+ const blanks=Array.from({length:firstWeekday},()=>'<span class="admin-date-picker-empty" aria-hidden="true"></span>').join("");
+ const days=Array.from({length:daysInMonth},(_,index)=>{const day=index+1,key=`${parts.year}-${String(parts.month).padStart(2,"0")}-${String(day).padStart(2,"0")}`,classes=[key===selected?"is-selected":"",key===today?"is-today":""].filter(Boolean).join(" ");return `<button type="button" class="admin-date-picker-day ${classes}" data-date-picker-day="${key}" aria-label="${htmlText(key)}" ${key===selected?'aria-current="date"':''}>${day}</button>`;}).join("");
+ const weekdays=adminDatePickerWeekdays().map(day=>`<span>${htmlText(day)}</span>`).join("");
+ const dateTime=adminDatePickerInputType(input)==="datetime-local",time=dateTime?(String(input.value||"").slice(11,16)||"09:00"):"";
+ return `<section class="admin-date-picker-popover-card" role="dialog" aria-modal="false" aria-label="${bi("Choose date","Dátum kiválasztása")}"><header class="admin-date-picker-header"><button type="button" class="admin-date-picker-nav" data-date-picker-month="-1" aria-label="${bi("Previous month","Előző hónap")}">‹</button><div><strong>${htmlText(adminDatePickerMonthLabel(monthKey))}</strong><small>${htmlText(parts.year)}</small></div><button type="button" class="admin-date-picker-nav" data-date-picker-month="1" aria-label="${bi("Next month","Következő hónap")}">›</button></header><div class="admin-date-picker-actions"><button type="button" class="admin-date-picker-today" data-date-picker-today>${bi("Today","Ma")}</button></div><div class="admin-date-picker-weekdays">${weekdays}</div><div class="admin-date-picker-grid">${blanks}${days}</div>${dateTime?`<div class="admin-date-picker-time"><label>${bi("Time","Időpont")}<input type="time" data-date-picker-time value="${htmlText(time)}"></label><button type="button" class="admin-date-picker-done" data-date-picker-done>${bi("Done","Kész")}</button></div>`:""}</section>`;
+}
+function adminDatePickerRender(state){
+ if(!state?.popover)return;
+ state.popover.innerHTML=adminDatePickerMarkup(state);
+ state.popover.querySelectorAll("[data-date-picker-month]").forEach(button=>button.addEventListener("click",()=>{state.monthKey=adminDatePickerMonthOffset(state.monthKey,Number(button.dataset.datePickerMonth));adminDatePickerRender(state);}));
+ state.popover.querySelector("[data-date-picker-today]")?.addEventListener("click",()=>{adminDatePickerClose();adminDatePickerSetValue(state.input,nyDateKey());});
+ state.popover.querySelectorAll("[data-date-picker-day]").forEach(button=>button.addEventListener("click",()=>{const key=button.dataset.datePickerDay;if(adminDatePickerInputType(state.input)==="date"){adminDatePickerClose();adminDatePickerSetValue(state.input,key);}else{adminDatePickerSetValue(state.input,key);if(activeAdminDatePicker!==state)return;state.monthKey=key.slice(0,7);adminDatePickerRender(state);}}));
+ const time=state.popover.querySelector("[data-date-picker-time]");if(time)time.addEventListener("change",()=>{const key=adminDatePickerDateKey(state.input.value)||nyDateKey();state.input.value=`${key}T${time.value||"09:00"}`;state.input.dispatchEvent(new Event("input",{bubbles:true}));state.input.dispatchEvent(new Event("change",{bubbles:true}));adminDatePickerSync(state.input);});
+ state.popover.querySelector("[data-date-picker-done]")?.addEventListener("click",adminDatePickerClose);
+ adminDatePickerPosition(state);
+}
+function adminDatePickerOpen(input,anchor){
+ if(!input||input.disabled)return;
+ if(activeAdminDatePicker?.input===input){adminDatePickerClose();return;}
+ adminDatePickerClose();
+ const popover=document.createElement("div");popover.className="admin-date-picker-popover";popover.id=`adminDatePicker_${Date.now()}`;document.body.appendChild(popover);
+ const state={input,anchor:anchor||input.closest(".admin-date-control"),popover,monthKey:adminDatePickerMonthKey(input.value)};activeAdminDatePicker=state;
+ state.anchor?.setAttribute("aria-controls",popover.id);state.anchor?.setAttribute("aria-expanded","true");adminDatePickerRender(state);adminDatePickerSync(input);
+}
+function workflowOpenDatePicker(inputOrId,anchor){const input=typeof inputOrId==="string"?document.getElementById(inputOrId):inputOrId;adminDatePickerOpen(input,anchor||input?.closest?.(".workflow-date-picker"));}
 function workflowBindDatePicker(box){
  const picker=box?.querySelector(".workflow-date-picker"),input=picker?.querySelector(".workflow-date-input");
- if(!picker||!input)return;
- picker.tabIndex=0;
- picker.setAttribute("role","button");
- picker.addEventListener("click",event=>{
-  event.preventDefault();
-  workflowOpenDatePicker(input);
- });
- picker.addEventListener("keydown",event=>{
-  if(event.key!=="Enter"&&event.key!==" ")return;
-  event.preventDefault();
-  workflowOpenDatePicker(input);
- });
+ if(!picker||!input||picker.dataset.adminDatePickerBound==="true")return;
+ picker.dataset.adminDatePickerBound="true";input.dataset.adminDatePickerEnhanced="true";input.tabIndex=-1;picker.tabIndex=0;picker.setAttribute("role","button");picker.setAttribute("aria-haspopup","dialog");picker.setAttribute("aria-expanded","false");picker.setAttribute("aria-label",input.getAttribute("aria-label")||bi("Choose reference date","Referencia dátum kiválasztása"));picker.addEventListener("click",event=>{event.preventDefault();workflowOpenDatePicker(input,picker);});picker.addEventListener("keydown",event=>{if(event.key!=="Enter"&&event.key!==" ")return;event.preventDefault();workflowOpenDatePicker(input,picker);});
+}
+function adminDatePickerEnhanceInput(input){
+ if(!input||input.dataset.adminDatePickerEnhanced==="true"||input.closest(".workflow-date-picker"))return;
+ const parent=input.parentElement;if(!parent)return;
+ const control=document.createElement("span");control.className="admin-date-control";parent.insertBefore(control,input);control.appendChild(input);input.dataset.adminDatePickerEnhanced="true";input.classList.add("admin-date-input-native");input.tabIndex=-1;
+ const trigger=document.createElement("button");trigger.type="button";trigger.className="admin-date-control-trigger";trigger.setAttribute("aria-haspopup","dialog");trigger.setAttribute("aria-label",(input.getAttribute("aria-label")||input.closest("label")?.textContent||bi("Choose a date","Dátum kiválasztása")).replace(/\s+/g," ").trim());trigger.innerHTML=`<span class="admin-date-control-value"></span><span class="admin-date-control-icon" aria-hidden="true">${adminDatePickerIcon()}</span>`;control.appendChild(trigger);
+ trigger.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();adminDatePickerOpen(input,trigger);});trigger.addEventListener("keydown",event=>{if(event.key!=="Enter"&&event.key!==" ")return;event.preventDefault();adminDatePickerOpen(input,trigger);});input.addEventListener("input",()=>adminDatePickerSync(input));input.addEventListener("change",()=>adminDatePickerSync(input));input.addEventListener("invalid",()=>{trigger.classList.add("is-invalid");trigger.focus({preventScroll:true});setTimeout(()=>trigger.classList.remove("is-invalid"),1500);});adminDatePickerSync(input);
+}
+function enhanceAdminDatePickers(root=document){
+ const inputs=[];if(root instanceof HTMLInputElement&&root.matches('input[type="date"],input[type="datetime-local"]'))inputs.push(root);else root.querySelectorAll?.('input[type="date"],input[type="datetime-local"]').forEach(input=>inputs.push(input));inputs.forEach(adminDatePickerEnhanceInput);
+}
+function initAdminDatePickerSystem(){
+ if(adminDatePickerObserver)return;
+ enhanceAdminDatePickers(document);
+ adminDatePickerObserver=new MutationObserver(mutations=>mutations.forEach(mutation=>mutation.addedNodes.forEach(node=>{if(node.nodeType===1)enhanceAdminDatePickers(node);})));
+ adminDatePickerObserver.observe(document.body,{childList:true,subtree:true});
+ document.addEventListener("pointerdown",event=>{if(!activeAdminDatePicker)return;if(activeAdminDatePicker.popover?.contains(event.target)||activeAdminDatePicker.anchor?.contains(event.target))return;adminDatePickerClose();},true);
+ document.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeAdminDatePicker)adminDatePickerClose();},true);
+ window.addEventListener("resize",()=>{if(activeAdminDatePicker)adminDatePickerPosition(activeAdminDatePicker);});
+ document.addEventListener("scroll",event=>{if(activeAdminDatePicker&&!activeAdminDatePicker.popover?.contains(event.target))adminDatePickerClose();},true);
 }
 function decorateWorkflowToolbar(box){
  const actions=box?.querySelector(".workflow-day-actions");
