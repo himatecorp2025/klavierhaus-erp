@@ -122,6 +122,12 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(appSource, /"calendar-grid":'<rect/);
   assert.match(appSource, /class="workflow-date-value"/);
   assert.match(appSource, /class="workflow-date-picker-icon"/);
+  assert.match(appSource, /function workflowOpenDatePicker\(inputOrId\)/);
+  assert.match(appSource, /function workflowBindDatePicker\(box\)/);
+  assert.match(appSource, /workflowOpenDatePicker\(input\)/);
+  const dateLabelStart = appSource.indexOf("function workflowBoardDateLabel");
+  const dateLabelEnd = appSource.indexOf("function workflowNYZoneLabel", dateLabelStart);
+  assert.doesNotMatch(appSource.slice(dateLabelStart, dateLabelEnd), /weekday:"long"/);
   assert.match(appSource, /data-workflow-event-log-trigger/);
   assert.match(appSource, /workflowShowFullEventLog\(button\.dataset\.workflowId\)/);
   assert.match(appSource, /workflowEventLogMarkup\(stage,3\)/);
@@ -138,6 +144,8 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(styles, /\.workflow-event-log-modal/);
   assert.match(styles, /\.workflow-shell \.workflow-control-icon/);
   assert.match(styles, /input\.workflow-date-input::-webkit-calendar-picker-indicator\{display:none!important/);
+  assert.match(styles, /input\.workflow-date-input\{position:absolute!important;inset:0!important;z-index:2;width:100%!important/);
+  assert.match(styles, /pointer-events:none!important;cursor:pointer;appearance:none/);
   assert.match(styles, /\.workflow-full-log-modal-card/);
   assert.match(styles, /\.workflow-full-log-phase\.status-not-required/);
   assert.match(styles, /\.workflow-full-log-history/);
