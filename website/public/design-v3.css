@@ -144,3 +144,37 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
  :root{--kh-public-hero-height:min(90svh,52rem)}
  .customer-chat{right:1rem;bottom:max(1rem,env(safe-area-inset-bottom))}
 }
+
+/* Public navigation arrows: one crisp, scalable SVG language for desktop,
+   mobile and PWA layouts. The icon always follows the control's text color. */
+.button-arrow{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 auto;
+  width:1.05em;
+  height:1.05em;
+  font-size:1em;
+  line-height:1;
+  color:currentColor;
+  transition:transform 300ms var(--ease);
+}
+.button-arrow-icon{
+  display:block;
+  width:1em;
+  height:1em;
+  overflow:visible;
+  color:currentColor;
+}
+.button-arrow-icon path{
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.header-consultation,
+.header-consultation:hover{
+  color:var(--ivory);
+}
+.header-consultation .button-arrow{color:inherit}
