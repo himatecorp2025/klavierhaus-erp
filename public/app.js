@@ -1373,7 +1373,7 @@ function workflowCardDateTimeText(value){
 function workflowBoardDateLabel(value){
  const parts=String(value||"").split("-").map(Number);
  if(parts.length!==3||parts.some(Number.isNaN))return String(value||"");
- try{return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(Date.UTC(parts[0],parts[1]-1,parts[2],12)));}
+ try{return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",year:"numeric",month:"long",day:"numeric"}).format(new Date(Date.UTC(parts[0],parts[1]-1,parts[2],12)));}
  catch(_error){return String(value||"");}
 }
 function workflowNYZoneLabel(){
@@ -1392,6 +1392,28 @@ function workflowToolbarIcon(kind){
   "plus":'<path d="M12 5v14M5 12h14"/>'
  };
  return `<svg class="workflow-control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[kind]||paths.date}</svg>`;
+}
+function workflowOpenDatePicker(inputOrId){
+ const input=typeof inputOrId==="string"?document.getElementById(inputOrId):inputOrId;
+ if(!input)return;
+ try{if(typeof input.showPicker==="function"){input.showPicker();return;}}catch(_error){}
+ try{input.focus({preventScroll:true});}catch(_error){input.focus();}
+ try{input.click();}catch(_error){}
+}
+function workflowBindDatePicker(box){
+ const picker=box?.querySelector(".workflow-date-picker"),input=picker?.querySelector(".workflow-date-input");
+ if(!picker||!input)return;
+ picker.tabIndex=0;
+ picker.setAttribute("role","button");
+ picker.addEventListener("click",event=>{
+  event.preventDefault();
+  workflowOpenDatePicker(input);
+ });
+ picker.addEventListener("keydown",event=>{
+  if(event.key!=="Enter"&&event.key!==" ")return;
+  event.preventDefault();
+  workflowOpenDatePicker(input);
+ });
 }
 function decorateWorkflowToolbar(box){
  const actions=box?.querySelector(".workflow-day-actions");
@@ -1869,6 +1891,7 @@ async function renderWorkshopWorkflow(){
   const emptyBoard=`<div class="workflow-empty"><strong>${bi("No workflows in this view.","Ebben a nézetben nincs workflow.")}</strong><p>${bi("Create the first workshop workflow from a client piano.","Hozd létre az első műhely-workflow-t egy ügyfélzongorához.")}</p></div>`;
   box.innerHTML=`<div class="workflow-shell${selected?" has-workflow-drawer":""}"><section class="panel workflow-board-panel"><header class="workflow-toolbar"><div class="workflow-toolbar-copy"><h2>${bi("Workshop Workflow","Műhely Workflow")}</h2><p>${bi("Quality. Heritage. Forward.","Minőség. Hagyomány. Tovább.")}</p></div><div class="workflow-toolbar-clock" aria-label="${bi("New York date and time","New York-i dátum és idő")}"><strong>${htmlText(workflowBoardDateLabel(workshopWorkflowDate))}</strong><span>New York (${htmlText(workflowNYZoneLabel())}) <time data-workflow-ny-clock>${htmlText(currentNYTimeString())}</time></span></div></header><div class="workflow-board-controls"><div class="workflow-day-actions"><button type="button" class="ghost-btn" onclick="workflowDateMove(-1)" aria-label="${bi("Previous day","Előző nap")}">‹ <span>${bi("Previous day","Előző nap")}</span></button><button type="button" class="workflow-today-btn" onclick="workshopWorkflowDate=nyDateKey();renderWorkshopWorkflow()">${bi("Today","Ma")}</button><button type="button" class="ghost-btn" onclick="workflowDateMove(1)" aria-label="${bi("Next day","Következő nap")}"><span>${bi("Next day","Következő nap")}</span> ›</button><label class="workflow-date-picker" title="${bi("Choose reference date","Referencia dátum kiválasztása")}"><span class="workflow-date-value">${htmlText(workflowBoardDateLabel(workshopWorkflowDate))}</span><span class="workflow-date-picker-icon" aria-hidden="true"></span><input class="workflow-date-input" type="date" value="${htmlText(workshopWorkflowDate)}" aria-label="${bi("Choose reference date","Referencia dátum kiválasztása")}" onchange="workshopWorkflowDate=this.value||nyDateKey();renderWorkshopWorkflow()"></label><button type="button" class="ghost-btn" onclick="workshopWorkflowPrevious=true;workshopWorkflowSelectedId='';workshopWorkflowSelectedStageId='';renderWorkshopWorkflow()">▣ ${bi("Previous works","Korábbi munkák")}</button><button type="button" class="ghost-btn" onclick="render('scheduler')">▣ ${bi("Open calendar","Naptár megnyitása")}</button>${isAdmin()?`<button type="button" class="ghost-btn workflow-stage-settings" onclick="openWorkflowStageSettings()">⚙ ${bi("Stage settings","Fázisbeállítások")}</button>`:""}</div><div class="workflow-board-filter-row"><label>${bi("Responsible","Felelős")}<select onchange="workshopWorkflowAssigneeFilter=this.value;renderWorkshopWorkflow()">${workflowFilterWorkerOptions()}</select></label><label>${bi("Status","Státusz")}<select onchange="workshopWorkflowStatusFilter=this.value;renderWorkshopWorkflow()">${workflowFilterStatusOptions()}</select></label><label class="workflow-overdue-toggle"><span>${bi("Overdue only","Csak lejárt")}</span><input type="checkbox" ${workshopWorkflowOverdueOnly?"checked":""} onchange="workshopWorkflowOverdueOnly=this.checked;renderWorkshopWorkflow()"><i aria-hidden="true"></i></label><button type="button" class="workflow-new-btn" onclick="openWorkflowCreate()">＋ ${bi("New workflow","Új munkafolyamat")}</button></div></div><div class="workflow-board-scroll"><div class="workflow-board-head"><div class="workflow-piano-heading">${bi("Pianos","Zongorák")}</div><div class="workflow-stage-head">${stageHead}</div></div>${board||emptyBoard}</div></section>${workflowDrawerMarkup(selected,workshopWorkflowSelectedStageId)}</div>`;
   decorateWorkflowToolbar(box);
+  workflowBindDatePicker(box);
   box.querySelector(".workflow-shell")?.style.setProperty("--workflow-stage-count",String(Math.max(1,stageDefinitions.length)));
   box.querySelectorAll("[data-workflow-event-log-trigger]").forEach(button=>{button.onclick=()=>workflowShowFullEventLog(button.dataset.workflowId);});
   const materialSource=box.querySelector("#workflowMaterialSource");if(materialSource){const inventorySelect=document.createElement("select");inventorySelect.id="workflowMaterialInventoryId";inventorySelect.innerHTML=workflowInventoryOptions();inventorySelect.title=bi("Required for central inventory","Központi leltárnál kötelező");materialSource.parentElement.insertBefore(inventorySelect,materialSource);}
