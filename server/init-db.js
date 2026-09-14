@@ -630,6 +630,7 @@ function runMigrations() {
     ensureColumn("contacts", "interest_notes", "TEXT");
 
     // Pianos and piano import.
+    ensureColumn("pianos", "build_year", "INTEGER");
     ensureColumn("pianos", "ownership_type", "TEXT DEFAULT 'Customer owned'");
     ensureColumn("pianos", "display_name", "TEXT");
     ensureColumn("pianos", "asset_recorded", "INTEGER DEFAULT 0");
@@ -640,6 +641,7 @@ function runMigrations() {
     ensureColumn("pianos", "owner_resolution", "TEXT");
 
     // Jobs and immutable user/workflow links.
+    ensureColumn("website_showroom_pianos", "build_year", "INTEGER");
     ensureColumn("jobs", "job_type", "TEXT DEFAULT 'Standalone'");
     ensureColumn("jobs", "pricing_basis", "TEXT");
     ensureColumn("jobs", "last_reassigned_by", "TEXT");
