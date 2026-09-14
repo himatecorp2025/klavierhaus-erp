@@ -179,59 +179,96 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 }
 .header-consultation .button-arrow{color:inherit}
 
-/* Luxury Light Mode cascade lock — this file loads after styles.css. */
-:root[data-theme="light"] .ticket-quantity,
-:root[data-theme="light"] .event-card-reservation form,
-:root[data-theme="light"] .attendee-names {
-  border-color: var(--color-border-gold);
-  background: rgba(252,251,247,.72);
-  color: var(--color-text);
-}
-:root[data-theme="light"] .ticket-quantity :where(span,input,button),
-:root[data-theme="light"] .attendee-names :where(label,legend),
-:root[data-theme="light"] .event-card-reservation label { color: var(--color-text-secondary); }
-:root[data-theme="light"] .attendee-names input,
-:root[data-theme="light"] .event-card-reservation input,
-:root[data-theme="light"] .customer-chat__panel input,
-:root[data-theme="light"] .customer-chat__panel textarea,
-:root[data-theme="light"] .customer-chat__panel select {
-  border-color: var(--color-border-strong);
-  background: rgba(255,254,250,.82);
-  color: var(--color-text);
-}
-:root[data-theme="light"] .catalog-card {
+/* Luxury Light Mode v3 cascade guard */
+html[data-theme="light"] .public-event-card {
+  background: var(--color-surface);
   border-color: var(--color-border);
-  background: linear-gradient(145deg, rgba(255,255,255,.52), rgba(247,244,236,.24)), var(--color-surface);
   box-shadow: var(--shadow-sm);
 }
-:root[data-theme="light"] .catalog-card:hover { border-color: var(--color-border-gold); box-shadow: var(--shadow-md); }
-:root[data-theme="light"] .catalog-card__image,
-:root[data-theme="light"] .piano-brand-instrument__media,
-:root[data-theme="light"] .detail-gallery figure { background: var(--color-photo-mat); }
-:root[data-theme="light"] .catalog-card__image::after,
-:root[data-theme="light"] .piano-brand-card .catalog-card__image::after,
-:root[data-theme="light"] .piano-brand-instrument__media::after { background: linear-gradient(transparent 68%, rgba(23,24,23,.18)); }
-:root[data-theme="light"] .privacy-dialog,
-:root[data-theme="light"] .interest-dialog,
-:root[data-theme="light"] .service-dialog {
+html[data-theme="light"] .public-event-card:hover {
   border-color: var(--color-border-gold);
-  background: var(--color-surface-raised);
-  color: var(--color-text);
-  box-shadow: 0 24px 72px rgba(37,30,18,.16);
-}
-:root[data-theme="light"] .privacy-dialog input,
-:root[data-theme="light"] .interest-dialog input,
-:root[data-theme="light"] .service-dialog input,
-:root[data-theme="light"] .service-dialog textarea,
-:root[data-theme="light"] .service-dialog select { background: rgba(255,254,250,.82); color: var(--color-text); border-color: var(--color-border-strong); }
-:root[data-theme="light"] .dialog-close { background: var(--color-surface-muted); color: var(--color-heading); }
-:root[data-theme="light"] .consent-banner {
-  border-color: var(--color-border-gold);
-  background: rgba(252,251,247,.96);
-  color: var(--color-text);
   box-shadow: var(--shadow-md);
 }
-:root[data-theme="light"] .customer-chat__panel,
-:root[data-theme="light"] .customer-chat__message { background: var(--color-surface); color: var(--color-text); }
-:root[data-theme="light"] .customer-chat__toggle { border-color: var(--color-gold-dark); background: var(--color-gold-dark); color: var(--color-surface-raised); box-shadow: var(--shadow-sm); }
-:root[data-theme="light"] .customer-chat__toggle[aria-expanded="true"] { background: #6A5125; color: var(--color-surface-raised); }
+html[data-theme="light"] .public-event-card__media {
+  background: var(--color-photo-mat);
+}
+html[data-theme="light"] .public-event-card__media::after {
+  background: linear-gradient(180deg, transparent 54%, rgba(8, 8, 7, 0.48));
+}
+html[data-theme="light"] .public-event-card__number {
+  color: #FFFEFA;
+}
+html[data-theme="light"] .public-event-card__date,
+html[data-theme="light"] .public-event-card__facts {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .public-event-card__excerpt,
+html[data-theme="light"] .catalog-card__body > p,
+html[data-theme="light"] .catalog-detail__copy > .section-copy,
+html[data-theme="light"] .artist-detail__copy {
+  color: var(--color-text-secondary);
+}
+html[data-theme="light"] .catalog-card,
+html[data-theme="light"] .event-facts,
+html[data-theme="light"] .ticket-quantity,
+html[data-theme="light"] .attendee-names {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+html[data-theme="light"] .catalog-card__image,
+html[data-theme="light"] .piano-brand-instrument__media,
+html[data-theme="light"] .catalog-detail > img {
+  background: var(--color-photo-mat);
+  border-color: var(--color-border-gold);
+}
+html[data-theme="light"] .catalog-card__image::after,
+html[data-theme="light"] .piano-brand-card .catalog-card__image::after {
+  background: linear-gradient(transparent 64%, rgba(23, 24, 23, 0.30));
+}
+html[data-theme="light"] .piano-brand-instrument__media::after {
+  background: linear-gradient(90deg, transparent 72%, rgba(23, 24, 23, 0.16));
+}
+html[data-theme="light"] .piano-brand-instrument--reverse .piano-brand-instrument__media::after {
+  background: linear-gradient(270deg, transparent 72%, rgba(23, 24, 23, 0.16));
+}
+html[data-theme="light"] .ticket-quantity > span,
+html[data-theme="light"] .attendee-names label,
+html[data-theme="light"] .catalog-detail__lead {
+  color: var(--color-text-secondary);
+}
+html[data-theme="light"] :is(.ticket-quantity input, .attendee-names input, .privacy-dialog input, .interest-dialog input, .service-dialog input, .service-dialog textarea, .service-dialog select, .customer-chat__panel input, .customer-chat__panel textarea, .customer-chat__panel select) {
+  color: var(--color-text);
+  background: rgba(255, 254, 250, 0.80);
+  border-color: var(--color-border-strong);
+}
+html[data-theme="light"] :is(.privacy-dialog, .interest-dialog, .service-dialog, .customer-chat__panel, .consent-banner) {
+  color: var(--color-text);
+  background: rgba(252, 251, 247, 0.98);
+  border-color: var(--color-border-gold);
+  box-shadow: var(--shadow-md);
+}
+html[data-theme="light"] .dialog-close {
+  color: var(--color-heading);
+  background: var(--color-surface-muted);
+}
+html[data-theme="light"] .customer-chat__toggle {
+  color: #FFFEFA;
+  background: #80642F;
+  border-color: #80642F;
+  box-shadow: var(--shadow-sm);
+}
+html[data-theme="light"] .customer-chat__toggle[aria-expanded="true"] {
+  color: #FFFEFA;
+  background: #6A5125;
+}
+html[data-theme="light"] .customer-chat__message {
+  color: var(--color-text);
+  background: rgba(169, 132, 66, 0.08);
+  border-left-color: var(--color-gold-dark);
+}
+html[data-theme="light"] .event-facts {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-gold);
+}
+
