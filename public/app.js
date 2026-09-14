@@ -944,9 +944,11 @@ function updateSidebarToggle(){
 function toggleSidebar(){document.body.classList.toggle("sidebar-collapsed");updateSidebarToggle();}
 function money(n){return "$"+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0})}
 function badge(v){let c=String(v||"").split(" ")[0];return `<span class="badge ${c}">${v||""}</span>`}
-function fmtDate(d){return d.toISOString().slice(0,10)}
-function startOfWeek(d){let x=new Date(d);let day=x.getDay();let diff=(day===0?-6:1-day);x.setDate(x.getDate()+diff);x.setHours(0,0,0,0);return x}
-function addDays(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
+function fmtDate(d){return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d)}
+function dateKeyToUtcDate(key){return new Date(`${String(key).slice(0,10)}T12:00:00Z`)}
+function dateKeyFromAny(value){if(typeof value==="string"&&/^\d{4}-\d{2}-\d{2}/.test(value))return value.slice(0,10);return fmtDate(value instanceof Date?value:new Date(value))}
+function startOfWeek(value){const key=dateKeyFromAny(value),d=dateKeyToUtcDate(key),day=d.getUTCDay(),diff=day===0?-6:1-day;d.setUTCDate(d.getUTCDate()+diff);return d}
+function addDays(d,n){const x=new Date(d);x.setUTCDate(x.getUTCDate()+n);return x}
 function addDaysToDateKey(value,n){const d=new Date(`${value}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function jobsRangeUrl(fromDate,toDateExclusive){return `/api/jobs?from=${encodeURIComponent(`${fromDate}T00:00`)}&to=${encodeURIComponent(`${toDateExclusive}T00:00`)}`}
 function localDT(d){
@@ -975,12 +977,13 @@ function wallClockDifferenceMinutes(start,end){
  const a=localDateTimeParts(start),b=localDateTimeParts(end);
  return a&&b?Math.round((b.stamp-a.stamp)/60000):NaN;
 }
-function roundWallClockUp(value,step=5){
+const SCHEDULE_INTERVAL_MINUTES=15;
+function roundWallClockUp(value,step=SCHEDULE_INTERVAL_MINUTES){
  const parts=localDateTimeParts(value);if(!parts)return value;
  const remainder=parts.minute%step;
  return remainder===0?formatWallClockDateTime(parts.stamp):formatWallClockDateTime(parts.stamp+(step-remainder)*60000);
 }
-function isFiveMinuteDateTime(value){const parts=localDateTimeParts(value);return Boolean(parts)&&parts.minute%5===0;}
+function isFiveMinuteDateTime(value){const parts=localDateTimeParts(value);return Boolean(parts)&&parts.minute%SCHEDULE_INTERVAL_MINUTES===0;}
 function formatDurationInput(minutes){const safe=Math.max(0,Math.round(Number(minutes)||0));return `${Math.floor(safe/60)}:${String(safe%60).padStart(2,"0")}`;}
 function formatDurationLabel(minutes){
  const safe=Math.max(0,Math.round(Number(minutes)||0)),hours=Math.floor(safe/60),mins=safe%60;
@@ -992,7 +995,7 @@ function parseDurationInput(value){
  const match=raw.match(/^(\d{1,3})[:.]([0-5]\d)$/);
  if(!match)return NaN;
  const minutes=Number(match[1])*60+Number(match[2]);
- return Number(match[2])%5===0?minutes:NaN;
+ return Number(match[2])%SCHEDULE_INTERVAL_MINUTES===0?minutes:NaN;
 }
 function hhmm(s){let d=new Date(s);return d.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})}
 function sameDay(a,b){return fmtDate(new Date(a))===fmtDate(new Date(b))}
@@ -1168,8 +1171,8 @@ function calendarEventCardMarkup(j){
   return `<span class="kh-event-ribbon">${label}${status}</span><strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(title||"")}</b><small class="event-card-primary">${htmlText(j.performer_name||bi("Artist to be announced","A művész hamarosan"))}</small><small class="event-card-secondary">${htmlText(j.venue_name||"Klavierhaus")}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
  }
  const client=String(j?.client_name||"—"),amount=calendarCardAmount(j);
- const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—");
- return `<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
+ const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—"),notes=String(j?.notes||"").trim();
+ return `<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small>${notes?`<small class="event-card-notes" title="${htmlText(notes)}">${htmlText(notes)}</small>`:""}<span class="event-status">${calendarStatusIcon(j)}</span>`;
 }
 
 async function loadCalendarEntries(fromDate,toDateExclusive){
@@ -2054,6 +2057,53 @@ function updateCurrentTimeLine(){
    const label=line.querySelector("span"); if(label) label.textContent=now.label;
  });
 }
+let schedulerDragState=null;
+function schedulerDragPayload(job){return {id:job.id||job.job_id,start_time:job.start_time,end_time:job.end_time,assigned_user_id:job.assigned_user_id||"",assigned_to:job.assigned_to||""};}
+function beginSchedulerDrag(event,job){
+ if(job?.calendar_entry_type)return;
+ schedulerDragState=schedulerDragPayload(job);
+ event.dataTransfer.effectAllowed="move";
+ event.dataTransfer.setData("text/plain",JSON.stringify(schedulerDragState));
+ document.body.classList.add("scheduler-dragging");
+}
+function endSchedulerDrag(){schedulerDragState=null;document.body.classList.remove("scheduler-dragging");}
+function schedulerDropMinutes(event,target){
+ const rect=target.getBoundingClientRect(),dayStart=Number(target.dataset.dayStart||420),dayEnd=Number(target.dataset.dayEnd||1320),span=dayEnd-dayStart;
+ const raw=dayStart+((event.clientY-rect.top)/Math.max(1,rect.height))*span;
+ return Math.max(dayStart,Math.min(dayEnd-SCHEDULE_INTERVAL_MINUTES,Math.round(raw/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES));
+}
+function dateTimeFromDateAndMinutes(date,minutes){return `${date}T${String(Math.floor(minutes/60)).padStart(2,"0")}:${String(minutes%60).padStart(2,"0")}`;}
+async function commitSchedulerMove(jobId,start,end,assignedUserId,source="calendar_drag"){
+ try{
+  const saved=await api(`/api/jobs/${encodeURIComponent(jobId)}/schedule`,{method:"PATCH",body:JSON.stringify({start_time:start,end_time:end,assigned_user_id:assignedUserId,source})});
+  await refreshCalendarAfterMutation(saved);return saved;
+ }catch(error){showError(error);await renderScheduler();return null;}
+}
+async function handleSchedulerDrop(event,date){
+ event.preventDefault();
+ const payload=schedulerDragState||(()=>{try{return JSON.parse(event.dataTransfer.getData("text/plain")||"null")}catch(_e){return null}})();
+ if(!payload?.id)return endSchedulerDrag();
+ const target=event.currentTarget,minutes=schedulerDropMinutes(event,target),duration=Math.max(SCHEDULE_INTERVAL_MINUTES,wallClockDifferenceMinutes(payload.start_time,payload.end_time));
+ const start=dateTimeFromDateAndMinutes(date,minutes),end=addWallClockMinutes(start,duration);
+ await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_drag");endSchedulerDrag();
+}
+async function handleSchedulerWorkerDrop(event,userId){
+ event.preventDefault();event.stopPropagation();
+ const payload=schedulerDragState||(()=>{try{return JSON.parse(event.dataTransfer.getData("text/plain")||"null")}catch(_e){return null}})();
+ if(!payload?.id)return endSchedulerDrag();
+ await commitSchedulerMove(payload.id,payload.start_time,payload.end_time,userId,"calendar_worker_drag");endSchedulerDrag();
+}
+function beginSchedulerResize(event,job,dayStart,dayEnd){
+ event.preventDefault();event.stopPropagation();
+ if(job?.calendar_entry_type)return;
+ const card=event.currentTarget.closest(".timeline-event"),day=card?.closest(".timeline-day");if(!card||!day)return;
+ const initialY=event.clientY,initialEnd=minutesFromTime(job.end_time),startMinutes=minutesFromTime(job.start_time),rect=day.getBoundingClientRect(),span=dayEnd-dayStart;
+ const move=e=>{const delta=((e.clientY-initialY)/Math.max(1,rect.height))*span,next=Math.max(startMinutes+SCHEDULE_INTERVAL_MINUTES,Math.min(dayEnd,Math.round((initialEnd+delta)/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES));card.style.height=`${Math.max(1.67,((next-startMinutes)/span)*100)}%`;card.dataset.resizeEnd=String(next);};
+ const up=async()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);const next=Number(card.dataset.resizeEnd||initialEnd);delete card.dataset.resizeEnd;const end=dateTimeFromDateAndMinutes(String(job.start_time).slice(0,10),next);await commitSchedulerMove(job.id,job.start_time,end,job.assigned_user_id,"calendar_resize");};
+ window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true});
+}
+
+function isMovableSchedulerJob(job){return !job?.calendar_entry_type && !['Completed','Partially completed','Failed','Cancelled'].includes(String(job?.status||''));}
 async function renderScheduler(){
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const weekDates=week.map(d=>fmtDate(d));
@@ -2063,18 +2113,19 @@ async function renderScheduler(){
  const dayStart=7*60, dayEnd=22*60, totalMinutes=dayEnd-dayStart;
  let html=`<div class="panel scheduler-panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${schedulerFilterOptions(workers)}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div>
  <div class="scheduler-legend"><span class="legend-klavierhaus-event">◆ ${bi("Klavierhaus event","Klavierhaus esemény")}</span><span class="legend-active">◷ ${bi("Active — employee color","Aktív — munkavállalói szín")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-overdue">! ${bi("Overdue, not closed","Lejárt, nincs lezárva")}</span><span class="legend-failed">! ${bi("Failed","Sikertelen")}</span></div>
- <div class="timeline-scroll"><div class="timeline-calendar"><div class="timeline-corner">${bi("Time","Idő")}</div>${week.map(d=>`<div class="timeline-day-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short"})}</b><span>${fmtDate(d)}</span></div>`).join("")}
+ <div class="scheduler-worker-dropbar" aria-label="${bi("Reassign by dragging","Átadás húzással")}"><span>${bi("Drag a job here to reassign:","Húzd ide a munkát az átadáshoz:")}</span>${workers.map(w=>`<button type="button" class="scheduler-worker-drop" style="--worker-color:${workerColor(w.name,w.calendar_color)}" ondragover="event.preventDefault()" ondrop="handleSchedulerWorkerDrop(event,'${htmlText(w.id)}')">${htmlText(w.name)}</button>`).join("")}</div>
+ <div class="timeline-scroll"><div class="timeline-calendar"><div class="timeline-corner">${bi("Time","Idő")}</div>${week.map(d=>`<div class="timeline-day-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short",timeZone:"America/New_York"})}</b><span>${fmtDate(d)}</span></div>`).join("")}
  <div class="timeline-times">${Array.from({length:16},(_,i)=>`<span style="top:${(i*60/totalMinutes)*100}%">${String(i+7).padStart(2,"0")}:00</span>`).join("")}</div>`;
  for(const day of week){
    const dayStr=fmtDate(day); const events=visibleJobs.filter(j=>String(j.start_time||"").slice(0,10)===dayStr);
    const placed=calendarLayout(events,dayStart,dayEnd);
-   html+=`<div class="timeline-day" data-date="${dayStr}" onclick="if(event.target===this){const r=this.getBoundingClientRect();const mins=${dayStart}+Math.round(((event.clientY-r.top)/r.height)*${totalMinutes}/15)*15;openJob('${dayStr}T'+String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'))}">
+   html+=`<div class="timeline-day" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}" ondragover="event.preventDefault()" ondrop="handleSchedulerDrop(event,'${dayStr}')" onclick="if(event.target===this){const r=this.getBoundingClientRect();const mins=${dayStart}+Math.round(((event.clientY-r.top)/r.height)*${totalMinutes}/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES;openJob('${dayStr}T'+String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'))}">
     <div class="quarter-grid">${Array.from({length:60},(_,i)=>`<i style="top:${(i/60)*100}%" class="${i%4===0?'hour':''}"></i>`).join("")}</div>
     <div class="current-time-line" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>`;
    for(const item of placed){
      const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
      const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" onclick='event.stopPropagation();openCalendarEntry(${esc(j)})'>${calendarEventCardMarkup(j)}</button>`;
+     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" ${isMovableSchedulerJob(j)?`draggable="true" ondragstart='beginSchedulerDrag(event,${esc(j)})' ondragend="endSchedulerDrag()"`:""} onclick='event.stopPropagation();openCalendarEntry(${esc(j)})'>${calendarEventCardMarkup(j)}${isMovableSchedulerJob(j)?`<span class="timeline-resize-handle" onpointerdown='beginSchedulerResize(event,${esc(j)},${dayStart},${dayEnd})' aria-hidden="true"></span>`:""}</button>`;
    }
    html+=`</div>`;
  }
@@ -2085,7 +2136,7 @@ async function renderScheduler(){
  applyLanguageToDOM();
 }
 async function refreshCalendarAfterMutation(job=null){
- if(job?.start_time && currentView==="scheduler") currentWeekStart=startOfWeek(new Date(job.start_time));
+ if(job?.start_time && currentView==="scheduler") currentWeekStart=startOfWeek(job.start_time);
  if(currentView==="today") return renderToday();
  if(currentView==="scheduler") return renderScheduler();
  return null;
@@ -2097,12 +2148,22 @@ setInterval(async()=>{
  try{if(currentView==='today')await renderToday();else if(currentView==='scheduler')await renderScheduler();}catch(_error){}finally{calendarAutoRefreshBusy=false;}
 },15000);
 
-async function openJob(prefill="", row=null){
- const existingMinutes=Number(row?.planned_minutes)>0?Number(row.planned_minutes):Math.round(Number(row?.planned_hours||3)*60);
- const start=row?.start_time || roundWallClockUp(prefill || newYorkNowLocal(),5);
- const end=row?.end_time || addWallClockMinutes(start,existingMinutes||180);
+async function openJobPianoCreate(client,draft){
+ const suggested=String(draft?.piano_name||"").trim();
+ $("#modal").classList.remove("hidden");
+ $("#modalTitle").textContent=bi("Add piano for job","Zongora hozzáadása a munkához");
+ $("#form").innerHTML=`<div class="form-grid"><div class="field full"><p class="muted">${bi("The client exists, but the selected piano is not in the ERP yet. Create it now; the job draft will be preserved.","Az ügyfél létezik, de a kiválasztott zongora még nincs az ERP-ben. Hozd létre most; a munka piszkozata megmarad.")}</p></div><div class="field"><label>${bi("Piano name / description","Zongora neve / leírás")}</label><input name="display_name" value="${htmlText(suggested)}" required></div><div class="field"><label>${bi("Brand","Márka")}</label><input name="brand"></div><div class="field"><label>${bi("Model","Típus")}</label><input name="model"></div><div class="field"><label>${bi("Serial No.","Gyári szám")}</label><input name="serial_no"></div><div class="field"><label>${bi("Location","Helyszín")}</label><input name="location" value="${htmlText(draft?.service_address||client?.address||"")}"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="openJob('${htmlText(draft?.start_time||"")}',null,${esc(draft||{})})">${bi("Back","Vissza")}</button><button>${bi("Create piano and continue","Zongora létrehozása és folytatás")}</button></div>`;
+ $("#form").onsubmit=async event=>{event.preventDefault();try{const body=Object.fromEntries(new FormData(event.target));body.owner_contact_id=client.id;body.ownership_type="Customer owned";const piano=await api("/api/pianos",{method:"POST",body:JSON.stringify(body)});await openJob(draft.start_time,null,{...draft,client_id:client.id,client_name:client.name,client_phone:client.phone||draft.client_phone,piano_id:piano.id,piano_name:piano.display_name||`${piano.brand||""} ${piano.model||""}`.trim()});}catch(error){showError(error)}};
+ applyLanguageToDOM(document.getElementById("modal"));
+}
+
+async function openJob(prefill="", row=null, draft=null){
+ const source=draft||row||{};
+ const existingMinutes=Number(source?.planned_minutes)>0?Number(source.planned_minutes):Math.round(Number(source?.planned_hours||3)*60);
+ const start=source?.start_time || roundWallClockUp(prefill || newYorkNowLocal(),SCHEDULE_INTERVAL_MINUTES);
+ const end=source?.end_time || addWallClockMinutes(start,existingMinutes||180);
  const preservesExistingExactTime=Boolean(row?.id&&(!isFiveMinuteDateTime(start)||!isFiveMinuteDateTime(end)));
- const dateTimeStep=preservesExistingExactTime?"any":"300";
+ const dateTimeStep=preservesExistingExactTime?"any":String(SCHEDULE_INTERVAL_MINUTES*60);
 
  const [contacts,pianos]=await Promise.all([
   api("/api/contacts").catch(()=>[]),
@@ -2116,40 +2177,41 @@ async function openJob(prefill="", row=null){
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent=row ? bi("Edit Job","Munka szerkesztése") : bi("New Job","Új munka");
  $("#form").innerHTML=`<div class="form-grid">
-<div class="field"><label>${req("Job title / Munka neve")}</label><input name="title" value="${row?.title||""}" required placeholder="Piano tuning / Zongorahangolás"></div>
+<div class="field"><label>${req("Job title / Munka neve")}</label><input name="title" value="${source?.title||""}" required placeholder="Piano tuning / Zongorahangolás"></div>
 <div class="field"><label>${req("Assigned to / Felelős")}</label>
 <select id="jobAssignedUser" name="assigned_user_id" required>
-${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
+${workerSelectOptions(source?.assigned_user_id,source?.assigned_to)}
 </select><small class="worker-availability-hint" aria-live="polite"></small></div>
 
 <div class="field"><label>${req("Standalone or part-work / Önálló munka vagy részmunka")}</label>
 <select name="job_type" id="jobType" onchange="toggleInstructionsField()">
-<option value="Standalone" ${row?.job_type==="Standalone"?"selected":""}>Standalone / Önálló munka</option>
-<option value="Part-work" ${row?.job_type==="Part-work"?"selected":""}>Part-work / Részmunka</option>
+<option value="Standalone" ${source?.job_type==="Standalone"?"selected":""}>Standalone / Önálló munka</option>
+<option value="Part-work" ${source?.job_type==="Part-work"?"selected":""}>Part-work / Részmunka</option>
 </select></div>
 
 <div class="field"><label>${req("Client name / Ügyfél neve")}</label>
-<input id="clientNameInput" name="client_name" list="clientList" value="${row?.client_name||""}" required placeholder="Start typing client name / Kezdd el írni az ügyfél nevét">
+<input id="clientNameInput" name="client_name" list="clientList" value="${source?.client_name||""}" required placeholder="Start typing client name / Kezdd el írni az ügyfél nevét">
 <datalist id="clientList">${clientOptions}</datalist></div>
 
 <div class="field"><label>${req("Piano name / Zongora neve")}</label>
-<input id="pianoNameInput" name="piano_name" list="pianoList" value="${row?.piano_name||""}" required placeholder="Steinway D, Yamaha U1...">
+<input id="pianoNameInput" name="piano_name" list="pianoList" value="${source?.piano_name||""}" required placeholder="Steinway D, Yamaha U1...">
 <datalist id="pianoList">${pianoOptions}</datalist></div>
 
-<div class="field"><label>Client phone / Ügyfél telefonszáma</label><input id="clientPhoneInput" name="client_phone" value="${row?.client_phone||""}" placeholder="+1..."></div>
+<div class="field"><label>Client phone / Ügyfél telefonszáma</label><input id="clientPhoneInput" name="client_phone" value="${source?.client_phone||""}" placeholder="+1..."></div>
 
 <div class="field"><label>${req("Start / Kezdés")}</label><input id="jobStart" name="start_time" type="datetime-local" value="${start}" step="${dateTimeStep}" required></div>
 <div class="field"><label>${req("End / Befejezés")}</label><input id="jobEnd" name="end_time" type="datetime-local" value="${end}" step="${dateTimeStep}" required></div>
 
-<div class="field"><label>Estimated amount / Előzetes összeg</label><input name="planned_amount" type="number" value="${row?.planned_amount||0}"></div>
+<div class="field"><label>Estimated amount / Előzetes összeg</label><input name="planned_amount" type="number" value="${source?.planned_amount||0}"></div>
 <div class="field"><label>Pricing basis / Díjmegállapítás módja</label>
-<input name="pricing_basis" value="${row?.pricing_basis||""}" placeholder="Phone quote / Telefonos ajánlat, Email quote / E-mail ajánlat, Fixed agreement / Fix megállapodás"></div>
+<input name="pricing_basis" value="${source?.pricing_basis||""}" placeholder="Phone quote / Telefonos ajánlat, Email quote / E-mail ajánlat, Fixed agreement / Fix megállapodás"></div>
 
-<div class="field"><label>${bi("Planned duration","Tervezett időtartam")}</label><input id="plannedDuration" type="text" inputmode="numeric" value="${formatDurationInput(existingMinutes||180)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:05" required><input id="plannedHours" name="planned_hours" type="hidden" value="${Number(row?.planned_hours||((existingMinutes||180)/60))}"><input id="plannedMinutes" name="planned_minutes" type="hidden" value="${existingMinutes||180}"><small>${bi("Format: hours:minutes, in 5-minute steps (for example 3:05).","Formátum: óra:perc, 5 perces lépésekben (például 3:05).")}</small></div>
-<div class="field"><label>${req("Service address / Cím")}</label><input id="serviceAddressInput" name="service_address" value="${row?.service_address||""}" required></div>
+<div class="field"><label>${bi("Planned duration","Tervezett időtartam")}</label><input id="plannedDuration" type="text" inputmode="numeric" value="${formatDurationInput(existingMinutes||180)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:15" required><input id="plannedHours" name="planned_hours" type="hidden" value="${Number(source?.planned_hours||((existingMinutes||180)/60))}"><input id="plannedMinutes" name="planned_minutes" type="hidden" value="${existingMinutes||180}"><small>${bi("Format: hours:minutes, in 15-minute steps (for example 3:15).","Formátum: óra:perc, 15 perces lépésekben (például 3:15).")}</small></div>
+<div class="field"><label>${req("Service address / Cím")}</label><input id="serviceAddressInput" name="service_address" value="${source?.service_address||""}" required></div>
 
-<div class="field full ${row?.job_type==="Part-work"?"":"hidden"}" id="instructionsField"><label>Remaining tasks / Hátralévő feladatok</label>
-<textarea name="instructions" placeholder="Csak részmunka esetén: milyen feladat marad még hátra?">${row?.instructions||""}</textarea></div>
+<div class="field full ${source?.job_type==="Part-work"?"":"hidden"}" id="instructionsField"><label>Remaining tasks / Hátralévő feladatok</label>
+<textarea name="instructions" placeholder="Csak részmunka esetén: milyen feladat marad még hátra?">${source?.instructions||""}</textarea></div>
+<div class="field full"><label>${bi("Notes","Megjegyzés")}</label><textarea name="notes" rows="4" placeholder="${bi("Additional job notes","További megjegyzés a munkához")}">${htmlText(source?.notes||"")}</textarea></div>
 </div>
 <div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>${row?"Save changes / Módosítás mentése":"Create job / Munka létrehozása"}</button></div>`;
 
@@ -2183,7 +2245,7 @@ ${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
  function setEndFromDuration(){
    const s=startInput.value;
    const minutes=parseDurationInput(durationInput.value);
-   if(!s || !Number.isFinite(minutes) || minutes<5) return;
+   if(!s || !Number.isFinite(minutes) || minutes<SCHEDULE_INTERVAL_MINUTES) return;
    minutesInput.value=String(minutes);
    hoursInput.value=String(minutes/60);
    endInput.value=addWallClockMinutes(s,minutes);
@@ -2210,7 +2272,7 @@ ${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
    const timesUnchanged=Boolean(row?.id&&b.start_time===row.start_time&&b.end_time===row.end_time);
    if(!timesUnchanged&&(!isFiveMinuteDateTime(b.start_time)||!isFiveMinuteDateTime(b.end_time))){showError("INVALID_TIME_STEP");return}
    const plannedMinutes=timesUnchanged?wallClockDifferenceMinutes(b.start_time,b.end_time):parseDurationInput(durationInput.value);
-   if(!Number.isFinite(plannedMinutes)||plannedMinutes<5){showError("INVALID_PLANNED_DURATION");return}
+   if(!Number.isFinite(plannedMinutes)||plannedMinutes<SCHEDULE_INTERVAL_MINUTES){showError("INVALID_PLANNED_DURATION");return}
    if(b.job_type==="Part-work" && !(b.instructions||"").trim()){
      appAlert(bi("Remaining tasks are required for part-work.","Részmunka esetén a hátralévő feladatok megadása kötelező."),"warning");
      return;
@@ -2219,8 +2281,8 @@ ${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
    b.travel_minutes=0;
    b.priority=row?.priority||"Medium";
    if(row?.id){ b.id=row.id; b.job_id=row.id; } if(row?.job_key){ b.job_key=row.job_key; }
-   b.client_id=row?.client_id||null;
-   b.piano_id=row?.piano_id||null;
+   b.client_id=source?.client_id||null;
+   b.piano_id=source?.piano_id||null;
 
    const matchedClient=contacts.find(c=>(c.name||"").trim().toLowerCase()===(b.client_name||"").trim().toLowerCase());
    if(matchedClient){
@@ -2228,13 +2290,23 @@ ${workerSelectOptions(row?.assigned_user_id,row?.assigned_to)}
      if(!b.client_phone && matchedClient.phone) b.client_phone=matchedClient.phone;
      if(!b.service_address && matchedClient.address) b.service_address=matchedClient.address;
    }
-   const matchedPiano=pianos.find(p=>(`${p.brand||""} ${p.model||""}`).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());
+   const matchedPiano=pianos.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());
    if(matchedPiano) b.piano_id=matchedPiano.id;
+   if(!matchedClient){
+     const create=await appConfirm(`${bi("Client not found","Ügyfél nem található")}: ${b.client_name}\n${bi("Create this client now? Your job data will be preserved.","Létrehozod most az ügyfelet? A munka adatai megmaradnak.")}`,{confirmText:bi("Create client","Ügyfél létrehozása")});
+     if(create){const savedDraft={...b};openForm("contacts",null,{prefill:{name:b.client_name,phone:b.client_phone,address:b.service_address},onSaved:client=>openJob(savedDraft.start_time,null,{...savedDraft,client_id:client.id,client_name:client.name,client_phone:client.phone||savedDraft.client_phone,service_address:client.address||savedDraft.service_address})});}
+     return;
+   }
+   if(!matchedPiano){
+     const createPiano=await appConfirm(`${bi("Piano not found","Zongora nem található")}: ${b.piano_name}\n${bi("Create this piano for the selected client now? Your job data will be preserved.","Létrehozod most ezt a zongorát a kiválasztott ügyfélhez? A munka adatai megmaradnak.")}`,{confirmText:bi("Create piano","Zongora létrehozása")});
+     if(createPiano) await openJobPianoCreate(matchedClient,{...b,client_id:matchedClient.id,client_name:matchedClient.name});
+     return;
+   }
 
    try{
      const saved=row ? await api(`/api/jobs/${encodeURIComponent(jobRef(row))}`,{method:"PUT",body:JSON.stringify(b)}) : await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});
      console.log("Saved job / Mentett munka:", saved);
-     currentWeekStart=startOfWeek(new Date(saved.start_time || b.start_time));
+     currentWeekStart=startOfWeek(saved.start_time || b.start_time);
      closeModal();
      await refreshCalendarAfterMutation(saved);
    }catch(err){showError(err)}
@@ -2330,6 +2402,7 @@ function renderJobDetails(j){
   <p><b>${bi('Status','Státusz')}:</b> <span class="badge ${htmlText(String(j.status||'').split(' ')[0])}">${htmlText(jobStatusLabel(j.status))}</span></p>
   ${closed?`<p class="muted"><b>${bi('View only','Csak megtekintés')}:</b> ${bi('This job has already been closed or partially closed.','Ez a munka már lezárt vagy részlegesen lezárt.')}</p>`:''}
   ${instructions}
+  ${j.notes?`<p><b>${bi('Notes','Megjegyzés')}:</b><br><span data-i18n-exempt>${htmlText(j.notes).replaceAll('\n','<br>')}</span></p>`:''}
  </div><div class="actions">${actionButtons.join('')}</div>`;
  $("#form").onsubmit=e=>e.preventDefault();
 }
@@ -2395,7 +2468,7 @@ function openCloseJob(j){$("#modalTitle").textContent=bi("Close Job","Munka lez�
 <div class="field"><label>${req("Payment method / Fizetési mód")}</label><select name="payment_method" required><option value="">Select payment method / Válassz fizetési módot</option><option>Cash</option><option>Check</option><option>Bank Transfer</option><option>Credit Card</option><option>Invoice</option><option>Warranty Work</option></select></div>
 <div class="field"><label>Invoice number / Számla vagy csekk szám</label><input name="invoice_number"></div><div class="field"><label>Invoice/check file / Számla vagy csekk fájl</label><input name="file" type="file"></div>
 <div class="field full"><label>${req("Close description / Elvégzett munka leírása")}</label><textarea name="close_description" required></textarea></div>
-<div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select id="nextAssignedUser" name="next_assigned_user_id">${workerSelectOptions(j.assigned_user_id,j.assigned_to)}</select><small class="worker-availability-hint" aria-live="polite"></small></div><div class="field"><label>Next priority / Következő prioritás</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input id="nextJobStart" name="next_start_time" type="datetime-local" step="300"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input id="nextJobEnd" name="next_end_time" type="datetime-local" step="300"></div><div class="field"><label>Next planned amount / Következő tervezett összeg</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Save closeout / Lezárás mentése</button></div>`;
+<div id="nextJobFields" class="field full hidden"><h3>Next job / Következő feladat</h3><div class="form-grid"><div class="field full"><label>${req("Next title / Következő feladat neve")}</label><input name="next_title"></div><div class="field"><label>${req("Next assigned to / Következő felelős")}</label><select id="nextAssignedUser" name="next_assigned_user_id">${workerSelectOptions(j.assigned_user_id,j.assigned_to)}</select><small class="worker-availability-hint" aria-live="polite"></small></div><div class="field"><label>Next priority / Következő prioritás</label><select name="next_priority"><option>Critical</option><option>Urgent</option><option>High</option><option selected>Medium</option><option>Low</option></select></div><div class="field"><label>${req("Next start / Következő kezdés")}</label><input id="nextJobStart" name="next_start_time" type="datetime-local" step="900"></div><div class="field"><label>${req("Next end / Következő befejezés")}</label><input id="nextJobEnd" name="next_end_time" type="datetime-local" step="900"></div><div class="field"><label>Next planned amount / Következő tervezett összeg</label><input name="next_planned_amount" type="number" value="0"></div><div class="field full"><label>Next pricing basis / Következő díjmegállapítás</label><input name="next_pricing_basis"></div><div class="field full"><label>Next address / Következő cím</label><input name="next_service_address" value="${j.service_address||""}"></div><div class="field full"><label>Next instructions / Következő teendők</label><textarea name="next_instructions"></textarea></div><div class="field full"><label>Next notes / Következő megjegyzés</label><textarea name="next_notes"></textarea></div></div></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Save closeout / Lezárás mentése</button></div>`;
 bindWorkerAvailability(document.getElementById("nextAssignedUser"),document.getElementById("nextJobStart"),document.getElementById("nextJobEnd"));
 $("#form").onsubmit=async e=>{e.preventDefault();let fd=new FormData(e.target);let billed=Number(fd.get("billed_amount"));let file=fd.get("file");let payment=fd.get("payment_method");if(billed>0&&!payment){appAlert(bi("Payment method is required when billed amount is greater than zero.","Fizetési mód kötelező, ha az összeg nagyobb mint 0."),"warning");return}if(billed>0&&(!file||!file.name)){appAlert(bi("An invoice/check file is required when the amount is greater than zero.","Számla/csekk fájl kötelező, ha az összeg nagyobb mint 0."),"warning");return}
 if(file && file.name && !isAllowedInvoiceFile(file.name)){appAlert(bi("Only PDF, JPG, JPEG or PNG files are allowed.","Csak PDF, JPG, JPEG vagy PNG fájl tölthető fel."),"warning");return}
@@ -2885,14 +2958,14 @@ async function commitPianoImport(){
 }
 function renderPianoImportCompleted(result){const box=document.getElementById('pianoImportResult');if(!box)return;box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Piano import completed','A zongoraimport befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported pianos','Importált zongorák')}</span><strong>${Number(result.importedPianos||0)}</strong></div><div class="import-stat"><span>${bi('Clients updated as owners','Owner státuszra frissített ügyfelek')}</span><strong>${Number(result.updatedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Unidentified owner','Ismeretlen tulajdonos')}</span><strong>${Number(result.unidentifiedOwnerPianos||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedAlreadyImported||0)+Number(result.skippedPossibleDuplicates||0)}</strong></div><div class="import-stat"><span>${bi('Client not found','Ügyfél nem található')}</span><strong>${Number(result.clientNotFound||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Invalid/failed rows','Hibás sorok')}</span><strong>${Number(result.invalidRows||0)+Number(result.failedRows||0)}</strong></div></div><div class="actions"><button type="button" onclick="closeModal();render('pianos')">${bi('View pianos','Zongorák megtekintése')}</button></div></div>`;}
 
-function openForm(key,row=null){let s=schemas[key];$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,row?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
+function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
  if(key==="pianos") setupPianoFormBehavior(row);
  applyLanguageToDOM(document.getElementById("modal"));
  $("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}try{let saved;
 if(row) saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});
 if(key==="contacts"){const clientId=(row&&row.id)||saved.id; const allPianoChecks=[...document.querySelectorAll('input[name="client_piano_ids"]')]; const ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value); if(clientId && allPianoChecks.length) await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}
-closeModal();render(key)}catch(err){showError(err)}}}
+closeModal();if(typeof options.onSaved==="function") await options.onSaved(saved); else render(key)}catch(err){showError(err)}}}
 function field(f,val=""){let[name,label,type,opts]=f;const cls=`field field-${name} ${type==="textarea"?"full":""}`;if(type==="textarea")return `<div class="${cls}" data-field="${name}"><label>${label}</label><textarea name="${name}">${val||""}</textarea></div>`;if(type==="select")return `<div class="${cls}" data-field="${name}"><label>${label}</label><select name="${name}" onchange="if(typeof updateContactConditionalUI==='function')updateContactConditionalUI()">${opts.map(o=>{const value=Array.isArray(o)?o[0]:o;const text=Array.isArray(o)?o[1]:o;return `<option value="${value}" ${String(value)===String(val??"")?"selected":""}>${text}</option>`}).join("")}</select></div>`;return `<div class="${cls}" data-field="${name}"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${val??""}"></div>`}
 
 function updateContactConditionalUI(){
@@ -3104,7 +3177,7 @@ function openFinancialItem(row=null){
      <option value="LIABILITY" ${selectedType==="LIABILITY"?"selected":""}>Liability / Kötelezettség</option>
      <option value="EQUITY" ${selectedType==="EQUITY"?"selected":""}>Equity / Saját tőke</option>
    </select></div>
-   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${row?.title||""}" required placeholder="${bi("Piano sale, tuning, rent...","Zongoraeladás, hangolás, bérleti díj...")}"></div>
+   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${source?.title||""}" required placeholder="${bi("Piano sale, tuning, rent...","Zongoraeladás, hangolás, bérleti díj...")}"></div>
    <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" min="0" step="0.01" value="${row?.amount||0}" required></div>
    <div class="field"><label>${req("Category / Kategória")}</label><select name="category" id="financialCategory">${optionsFrom(categoryList,row?.category||"")}</select></div>
    <div class="field"><label>${req("Recurrence / Ismétlődés")}</label><select name="recurrence"><option value="ONE_TIME" ${row?.recurrence!=="MONTHLY"?"selected":""}>One-time / Egyszeri</option><option value="MONTHLY" ${row?.recurrence==="MONTHLY"?"selected":""}>Monthly / Havi</option></select></div>
@@ -3440,7 +3513,7 @@ async function renderPlannedJobs(){
 }
 async function openPlannedJob(row=null){
  const [contacts,pianos]=await Promise.all([api("/api/contacts").catch(()=>[]),api("/api/pianos").catch(()=>[]),loadSchedulerWorkers().catch(()=>[])]).then(results=>[results[0],results[1]]);
- const estimatedMinutes=Math.max(5,Math.round(Number(row?.estimated_hours||2)*60/5)*5);
+ const estimatedMinutes=Math.max(SCHEDULE_INTERVAL_MINUTES,Math.round(Number(row?.estimated_hours||2)*60/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES);
  const clientOptions=contacts.map(c=>`<option value="${(c.name||"").replaceAll('"',"&quot;")}">${c.phone||""} ${c.address||""}</option>`).join("");
  const pianoOptions=pianos.map(p=>`<option value="${(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).replaceAll('"',"&quot;")}">${p.serial_no||""} ${p.location||""}</option>`).join("");
  const isEdit=!!row;
@@ -3457,7 +3530,7 @@ async function openPlannedJob(row=null){
    <div class="field"><label>Priority / Prioritás</label><select name="priority">${["Critical","Urgent","High","Medium","Low"].map(n=>`<option ${row?.priority===n?"selected":""}>${n}</option>`).join("")}</select></div>
    <div class="field"><label>Expected revenue / Várható bevétel</label><input name="expected_revenue" type="number" value="${row?.expected_revenue||0}"></div>
    <div class="field"><label>Probability / Valószínűség</label><select name="probability">${optionTags(plannedJobProbabilities,row?.probability||plannedJobProbabilities[0])}</select></div>
-   <div class="field"><label>${bi("Estimated duration","Tervezett időtartam")}</label><input id="plannedEstimatedDuration" type="text" inputmode="numeric" value="${formatDurationInput(estimatedMinutes)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:05" required><input name="estimated_hours" type="hidden" value="${estimatedMinutes/60}"><small>${bi("Format: hours:minutes, in 5-minute steps.","Formátum: óra:perc, 5 perces lépésekben.")}</small></div>
+   <div class="field"><label>${bi("Estimated duration","Tervezett időtartam")}</label><input id="plannedEstimatedDuration" type="text" inputmode="numeric" value="${formatDurationInput(estimatedMinutes)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:15" required><input name="estimated_hours" type="hidden" value="${estimatedMinutes/60}"><small>${bi("Format: hours:minutes, in 15-minute steps.","Formátum: óra:perc, 15 perces lépésekben.")}</small></div>
    <div class="field"><label>Target date / Cél dátum</label><input name="target_date" type="date" value="${row?.target_date||""}"></div>
    <div class="field"><label>Status / Állapot</label><select name="status">${optionTags(plannedJobStatuses,row?.status||plannedJobStatuses[1])}</select></div>
    <div class="field full"><label>Block reason / Elakadás oka</label><input name="block_reason" value="${row?.block_reason||""}" placeholder="Waiting for parts / Alkatrészre vár, client delay..."></div>
@@ -3471,7 +3544,7 @@ async function openPlannedJob(row=null){
    e.preventDefault();
    const body=Object.fromEntries(new FormData(e.target));
    const durationMinutes=parseDurationInput(document.getElementById("plannedEstimatedDuration")?.value);
-   if(!Number.isFinite(durationMinutes)||durationMinutes<5){showError("INVALID_PLANNED_DURATION");return;}
+   if(!Number.isFinite(durationMinutes)||durationMinutes<SCHEDULE_INTERVAL_MINUTES){showError("INVALID_PLANNED_DURATION");return;}
    body.expected_revenue=Number(body.expected_revenue||0); body.estimated_hours=durationMinutes/60;
    const c=contacts.find(x=>(x.name||"").trim().toLowerCase()===(body.client_name||"").trim().toLowerCase()); if(c) body.client_id=c.id;
    const p=pianos.find(x=>(x.display_name||`${x.brand||""} ${x.model||""}`.trim()).trim().toLowerCase()===(body.piano_name||"").trim().toLowerCase()); if(p) body.piano_id=p.id;
@@ -3489,22 +3562,22 @@ function openPlannedJobDetails(x){
 }
 async function openConvertPlannedJob(x){
  await loadSchedulerWorkers();
- const plannedMinutes=Math.max(5,Math.round(Number(x.estimated_hours||2)*60/5)*5);
- const start=roundWallClockUp(newYorkNowLocal(),5);const end=addWallClockMinutes(start,plannedMinutes);
+ const plannedMinutes=Math.max(SCHEDULE_INTERVAL_MINUTES,Math.round(Number(x.estimated_hours||2)*60/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES);
+ const start=roundWallClockUp(newYorkNowLocal(),SCHEDULE_INTERVAL_MINUTES);const end=addWallClockMinutes(start,plannedMinutes);
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent="Convert to Scheduled Job / Áthelyezés naptárba";
  $("#form").innerHTML=`<p class="muted">A rendszer backend oldalon ellenőrzi, hogy a kiválasztott felelős szabad-e az adott időintervallumban.</p><div class="form-grid">
    <div class="field"><label>${req("Title / Munka neve")}</label><input name="title" value="${x.title||""}" required></div>
    <div class="field"><label>${req("Assigned to / Felelős")}</label><select id="convertAssignedUser" name="assigned_user_id">${workerSelectOptions(x.preferred_assigned_user_id,x.preferred_assigned_to)}</select><small class="worker-availability-hint" aria-live="polite"></small></div>
-   <div class="field"><label>${req("Start / Kezdés")}</label><input id="convertJobStart" name="start_time" type="datetime-local" value="${start}" step="300" required></div>
-   <div class="field"><label>${req("End / Befejezés")}</label><input id="convertJobEnd" name="end_time" type="datetime-local" value="${end}" step="300" required></div>
+   <div class="field"><label>${req("Start / Kezdés")}</label><input id="convertJobStart" name="start_time" type="datetime-local" value="${start}" step="900" required></div>
+   <div class="field"><label>${req("End / Befejezés")}</label><input id="convertJobEnd" name="end_time" type="datetime-local" value="${end}" step="900" required></div>
    <div class="field"><label>Final agreed amount / Végleges megbeszélt összeg</label><input name="planned_amount" type="number" value="${x.expected_revenue||0}"></div>
-   <div class="field"><label>${bi("Planned duration","Tervezett időtartam")}</label><input id="convertPlannedDuration" type="text" inputmode="numeric" value="${formatDurationInput(plannedMinutes)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:05" required><input id="convertPlannedHours" name="planned_hours" type="hidden" value="${plannedMinutes/60}"><input id="convertPlannedMinutes" name="planned_minutes" type="hidden" value="${plannedMinutes}"></div>
+   <div class="field"><label>${bi("Planned duration","Tervezett időtartam")}</label><input id="convertPlannedDuration" type="text" inputmode="numeric" value="${formatDurationInput(plannedMinutes)}" pattern="[0-9]{1,3}[:.][0-5][0-9]" placeholder="3:15" required><input id="convertPlannedHours" name="planned_hours" type="hidden" value="${plannedMinutes/60}"><input id="convertPlannedMinutes" name="planned_minutes" type="hidden" value="${plannedMinutes}"></div>
    <div class="field full"><label>${req("Service address / Cím")}</label><input name="service_address" value="${x.service_address||""}" required></div>
    <div class="field full"><label>Instructions / Instrukció</label><textarea name="instructions">${x.next_step||x.notes||""}</textarea></div>
  </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>Convert / Naptárba helyezés</button></div>`;
  const convertStart=document.getElementById("convertJobStart"),convertEnd=document.getElementById("convertJobEnd"),convertDuration=document.getElementById("convertPlannedDuration");
- const syncEnd=()=>{const minutes=parseDurationInput(convertDuration.value);if(Number.isFinite(minutes)&&minutes>=5){document.getElementById("convertPlannedMinutes").value=String(minutes);document.getElementById("convertPlannedHours").value=String(minutes/60);convertEnd.value=addWallClockMinutes(convertStart.value,minutes);}};
+ const syncEnd=()=>{const minutes=parseDurationInput(convertDuration.value);if(Number.isFinite(minutes)&&minutes>=SCHEDULE_INTERVAL_MINUTES){document.getElementById("convertPlannedMinutes").value=String(minutes);document.getElementById("convertPlannedHours").value=String(minutes/60);convertEnd.value=addWallClockMinutes(convertStart.value,minutes);}};
  const syncDuration=()=>{const minutes=wallClockDifferenceMinutes(convertStart.value,convertEnd.value);if(minutes>0){convertDuration.value=formatDurationInput(minutes);document.getElementById("convertPlannedMinutes").value=String(minutes);document.getElementById("convertPlannedHours").value=String(minutes/60);}};
  convertDuration.addEventListener("change",syncEnd);convertStart.addEventListener("change",syncEnd);convertEnd.addEventListener("change",syncDuration);
  bindWorkerAvailability(document.getElementById("convertAssignedUser"),convertStart,convertEnd);
@@ -3515,8 +3588,8 @@ async function openConvertPlannedJob(x){
    body.planned_amount=Number(body.planned_amount||0);body.planned_minutes=durationMinutes;body.planned_hours=durationMinutes/60;
    if(wallClockDifferenceMinutes(body.start_time,body.end_time)<=0){showError("INVALID_TIME_RANGE");return;}
    if(!isFiveMinuteDateTime(body.start_time)||!isFiveMinuteDateTime(body.end_time)){showError("INVALID_TIME_STEP");return;}
-   if(!Number.isFinite(durationMinutes)||durationMinutes<5){showError("INVALID_PLANNED_DURATION");return;}
-   try{const r=await api(`/api/planned-jobs/${x.id}/convert`,{method:"POST",body:JSON.stringify(body)}); await appAlert(`${bi("Scheduled job created","Naptári munka létrejött")}: ${r.job?.job_key||r.job?.id||""}`,"success"); closeModal(); currentWeekStart=startOfWeek(new Date(body.start_time)); await renderScheduler();}catch(err){showError(err)}
+   if(!Number.isFinite(durationMinutes)||durationMinutes<SCHEDULE_INTERVAL_MINUTES){showError("INVALID_PLANNED_DURATION");return;}
+   try{const r=await api(`/api/planned-jobs/${x.id}/convert`,{method:"POST",body:JSON.stringify(body)}); await appAlert(`${bi("Scheduled job created","Naptári munka létrejött")}: ${r.job?.job_key||r.job?.id||""}`,"success"); closeModal(); currentWeekStart=startOfWeek(body.start_time); await renderScheduler();}catch(err){showError(err)}
  };
 }
 async function archivePlannedJob(id){
@@ -3824,8 +3897,8 @@ async function resendUserActivation(id){
 async function deleteUser(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");if(!await appConfirm(bi("Delete this user permanently?","Véglegesen töröljük ezt a felhasználót?"),{type:"error",confirmText:bi("Delete permanently","Végleges törlés")}))return;try{await api(`/api/users/${id}`,{method:"DELETE"});await renderUsers();}catch(err){showError(err)}}
 
 const friendlyErrors={
- en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced.",PWA_LOGO_REQUIREMENTS:"Use a PNG, JPG, or JPEG image at least 192×192 pixels. Non-square images are automatically centered on a square canvas for the PWA icon.",INVALID_TIME_RANGE:"The end time must be later than the start time. Past dates and times are allowed.",INVALID_TIME_STEP:"Times must use 5-minute steps (00, 05, 10, ...).",INVALID_PLANNED_DURATION:"Enter the planned duration as hours:minutes in 5-minute steps (for example 3:05).",INVALID_USER_ROLE:"Select Administrator, Manager, or Worker as the role.",INVALID_CALENDAR_COLOR:"Select a valid calendar color.",RESERVED_CALENDAR_COLOR:"This color is reserved for job statuses. Choose a different employee color.",JOB_ALREADY_CLOSED:"This job step has already been closed and cannot be closed again.",WORKFLOW_ALREADY_FINALIZED:"This workflow has already been fully closed.",PARTIAL_CLOSE_NEXT_JOB_REQUIRED:"A partial close requires the complete next job, including its responsible employee and time range."},
- hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A szuperadmin jogosultságai nem csökkenthetők.",PWA_LOGO_REQUIREMENTS:"Legalább 192×192 képpontos PNG-, JPG- vagy JPEG-képet használj. A nem négyzetes képet a rendszer automatikusan négyzetes PWA-ikonba igazítja.",INVALID_TIME_RANGE:"A befejezés időpontjának későbbinek kell lennie a kezdésnél. Korábbi dátum és időpont megadható.",INVALID_TIME_STEP:"Az időpontokat 5 perces lépésekben add meg (00, 05, 10, ...).",INVALID_PLANNED_DURATION:"A tervezett időtartamot óra:perc formában, 5 perces lépésekben add meg (például 3:05).",INVALID_USER_ROLE:"Szerepkörként Admin, Manager vagy Worker választható.",INVALID_CALENDAR_COLOR:"Válassz érvényes naptárszínt.",RESERVED_CALENDAR_COLOR:"Ez a szín a munkaállapotok számára van lefoglalva. Válassz másik munkavállalói színt.",JOB_ALREADY_CLOSED:"Ezt a munkalépést már lezárták, ezért nem zárható le újra.",WORKFLOW_ALREADY_FINALIZED:"Ezt a teljes munkafolyamatot már véglegesen lezárták.",PARTIAL_CLOSE_NEXT_JOB_REQUIRED:"Részleges lezáráskor kötelező a következő munka, a felelős munkatárs és az időintervallum teljes megadása."}
+ en:{PERMISSION_DENIED:"You do not have permission to perform this action.",REQUIRED_FIELDS:"Please complete all required fields.",INVALID_FILE_TYPE:"The selected file is not a valid PDF, JPG, JPEG, or PNG file.",FILE_TOO_LARGE:"The selected file exceeds the 20 MB size limit.",INVALID_PASSWORD:"The password is incorrect.",BACKUP_NOT_FOUND:"The selected backup could not be found.",RESTORE_CONFIRMATION_REQUIRED:"Type RESTORE BACKUP exactly to confirm the restore.",SUPERADMIN_PERMISSIONS_FIXED:"Superadmin permissions cannot be reduced.",PWA_LOGO_REQUIREMENTS:"Use a PNG, JPG, or JPEG image at least 192×192 pixels. Non-square images are automatically centered on a square canvas for the PWA icon.",INVALID_TIME_RANGE:"The end time must be later than the start time. Past dates and times are allowed.",INVALID_TIME_STEP:"Times must use 15-minute steps (00, 15, 30, 45).",INVALID_PLANNED_DURATION:"Enter the planned duration as hours:minutes in 15-minute steps (for example 3:15).",INVALID_USER_ROLE:"Select Administrator, Manager, or Worker as the role.",INVALID_CALENDAR_COLOR:"Select a valid calendar color.",RESERVED_CALENDAR_COLOR:"This color is reserved for job statuses. Choose a different employee color.",JOB_ALREADY_CLOSED:"This job step has already been closed and cannot be closed again.",WORKFLOW_ALREADY_FINALIZED:"This workflow has already been fully closed.",PARTIAL_CLOSE_NEXT_JOB_REQUIRED:"A partial close requires the complete next job, including its responsible employee and time range."},
+ hu:{PERMISSION_DENIED:"Nincs jogosultságod ehhez a művelethez.",REQUIRED_FIELDS:"Kérlek, tölts ki minden kötelező mezőt.",INVALID_FILE_TYPE:"A kiválasztott fájl nem érvényes PDF-, JPG-, JPEG- vagy PNG-fájl.",FILE_TOO_LARGE:"A kiválasztott fájl meghaladja a 20 MB-os mérethatárt.",INVALID_PASSWORD:"A megadott jelszó hibás.",BACKUP_NOT_FOUND:"A kiválasztott biztonsági mentés nem található.",RESTORE_CONFIRMATION_REQUIRED:"A visszaállításhoz pontosan ezt írd be: RESTORE BACKUP.",SUPERADMIN_PERMISSIONS_FIXED:"A szuperadmin jogosultságai nem csökkenthetők.",PWA_LOGO_REQUIREMENTS:"Legalább 192×192 képpontos PNG-, JPG- vagy JPEG-képet használj. A nem négyzetes képet a rendszer automatikusan négyzetes PWA-ikonba igazítja.",INVALID_TIME_RANGE:"A befejezés időpontjának későbbinek kell lennie a kezdésnél. Korábbi dátum és időpont megadható.",INVALID_TIME_STEP:"Az időpontokat 15 perces lépésekben add meg (00, 15, 30, 45).",INVALID_PLANNED_DURATION:"A tervezett időtartamot óra:perc formában, 15 perces lépésekben add meg (például 3:15).",INVALID_USER_ROLE:"Szerepkörként Admin, Manager vagy Worker választható.",INVALID_CALENDAR_COLOR:"Válassz érvényes naptárszínt.",RESERVED_CALENDAR_COLOR:"Ez a szín a munkaállapotok számára van lefoglalva. Válassz másik munkavállalói színt.",JOB_ALREADY_CLOSED:"Ezt a munkalépést már lezárták, ezért nem zárható le újra.",WORKFLOW_ALREADY_FINALIZED:"Ezt a teljes munkafolyamatot már véglegesen lezárták.",PARTIAL_CLOSE_NEXT_JOB_REQUIRED:"Részleges lezáráskor kötelező a következő munka, a felelős munkatárs és az időintervallum teljes megadása."}
 };
 Object.assign(friendlyErrors.en,{WORKFLOW_TRANSFER_REASON_REQUIRED:"A transfer reason is required when the next phase is assigned to a different person.",WORKFLOW_AUTO_ASSIGNMENT_INVALID:"The next phase could not inherit the previous responsible person. Reload the workflow and try again.",WORKFLOW_AUTO_ASSIGNMENT_CONFLICT:"The next phase was changed by another user. Reload the workflow and try again.",WORKFLOW_ASSIGNMENT_MODE_INVALID:"The selected workflow assignment mode is not valid.",WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE:"This phase cannot start until the previous active phase is completed.",WORKFLOW_RESPONSIBLE_REQUIRED_TO_START:"Select a responsible person before starting the phase.",INVALID_STAGE_DEADLINE:"Enter a valid phase deadline.",STAGE_DEADLINE_NOT_ALLOWED:"You do not have permission to change this phase deadline.",FINAL_DEADLINE_IMMUTABLE:"The final customer deadline cannot be changed here."});
 Object.assign(friendlyErrors.hu,{WORKFLOW_TRANSFER_REASON_REQUIRED:"Másik személy kijelölésekor az átadás indokát is meg kell adni.",WORKFLOW_AUTO_ASSIGNMENT_INVALID:"A következő fázis nem tudta automatikusan örökölni az előző felelőst. Töltsd újra a workflow-t, majd próbáld újra.",WORKFLOW_AUTO_ASSIGNMENT_CONFLICT:"A következő fázist közben másik felhasználó módosította. Töltsd újra a workflow-t, majd próbáld újra.",WORKFLOW_ASSIGNMENT_MODE_INVALID:"A kiválasztott workflow-hozzárendelési mód érvénytelen.",WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE:"Ez a fázis addig nem indítható, amíg az előző aktív fázis le nem zárul.",WORKFLOW_RESPONSIBLE_REQUIRED_TO_START:"A fázis indítása előtt válassz felelőst.",INVALID_STAGE_DEADLINE:"Adj meg érvényes fázishatáridőt.",STAGE_DEADLINE_NOT_ALLOWED:"Nincs jogosultságod ennek a fázishatáridőnek a módosításához.",FINAL_DEADLINE_IMMUTABLE:"A végső ügyfélhatáridő itt nem módosítható."});
@@ -3843,8 +3916,8 @@ function localizedErrorMessage(error){
  };
  if(userManagementErrors[currentLang]?.[code])return userManagementErrors[currentLang][code];
  const googleErrors={
-  en:{INVALID_GOOGLE_CALENDAR_EMAIL:"Enter a valid Google Calendar email address.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"This Google Calendar email is already assigned to another employee.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Assign the imported event to an active employee before completing the review.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Resolve the schedule conflict before completing the review.",GOOGLE_SOURCE_EVENT_CANCELLED:"The Google source event was cancelled. Edit or delete the ERP job as appropriate.",GOOGLE_CALENDAR_NOT_CONFIGURED:"The Google Calendar server settings are incomplete.",GOOGLE_CALENDAR_NOT_CONNECTED:"Google Calendar is not connected."},
-  hu:{INVALID_GOOGLE_CALENDAR_EMAIL:"Adj meg érvényes Google Naptár e-mail-címet.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"Ez a Google Naptár e-mail-cím már egy másik munkatárshoz tartozik.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Az ellenőrzés befejezése előtt rendeld az importált eseményt aktív munkatárshoz.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Az ellenőrzés befejezése előtt oldd fel az időpontütközést.",GOOGLE_SOURCE_EVENT_CANCELLED:"A forrásként szolgáló Google-eseményt törölték. Szükség szerint módosítsd vagy töröld az ERP-munkát.",GOOGLE_CALENDAR_NOT_CONFIGURED:"A Google Naptár szerverbeállításai hiányosak.",GOOGLE_CALENDAR_NOT_CONNECTED:"A Google Naptár nincs csatlakoztatva."}
+  en:{INVALID_GOOGLE_CALENDAR_EMAIL:"Enter a valid Google Calendar email address.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"This Google Calendar email is already assigned to another employee.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Assign the imported event to an active employee before completing the review.",GOOGLE_EVENT_CLIENT_REQUIRED:"Select a client before completing the Google Calendar review.",GOOGLE_EVENT_PIANO_REQUIRED:"Select a client piano before completing the Google Calendar review.",GOOGLE_EVENT_TIME_ALIGNMENT_REQUIRED:"Adjust the imported event to a 15-minute calendar interval before completing the review.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Resolve the schedule conflict before completing the review.",GOOGLE_SOURCE_EVENT_CANCELLED:"The Google source event was cancelled. Edit or delete the ERP job as appropriate.",GOOGLE_CALENDAR_NOT_CONFIGURED:"The Google Calendar server settings are incomplete.",GOOGLE_CALENDAR_NOT_CONNECTED:"Google Calendar is not connected."},
+  hu:{INVALID_GOOGLE_CALENDAR_EMAIL:"Adj meg érvényes Google Naptár e-mail-címet.",GOOGLE_CALENDAR_EMAIL_ALREADY_USED:"Ez a Google Naptár e-mail-cím már egy másik munkatárshoz tartozik.",GOOGLE_EVENT_ASSIGNEE_REQUIRED:"Az ellenőrzés befejezése előtt rendeld az importált eseményt aktív munkatárshoz.",GOOGLE_EVENT_CLIENT_REQUIRED:"A Google Naptár-ellenőrzés befejezése előtt válassz ügyfelet.",GOOGLE_EVENT_PIANO_REQUIRED:"A Google Naptár-ellenőrzés befejezése előtt válassz ügyfélzongorát.",GOOGLE_EVENT_TIME_ALIGNMENT_REQUIRED:"A Google Naptár-ellenőrzés befejezése előtt igazítsd az eseményt 15 perces naptárintervallumra.",GOOGLE_EVENT_CONFLICT_UNRESOLVED:"Az ellenőrzés befejezése előtt oldd fel az időpontütközést.",GOOGLE_SOURCE_EVENT_CANCELLED:"A forrásként szolgáló Google-eseményt törölték. Szükség szerint módosítsd vagy töröld az ERP-munkát.",GOOGLE_CALENDAR_NOT_CONFIGURED:"A Google Naptár szerverbeállításai hiányosak.",GOOGLE_CALENDAR_NOT_CONNECTED:"A Google Naptár nincs csatlakoztatva."}
  };
  if(googleErrors[currentLang]?.[code])return googleErrors[currentLang][code];
  const eventErrors={
