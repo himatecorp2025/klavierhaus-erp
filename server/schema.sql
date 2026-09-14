@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS pianos (
   model TEXT,
   serial_no TEXT,
   year INTEGER,
+  build_year INTEGER,
   ownership TEXT,
   owner_contact_id TEXT,
   location TEXT,
@@ -767,6 +768,15 @@ CREATE TABLE IF NOT EXISTS app_settings (
 -- Published website copy is stored per page and language. The bundled website
 -- content remains the safe fallback, while administrators can update the same
 -- structured document without injecting HTML into the public renderer.
+CREATE TABLE IF NOT EXISTS landing_sections (
+  section_key TEXT PRIMARY KEY,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+  order_index INTEGER NOT NULL DEFAULT 0,
+  updated_by_user_id TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS website_content_pages (
   page_key TEXT NOT NULL,
   language TEXT NOT NULL CHECK(language IN ('en','hu')),
@@ -811,6 +821,7 @@ CREATE TABLE IF NOT EXISTS website_showroom_pianos (
   slug_hu TEXT NOT NULL UNIQUE,
   brand TEXT NOT NULL,
   model TEXT,
+  build_year INTEGER,
   title_en TEXT NOT NULL,
   title_hu TEXT NOT NULL,
   summary_en TEXT,
