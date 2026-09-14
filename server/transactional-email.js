@@ -162,19 +162,32 @@ function safeProviderCode(error) {
 }
 
 function createTransactionalEmail(env = process.env) {
-  const apiKey = String(env.RESEND_API_KEY || "").trim();
-  const from = String(env.EMAIL_FROM || DEFAULT_FROM).trim();
-  const eventFrom = String(env.EVENT_EMAIL_FROM || DEFAULT_EVENT_FROM).trim();
-  const replyTo = String(env.EMAIL_REPLY_TO || "").trim();
+  let apiKey = String(env.RESEND_API_KEY || "").trim();
+  let from = String(env.EMAIL_FROM || DEFAULT_FROM).trim();
+  let eventFrom = String(env.EVENT_EMAIL_FROM || DEFAULT_EVENT_FROM).trim();
+  let replyTo = String(env.EMAIL_REPLY_TO || "").trim();
   const appBaseUrl = String(env.APP_BASE_URL || "").trim();
   const webhookSecret = String(env.RESEND_WEBHOOK_SECRET || "").trim();
-  const resend = new Resend(apiKey || "re_webhook_verification_only");
+  let resend = new Resend(apiKey || "re_webhook_verification_only");
+  let integrationEnabled = true;
+  function reconfigure({ apiKey: nextApiKey, from: nextFrom, eventFrom: nextEventFrom, replyTo: nextReplyTo, enabled = true } = {}) {
+    if (nextApiKey !== undefined) apiKey = String(nextApiKey || "").trim();
+    if (nextFrom !== undefined) from = String(nextFrom || DEFAULT_FROM).trim();
+    if (nextEventFrom !== undefined) eventFrom = String(nextEventFrom || DEFAULT_EVENT_FROM).trim();
+    if (nextReplyTo !== undefined) replyTo = String(nextReplyTo || "").trim();
+    integrationEnabled = Boolean(enabled);
+    resend = new Resend(apiKey || "re_webhook_verification_only");
+    return { configured: integrationEnabled && Boolean(apiKey && from) };
+  }
+  function assertEnabled() { if (!integrationEnabled) throw Object.assign(new Error("RESEND_INTEGRATION_DISABLED"), { code: "RESEND_INTEGRATION_DISABLED" }); }
 
   return {
     provider: "RESEND",
-    configured: Boolean(apiKey && from),
+    get configured() { return integrationEnabled && Boolean(apiKey && from); },
+    reconfigure,
     webhookConfigured: Boolean(webhookSecret),
     async sendAccountActivation({ to, name, code, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !from) {
         const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
         error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
@@ -198,6 +211,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendEventInvitation({ to, name, event, invitationUrl, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !eventFrom) {
         const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
         error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
@@ -221,6 +235,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendEventInterestConfirmation({ to, event, language, websiteBaseUrl, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !eventFrom) {
         const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
         error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
@@ -244,6 +259,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendEventReturnAnnouncement({ to, event, language, websiteBaseUrl, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildEventReturnAnnouncement({ event, language, websiteBaseUrl });
       const { data, error } = await resend.emails.send({ from: eventFrom, to: [String(to || "").trim().toLowerCase()], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "event_return" }] }, { idempotencyKey });
@@ -251,6 +267,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendEventPurchaseConfirmation({ to, purchaserName, event, payment, invoiceNumber, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildEventPurchaseEmail({ purchaserName, event, payment, invoiceNumber, company, websiteBaseUrl });
       const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }, { filename: `klavierhaus-invoice-${invoiceNumber}.pdf`, content: invoicePdf }], tags: [{ name: "category", value: "event_purchase" }] }, { idempotencyKey });
@@ -258,6 +275,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendEventTicketDocuments({ to, event, tickets, ticketPdf, language, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildTicketDocumentsEmail({ name: tickets?.[0]?.buyer_name || tickets?.[0]?.attendee_name, event, language });
       const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }], tags: [{ name: "category", value: "event_ticket" }] }, { idempotencyKey });
@@ -265,6 +283,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendCustomerConversationReply({ to, name, message, conversationUrl, language, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildConversationReplyEmail({ name, message, conversationUrl, language });
       const { data, error } = await resend.emails.send({ from, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "customer_conversation" }] }, { idempotencyKey });
@@ -272,6 +291,7 @@ function createTransactionalEmail(env = process.env) {
       return { providerMessageId: String(data.id) };
     },
     async sendCustomerConversationAutoReply({ to, name, conversationUrl, language, idempotencyKey }) {
+      assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
       const content = buildConversationAutoReplyEmail({ name, conversationUrl, language });
       const { data, error } = await resend.emails.send({ from, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "customer_conversation_auto_reply" }] }, { idempotencyKey });
