@@ -178,11 +178,17 @@ function resolveBrand(copy = {}) {
   };
 }
 
-function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" }) {
+function renderHeader({ copy, language, currentKey, alternateRouteOverride = "", activeLandingKeys = null }) {
   const brand = resolveBrand(copy);
   const alternateLanguage = getAlternateLanguage(language);
   const alternateRoute = alternateRouteOverride || getRoute(currentKey, alternateLanguage);
-  const navItems = copy.nav.map((item) => {
+  const hiddenNavKeys = activeLandingKeys ? new Set([
+    ...(!activeLandingKeys.has("salon_events") ? ["events"] : []),
+    ...(!activeLandingKeys.has("featured_pianos") ? ["pianos"] : []),
+    ...(!activeLandingKeys.has("craftsmanship") ? ["services"] : []),
+    ...(!activeLandingKeys.has("contact_cta") ? ["contact"] : [])
+  ]) : new Set();
+  const navItems = copy.nav.filter((item) => !hiddenNavKeys.has(item.key)).map((item) => {
     const active = isNavigationActive(item.key, currentKey) ? ' aria-current="page"' : "";
     return `<li><a href="${escapeHtml(getRoute(item.key, language))}"${active}>${escapeHtml(item.label)}</a></li>`;
   }).join("");
@@ -208,6 +214,7 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "" 
         <ul>${navItems}</ul>
       </nav>
       <div class="header-actions">
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}" title="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}"><span data-theme-icon aria-hidden="true">☀</span></button>
         <a class="language-switch" href="${escapeHtml(alternateRoute)}" hreflang="${alternateLanguage === "hu" ? "hu-HU" : "en-US"}">${escapeHtml(copy.alternateLabel)}</a>
         <button class="header-consultation" type="button" data-private-viewing-open><span class="header-consultation__label">${escapeHtml(copy.consultationLabel)}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button>
       </div>
@@ -421,8 +428,9 @@ function renderSection(section, language) {
   }
 }
 
-function renderFooter(copy, language) {
+function renderFooter(copy, language, activeLandingKeys = null) {
   const brand = resolveBrand(copy);
+  const enabled = (key) => { if (activeLandingKeys) return activeLandingKeys.has(key); const navKey={salon_events:"events",featured_pianos:"pianos",craftsmanship:"services",contact_cta:"contact"}[key]; return !navKey || copy.nav.some((item)=>item.key===navKey); };
   return `<footer class="site-footer">
     <div class="footer-primary">
       <div class="footer-brand">
@@ -432,16 +440,16 @@ function renderFooter(copy, language) {
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerExplore)}</p>
         <a href="${escapeHtml(getRoute("story", language))}">${escapeHtml(copy.footerStory)}</a>
-        <a href="${escapeHtml(getRoute("events", language))}">${escapeHtml(copy.nav.find((item) => item.key === "events").label)}</a>
-        <a href="${escapeHtml(getRoute("artists", language))}">${escapeHtml(copy.nav.find((item) => item.key === "artists").label)}</a>
-        <a href="${escapeHtml(getRoute("pianos", language))}">${escapeHtml(copy.nav.find((item) => item.key === "pianos").label)}</a>
+        ${enabled("salon_events") ? `<a href="${escapeHtml(getRoute("events", language))}">${escapeHtml(copy.nav.find((item) => item.key === "events")?.label || (language === "hu" ? "Események" : "Events"))}</a>` : ""}
+        <a href="${escapeHtml(getRoute("artists", language))}">${escapeHtml(copy.nav.find((item) => item.key === "artists")?.label || (language === "hu" ? "Művészek" : "Artists"))}</a>
+        ${enabled("featured_pianos") ? `<a href="${escapeHtml(getRoute("pianos", language))}">${escapeHtml(copy.nav.find((item) => item.key === "pianos")?.label || (language === "hu" ? "Zongorák" : "Pianos"))}</a>` : ""}
       </div>
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerVisit)}</p>
         <address>${escapeHtml(brand.addressLine1)}<br>${escapeHtml(brand.addressLine2)}</address>
         <a href="${escapeHtml(brand.phoneHref)}">${escapeHtml(brand.phoneDisplay)}</a>
         <a href="${escapeHtml(brand.emailHref)}">${escapeHtml(brand.emailDisplay)}</a>
-        <a href="${escapeHtml(getRoute("contact", language))}">${escapeHtml(copy.footerContact)}</a>
+        ${enabled("contact_cta") ? `<a href="${escapeHtml(getRoute("contact", language))}">${escapeHtml(copy.footerContact)}</a>` : ""}
       </div>
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerLegal)}</p>
@@ -541,7 +549,7 @@ function renderShowroomCollection(items, language, options = {}) {
     const path = pianoBrandPath(brand, language);
     return `<article class="catalog-card piano-brand-card" data-reveal>
       <a class="catalog-card__image" href="${escapeHtml(path)}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
-      <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h3 class="word-safe-title"><a href="${escapeHtml(path)}">${escapeHtml(brand.label)}</a></h3><p>${escapeHtml(`${brandItems.length} ${brandItems.length === 1 ? labels.showroomInstrumentSingular : labels.showroomInstrumentPlural}`)}</p><a class="button button--ghost" href="${escapeHtml(path)}"><span>${escapeHtml(labels.showroomDiscover || (language === "hu" ? "A hangszerek felfedezése" : "Discover the instruments"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a></div>
+      <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h3 class="word-safe-title"><a href="${escapeHtml(path)}">${escapeHtml(brand.label)}</a></h3>${item.build_year ? `<p class="piano-age">${escapeHtml(language === "hu" ? `Gyártási év: ${item.build_year} (${item.age} éves)` : `Built: ${item.build_year} (${item.age} years old)`)}</p>` : ""}<p>${escapeHtml(`${brandItems.length} ${brandItems.length === 1 ? labels.showroomInstrumentSingular : labels.showroomInstrumentPlural}`)}</p><a class="button button--ghost" href="${escapeHtml(path)}"><span>${escapeHtml(labels.showroomDiscover || (language === "hu" ? "A hangszerek felfedezése" : "Discover the instruments"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a></div>
     </article>`;
   }).join("");
   return `<section class="section catalog-showcase${compact ? " catalog-showcase--home" : ""}" id="showroom-pianos"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.showroomEyebrow || (language === "hu" ? "Bemutatótermi zongorák" : "The showroom"))}</p><h2>${escapeHtml(labels.showroomTitle || (language === "hu" ? "Kivételes hangszerek, személyes találkozásra." : "Exceptional instruments, encountered in person."))}</h2><p>${escapeHtml(labels.showroomLead || (language === "hu" ? "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg." : "A piano's true character is known only through tone, touch, and time in the room."))}</p></div><div class="catalog-grid">${cards}</div></section>`;
@@ -563,7 +571,7 @@ function renderPrivateViewingDialog(language) {
   return `<dialog class="service-dialog" data-private-viewing-dialog aria-labelledby="private-viewing-title"><form method="dialog" data-private-viewing-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">Klavierhaus</p><h2 id="private-viewing-title">${hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"}</h2><p data-private-viewing-context></p><input type="hidden" name="service_id"><div class="service-form-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail-cím" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label>${hu ? "Kapcsolatfelvétel ideje" : "Preferred time to contact"}<input name="preferred_time" maxlength="240" required></label><label>${hu ? "Zongora márkája" : "Piano brand"}<input name="piano_brand" maxlength="160"></label><label>${hu ? "Zongora modellje" : "Piano model"}<input name="piano_model" maxlength="160"></label><label class="service-field-wide">${hu ? "Helyszín / cím" : "Address"}<input name="service_address" maxlength="1000" autocomplete="street-address" required></label><label class="service-field-wide">${hu ? "Megjegyzés" : "Message"}<textarea name="message" maxlength="5000" rows="4"></textarea></label></div><label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${hu ? "Hozzájárulok, hogy felvegyék velem a kapcsolatot." : "I consent to being contacted about this enquiry."}</label><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request an appointment"}</button><p class="form-result" data-private-viewing-result aria-live="polite"></p></form></dialog>`;
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], artists = [], pageOverride = null, globalOverride = null, seoConfig = null }) {
+function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], artists = [], landingSections = null, pageOverride = null, globalOverride = null, seoConfig = null }) {
   const { key, language } = route;
   const copy = globalOverride || getGlobal(language);
   const page = pageOverride || getPage(key, language);
@@ -578,19 +586,30 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   const pageDescription = page.seo?.description || page.hero?.lead || "Klavierhaus";
   const keywords = seoKeywords({ seoConfig, key, language, page, title: pageTitle, description: pageDescription });
   const testimonial = page.sections.find((section) => section.id === "testimonial") || null;
-  const sections = page.sections.filter((section) => {
-    if (key === "home" && ["salon", "testimonial"].includes(section.id)) return false;
-    if (key === "pianos" && showroomPianos.length && ["selection", "inventory"].includes(section.id)) return false;
-    if (key === "services" && websiteServices.length && section.id === "services") return false;
-    if (key === "artists" && artists.length && section.id === "artist-directory") return false;
-    return true;
-  }).map((section) => {
-    if (key === "home" && section.id === "manifesto") return `${renderSection(section, language)}${renderHomeEventShowcase(homeEvents, language, copy)}${renderReviewShowcase(reviews, language, testimonial, copy)}`;
-    if (key === "home" && section.id === "pianos" && showroomPianos.length) return renderShowroomCollection(showroomPianos, language, { compact: true, copy });
-    if (key === "home" && section.id === "craft" && websiteServices.length) return renderServiceCollection(websiteServices, language, { compact: true, copy });
-    if (key === "home" && section.id === "artists" && artists.length) return renderArtistCollection(artists, language, { compact: true, copy });
-    return renderSection(section, language);
-  }).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
+  const landing = Array.isArray(landingSections) && landingSections.length ? landingSections : [
+    {section_key:"hero",is_active:1,order_index:0},{section_key:"featured_pianos",is_active:1,order_index:1},{section_key:"craftsmanship",is_active:1,order_index:2},{section_key:"salon_events",is_active:1,order_index:3},{section_key:"testimonials",is_active:1,order_index:4},{section_key:"contact_cta",is_active:1,order_index:5}
+  ];
+  const activeLandingKeys = new Set(landing.filter((row) => Number(row.is_active) === 1).map((row) => row.section_key));
+  let sections;
+  if (key === "home") {
+    const byId = Object.fromEntries(page.sections.map((section) => [section.id, section]));
+    const homeBlocks = {
+      hero: () => renderHero(page, language, copy),
+      featured_pianos: () => showroomPianos.length ? renderShowroomCollection(showroomPianos, language, { compact: true, copy }) : renderSection(byId.pianos, language),
+      craftsmanship: () => websiteServices.length ? renderServiceCollection(websiteServices, language, { compact: true, copy }) : renderSection(byId.craft, language),
+      salon_events: () => renderHomeEventShowcase(homeEvents, language, copy),
+      testimonials: () => renderReviewShowcase(reviews, language, testimonial, copy),
+      contact_cta: () => renderSection(byId.consultation, language)
+    };
+    sections = landing.filter((row) => Number(row.is_active) === 1).sort((a,b)=>Number(a.order_index)-Number(b.order_index)).map((row) => row.section_key === "hero" ? homeBlocks.hero() : `<div class="content-shell">${homeBlocks[row.section_key]?.() || ""}</div>`).join("");
+  } else {
+    sections = page.sections.filter((section) => {
+      if (key === "pianos" && showroomPianos.length && ["selection", "inventory"].includes(section.id)) return false;
+      if (key === "services" && websiteServices.length && section.id === "services") return false;
+      if (key === "artists" && artists.length && section.id === "artist-directory") return false;
+      return true;
+    }).map((section) => renderSection(section, language)).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
+  }
 
   return `<!doctype html>
 <html lang="${escapeHtml(copy.locale)}" class="no-js">
@@ -622,12 +641,11 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   <title>${escapeHtml(pageTitle)}</title>
 </head>
 <body class="template-${escapeHtml(page.template)}" data-language="${escapeHtml(language)}" data-page="${escapeHtml(key)}">
-  ${renderHeader({ copy, language, currentKey: key })}
+  ${renderHeader({ copy, language, currentKey: key, activeLandingKeys })}
   <main id="main-content">
-    ${renderHero(page, language, copy)}
-    <div class="content-shell">${sections}</div>
+    ${key === "home" ? sections : `${renderHero(page, language, copy)}<div class="content-shell">${sections}</div>`}
   </main>
-  ${renderFooter(copy, language)}
+  ${renderFooter(copy, language, activeLandingKeys)}
   ${renderPrivateViewingDialog(language)}
 </body>
 </html>`;
@@ -1077,7 +1095,7 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
           ? "concert"
           : "services";
   const keywords = seoKeywords({ seoConfig, key: seoKey, language, title, description });
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && item.build_year ? `<p class="piano-age">${escapeHtml(language === "hu" ? `Gyártási év: ${item.build_year} (${item.age} éves)` : `Built: ${item.build_year} (${item.age} years old)`)}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
 function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, globalOverride = null, seoConfig = null }) {
@@ -1104,7 +1122,7 @@ function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, 
   };
   const instruments = items.map((item, index) => `<article class="piano-brand-instrument${index % 2 ? " piano-brand-instrument--reverse" : ""}" data-reveal>
     <a class="piano-brand-instrument__media" href="${escapeHtml(showroomPath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
-    <div class="piano-brand-instrument__copy"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h2 class="word-safe-title">${escapeHtml(item.title)}</h2>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(hu ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><div class="piano-brand-instrument__actions"><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(labels.brandInstrumentDetails || (hu ? "A hangszer részletei" : "Explore the instrument"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a><button class="button button--ghost" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(item.brand || brand.label)}" data-piano-model="${escapeHtml(item.model || item.title || "")}"><span>${escapeHtml(labels.brandInstrumentViewing || (hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div>
+    <div class="piano-brand-instrument__copy"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h2 class="word-safe-title">${escapeHtml(item.title)}</h2>${item.build_year ? `<p class="piano-age">${escapeHtml(hu ? `Gyártási év: ${item.build_year} (${item.age} éves)` : `Built: ${item.build_year} (${item.age} years old)`)}</p>` : ""}${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(hu ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><div class="piano-brand-instrument__actions"><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(labels.brandInstrumentDetails || (hu ? "A hangszer részletei" : "Explore the instrument"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a><button class="button button--ghost" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(item.brand || brand.label)}" data-piano-model="${escapeHtml(item.model || item.title || "")}"><span>${escapeHtml(labels.brandInstrumentViewing || (hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div>
   </article>`).join("");
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: items[0]?.image_url || shared.heroImage, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), itemList], globalCopyOverride: copy, keywords })}</head><body class="template-piano-brand" data-language="${escapeHtml(language)}" data-page="pianos">${renderHeader({ copy, language, currentKey: "pianos", alternateRouteOverride: alternatePath })}<main id="main-content"><section class="hero hero--inner hero--with-image" aria-labelledby="page-title">${renderPicture(items[0]?.image_url || shared.heroImage, items[0]?.image_alt || brand.label, "hero-media", { eager: true })}<div class="hero-shade" aria-hidden="true"></div><div class="hero-content" data-reveal><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h1 id="page-title" class="word-safe-title">${escapeHtml(brand.label)}</h1><p class="hero-lead">${escapeHtml(labels.brandLead || (hu ? "A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás." : "Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter."))}</p></div></section><section class="piano-brand-list">${instruments}</section><section class="section section--cta"><div class="cta-inner"><p class="eyebrow">${escapeHtml(labels.brandPrivateSelection || (hu ? "Személyes kiválasztás" : "Private selection"))}</p><h2>${escapeHtml(labels.brandCtaTitle || (hu ? "Találkozzon a hangszerrel, mielőtt döntést hoz." : "Meet the instrument before making a decision."))}</h2><button class="button button--primary" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(brand.label)}">${escapeHtml(labels.brandCta || (hu ? "Privát időpont egyeztetése" : "Arrange a private appointment"))} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></section></main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
@@ -1549,6 +1567,7 @@ function createApp(options = {}) {
     let showroomPianos = [];
     let websiteServices = [];
     let artists = [];
+    let landingSections = null;
     let pageOverride = null;
     let globalOverride = null;
     let seoConfig = null;
@@ -1561,9 +1580,10 @@ function createApp(options = {}) {
         route.key === "home" ? eventClient.reviews(route.language) : Promise.resolve([]),
         ["home","pianos"].includes(route.key) ? eventClient.showroomPianos(route.language) : Promise.resolve([]),
         ["home","services"].includes(route.key) ? eventClient.services(route.language) : Promise.resolve([]),
-        ["home","artists"].includes(route.key) ? eventClient.artists(route.language) : Promise.resolve([])
+        ["home","artists"].includes(route.key) ? eventClient.artists(route.language) : Promise.resolve([]),
+        eventClient.landingSections()
       ];
-      const [contentResult,globalResult,seoResult,eventResult,reviewResult,pianoResult,serviceResult,artistResult] = await Promise.allSettled(requests);
+      const [contentResult,globalResult,seoResult,eventResult,reviewResult,pianoResult,serviceResult,artistResult,landingResult] = await Promise.allSettled(requests);
       if (contentResult.status === "fulfilled") pageOverride = contentResult.value?.content || null;
       else console.warn(`[website] Page content fallback: ${contentResult.reason?.code || contentResult.reason?.message}`);
       if (globalResult.status === "fulfilled") globalOverride = globalResult.value?.content || null;
@@ -1574,6 +1594,7 @@ function createApp(options = {}) {
       if (pianoResult.status === "fulfilled") showroomPianos = pianoResult.value;
       if (serviceResult.status === "fulfilled") websiteServices = serviceResult.value;
       if (artistResult.status === "fulfilled") artists = artistResult.value;
+      if (landingResult.status === "fulfilled") landingSections = landingResult.value;
     }
     res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
     res.type("html").send(renderDocument({
@@ -1586,6 +1607,7 @@ function createApp(options = {}) {
       showroomPianos,
       websiteServices,
       artists,
+      landingSections,
       pageOverride,
       globalOverride,
       seoConfig
