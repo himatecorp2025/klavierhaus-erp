@@ -178,3 +178,60 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
   color:var(--ivory);
 }
 .header-consultation .button-arrow{color:inherit}
+
+/* Luxury Light Mode cascade lock — this file loads after styles.css. */
+:root[data-theme="light"] .ticket-quantity,
+:root[data-theme="light"] .event-card-reservation form,
+:root[data-theme="light"] .attendee-names {
+  border-color: var(--color-border-gold);
+  background: rgba(252,251,247,.72);
+  color: var(--color-text);
+}
+:root[data-theme="light"] .ticket-quantity :where(span,input,button),
+:root[data-theme="light"] .attendee-names :where(label,legend),
+:root[data-theme="light"] .event-card-reservation label { color: var(--color-text-secondary); }
+:root[data-theme="light"] .attendee-names input,
+:root[data-theme="light"] .event-card-reservation input,
+:root[data-theme="light"] .customer-chat__panel input,
+:root[data-theme="light"] .customer-chat__panel textarea,
+:root[data-theme="light"] .customer-chat__panel select {
+  border-color: var(--color-border-strong);
+  background: rgba(255,254,250,.82);
+  color: var(--color-text);
+}
+:root[data-theme="light"] .catalog-card {
+  border-color: var(--color-border);
+  background: linear-gradient(145deg, rgba(255,255,255,.52), rgba(247,244,236,.24)), var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+:root[data-theme="light"] .catalog-card:hover { border-color: var(--color-border-gold); box-shadow: var(--shadow-md); }
+:root[data-theme="light"] .catalog-card__image,
+:root[data-theme="light"] .piano-brand-instrument__media,
+:root[data-theme="light"] .detail-gallery figure { background: var(--color-photo-mat); }
+:root[data-theme="light"] .catalog-card__image::after,
+:root[data-theme="light"] .piano-brand-card .catalog-card__image::after,
+:root[data-theme="light"] .piano-brand-instrument__media::after { background: linear-gradient(transparent 68%, rgba(23,24,23,.18)); }
+:root[data-theme="light"] .privacy-dialog,
+:root[data-theme="light"] .interest-dialog,
+:root[data-theme="light"] .service-dialog {
+  border-color: var(--color-border-gold);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: 0 24px 72px rgba(37,30,18,.16);
+}
+:root[data-theme="light"] .privacy-dialog input,
+:root[data-theme="light"] .interest-dialog input,
+:root[data-theme="light"] .service-dialog input,
+:root[data-theme="light"] .service-dialog textarea,
+:root[data-theme="light"] .service-dialog select { background: rgba(255,254,250,.82); color: var(--color-text); border-color: var(--color-border-strong); }
+:root[data-theme="light"] .dialog-close { background: var(--color-surface-muted); color: var(--color-heading); }
+:root[data-theme="light"] .consent-banner {
+  border-color: var(--color-border-gold);
+  background: rgba(252,251,247,.96);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+}
+:root[data-theme="light"] .customer-chat__panel,
+:root[data-theme="light"] .customer-chat__message { background: var(--color-surface); color: var(--color-text); }
+:root[data-theme="light"] .customer-chat__toggle { border-color: var(--color-gold-dark); background: var(--color-gold-dark); color: var(--color-surface-raised); box-shadow: var(--shadow-sm); }
+:root[data-theme="light"] .customer-chat__toggle[aria-expanded="true"] { background: #6A5125; color: var(--color-surface-raised); }
