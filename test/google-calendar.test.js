@@ -15,6 +15,8 @@ function setup(fetchImpl = async () => { throw new Error("unexpected network req
     VALUES('U-A','Admin','admin@example.com','x','ADMIN','Active','#2563EB','admin.calendar@gmail.com',0,0)`).run();
   db.prepare(`INSERT INTO users(id,name,email,password_hash,role,status,calendar_color,google_calendar_email,hidden_user,is_superadmin)
     VALUES('U-W','Worker','worker@example.com','x','WORKER','Active','#0891B2','worker.calendar@gmail.com',0,0)`).run();
+  db.prepare(`INSERT INTO contacts(id,name,email,phone,address,status) VALUES('C-G','Google Client','client@example.com','+1 555 0100','123 Piano Street','Active')`).run();
+  db.prepare(`INSERT INTO pianos(id,brand,model,display_name,owner_contact_id,status) VALUES('P-G','Steinway','D','Steinway D','C-G','Active')`).run();
   const notifications = [];
   let counter = 0;
   const rid = (prefix) => `${prefix}-${++counter}`;
@@ -101,6 +103,7 @@ test("Google event imports, maps creator, notifies, protects reviewed ERP data a
   assert.ok(notifications.some((item) => item.type === "GOOGLE_EVENT_REVIEW_REQUIRED" && item.recipientUserId === "U-A"));
   assert.ok(notifications.some((item) => item.type === "GOOGLE_EVENT_IMPORTED" && item.recipientUserId === "U-W"));
 
+  db.prepare("UPDATE jobs SET client_id='C-G',client_name='Google Client',client_phone='+1 555 0100',piano_id='P-G',piano_name='Steinway D' WHERE id=?").run(job.id);
   integration.markReviewed(job.id, "U-A");
   assert.equal(getJob(job.id).calendar_review_status, "REVIEWED");
   const reviewedExternal = db.prepare("SELECT reviewed_at,raw_json FROM external_calendar_events WHERE external_event_id='event-1'").get();
@@ -129,6 +132,7 @@ test("conflicting Google event is imported and cannot be reviewed until resolved
   assert.equal(result.flagged, 1);
   const external = db.prepare("SELECT * FROM external_calendar_events WHERE external_event_id='event-conflict'").get();
   assert.equal(external.conflict_flag, 1);
+  db.prepare("UPDATE jobs SET client_id='C-G',client_name='Google Client',piano_id='P-G',piano_name='Steinway D' WHERE id=?").run(external.job_id);
   assert.throws(() => integration.markReviewed(external.job_id, "U-A"), /GOOGLE_EVENT_CONFLICT_UNRESOLVED/);
   db.prepare("UPDATE jobs SET start_time='2032-08-04T18:00',end_time='2032-08-04T20:00' WHERE id=?").run(external.job_id);
   const reviewed = integration.markReviewed(external.job_id, "U-A");
@@ -137,7 +141,7 @@ test("conflicting Google event is imported and cannot be reviewed until resolved
   db.close();
 });
 
-test("Google imports preserve exact source minutes without applying the manual five-minute rule", () => {
+test("Google imports preserve exact source minutes but review requires the 15-minute ERP grid", () => {
   const { db, integration, getJob } = setup();
   const result = integration._test.processEvent(googleEvent({
     id: "event-exact-minutes",
@@ -148,6 +152,8 @@ test("Google imports preserve exact source minutes without applying the manual f
   const external = db.prepare("SELECT job_id FROM external_calendar_events WHERE external_event_id='event-exact-minutes'").get();
   const job = getJob(external.job_id);
   assert.equal(job.start_time, "2032-08-04T14:02");
+  db.prepare("UPDATE jobs SET client_id='C-G',client_name='Google Client',piano_id='P-G',piano_name='Steinway D' WHERE id=?").run(job.id);
+  assert.throws(() => integration.markReviewed(job.id, "U-A"), /GOOGLE_EVENT_TIME_ALIGNMENT_REQUIRED/);
   assert.equal(job.end_time, "2032-08-04T15:07");
   assert.equal(job.planned_minutes, 65);
   integration.stop();
@@ -189,7 +195,7 @@ test("temporary Google test event always attempts cleanup after a delete failure
     if ((init.method||"GET") === "POST" && String(url).includes("/events")) return new Response(JSON.stringify({id:"temporary-test-event"}),{status:200,headers:{"Content-Type":"application/json"}});
     if ((init.method||"GET") === "DELETE") {
       const deletes=requests.filter(item=>item.method==="DELETE").length;
-      return new Response("",{status:deletes===1?500:204});
+      return new Response(deletes===1?"":null,{status:deletes===1?500:204});
     }
     throw new Error(`unexpected request: ${url}`);
   };
