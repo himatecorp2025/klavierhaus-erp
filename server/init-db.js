@@ -48,6 +48,40 @@ function ensureIndex(name, sql) {
   log(`Index ready: ${name}`);
 }
 
+function tableSql(tableName) {
+  return db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(tableName)?.sql || "";
+}
+
+function hardenSystemIntegrationControlTables() {
+  const allowed = "'GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE'";
+  const backupSql = tableSql("system_integration_backups");
+  if (backupSql && !/CHECK\s*\(provider\s+IN/i.test(backupSql)) {
+    log("Hardening system_integration_backups provider constraint");
+    db.exec("ALTER TABLE system_integration_backups RENAME TO system_integration_backups_legacy");
+    db.exec(`CREATE TABLE system_integration_backups (
+      id TEXT PRIMARY KEY, provider TEXT NOT NULL CHECK(provider IN (${allowed})), snapshot_json TEXT NOT NULL,
+      backup_file_path TEXT NOT NULL DEFAULT '', backup_sha256 TEXT NOT NULL DEFAULT '', created_by_user_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL)`);
+    db.exec(`INSERT INTO system_integration_backups(id,provider,snapshot_json,backup_file_path,backup_sha256,created_by_user_id,created_at)
+      SELECT id,provider,snapshot_json,COALESCE(backup_file_path,''),COALESCE(backup_sha256,''),created_by_user_id,created_at FROM system_integration_backups_legacy
+      WHERE provider IN (${allowed})`);
+    db.exec("DROP TABLE system_integration_backups_legacy");
+  }
+  const deleteSql = tableSql("system_integration_delete_tokens");
+  if (deleteSql && !/CHECK\s*\(provider\s+IN/i.test(deleteSql)) {
+    log("Hardening system_integration_delete_tokens provider constraint");
+    db.exec("ALTER TABLE system_integration_delete_tokens RENAME TO system_integration_delete_tokens_legacy");
+    db.exec(`CREATE TABLE system_integration_delete_tokens (
+      token_hash TEXT PRIMARY KEY, provider TEXT NOT NULL CHECK(provider IN (${allowed})), requested_by_user_id TEXT NOT NULL,
+      record_counts_json TEXT NOT NULL DEFAULT '{}', expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(requested_by_user_id) REFERENCES users(id) ON DELETE CASCADE)`);
+    db.exec(`INSERT INTO system_integration_delete_tokens(token_hash,provider,requested_by_user_id,record_counts_json,expires_at,created_at)
+      SELECT token_hash,provider,requested_by_user_id,record_counts_json,expires_at,created_at FROM system_integration_delete_tokens_legacy
+      WHERE provider IN (${allowed})`);
+    db.exec("DROP TABLE system_integration_delete_tokens_legacy");
+  }
+}
+
 function ensureNormalizedUserEmailIndexes() {
   ensureIndex("idx_users_email_lookup", "CREATE INDEX IF NOT EXISTS idx_users_email_lookup ON users(lower(trim(email)))");
   const duplicates = db.prepare(`
@@ -114,7 +148,7 @@ function migrationRequiresBackup() {
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
-  const systemIntegrationTablesMissing = tableExists("users") && (!["system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens"].every(tableExists));
+  const systemIntegrationTablesMissing = tableExists("users") && (!["system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens"].every(tableExists));
   const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id", "custom_type"].some((column) => !tableColumns("events").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
@@ -539,6 +573,10 @@ function runMigrations() {
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  ensureColumn("system_integration_health", "enabled", "INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))");
+  ensureColumn("system_integration_backups", "backup_file_path", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn("system_integration_backups", "backup_sha256", "TEXT NOT NULL DEFAULT ''");
+  hardenSystemIntegrationControlTables();
   removeRetiredPrivateConsultationPage();
 
   const migrateColumns = db.transaction(() => {
@@ -786,6 +824,7 @@ function runMigrations() {
   ensureIndex("idx_system_integration_health_status", "CREATE INDEX IF NOT EXISTS idx_system_integration_health_status ON system_integration_health(status,provider)");
   ensureIndex("idx_system_integration_backups_provider", "CREATE INDEX IF NOT EXISTS idx_system_integration_backups_provider ON system_integration_backups(provider,created_at DESC)");
   ensureIndex("idx_system_integration_delete_expiry", "CREATE INDEX IF NOT EXISTS idx_system_integration_delete_expiry ON system_integration_delete_tokens(expires_at)");
+  ensureIndex("idx_system_integration_test_expiry", "CREATE INDEX IF NOT EXISTS idx_system_integration_test_expiry ON system_integration_test_tokens(expires_at)");
   ensureIndex("idx_event_repeat_requests", "CREATE INDEX IF NOT EXISTS idx_event_repeat_requests ON event_repeat_requests(event_id,created_at DESC)");
   ensureIndex("idx_marketing_campaigns_active", "CREATE INDEX IF NOT EXISTS idx_marketing_campaigns_active ON marketing_campaigns(active,updated_at DESC)");
   ensureIndex("idx_website_tracking_events", "CREATE INDEX IF NOT EXISTS idx_website_tracking_events ON website_tracking_events(event_name,created_at DESC)");
