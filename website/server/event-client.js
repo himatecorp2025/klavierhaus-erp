@@ -84,6 +84,9 @@ function createEventClient(options = {}) {
     designSettings() {
       return request("/api/public/website-design-settings");
     },
+    landingSections() {
+      return request("/api/public/landing-sections");
+    },
     reviews(language) {
       return request(`/api/public/website-reviews?lang=${language === "hu" ? "hu" : "en"}`);
     },
