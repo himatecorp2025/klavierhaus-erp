@@ -679,10 +679,7 @@ $("#activationBackButton").onclick=showLoginStep;
 $("#logoutBtn").onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
-let inactivityTimer = null;
 let countdownInterval = null;
-let logoutAt = 0;
-let pausedRemainingMs = INACTIVITY_LIMIT_MS;
 function logoutNow(){
   stopDigitalAttendanceLiveSync?.();
   if(token){try{fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token},keepalive:true});}catch(e){}}
@@ -690,36 +687,61 @@ function logoutNow(){
   localStorage.removeItem("kh_user");
   location.reload();
 }
+function createSessionActivityController({timeoutMs=10*60*1000,setTimer=setTimeout,clearTimer=clearTimeout,now=Date.now,onTimeout=()=>{},canRun=()=>true,onStateChange=()=>{}}={}){
+  let timer=null,deadline=0,remainingMs=timeoutMs;
+  const notify=()=>onStateChange(controller.snapshot());
+  const controller={
+    activeModalCount:0,paused:false,
+    resetTimer(){
+      if(timer){clearTimer(timer);timer=null;}
+      if(!canRun()){deadline=0;remainingMs=timeoutMs;notify();return null;}
+      this.paused=false;remainingMs=timeoutMs;deadline=now()+timeoutMs;
+      timer=setTimer(()=>{timer=null;deadline=0;remainingMs=0;notify();onTimeout();},timeoutMs);
+      notify();return timer;
+    },
+    pause(){
+      if(this.paused)return;
+      remainingMs=deadline?Math.max(0,deadline-now()):timeoutMs;
+      this.paused=true;if(timer){clearTimer(timer);timer=null;}deadline=0;notify();
+    },
+    resume(){if(this.activeModalCount>0||!canRun())return null;return this.resetTimer();},
+    touch(){if(!canRun()||this.activeModalCount>0||this.paused)return null;return this.resetTimer();},
+    modalOpened(){this.activeModalCount+=1;this.pause();return this.activeModalCount;},
+    modalClosed(){this.activeModalCount=Math.max(0,this.activeModalCount-1);if(this.activeModalCount===0)this.resume();else notify();return this.activeModalCount;},
+    setModalCount(count){this.activeModalCount=Math.max(0,Number(count)||0);if(this.activeModalCount>0)this.pause();else this.resume();return this.activeModalCount;},
+    remaining(){return this.paused?remainingMs:(deadline?Math.max(0,deadline-now()):remainingMs);},
+    snapshot(){return {activeModalCount:this.activeModalCount,paused:this.paused,remainingMs:this.remaining(),timerActive:Boolean(timer)};},
+    destroy(){if(timer){clearTimer(timer);timer=null;}deadline=0;this.activeModalCount=0;this.paused=false;remainingMs=timeoutMs;notify();}
+  };
+  return controller;
+}
 function updateCountdownDisplay(){
   const el=document.getElementById("sessionCountdown");
   if(!el || !token) return;
-  const remaining=sessionActivity.paused?pausedRemainingMs:Math.max(0, logoutAt-Date.now());
+  const remaining=sessionActivity.remaining();
   const totalSeconds=Math.ceil(remaining/1000);
   const mm=String(Math.floor(totalSeconds/60)).padStart(2,"0");
   const ss=String(totalSeconds%60).padStart(2,"0");
+  el.style.display="";
   el.textContent=sessionActivity.paused?`${tr("logoutIn")}: PAUSED`:`${tr("logoutIn")}: ${mm}:${ss}`;
   el.classList.toggle("warning", !sessionActivity.paused&&remaining<=60000);
 }
-const sessionActivity={
-  activeModalCount:0,paused:false,observer:null,
-  pause(){if(this.paused)return;this.paused=true;pausedRemainingMs=logoutAt?Math.max(0,logoutAt-Date.now()):INACTIVITY_LIMIT_MS;if(inactivityTimer)clearTimeout(inactivityTimer);inactivityTimer=null;updateCountdownDisplay();},
-  resume(){if(this.activeModalCount>0||!token)return;this.paused=false;pausedRemainingMs=INACTIVITY_LIMIT_MS;resetInactivityTimer({force:true});},
-  touch(){if(!token||this.activeModalCount>0||this.paused)return;resetInactivityTimer({force:true});},
-  modalOpened(){this.activeModalCount+=1;this.pause();},
-  modalClosed(){this.activeModalCount=Math.max(0,this.activeModalCount-1);if(this.activeModalCount===0)this.resume();},
-  visibleModalCount(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay, .workflow-event-log-modal, .workflow-drawer')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay,.workflow-event-log-modal,.workflow-drawer'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;},
-  syncModalState(){const count=this.visibleModalCount();if(count===this.activeModalCount)return;this.activeModalCount=count;if(count>0)this.pause();else this.resume();},
-  install(){if(this.observer)return;this.observer=new MutationObserver(()=>this.syncModalState());this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});this.syncModalState();}
-};
+const sessionActivity=createSessionActivityController({
+  timeoutMs:INACTIVITY_LIMIT_MS,
+  onTimeout:()=>logoutNow(),
+  canRun:()=>Boolean(token),
+  onStateChange:()=>updateCountdownDisplay()
+});
+sessionActivity.observer=null;
+sessionActivity.visibleModalCount=function(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay, .workflow-event-log-modal, .workflow-drawer')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay,.workflow-event-log-modal,.workflow-drawer'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;};
+sessionActivity.syncModalState=function(){this.setModalCount(this.visibleModalCount());};
+sessionActivity.install=function(){if(this.observer)return;this.observer=new MutationObserver(()=>this.syncModalState());this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});this.syncModalState();};
 window.sessionActivity=sessionActivity;
 function resetInactivityTimer({force=false}={}){
-  if(!token) return;
-  if(isStandalonePWA()){ if(inactivityTimer)clearTimeout(inactivityTimer); if(countdownInterval)clearInterval(countdownInterval); const el=document.getElementById("sessionCountdown"); if(el)el.style.display="none"; return; }
+  if(!token)return;
   if(sessionActivity.activeModalCount>0&&!force){sessionActivity.pause();return;}
-  sessionActivity.paused=false;pausedRemainingMs=INACTIVITY_LIMIT_MS;logoutAt=Date.now()+INACTIVITY_LIMIT_MS;
-  if(inactivityTimer) clearTimeout(inactivityTimer);
-  if(countdownInterval) clearInterval(countdownInterval);
-  inactivityTimer = setTimeout(()=>logoutNow(), INACTIVITY_LIMIT_MS);
+  sessionActivity.resetTimer();
+  if(countdownInterval)clearInterval(countdownInterval);
   countdownInterval=setInterval(updateCountdownDisplay,1000);
   updateCountdownDisplay();
 }
@@ -2194,18 +2216,33 @@ async function openJobPianoCreate(client,draft){
  applyLanguageToDOM(document.getElementById("modal"));
 }
 
+function createNestedClientStateMachine(initialDraft={}){
+ let draft={...(initialDraft||{})},mode="idle";
+ return {
+  begin(term,nextDraft=draft){draft={...(nextDraft||{}),client_name:String(term||"").trim(),allow_ad_hoc_client:false};mode="creating";return {...draft};},
+  decline(term,nextDraft=draft){draft={...(nextDraft||{}),client_id:"",client_name:String(term||"").trim(),allow_ad_hoc_client:true};mode="adhoc";return {...draft};},
+  saved(client){draft={...draft,client_id:client?.id||"",client_name:client?.name||draft.client_name||"",client_phone:client?.phone||draft.client_phone||"",service_address:client?.address||draft.service_address||"",allow_ad_hoc_client:false};mode="saved";return {...draft};},
+  cancelled(){mode="cancelled";return {...draft};},
+  snapshot(){return {...draft};},
+  get mode(){return mode;}
+ };
+}
+function entityFormFieldsMarkup(key,row=null,initial={}){const s=schemas[key],pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";return `<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div>${key==="contacts"?'<div id="contactPianoSection"></div>':''}`;}
+function collectEntityFormBody(key,form){const s=schemas[key],body=Object.fromEntries(new FormData(form));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}return body;}
+async function saveEntityFormRecord(key,row,form){const s=schemas[key],body=collectEntityFormBody(key,form);let saved;if(row)saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});if(key==="contacts"){const clientId=(row&&row.id)||saved.id,scope=form.closest('.nested-modal-overlay,#modal')||document,allPianoChecks=[...scope.querySelectorAll('input[name="client_piano_ids"]')],ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value);if(clientId&&allPianoChecks.length)await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}return saved;}
+
 function captureJobDraftFromForm(){const form=document.getElementById("form");if(!form)return jobDraftState?{...jobDraftState}:{};const body=Object.fromEntries(new FormData(form));const start=document.getElementById("jobStart")?.value,end=document.getElementById("jobEnd")?.value;if(start)body.start_time=start;if(end)body.end_time=end;body.daily_rate_enabled=Boolean(document.getElementById("jobDailyRateEnabled")?.checked);body.daily_rate_allocated_amount=Number(document.getElementById("jobDailyRateAmount")?.value||0);return body;}
 function closeNestedClientModal(result=null){const overlay=document.querySelector(".nested-modal-overlay[data-nested-client]");if(overlay)overlay.remove();return result;}
-function openNestedClientModal({prefillName="",draft,onSaved,onCancelled}={}){
- const schema=schemas.contacts,overlay=document.createElement("div");
+function openNestedClientModal({prefillName="",draft,onSaved,onCancelled,stateMachine=null}={}){
+ const overlay=document.createElement("div"),initial={name:prefillName};
  overlay.className="nested-modal-overlay";overlay.dataset.nestedClient="1";
- overlay.innerHTML=`<section class="nested-modal-card" role="dialog" aria-modal="true" aria-labelledby="nestedClientTitle"><div class="modal-header"><h3 id="nestedClientTitle">${bi("Add Client","Új ügyfél")}</h3><button type="button" class="modal-close" data-nested-cancel aria-label="${bi("Close","Bezárás")}">×</button></div><form class="nested-client-form"><div class="form-grid">${schema.fields.map(f=>field(f,f[0]==="name"?prefillName:"" )).join("")}</div><div class="actions"><button type="button" class="ghost-btn" data-nested-cancel>${bi("Cancel","Mégse")}</button><button type="submit">${bi("Save","Mentés")}</button></div></form></section>`;
- let onKey=null;
+ overlay.innerHTML=`<section class="nested-modal-card" role="dialog" aria-modal="true" aria-labelledby="nestedClientTitle"><div class="modal-header"><h3 id="nestedClientTitle">${bi("Add Client","Új ügyfél")}</h3><button type="button" class="modal-close" data-nested-cancel aria-label="${bi("Close","Bezárás")}">×</button></div><form class="nested-client-form">${entityFormFieldsMarkup("contacts",null,initial)}<div class="actions"><button type="button" class="ghost-btn" data-nested-cancel>${bi("Cancel","Mégse")}</button><button type="submit">${bi("Save","Mentés")}</button></div></form></section>`;
+ let onKey=null,finished=false;
  const cleanup=()=>{if(onKey)document.removeEventListener('keydown',onKey,true);closeNestedClientModal();};
- const cancel=()=>{cleanup();if(typeof onCancelled==="function")onCancelled(draft);};
+ const cancel=()=>{if(finished)return;finished=true;const restored=stateMachine?stateMachine.cancelled():(draft||{});cleanup();if(typeof onCancelled==="function")onCancelled(restored);};
  overlay.querySelectorAll('[data-nested-cancel]').forEach(btn=>btn.addEventListener('click',cancel));
  overlay.addEventListener('click',e=>{if(e.target===overlay)cancel();});
- overlay.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));schema.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);try{const saved=await api('/api/contacts',{method:'POST',body:JSON.stringify(body)});cleanup();if(typeof onSaved==="function")await onSaved(saved,draft);}catch(error){showError(error);}});
+ overlay.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();if(finished)return;try{const saved=await saveEntityFormRecord('contacts',null,e.target);finished=true;const restored=stateMachine?stateMachine.saved(saved):(draft||{});cleanup();if(typeof onSaved==="function")await onSaved(saved,restored);}catch(error){showError(error);}});
  document.body.appendChild(overlay);setupContactFormBehavior(null);applyLanguageToDOM(overlay);
  onKey=e=>{if(e.key==='Escape'){e.preventDefault();cancel();}};document.addEventListener('keydown',onKey,true);
  setTimeout(()=>overlay.querySelector('[name="name"]')?.focus(),20);return overlay;
@@ -2253,7 +2290,7 @@ ${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end)}
 
  function fillClientData(){const c=contacts.find(x=>(x.name||"").trim().toLowerCase()===(clientInput.value||"").trim().toLowerCase());if(!c)return;phoneInput.value=c.phone||phoneInput.value||"";addressInput.value=c.address||addressInput.value||"";const ownedList=pianos.filter(p=>p.owner_contact_id===c.id);if(ownedList.length){const list=document.getElementById("pianoList");if(list)list.innerHTML=ownedList.map(p=>`<option value="${htmlText(p.display_name||`${p.brand||''} ${p.model||''}`.trim())}">${htmlText(`${p.serial_no||''} ${p.location||''}`)}</option>`).join('');if(!pianoInput.value)pianoInput.value=(ownedList[0].display_name||`${ownedList[0].brand||''} ${ownedList[0].model||''}`.trim());}}
  clientInput.addEventListener("change",fillClientData);clientInput.addEventListener("blur",fillClientData);
- ensureInlineClientPrompt(clientInput,{contacts,onYes:(term)=>{jobDraftState={...captureJobDraftFromForm(),client_name:term};openNestedClientModal({prefillName:term,draft:jobDraftState,onSaved:(client,draftState)=>{allowAdHocClient=false;jobDraftState=null;contacts.push(client);clientInput.value=client.name||term;phoneInput.value=client.phone||draftState.client_phone||'';addressInput.value=client.address||draftState.service_address||'';clientInput.dataset.clientId=client.id;showToast(bi('Client created and linked.','Ügyfél létrehozva és összekapcsolva.'),'success');},onCancelled:()=>{jobDraftState=null;}});},onNo:(term)=>{allowAdHocClient=true;clientInput.dataset.clientId='';showToast(bi('Client will remain text-only for this job.','Az ügyfél ennél a munkánál csak szöveges adat marad.'),'info');}});
+ ensureInlineClientPrompt(clientInput,{contacts,onYes:(term)=>{const flow=createNestedClientStateMachine(captureJobDraftFromForm());jobDraftState=flow.begin(term,captureJobDraftFromForm());openNestedClientModal({prefillName:term,draft:jobDraftState,stateMachine:flow,onSaved:(client,draftState)=>{allowAdHocClient=false;jobDraftState=null;contacts.push(client);clientInput.value=draftState.client_name||client.name||term;phoneInput.value=draftState.client_phone||'';addressInput.value=draftState.service_address||'';clientInput.dataset.clientId=draftState.client_id||client.id;showToast(bi('Client created and linked.','Ügyfél létrehozva és összekapcsolva.'),'success');},onCancelled:(draftState)=>{jobDraftState=null;clientInput.value=draftState.client_name||term;phoneInput.value=draftState.client_phone||phoneInput.value||'';addressInput.value=draftState.service_address||addressInput.value||'';}});},onNo:(term)=>{const flow=createNestedClientStateMachine(captureJobDraftFromForm()),draftState=flow.decline(term,captureJobDraftFromForm());allowAdHocClient=true;jobDraftState=draftState;clientInput.value=draftState.client_name||term;clientInput.dataset.clientId='';showToast(bi('Client will remain text-only for this job.','Az ügyfél ennél a munkánál csak szöveges adat marad.'),'info');}});
 
  function recalculateDuration(){const minutes=wallClockDifferenceMinutes(startInput.value,endInput.value);if(minutes>0){minutesInput.value=String(minutes);hoursInput.value=String(minutes/60);durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: ${formatDurationLabel(minutes)}`;}else{durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: —`;}}
  async function refreshDailyRateCapacity(){
@@ -2277,7 +2314,7 @@ ${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end)}
    if(row?.id){b.id=row.id;b.job_id=row.id;}if(row?.job_key)b.job_key=row.job_key;b.client_id=clientInput.dataset.clientId||source?.client_id||null;b.piano_id=source?.piano_id||null;b.allow_ad_hoc_client=allowAdHocClient;
    const matchedClient=contacts.find(c=>(c.name||"").trim().toLowerCase()===(b.client_name||"").trim().toLowerCase());if(matchedClient){b.client_id=matchedClient.id;b.allow_ad_hoc_client=false;if(!b.client_phone&&matchedClient.phone)b.client_phone=matchedClient.phone;if(!b.service_address&&matchedClient.address)b.service_address=matchedClient.address;}
    const matchedPiano=allowAdHocClient?null:pianos.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());if(matchedPiano)b.piano_id=matchedPiano.id;
-   if(!matchedClient&&!allowAdHocClient){jobDraftState={...b};openNestedClientModal({prefillName:b.client_name,draft:jobDraftState,onSaved:(client,draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,{...draftState,client_id:client.id,client_name:client.name,client_phone:client.phone||draftState.client_phone,service_address:client.address||draftState.service_address,allow_ad_hoc_client:false});},onCancelled:(draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,{...draftState,allow_ad_hoc_client:false});}});return;}
+   if(!matchedClient&&!allowAdHocClient){const flow=createNestedClientStateMachine(b);jobDraftState=flow.begin(b.client_name,b);openNestedClientModal({prefillName:b.client_name,draft:jobDraftState,stateMachine:flow,onSaved:(client,draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,draftState);},onCancelled:(draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,draftState);}});return;}
    if(!matchedPiano&&!allowAdHocClient){const createPiano=await appConfirm(`${bi("Piano not found","Zongora nem található")}: ${b.piano_name}\n${bi("Create this piano for the selected client now? Your job data will be preserved.","Létrehozod most ezt a zongorát a kiválasztott ügyfélhez? A munka adatai megmaradnak.")}`,{confirmText:bi("Create piano","Zongora létrehozása")});if(createPiano)await openJobPianoCreate(matchedClient,{...b,client_id:matchedClient.id,client_name:matchedClient.name});return;}
    try{const saved=row?await api(`/api/jobs/${encodeURIComponent(jobRef(row))}`,{method:"PUT",body:JSON.stringify(b)}):await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});currentWeekStart=startOfWeek(saved.start_time||b.start_time);closeModal();await refreshCalendarAfterMutation(saved);}catch(err){showError(err)}
  };
@@ -2929,14 +2966,12 @@ async function commitPianoImport(){
 }
 function renderPianoImportCompleted(result){const box=document.getElementById('pianoImportResult');if(!box)return;box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Piano import completed','A zongoraimport befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported pianos','Importált zongorák')}</span><strong>${Number(result.importedPianos||0)}</strong></div><div class="import-stat"><span>${bi('Clients updated as owners','Owner státuszra frissített ügyfelek')}</span><strong>${Number(result.updatedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Unidentified owner','Ismeretlen tulajdonos')}</span><strong>${Number(result.unidentifiedOwnerPianos||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedAlreadyImported||0)+Number(result.skippedPossibleDuplicates||0)}</strong></div><div class="import-stat"><span>${bi('Client not found','Ügyfél nem található')}</span><strong>${Number(result.clientNotFound||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Invalid/failed rows','Hibás sorok')}</span><strong>${Number(result.invalidRows||0)+Number(result.failedRows||0)}</strong></div></div><div class="actions"><button type="button" onclick="closeModal();render('pianos')">${bi('View pianos','Zongorák megtekintése')}</button></div></div>`;}
 
-function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};activeModalCancelHandler=typeof options.onCancelled==="function"?options.onCancelled:null;$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
+function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};activeModalCancelHandler=typeof options.onCancelled==="function"?options.onCancelled:null;$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`${entityFormFieldsMarkup(key,row,initial)}<div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
  if(key==="pianos") setupPianoFormBehavior(row);
  applyLanguageToDOM(document.getElementById("modal"));
- $("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}try{let saved;
-if(row) saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});
-if(key==="contacts"){const clientId=(row&&row.id)||saved.id; const allPianoChecks=[...document.querySelectorAll('input[name="client_piano_ids"]')]; const ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value); if(clientId && allPianoChecks.length) await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}
-activeModalCancelHandler=null;closeModal();if(typeof options.onSaved==="function") await options.onSaved(saved); else render(key)}catch(err){showError(err)}}}
+ $("#form").onsubmit=async e=>{e.preventDefault();try{const saved=await saveEntityFormRecord(key,row,e.target);activeModalCancelHandler=null;closeModal();if(typeof options.onSaved==="function")await options.onSaved(saved);else render(key)}catch(err){showError(err)}}}
+
 function field(f,val=""){let[name,label,type,opts]=f;const cls=`field field-${name} ${type==="textarea"?"full":""}`;if(type==="textarea")return `<div class="${cls}" data-field="${name}"><label>${label}</label><textarea name="${name}">${val||""}</textarea></div>`;if(type==="select")return `<div class="${cls}" data-field="${name}"><label>${label}</label><select name="${name}" onchange="if(typeof updateContactConditionalUI==='function')updateContactConditionalUI()">${opts.map(o=>{const value=Array.isArray(o)?o[0]:o;const text=Array.isArray(o)?o[1]:o;return `<option value="${value}" ${String(value)===String(val??"")?"selected":""}>${text}</option>`}).join("")}</select></div>`;return `<div class="${cls}" data-field="${name}"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${val??""}"></div>`}
 
 function updateContactConditionalUI(){
