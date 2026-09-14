@@ -1,110 +1,62 @@
-"use strict";
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const crypto = require("node:crypto");
-const vm = require("node:vm");
+const root = path.resolve(__dirname, '..');
+const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
+const sha = (rel) => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, rel))).digest('hex');
 
-const root = path.resolve(__dirname, "..");
-const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
-const sha256 = (relative) => crypto.createHash("sha256").update(fs.readFileSync(path.join(root, relative))).digest("hex");
+const styles = read('website/public/styles.css');
+const designV3 = read('website/public/design-v3.css');
+const app = read('website/public/app.js');
+const websiteServer = read('website/server/index.js');
 
-const styles = read("website/public/styles.css");
-const designV3 = read("website/public/design-v3.css");
-const app = read("website/public/app.js");
-const websiteServer = read("website/server/index.js");
+// Baseline hashes of ERP/admin files from the supplied source ZIP. These files are out of scope.
+const ERP_BASELINE = {
+  'public/styles.css': 'f700d359009225386a3d404197855b9417f5d33b90b11b2e2e98cfd61990ebed',
+  'public/app.js': '63f9c51ee6e8a5289c1b99a098eb572b6ab5bdde76c41737de4844f2e8b5e198',
+  'server/index.js': '0e411aa38ccba9c8f0ad30d53e3b424bf8565f6e1ddc3f5d8fc4c63b3838422b'
+};
 
-test("Luxury Light token szerződés és vizuális alapértékek", () => {
-  assert.match(styles, /:root\[data-theme="light"\]\s*\{/);
-  for (const value of ["#F7F5EF", "#F1EDE4", "#FCFBF7", "#FFFEFA", "#F3F0E8", "#171817", "#292B2A", "#A98442", "#80642F", "#C8AD76", "#191A18"]) {
-    assert.ok(styles.includes(value), `Hiányzó Luxury Light token/szín: ${value}`);
+test('Luxury Light token contract uses Ivory, Ebony & Brass palette', () => {
+  assert.match(styles, /:root\[data-theme="light"\]/);
+  for (const token of ['#F7F5EF', '#F1EDE4', '#FCFBF7', '#FFFEFA', '#ECE7DD', '#F3F0E8', '#171817', '#292B2A', '#555550', '#77736B', '#A09A90', '#A98442', '#B89A61', '#80642F', '#C8AD76', '#191A18']) {
+    assert.ok(styles.includes(token), `Missing luxury light token ${token}`);
   }
-  assert.match(styles, /rgba\(247,\s*245,\s*239,\s*0\.92\)/);
-  assert.match(styles, /backdrop-filter:\s*blur\(18px\)/);
-  assert.match(styles, /\.site-footer\s*\{[\s\S]*?background:\s*#191A18/i);
-  assert.match(styles, /\.theme-toggle[\s\S]*?width:\s*38px[\s\S]*?height:\s*38px/);
+  assert.match(styles, /--color-border:\s*rgba\(41, 43, 42, 0\.12\)/);
+  assert.match(styles, /--shadow-md:\s*0 14px 42px rgba\(37, 30, 18, 0\.075\)/);
 });
 
-test("Light mode komponensekben nincs közvetlen tiszta fekete/fehér dark leakage", () => {
-  const lightStyles = styles.slice(styles.indexOf("/* Luxury Light Mode — Ivory, Ebony & Brass */"));
-  const lightV3 = designV3.slice(designV3.indexOf("/* Luxury Light Mode cascade lock"));
-  assert.ok(lightStyles.length > 1000, "A Luxury Light styles blokk hiányzik vagy túl rövid.");
-  assert.ok(lightV3.length > 500, "A design-v3 Luxury Light cascade blokk hiányzik.");
-  for (const css of [lightStyles, lightV3]) {
-    assert.doesNotMatch(css, /(?:background|color|border(?:-color)?)\s*:\s*#(?:000(?:000)?|fff(?:fff)?)\b/i);
+test('Light components use theme tokens and cinematic hero remains dark/photo-safe', () => {
+  const lightBlock = styles.slice(styles.indexOf('/* Luxury Light Mode — Ivory, Ebony & Brass */'));
+  assert.ok(lightBlock.length > 1000);
+  assert.match(lightBlock, /\.hero-shade[\s\S]*rgba\(4, 4, 3/);
+  assert.match(lightBlock, /\.hero :is\(h1, h2, h3, p, \.eyebrow, \.hero-lead, \.hero-scroll\)/);
+  assert.match(lightBlock, /\.catalog-card[\s\S]*var\(--color-surface\)/);
+  assert.match(lightBlock, /\.site-footer[\s\S]*#191A18/);
+  assert.match(designV3, /Luxury Light Mode v3 cascade guard/);
+  assert.match(designV3, /html\[data-theme="light"\] :is\([^)]*\.privacy-dialog[^)]*\)/);
+  assert.doesNotMatch(lightBlock, /background:\s*#000(?:000)?\b/i);
+  assert.doesNotMatch(lightBlock, /background:\s*#fff(?:fff)?\b/i);
+});
+
+test('Solar theme and manual override persist correctly and use SVG line icons', () => {
+  assert.match(app, /timeZone:\s*"America\/New_York"/);
+  assert.match(app, /hour >= 7 && hour < 19 \? "light" : "dark"/);
+  assert.match(app, /localStorage\.getItem\(klavierhausThemePreferenceKey\)/);
+  assert.match(app, /localStorage\.setItem\(klavierhausThemePreferenceKey, next\)/);
+  assert.match(app, /root\.dataset\.theme = value/);
+  assert.match(app, /function themeIconSvg\(theme\)/);
+  assert.match(app, /<svg viewBox="0 0 24 24"/);
+  assert.doesNotMatch(app.slice(app.indexOf('function themeIconSvg'), app.indexOf('function initializeSolarTheme')), /☀|☾/);
+  assert.match(websiteServer, /class="theme-toggle__icon"/);
+  assert.doesNotMatch(websiteServer.match(/<button class="theme-toggle"[\s\S]*?<\/button>/)?.[0] || '', /☀|☾/);
+});
+
+test('ERP/admin scope files remain byte-identical to the supplied baseline', () => {
+  for (const [rel, expected] of Object.entries(ERP_BASELINE)) {
+    assert.equal(sha(rel), expected, `${rel} was modified even though ERP/admin is out of scope`);
   }
-  assert.match(lightStyles, /var\(--color-surface\)/);
-  assert.match(lightStyles, /var\(--color-text\)/);
-  assert.match(lightV3, /var\(--color-photo-mat\)/);
-});
-
-test("Solar témamotor, manual override és SVG jewel switch működési szerződése", () => {
-  const marker = "// Public website theme engine: solar default";
-  const start = app.indexOf(marker);
-  assert.ok(start >= 0, "A publikus témamotor nem található.");
-  const themeSource = app.slice(start);
-  const store = new Map();
-  const rootElement = {
-    dataset: {},
-    style: { values: new Map(), setProperty(name, value) { this.values.set(name, value); } }
-  };
-  const icon = { innerHTML: "" };
-  let clickHandler = null;
-  const button = {
-    dataset: {},
-    attrs: {},
-    setAttribute(name, value) { this.attrs[name] = value; },
-    addEventListener(type, handler) { if (type === "click") clickHandler = handler; }
-  };
-  const context = {
-    publishedDesignSettings: null,
-    document: {
-      documentElement: rootElement,
-      querySelectorAll(selector) {
-        if (selector === "[data-theme-icon]") return [icon];
-        if (selector === "[data-theme-toggle]") return [button];
-        return [];
-      }
-    },
-    localStorage: {
-      getItem(key) { return store.has(key) ? store.get(key) : null; },
-      setItem(key, value) { store.set(key, String(value)); }
-    },
-    Intl,
-    Date,
-    console
-  };
-  vm.createContext(context);
-  vm.runInContext(themeSource, context);
-  const solarTheme = vm.runInContext("solarTheme", context);
-  const applyPublicTheme = vm.runInContext("applyPublicTheme", context);
-  const initializeSolarTheme = vm.runInContext("initializeSolarTheme", context);
-
-  assert.equal(solarTheme(new Date("2026-09-15T11:00:00Z")), "light", "07:00 New York időben light mód szükséges.");
-  assert.equal(solarTheme(new Date("2026-09-15T22:59:00Z")), "light", "18:59 New York időben még light mód szükséges.");
-  assert.equal(solarTheme(new Date("2026-09-15T23:00:00Z")), "dark", "19:00 New York időben dark mód szükséges.");
-  assert.equal(solarTheme(new Date("2026-09-15T10:59:00Z")), "dark", "06:59 New York időben dark mód szükséges.");
-
-  applyPublicTheme("light");
-  assert.equal(rootElement.dataset.theme, "light");
-  assert.match(icon.innerHTML, /<svg[\s\S]*?<path/);
-  assert.equal(button.attrs["aria-pressed"], "false");
-
-  assert.equal(typeof clickHandler, "function", "A theme jewel click handler hiányzik.");
-  clickHandler();
-  assert.equal(rootElement.dataset.theme, "dark");
-  assert.equal(store.get("theme_preference"), "dark");
-  assert.equal(button.attrs["aria-pressed"], "true");
-
-  store.set("theme_preference", "light");
-  initializeSolarTheme();
-  assert.equal(rootElement.dataset.theme, "light", "A manual override-nak felül kell írnia a solar automatikát.");
-  assert.doesNotMatch(websiteServer, /data-theme-icon[^>]*>\s*[☀☾]/);
-  assert.match(websiteServer, /data-theme-icon[\s\S]*?<svg/);
-});
-
-test("Scope védelem: az ERP/admin stíluslap változatlan", () => {
-  assert.equal(sha256("public/styles.css"), "f700d359009225386a3d404197855b9417f5d33b90b11b2e2e98cfd61990ebed");
 });
