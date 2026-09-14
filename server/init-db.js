@@ -48,6 +48,27 @@ function ensureIndex(name, sql) {
   log(`Index ready: ${name}`);
 }
 
+function ensureFinancialSourceUniqueIndex() {
+  if (!tableExists("financial_items")) return;
+  const columns = tableColumns("financial_items");
+  if (!columns.has("source_type") || !columns.has("source_id")) return;
+  const duplicates = db.prepare(`
+    SELECT source_type,source_id,COUNT(*) AS count
+    FROM financial_items
+    WHERE source_type IS NOT NULL AND trim(source_type)<>'' AND source_id IS NOT NULL AND trim(source_id)<>''
+    GROUP BY source_type,source_id
+    HAVING COUNT(*)>1
+    LIMIT 1
+  `).get();
+  if (duplicates) {
+    log(`WARNING: duplicate financial source reference detected (${duplicates.source_type}:${duplicates.source_id}); application-level idempotency remains active and the unique index was not created`);
+    ensureIndex("idx_financial_items_source", "CREATE INDEX IF NOT EXISTS idx_financial_items_source ON financial_items(source_type,source_id)");
+    return;
+  }
+  db.exec("DROP INDEX IF EXISTS idx_financial_items_source");
+  ensureIndex("idx_financial_items_source_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_items_source_unique ON financial_items(source_type,source_id) WHERE source_type IS NOT NULL AND source_type<>'' AND source_id IS NOT NULL AND source_id<>''");
+}
+
 function tableSql(tableName) {
   return db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(tableName)?.sql || "";
 }
@@ -127,8 +148,10 @@ function preservedBusinessCounts() {
 function assertPreservedBusinessCounts(before) {
   const after = preservedBusinessCounts();
   for (const [tableName, count] of Object.entries(before)) {
-    if (after[tableName] !== count) {
-      throw new Error(`Data-preservation check failed for ${tableName}: before=${count}, after=${after[tableName]}`);
+    const current = after[tableName];
+    const valid = tableName === "jobs" ? current >= count : current === count;
+    if (!valid) {
+      throw new Error(`Data-preservation check failed for ${tableName}: before=${count}, after=${current}`);
     }
   }
   log(`Data-preservation check passed: ${Object.entries(after).map(([name, count]) => `${name}=${count}`).join(", ")}`);
@@ -143,6 +166,8 @@ function migrationRequiresBackup() {
   const usersMissingContactEmail = tableExists("users") && !tableColumns("users").has("contact_email");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
+  const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id"].some((column) => !tableColumns("jobs").has(column));
+  const workflowMissingJobLink = tableExists("workshop_workflows") && !tableColumns("workshop_workflows").has("job_id");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
@@ -156,7 +181,7 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || workflowMissingJobLink;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -629,6 +654,8 @@ function runMigrations() {
     ensureColumn("jobs", "workflow_status", "TEXT DEFAULT 'ACTIVE'");
     ensureColumn("jobs", "finalized_at", "TEXT");
     ensureColumn("jobs", "planned_minutes", "INTEGER DEFAULT 0");
+    ensureColumn("jobs", "notes", "TEXT");
+    ensureColumn("jobs", "workflow_id", "TEXT");
 
     // Import batches.
     ensureColumn("import_batches", "imported_pianos", "INTEGER DEFAULT 0");
@@ -641,7 +668,26 @@ function runMigrations() {
     ensureColumn("financial_items", "source_type", "TEXT");
     ensureColumn("financial_items", "source_id", "TEXT");
     ensureColumn("knowledge_base", "workflow_id", "TEXT");
-    if (tableExists("workshop_workflows")) ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
+    if (tableExists("workshop_workflows")) {
+      ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
+      ensureColumn("workshop_workflows", "job_id", "TEXT");
+    }
+    if (tableExists("workshop_workflows") && tableExists("jobs")) {
+      const legacyWorkflows=db.prepare("SELECT w.*,c.name AS client_name,p.display_name AS piano_display,p.brand AS piano_brand,p.model AS piano_model,u.name AS creator_name FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=COALESCE(w.transport_responsible_user_id,w.created_by_user_id) WHERE w.job_id IS NULL OR trim(w.job_id)='' ORDER BY w.created_at,w.id").all();
+      const insertLinkedJob=db.prepare(`INSERT OR IGNORE INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,workflow_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const linkWorkflow=db.prepare("UPDATE workshop_workflows SET job_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
+      for(const workflow of legacyWorkflows){
+        const jobId=`WFJOB-${workflow.id}`;
+        const end=String(workflow.final_due_at||'').slice(0,16);
+        const endDate=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(end)?new Date(`${end}:00Z`):null;
+        const start=endDate?new Date(endDate.getTime()-15*60000).toISOString().slice(0,16):end;
+        const pianoName=workflow.piano_display||`${workflow.piano_brand||''} ${workflow.piano_model||''}`.trim()||workflow.piano_id;
+        const assigneeId=workflow.transport_responsible_user_id||workflow.created_by_user_id||null;
+        const assigneeName=workflow.transport_responsible_name||workflow.creator_name||'Workshop workflow';
+        insertLinkedJob.run(jobId,`WFJOB-${workflow.workflow_key||workflow.id}`,jobId,1,workflow.current_status==='COMPLETED'?'COMPLETED':(workflow.current_status==='ABORTED'?'FAILED':'ACTIVE'),workflow.id,workflow.title,'Workflow',workflow.client_id,workflow.client_name,workflow.piano_id,pianoName,assigneeId,assigneeName,workflow.created_by_user_id||null,workflow.creator_name||'System','Medium',workflow.current_status==='COMPLETED'?'Completed':(workflow.current_status==='ABORTED'?'Cancelled':'Open'),start,end,'America/New_York',0,0.25,15,0,workflow.transport_address||workflow.current_location||'',workflow.description||'',workflow.description||'');
+        linkWorkflow.run(jobId,workflow.id);
+      }
+    }
     if (tableExists("workflow_stages")) {
       ensureColumn("workflow_stages", "card_title", "TEXT");
       ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
@@ -758,12 +804,14 @@ function runMigrations() {
   ensureIndex("idx_pianos_import_batch", "CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id)");
   ensureIndex("idx_pianos_owner_resolution", "CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution)");
   ensureIndex("idx_pianos_owner_contact", "CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)");
-  ensureIndex("idx_financial_items_source", "CREATE INDEX IF NOT EXISTS idx_financial_items_source ON financial_items(source_type,source_id)");
+  ensureFinancialSourceUniqueIndex();
   ensureIndex("idx_inventory_items_inventory_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id) WHERE inventory_id IS NOT NULL");
   ensureIndex("idx_inventory_items_category", "CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)");
   ensureIndex("idx_planned_jobs_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_jobs_key ON planned_jobs(planned_key) WHERE planned_key IS NOT NULL");
   ensureIndex("idx_planned_jobs_status", "CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)");
   ensureIndex("idx_jobs_workflow_root", "CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)");
+  ensureIndex("idx_jobs_workflow_id", "CREATE INDEX IF NOT EXISTS idx_jobs_workflow_id ON jobs(workflow_id)");
+  if (tableExists("workshop_workflows")) ensureIndex("idx_workshop_workflows_job_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_workflows_job_id ON workshop_workflows(job_id) WHERE job_id IS NOT NULL AND trim(job_id)<>''");
   ensureIndex("idx_jobs_assigned_user_id", "CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)");
   ensureIndex("idx_jobs_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_time_range ON jobs(start_time,end_time)");
   ensureIndex("idx_jobs_assignee_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_assignee_time_range ON jobs(assigned_user_id,start_time,end_time)");
