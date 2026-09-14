@@ -102,6 +102,14 @@ function createGoogleCalendarIntegration(options) {
     };
   }
 
+  function runtimeEnabled() {
+    try {
+      const master = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='system_integrations_enabled'").get()?.setting_value;
+      const provider = db.prepare("SELECT enabled FROM system_integration_health WHERE provider='GOOGLE_CALENDAR'").get()?.enabled;
+      return master !== "0" && Number(provider ?? 1) === 1;
+    } catch (_error) { return true; }
+  }
+
   function createAuthUrl(userId) {
     if (!configured) throw new Error("GOOGLE_CALENDAR_NOT_CONFIGURED");
     db.prepare("DELETE FROM calendar_oauth_states WHERE expires_at<=?").run(new Date().toISOString());
@@ -112,13 +120,57 @@ function createGoogleCalendarIntegration(options) {
       client_id: config.clientId,
       redirect_uri: config.redirectUri,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
+      scope: "https://www.googleapis.com/auth/calendar.readonly",
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "true",
       state
     });
     return `${config.authUrl}?${params}`;
+  }
+
+  function createTestAuthUrl(userId) {
+    if (!configured) throw new Error("GOOGLE_CALENDAR_NOT_CONFIGURED");
+    if (!runtimeEnabled()) throw new Error("GOOGLE_CALENDAR_INTEGRATION_DISABLED");
+    const rawState = crypto.randomBytes(32).toString("base64url");
+    const state = `KHIT.${rawState}`;
+    const stateHash = crypto.createHash("sha256").update(state).digest("hex");
+    db.prepare("DELETE FROM system_integration_test_tokens WHERE expires_at<=?").run(new Date().toISOString());
+    db.prepare("INSERT INTO system_integration_test_tokens(state_hash,provider,requested_by_user_id,expires_at) VALUES(?,'GOOGLE_CALENDAR',?,?)")
+      .run(stateHash, userId, new Date(Date.now() + 10 * 60 * 1000).toISOString());
+    const params = new URLSearchParams({
+      client_id: config.clientId, redirect_uri: config.redirectUri, response_type: "code",
+      scope: "https://www.googleapis.com/auth/calendar.events", access_type: "online", prompt: "consent", state
+    });
+    return `${config.authUrl}?${params}`;
+  }
+
+  function isTestState(state) {
+    const value = String(state || "");
+    if (!value.startsWith("KHIT.")) return false;
+    const stateHash = crypto.createHash("sha256").update(value).digest("hex");
+    const row = db.prepare("SELECT 1 FROM system_integration_test_tokens WHERE state_hash=? AND provider='GOOGLE_CALENDAR' AND expires_at>?").get(stateHash, new Date().toISOString());
+    return Boolean(row);
+  }
+
+  async function handleTestOAuthCallback(code, state) {
+    if (!configured) throw new Error("GOOGLE_CALENDAR_NOT_CONFIGURED");
+    const stateHash = crypto.createHash("sha256").update(String(state || "")).digest("hex");
+    const row = db.prepare("SELECT * FROM system_integration_test_tokens WHERE state_hash=? AND provider='GOOGLE_CALENDAR'").get(stateHash);
+    if (!row || Date.parse(row.expires_at) <= Date.now()) throw new Error("INVALID_OR_EXPIRED_TEST_OAUTH_STATE");
+    if (!code) throw new Error("GOOGLE_OAUTH_CODE_MISSING");
+    const token = await exchangeToken({ code, client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: config.redirectUri, grant_type: "authorization_code" });
+    if (!token.access_token) throw new Error("GOOGLE_TEST_ACCESS_TOKEN_MISSING");
+    const expiry = new Date(Date.now() + Math.min(Number(token.expires_in || 600) * 1000, 10 * 60 * 1000)).toISOString();
+    db.prepare("UPDATE system_integration_test_tokens SET access_token_encrypted=?,expires_at=? WHERE state_hash=?").run(encrypt(token.access_token), expiry, stateHash);
+    return { ok: true, expires_at: expiry };
+  }
+
+  function consumeTestAccessToken(userId) {
+    const row = db.prepare("SELECT * FROM system_integration_test_tokens WHERE provider='GOOGLE_CALENDAR' AND requested_by_user_id=? AND access_token_encrypted IS NOT NULL AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(userId, new Date().toISOString());
+    if (!row) throw Object.assign(new Error("GOOGLE_CALENDAR_TEST_WRITE_AUTH_REQUIRED"), { status: 409 });
+    db.prepare("DELETE FROM system_integration_test_tokens WHERE state_hash=?").run(row.state_hash);
+    return decrypt(row.access_token_encrypted);
   }
 
   async function readJsonResponse(response) {
@@ -448,12 +500,14 @@ function createGoogleCalendarIntegration(options) {
   }
 
   function syncNow(triggerType = "MANUAL") {
+    if (!runtimeEnabled()) return Promise.resolve({ ok: false, disabled: true, status: publicStatus() });
     if (syncPromise) return syncPromise;
     syncPromise = performSync(triggerType).finally(() => { syncPromise = null; });
     return syncPromise;
   }
 
   async function registerWatch() {
+    if (!runtimeEnabled()) return null;
     const row = integrationRow();
     if (!row || row.status !== "CONNECTED" || !config.webhookUrl || !/^https:\/\//i.test(config.webhookUrl)) return null;
     if (Date.parse(row.channel_expires_at || "") > Date.now() + 24 * 60 * 60 * 1000) return row;
@@ -471,6 +525,7 @@ function createGoogleCalendarIntegration(options) {
   }
 
   function handleWebhook(headers) {
+    if (!runtimeEnabled()) return false;
     const row = integrationRow();
     const channelId = String(headers["x-goog-channel-id"] || "");
     const channelToken = String(headers["x-goog-channel-token"] || "");
@@ -481,24 +536,40 @@ function createGoogleCalendarIntegration(options) {
   }
 
 
-  async function testConnection() {
+  async function testConnection(writeAccessToken = "") {
+    const token = String(writeAccessToken || "").trim();
+    if (!token) throw Object.assign(new Error("GOOGLE_CALENDAR_TEST_WRITE_AUTH_REQUIRED"), { status: 409 });
     const start = new Date(Date.now() + 5 * 60 * 1000);
     const end = new Date(start.getTime() + 5 * 60 * 1000);
-    const created = await googleRequest(`/calendars/${encodeURIComponent(config.calendarId)}/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        summary: "Klavierhaus ERP integration test (temporary)",
-        description: "Created and deleted automatically by System Activation & Integrations.",
-        start: { dateTime: start.toISOString() },
-        end: { dateTime: end.toISOString() }
-      })
-    });
-    if (!created?.id) throw new Error("GOOGLE_CALENDAR_TEST_EVENT_CREATE_FAILED");
-    const token = await accessToken(false);
-    const response = await fetchImpl(`${config.apiBase}/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(created.id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-    if (!response.ok && response.status !== 204) throw new Error(`GOOGLE_CALENDAR_TEST_EVENT_DELETE_FAILED:HTTP_${response.status}`);
-    return { live_data: true, temporary_event_created: true, temporary_event_deleted: true, event_id: created.id };
+    let createdId = "";
+    let deleted = false;
+    try {
+      const createResponse = await fetchImpl(`${config.apiBase}/calendars/${encodeURIComponent(config.calendarId)}/events`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          summary: "Klavierhaus ERP integration test (temporary)",
+          description: "Created and deleted automatically by System Activation & Integrations.",
+          start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() }
+        })
+      });
+      const created = await readJsonResponse(createResponse);
+      createdId = String(created?.id || "");
+      if (!createdId) throw new Error("GOOGLE_CALENDAR_TEST_EVENT_CREATE_FAILED");
+      const deleteResponse = await fetchImpl(`${config.apiBase}/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(createdId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      deleted = deleteResponse.ok || deleteResponse.status === 204 || deleteResponse.status === 410;
+      if (!deleted) throw new Error(`GOOGLE_CALENDAR_TEST_EVENT_DELETE_FAILED:HTTP_${deleteResponse.status}`);
+      return { live_data: true, temporary_event_created: true, temporary_event_deleted: true, event_id: createdId };
+    } finally {
+      if (createdId && !deleted) {
+        for (let attempt = 0; attempt < 3 && !deleted; attempt += 1) {
+          try {
+            const cleanup = await fetchImpl(`${config.apiBase}/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(createdId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+            deleted = cleanup.ok || cleanup.status === 204 || cleanup.status === 404 || cleanup.status === 410;
+          } catch (_error) {}
+        }
+      }
+    }
   }
 
   async function disconnect() {
@@ -537,6 +608,7 @@ function createGoogleCalendarIntegration(options) {
 
   function startTimers() {
     stopTimers();
+    if (!runtimeEnabled()) return;
     if (!configured || !publicStatus().connected) return;
     pollTimer = setInterval(() => syncNow("POLL").catch((error) => logger.warn("Google polling sync failed:", error.message)), config.pollIntervalMs);
     pollTimer.unref?.();
@@ -554,6 +626,10 @@ function createGoogleCalendarIntegration(options) {
     config: { centralEmail: config.centralEmail, calendarId: config.calendarId, redirectUri: config.redirectUri },
     status: publicStatus,
     createAuthUrl,
+    createTestAuthUrl,
+    isTestState,
+    handleTestOAuthCallback,
+    consumeTestAccessToken,
     handleOAuthCallback,
     syncNow,
     registerWatch,
@@ -563,6 +639,7 @@ function createGoogleCalendarIntegration(options) {
     markReviewed,
     ignoreDeletedJob,
     stop: stopTimers,
+    start: startTimers,
     _test: { encrypt, decrypt, processEvent }
   };
 }
