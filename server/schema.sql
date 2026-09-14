@@ -150,6 +150,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   travel_minutes INTEGER DEFAULT 0,
   service_address TEXT,
   instructions TEXT,
+  notes TEXT,
+  workflow_id TEXT,
   planned_job_id TEXT,
   close_type TEXT,
   billed_amount REAL DEFAULT 0,
@@ -1312,6 +1314,7 @@ CREATE TABLE IF NOT EXISTS workshop_workflows (
   piano_id TEXT NOT NULL,
   mode TEXT NOT NULL CHECK(mode IN ('INBOUND','ON_SITE')),
   planned_job_id TEXT,
+  job_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
   current_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(current_status IN ('ACTIVE','COMPLETED','ABORTED')),
@@ -1339,7 +1342,8 @@ CREATE TABLE IF NOT EXISTS workshop_workflows (
   FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(aborted_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(planned_job_id) REFERENCES planned_jobs(id) ON DELETE SET NULL
+  FOREIGN KEY(planned_job_id) REFERENCES planned_jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS workflow_stages (
