@@ -1868,36 +1868,37 @@ html[data-theme="dark"]{color-scheme:dark}
 /* Luxury Light Mode — Ivory, Ebony & Brass */
 :root[data-theme="light"] {
   color-scheme: light;
+
+  /* Canvas & surfaces */
   --color-bg: #F7F5EF;
   --color-bg-alt: #F1EDE4;
   --color-surface: #FCFBF7;
   --color-surface-raised: #FFFEFA;
   --color-surface-muted: #ECE7DD;
   --color-photo-mat: #F3F0E8;
+
+  /* Ebony typography */
   --color-heading: #171817;
   --color-text: #292B2A;
   --color-text-secondary: #555550;
   --color-text-muted: #77736B;
   --color-text-disabled: #A09A90;
+
+  /* Brushed brass */
   --color-gold: #A98442;
   --color-gold-soft: #B89A61;
   --color-gold-dark: #80642F;
   --color-gold-highlight: #C8AD76;
+
+  /* Borders & depth */
   --color-border: rgba(41, 43, 42, 0.12);
   --color-border-strong: rgba(41, 43, 42, 0.20);
   --color-border-gold: rgba(128, 100, 47, 0.30);
-  --color-link: #71572D;
-  --color-link-hover: #493719;
-  --color-focus: rgba(169, 132, 66, 0.34);
-  --color-success: #49614B;
-  --color-error: #8E3F37;
   --shadow-xs: 0 1px 2px rgba(30, 26, 18, 0.035);
   --shadow-sm: 0 5px 18px rgba(37, 30, 18, 0.055);
   --shadow-md: 0 14px 42px rgba(37, 30, 18, 0.075);
-  --surface-highlight: rgba(255, 255, 255, 0.72);
-  --surface-inset: rgba(128, 100, 47, 0.07);
 
-  /* Compatibility tokens used by the established public design system. */
+  /* Compatibility aliases used by the historical public styles */
   --black: var(--color-bg);
   --black-soft: var(--color-bg-alt);
   --black-raised: var(--color-surface);
@@ -1907,33 +1908,43 @@ html[data-theme="dark"]{color-scheme:dark}
   --gold: var(--color-gold);
   --gold-bright: var(--color-gold-highlight);
   --gold-dark: var(--color-gold-dark);
-  --line: var(--color-border);
-  --line-soft: rgba(128, 100, 47, 0.16);
+  --line: var(--color-border-gold);
+  --line-soft: var(--color-border);
   --shadow: var(--shadow-md);
+  --cream: var(--color-text);
+  --cream-soft: var(--color-text-secondary);
+  --muted: var(--color-text-muted);
+  --panel: var(--color-surface);
 }
 
 html[data-theme="light"] {
   background: var(--color-bg);
   scrollbar-color: var(--color-gold-dark) var(--color-bg-alt);
 }
+
 html[data-theme="light"] body {
   color: var(--color-text);
   background:
-    radial-gradient(circle at 86% 14%, rgba(169, 132, 66, 0.055), transparent 25rem),
-    linear-gradient(180deg, var(--color-bg), #F5F2EB 68%, var(--color-bg-alt));
+    radial-gradient(circle at 88% 16%, rgba(169, 132, 66, 0.055), transparent 27rem),
+    linear-gradient(180deg, var(--color-bg) 0%, #F5F2EA 52%, var(--color-bg) 100%);
 }
-html[data-theme="light"] ::selection { color: var(--color-surface-raised); background: var(--color-gold-dark); }
-html[data-theme="light"] :where(h1,h2,h3,.brand-wordmark) { color: var(--color-heading); }
-html[data-theme="light"] :where(.section-copy,.hero-lead,.section-heading>p:not(.eyebrow),.catalog-card__body>p,.public-event-card__excerpt) { color: var(--color-text-secondary); }
-html[data-theme="light"] .eyebrow,
-html[data-theme="light"] .section-label,
-html[data-theme="light"] .catalog-status {
+
+html[data-theme="light"] ::selection {
+  color: var(--color-heading);
+  background: rgba(200, 173, 118, 0.42);
+}
+
+html[data-theme="light"] :is(h1, h2, h3) {
+  color: var(--color-heading);
+}
+
+html[data-theme="light"] :is(.eyebrow, .section-marker, .catalog-status) {
   color: var(--color-gold-dark);
-  letter-spacing: .18em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
-html[data-theme="light"] .site-header,
+/* Header: translucent ivory, but the unscrolled photographic hero keeps its cinematic contrast. */
 html[data-theme="light"] .site-header.is-scrolled,
 html[data-theme="light"] .template-legal .site-header,
 html[data-theme="light"] .template-not-found .site-header {
@@ -1941,118 +1952,242 @@ html[data-theme="light"] .template-not-found .site-header {
   background: rgba(247, 245, 239, 0.92);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
-  box-shadow: 0 1px 0 rgba(255,255,255,.5), var(--shadow-xs);
 }
-html[data-theme="light"] .navigation-panel { background: transparent; }
-html[data-theme="light"] .brand { color: var(--color-heading); }
-html[data-theme="light"] .primary-navigation a,
-html[data-theme="light"] .language-switch { color: var(--color-text-secondary); }
-html[data-theme="light"] .primary-navigation a:hover,
-html[data-theme="light"] .primary-navigation a[aria-current="page"],
-html[data-theme="light"] .language-switch:hover { color: var(--color-gold-dark); }
-html[data-theme="light"] .menu-toggle span { background: var(--color-heading); }
 
+html[data-theme="light"] .site-header.is-scrolled .brand,
+html[data-theme="light"] .template-legal .brand,
+html[data-theme="light"] .template-not-found .brand,
+html[data-theme="light"] .site-header.is-scrolled .primary-navigation a,
+html[data-theme="light"] .site-header.is-scrolled .language-switch,
+html[data-theme="light"] .template-legal .primary-navigation a,
+html[data-theme="light"] .template-legal .language-switch,
+html[data-theme="light"] .template-not-found .primary-navigation a,
+html[data-theme="light"] .template-not-found .language-switch {
+  color: var(--color-text);
+}
+
+html[data-theme="light"] .site-header.is-scrolled .primary-navigation a:hover,
+html[data-theme="light"] .site-header.is-scrolled .primary-navigation a[aria-current="page"],
+html[data-theme="light"] .site-header.is-scrolled .language-switch:hover {
+  color: var(--color-gold-dark);
+}
+
+html[data-theme="light"] .site-header:not(.is-scrolled) {
+  background: linear-gradient(180deg, rgba(6, 7, 7, 0.78), rgba(6, 7, 7, 0));
+  border-color: rgba(255, 254, 250, 0.12);
+}
+
+html[data-theme="light"] .site-header:not(.is-scrolled) :is(.brand, .primary-navigation a, .language-switch) {
+  color: #F4EFE5;
+}
+
+/* Jewel theme switch */
 .theme-toggle {
   width: 38px;
   height: 38px;
   border: 1px solid rgba(128, 100, 47, 0.30);
   border-radius: 50%;
-  background: rgba(255, 254, 250, 0.08);
+  background: rgba(255, 254, 250, 0.07);
   color: var(--gold-bright);
-  transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+  transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease, transform 220ms ease;
 }
-.theme-toggle svg { display:block; }
-.theme-toggle:hover { transform: translateY(-1px); border-color: var(--gold); }
-html[data-theme="light"] .theme-toggle {
-  background: rgba(255, 254, 250, 0.66);
-  color: var(--color-gold-dark);
-  box-shadow: var(--shadow-xs);
-}
-html[data-theme="light"] .theme-toggle:hover { background: rgba(169, 132, 66, 0.08); border-color: var(--color-gold); }
-
-html[data-theme="light"] .button--primary,
-html[data-theme="light"] .header-consultation,
-html[data-theme="light"] .event-card-action--checkout {
-  min-height: 44px;
-  border-color: var(--color-gold-dark);
-  background: var(--color-gold-dark);
-  color: var(--color-surface-raised);
-  box-shadow: none;
-}
-html[data-theme="light"] .button--primary:hover,
-html[data-theme="light"] .header-consultation:hover,
-html[data-theme="light"] .event-card-action--checkout:hover {
-  border-color: #6A5125;
-  background: #6A5125;
-  color: var(--color-surface-raised);
+.theme-toggle:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(92,70,30,.18);
+  border-color: var(--gold-bright);
+  background: rgba(169, 132, 66, 0.10);
 }
-html[data-theme="light"] .button--ghost,
-html[data-theme="light"] .button:not(.button--primary):not(.header-consultation) {
-  border-color: rgba(128, 100, 47, 0.42);
-  color: var(--color-text);
+.theme-toggle__icon,
+.theme-toggle__icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
-html[data-theme="light"] .button--ghost:hover { background: rgba(169,132,66,.07); border-color: var(--color-gold); }
+.theme-toggle__icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html[data-theme="light"] .site-header.is-scrolled .theme-toggle,
+html[data-theme="light"] .template-legal .theme-toggle,
+html[data-theme="light"] .template-not-found .theme-toggle {
+  color: var(--color-gold-dark);
+  background: rgba(255, 254, 250, 0.66);
+  border-color: rgba(128, 100, 47, 0.30);
+}
 
-html[data-theme="light"] :where(.catalog-card,.public-event-card,.event-card,.review-card,.event-facts,.invitation-card) {
-  border-color: var(--color-border);
-  background: linear-gradient(145deg, rgba(255,255,255,.50), rgba(247,244,236,.20)), var(--color-surface);
+/* Cinematic hero islands: keep the original dark/image treatment even in light mode. */
+html[data-theme="light"] .hero,
+html[data-theme="light"] .hero--home,
+html[data-theme="light"] .hero--inner {
+  color: #F2EFE8;
+}
+html[data-theme="light"] .hero :is(h1, h2, h3, p, .eyebrow, .hero-lead, .hero-scroll) {
+  color: inherit;
+}
+html[data-theme="light"] .hero .eyebrow {
+  color: #D0B67F;
+}
+html[data-theme="light"] .hero-shade {
+  background:
+    linear-gradient(90deg, rgba(4, 4, 3, 0.78) 0%, rgba(4, 4, 3, 0.44) 48%, rgba(4, 4, 3, 0.16) 100%),
+    linear-gradient(180deg, rgba(4, 4, 3, 0.22), rgba(4, 4, 3, 0.60));
+}
+html[data-theme="light"] .hero .button--primary {
+  color: #FFFEFA;
+  background: #80642F;
+  border-color: #80642F;
+}
+html[data-theme="light"] .hero .button--ghost {
+  color: #FFFEFA;
+  border-color: rgba(255, 254, 250, 0.48);
+  background: rgba(8, 8, 7, 0.14);
+}
+
+/* Quiet-luxury editorial surfaces */
+html[data-theme="light"] :is(.section--statement, .section--editorial, .section--cards, .section--contact, .section--notice, .dynamic-event-list, .catalog-detail, .event-detail-layout) {
   color: var(--color-text);
+}
+html[data-theme="light"] .section--statement,
+html[data-theme="light"] .section--cards,
+html[data-theme="light"] .section--notice {
+  background: var(--color-bg);
+}
+html[data-theme="light"] :is(.section--editorial, .section--contact, .home-event-showcase) {
+  background: var(--color-bg-alt);
+}
+html[data-theme="light"] .section--quote {
+  color: #EFE9DE;
+  background: #191A18;
+}
+html[data-theme="light"] .section--quote :is(p, footer, cite) {
+  color: inherit;
+}
+
+html[data-theme="light"] :is(.catalog-card, .event-card, .review-card, .public-event-card, .event-facts, .invitation-card) {
+  color: var(--color-text);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.50), rgba(247, 244, 236, 0.24)),
+    var(--color-surface);
+  border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
 }
-html[data-theme="light"] :where(.catalog-card,.public-event-card,.review-card):hover {
+html[data-theme="light"] :is(.catalog-card, .event-card, .review-card, .public-event-card):hover {
   border-color: var(--color-border-gold);
   box-shadow: var(--shadow-md);
 }
-html[data-theme="light"] :where(.catalog-card__image,.public-event-card__media,.detail-gallery figure,.piano-brand-instrument__media,.editorial-image,.editorial-feature-image,.statement-image,.visual-media figure) {
+html[data-theme="light"] :is(.catalog-card__image, .editorial-image, .editorial-feature-image, .statement-image, .visual-media figure) {
   background: var(--color-photo-mat);
 }
-html[data-theme="light"] .catalog-card__image::after,
-html[data-theme="light"] .piano-brand-card .catalog-card__image::after,
-html[data-theme="light"] .piano-brand-instrument__media::after { background: linear-gradient(transparent 68%, rgba(23,24,23,.18)); }
-html[data-theme="light"] .public-event-card__media::after { background: linear-gradient(180deg, transparent 56%, rgba(23,24,23,.35)); }
-html[data-theme="light"] .public-event-card__number { color: #FFFEFA; text-shadow: 0 1px 12px rgba(0,0,0,.35); }
-
-html[data-theme="light"] :where(input,textarea,select) {
-  border-color: var(--color-border-strong);
-  background: rgba(255,254,250,.76);
-  color: var(--color-text);
+html[data-theme="light"] :is(.catalog-card__body > p, .public-event-card__excerpt, .visual-copy p, .section-copy, .review-card p) {
+  color: var(--color-text-secondary);
 }
-html[data-theme="light"] :where(input,textarea,select):focus {
+html[data-theme="light"] :is(.public-event-card__date, .public-event-card__facts, .catalog-detail__lead) {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .public-event-card__artist {
+  color: var(--color-gold-dark);
+}
+
+/* Buttons */
+html[data-theme="light"] .button--primary,
+html[data-theme="light"] .event-card-action--checkout,
+html[data-theme="light"] .header-consultation {
+  min-height: 44px;
+  color: #FFFEFA;
+  border-color: #80642F;
+  background: #80642F;
+  box-shadow: var(--shadow-xs);
+}
+html[data-theme="light"] :is(.button--primary, .event-card-action--checkout, .header-consultation):hover {
+  color: #FFFEFA;
+  border-color: #6A5125;
+  background: #6A5125;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(92, 70, 30, 0.18);
+}
+html[data-theme="light"] .button--ghost,
+html[data-theme="light"] .text-link {
+  color: var(--color-text);
+  border-color: rgba(128, 100, 47, 0.42);
+  background: transparent;
+}
+html[data-theme="light"] .button--ghost:hover {
+  color: var(--color-heading);
   border-color: var(--color-gold);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--color-focus);
+  background: rgba(169, 132, 66, 0.07);
 }
-html[data-theme="light"] :where(.privacy-dialog,.interest-dialog,.service-dialog) {
-  border-color: var(--color-border-gold);
-  background: var(--color-surface-raised);
+
+/* Forms, dialogs and consent */
+html[data-theme="light"] :is(dialog, .privacy-dialog, .interest-dialog, .service-dialog, .customer-chat__panel, .consent-banner) {
   color: var(--color-text);
-  box-shadow: 0 24px 72px rgba(37,30,18,.16);
+  background: rgba(252, 251, 247, 0.98);
+  border-color: var(--color-border-gold);
+  box-shadow: var(--shadow-md);
 }
-html[data-theme="light"] :where(.privacy-dialog,.interest-dialog,.service-dialog)::backdrop { background: rgba(23,24,23,.38); }
-html[data-theme="light"] .dialog-close { border-color: var(--color-border); background: var(--color-surface-muted); color: var(--color-heading); }
+html[data-theme="light"] :is(.privacy-dialog, .interest-dialog, .service-dialog)::backdrop {
+  background: rgba(23, 24, 23, 0.42);
+}
+html[data-theme="light"] :is(input, textarea, select) {
+  color: var(--color-text);
+  background: rgba(255, 254, 250, 0.78);
+  border-color: var(--color-border-strong);
+}
+html[data-theme="light"] :is(input, textarea, select):focus {
+  outline: none;
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 3px rgba(169, 132, 66, 0.11);
+}
+html[data-theme="light"] :is(label, legend) {
+  color: var(--color-text-secondary);
+}
+html[data-theme="light"] .dialog-close {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
+}
 
-html[data-theme="light"] .section--quote,
-html[data-theme="light"] .section--statement,
-html[data-theme="light"] .home-event-showcase,
-html[data-theme="light"] .review-showcase { background-color: transparent; }
-html[data-theme="light"] .section--cards:nth-of-type(even),
-html[data-theme="light"] .section--editorial:nth-of-type(even) { background: rgba(241,237,228,.58); }
-
-/* A controlled dark footer anchors the light composition to the original Klavierhaus identity. */
+/* Footer remains a dark compositional anchor in both themes. */
 html[data-theme="light"] .site-footer {
-  border-top: 1px solid rgba(200, 173, 118, 0.32);
-  background: #191A18;
   color: #E8E2D7;
+  background: #191A18;
+  border-top: 1px solid rgba(200, 173, 118, 0.32);
 }
-html[data-theme="light"] .site-footer :where(.footer-brand p,.footer-column a,.footer-column address,.footer-bottom,.footer-privacy-button) { color: #D5CEC1; }
-html[data-theme="light"] .site-footer :where(.footer-label,.footer-column a:hover,.footer-privacy-button:hover) { color: #C8AD76; }
+html[data-theme="light"] .site-footer :is(a, p, dt, dd, button) {
+  color: inherit;
+}
+html[data-theme="light"] .site-footer .eyebrow,
+html[data-theme="light"] .site-footer a:hover,
+html[data-theme="light"] .site-footer button:hover {
+  color: #C8AD76;
+}
 
-html[data-theme="light"] a:focus-visible,
-html[data-theme="light"] button:focus-visible { outline-color: var(--color-gold-dark); box-shadow: 0 0 0 3px var(--color-focus); }
+/* Mobile light navigation must remain an ivory panel, never a dark leak. */
+@media (max-width: 900px) {
+  html[data-theme="light"] .navigation-panel {
+    color: var(--color-text);
+    background: rgba(247, 245, 239, 0.985);
+    border-left: 1px solid var(--color-border-gold);
+  }
+  html[data-theme="light"] .navigation-panel :is(.primary-navigation a, .language-switch) {
+    color: var(--color-text);
+  }
+  html[data-theme="light"] .menu-toggle span {
+    background: currentColor;
+  }
+  html[data-theme="light"] .site-header:not(.is-scrolled) .menu-toggle {
+    color: #F4EFE5;
+  }
+  html[data-theme="light"] .site-header.is-scrolled .menu-toggle {
+    color: var(--color-heading);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .theme-toggle,
-  html[data-theme="light"] :where(.catalog-card,.public-event-card,.review-card,.button) { transition: none !important; transform: none !important; }
+  html[data-theme="light"] :is(.catalog-card, .event-card, .review-card, .public-event-card, .button) {
+    transition-duration: 0.01ms !important;
+  }
 }
+
