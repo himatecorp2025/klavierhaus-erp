@@ -120,7 +120,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
     MANAGER:[...commonView,'finance.view','income_statement.view'],
     WORKER:[...commonView]
   };
@@ -866,7 +866,7 @@ const googleCalendar=createGoogleCalendarIntegration({
   getJob:(id)=>db.prepare(jobsSelectSql("WHERE j.id=?")).get(id),
   createNotification
 });
-registerSystemIntegrationRoutes({app,db,auth,permit,requireSuperadmin,audit,googleCalendar,env:process.env});
+registerSystemIntegrationRoutes({app,db,auth,requireSuperadmin,audit,googleCalendar,services:{transactionalEmail,stripeSandbox},env:process.env});
 
 function canCloseJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
@@ -1027,7 +1027,12 @@ app.get('/api/google-calendar/auth-url',auth,requireSuperadmin,(req,res)=>{
 });
 app.get('/api/google-calendar/oauth/callback',async(req,res)=>{
   try{
-    await googleCalendar.handleOAuthCallback(String(req.query.code||''),String(req.query.state||''));
+    const state=String(req.query.state||'');
+    if(googleCalendar.isTestState(state)){
+      await googleCalendar.handleTestOAuthCallback(String(req.query.code||''),state);
+      return res.redirect('/?googleCalendarTest=authorized');
+    }
+    await googleCalendar.handleOAuthCallback(String(req.query.code||''),state);
     res.redirect('/?googleCalendar=connected');
   }catch(error){
     console.warn('Google OAuth callback failed:',error.message);
@@ -2407,7 +2412,7 @@ app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{co
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
-  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','customer_inbox.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'];
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','customer_inbox.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
@@ -2524,7 +2529,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
         MANAGER:[...commonView,'finance.view','income_statement.view'],
         WORKER:[...commonView]
       };
