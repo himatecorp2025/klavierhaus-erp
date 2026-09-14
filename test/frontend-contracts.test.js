@@ -280,7 +280,7 @@ test("job details render one language immediately and expose only curated pendin
   assert.match(styles, /google-import-row dd\{[^}]*overflow-wrap:anywhere/);
 });
 
-test("manual scheduling uses wall-clock arithmetic, five-minute steps and readable durations", () => {
+test("manual scheduling uses wall-clock arithmetic, fifteen-minute steps and readable durations", () => {
   assert.match(appSource, /function addWallClockMinutes/);
   assert.match(appSource, /function wallClockDifferenceMinutes/);
   assert.match(appSource, /function isFiveMinuteDateTime/);
@@ -288,11 +288,13 @@ test("manual scheduling uses wall-clock arithmetic, five-minute steps and readab
   assert.match(appSource, /preservesExistingExactTime/);
   assert.match(appSource, /const timesUnchanged=Boolean/);
   assert.ok((appSource.match(/step="300"/g) || []).length >= 4);
-  assert.match(appSource, /const dateTimeStep=preservesExistingExactTime\?"any":"300"/);
+  assert.match(appSource, /const dateTimeStep=preservesExistingExactTime\?"any":String\(SCHEDULE_INTERVAL_MINUTES\*60\)/);
   assert.match(appSource, /INVALID_TIME_STEP/);
   assert.match(appSource, /INVALID_PLANNED_DURATION/);
   assert.match(serverSource, /function localDateTimeValue/);
   assert.match(serverSource, /function isFiveMinuteTime/);
+  assert.match(appSource, /const SCHEDULE_INTERVAL_MINUTES=15/);
+  assert.match(appSource, /step="900"/);
   assert.match(serverSource, /planned_minutes=timeRangeMinutes/);
 });
 
