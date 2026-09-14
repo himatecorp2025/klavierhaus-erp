@@ -226,8 +226,25 @@ function updateThemeButtons(){
   if(light) light.classList.toggle("active",currentTheme==="light");
 }
 
+const API_REQUEST_TIMEOUT_MS=12000;
+const BOOT_WATCHDOG_MS=30000;
+function requestTimeoutError(url,timeoutMs){const error=new Error(`REQUEST_TIMEOUT:${url}`);error.code='REQUEST_TIMEOUT';error.timeoutMs=timeoutMs;return error;}
+async function fetchWithTimeout(url,opt={},timeoutMs=API_REQUEST_TIMEOUT_MS){
+ const controller=new AbortController();
+ const externalSignal=opt.signal;
+ let externallyAborted=false;
+ const abortFromExternal=()=>{externallyAborted=true;controller.abort(externalSignal?.reason);};
+ if(externalSignal){if(externalSignal.aborted)abortFromExternal();else externalSignal.addEventListener('abort',abortFromExternal,{once:true});}
+ const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||API_REQUEST_TIMEOUT_MS));
+ try{return await fetch(url,{...opt,signal:controller.signal});}
+ catch(error){if(controller.signal.aborted&&!externallyAborted)throw requestTimeoutError(url,timeoutMs);throw error;}
+ finally{clearTimeout(timer);if(externalSignal)externalSignal.removeEventListener?.('abort',abortFromExternal);}
+}
 async function loadBranding(){
- try{branding=await fetch('/api/public/branding',{cache:'no-store'}).then(r=>r.json());}catch(e){}
+ try{
+  const response=await fetchWithTimeout('/api/public/branding',{cache:'no-store'},8000);
+  if(response.ok)branding=await response.json();
+ }catch(error){console.warn('Branding unavailable during bootstrap:',error?.message||error);}
  applyBranding();
 }
 function versionedBrandAsset(url){
@@ -263,7 +280,9 @@ function invalidateMasterDataCache(url=""){
  if(path.startsWith("/api/users")){apiResponseCache.delete("/api/schedule-workers");schedulerWorkersCache=null;}
 }
 async function apiRequest(url,opt={}){
- const response=await fetch(url,{...opt,headers:{...(opt.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(opt.headers||{})}});
+ const timeoutMs=Math.max(1000,Number(opt.timeoutMs)||API_REQUEST_TIMEOUT_MS);
+ const requestOptions={...opt};delete requestOptions.timeoutMs;
+ const response=await fetchWithTimeout(url,{...requestOptions,headers:{...(requestOptions.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(requestOptions.headers||{})}},timeoutMs);
  const text=await response.text();let body={};
  try{body=text?JSON.parse(text):{}}catch(_error){body={error:text||"Non-JSON response"}}
  if(!response.ok){const error=new Error(body.error||`API ${response.status}`);error.details=body;error.status=response.status;throw error}
@@ -635,7 +654,8 @@ function completeLoginSession(result,email=""){
  localStorage.setItem("kh_user",JSON.stringify(user));
  if(email)localStorage.setItem("kh_last_login_email",email);
  pendingAccountActivation=null;
- loadLanguage();boot();
+ loadLanguage();
+ void boot().catch(handleApplicationBootstrapError);
 }
 
 $("#loginForm").onsubmit=async e=>{
@@ -926,53 +946,91 @@ function initBrandHomeButton(){
  if(button)button.onclick=()=>{closeModal();render('workshop_workflow');};
 }
 
-async function boot(){
- if(!token)return;
- await loadBranding();
- loadLanguage();
- loadTheme();
- $("#login").classList.add("hidden");
- // Application visibility is controlled by the mandatory notification gate.
+let applicationBootPromise=null;
+let applicationBooting=false;
+function bootstrapStatusMarkup(message,detail=""){return `<div class="panel app-recovery-panel" role="status"><h3>${htmlText(message)}</h3>${detail?`<p class="muted">${htmlText(detail)}</p>`:""}</div>`;}
+function showApplicationBootstrapState(message=bi("Loading workspace…","Munkaterület betöltése…"),detail=""){
+ const app=document.getElementById("app"),target=ensureView("workshop_workflow");
+ app?.classList.remove("hidden");
+ forceShowView("workshop_workflow");
+ target.classList.remove("i18n-rendering");
+ target.innerHTML=bootstrapStatusMarkup(message,detail);
+}
+function handleApplicationBootstrapError(error){
+ console.error("Application bootstrap failed",error);
+ applicationBooting=false;applicationBootPromise=null;
+ hideNotificationActivationGate();
+ document.getElementById("login")?.classList.add("hidden");
+ document.getElementById("app")?.classList.remove("hidden");
  document.body.classList.add("sidebar-collapsed");
- const sb=document.getElementById("sidebarToggle");
- if(sb) sb.onclick=toggleSidebar;
- initBrandHomeButton();
- updateSidebarToggle();
- $("#userInfo").textContent=`${user.name} · ${user.role}`;
- try{userPermissions=await api("/api/my-permissions");}catch(e){userPermissions={all:isSuperadmin(),permissions:[]};}
- await loadAdminModuleState();
- renderNavigation();
- updateStaticChromeLanguage();
- const danger=document.getElementById("deleteEverythingBtn");
- if(danger) danger.classList.toggle("hidden", !isSuperadmin());
- resetInactivityTimer();
- sessionActivity.install();
- initViewHistory();
- $("#nav").onclick=e=>{
-   let b=e.target.closest("button");
-   if(!b)return;
-   if(!b.dataset.v)return;
-   document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));
-   b.classList.add("active");
-   $("#pageTitle").textContent=navLabel(b.dataset.v);
-   render(b.dataset.v);
- };
- initMobileAppShell();
- initCustomSelectSystem();
- initAdminDatePickerSystem();
- initNotificationCenter();
- initNotificationActivationGate();
- const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
- if(notificationsReady){
-   document.getElementById('app')?.classList.remove('hidden');
-   render(viewFromLocation()||"workshop_workflow",{noHistory:true,replaceHistory:true});
- }
- const googleResult=new URLSearchParams(location.search).get('googleCalendar');
- if(googleResult){
-   setTimeout(()=>showToast(googleResult==='connected'?bi('Google Calendar connected. The first synchronization has started.','A Google Naptár csatlakoztatva. Az első szinkronizálás elindult.'):bi('Google Calendar could not be connected.','A Google Naptár csatlakoztatása nem sikerült.'),googleResult==='connected'?'success':'error'),300);
-   history.replaceState({},'',location.pathname);
- }
- applyLanguageToDOM();
+ try{renderNavigation();updateStaticChromeLanguage();updateSidebarToggle();}catch(_error){}
+ const target=forceShowView("workshop_workflow");
+ target.classList.remove("i18n-rendering");
+ const message=error?.code==="REQUEST_TIMEOUT"?bi("The server did not answer in time.","A szerver nem válaszolt időben."):bi("The application could not finish loading.","Az alkalmazás betöltése nem fejeződött be.");
+ target.innerHTML=`<div class="panel app-recovery-panel"><h2>${message}</h2><p>${bi("Your session is still available. You can retry the startup safely.","A munkameneted megmaradt. A betöltést biztonságosan újrapróbálhatod.")}</p><p class="danger-text">${htmlText(error?.message||String(error||"BOOT_FAILED"))}</p><div class="actions"><button type="button" onclick="retryApplicationBoot()">${bi("Retry loading","Betöltés újrapróbálása")}</button><button type="button" class="ghost-btn" onclick="logoutNow()">${bi("Log out","Kijelentkezés")}</button></div></div>`;
+ updateCountdownDisplay();
+ return null;
+}
+function retryApplicationBoot(){applicationBootPromise=null;applicationBooting=false;showApplicationBootstrapState();void boot().catch(handleApplicationBootstrapError);}
+async function boot(){
+ if(!token)return null;
+ if(applicationBootPromise)return applicationBootPromise;
+ applicationBooting=true;
+ applicationBootPromise=(async()=>{
+  const watchdog=new Promise((_,reject)=>setTimeout(()=>{const error=new Error("BOOT_TIMEOUT");error.code="BOOT_TIMEOUT";reject(error);},BOOT_WATCHDOG_MS));
+  const run=(async()=>{
+   await loadBranding();
+   loadLanguage();
+   loadTheme();
+   document.getElementById("login")?.classList.add("hidden");
+   showApplicationBootstrapState();
+   document.body.classList.add("sidebar-collapsed");
+   const sb=document.getElementById("sidebarToggle");
+   if(sb)sb.onclick=toggleSidebar;
+   initBrandHomeButton();
+   updateSidebarToggle();
+   const userInfo=document.getElementById("userInfo");
+   if(userInfo)userInfo.textContent=`${user?.name||""} · ${user?.role||""}`;
+   try{userPermissions=await api("/api/my-permissions");}catch(error){console.warn("Permissions unavailable during bootstrap:",error?.message||error);userPermissions={all:isSuperadmin(),permissions:[]};}
+   await loadAdminModuleState();
+   renderNavigation();
+   updateStaticChromeLanguage();
+   const danger=document.getElementById("deleteEverythingBtn");
+   if(danger)danger.classList.toggle("hidden",!isSuperadmin());
+   resetInactivityTimer();
+   sessionActivity.install();
+   initViewHistory();
+   const nav=document.getElementById("nav");
+   if(nav)nav.onclick=e=>{
+    const b=e.target.closest("button");if(!b?.dataset.v)return;
+    document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));b.classList.add("active");
+    const pageTitle=document.getElementById("pageTitle");if(pageTitle)pageTitle.textContent=navLabel(b.dataset.v);
+    void render(b.dataset.v);
+   };
+   initMobileAppShell();
+   initCustomSelectSystem();
+   initAdminDatePickerSystem();
+   initNotificationCenter();
+   initNotificationActivationGate();
+   const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
+   if(notificationsReady){
+    document.getElementById("app")?.classList.remove("hidden");
+    await render(viewFromLocation()||"workshop_workflow",{noHistory:true,replaceHistory:true});
+   }
+   const googleResult=new URLSearchParams(location.search).get("googleCalendar");
+   if(googleResult){
+    setTimeout(()=>showToast(googleResult==="connected"?bi("Google Calendar connected. The first synchronization has started.","A Google Naptár csatlakoztatva. Az első szinkronizálás elindult."):bi("Google Calendar could not be connected.","A Google Naptár csatlakoztatása nem sikerült."),googleResult==="connected"?"success":"error"),300);
+    history.replaceState({},"",location.pathname);
+   }
+   applyLanguageToDOM();
+   applicationBooting=false;
+   return true;
+  })();
+  return Promise.race([run,watchdog]);
+ })();
+ try{return await applicationBootPromise;}
+ catch(error){return handleApplicationBootstrapError(error);}
+ finally{if(!applicationBooting)applicationBootPromise=null;}
 }
 function updateSidebarToggle(){
  const button=document.getElementById("sidebarToggle");
@@ -1351,6 +1409,9 @@ async function render(v,opts={}){
   applyLanguageToDOM(target);
   enhanceCustomSelects(target);
   enhanceAdminDatePickers(target);
+ }catch(error){
+  console.error(`View render failed: ${v}`,error);
+  target.innerHTML=`<div class="panel app-recovery-panel"><h3>${bi("This view could not be loaded.","A nézet betöltése nem sikerült.")}</h3><p class="danger-text">${htmlText(error?.message||String(error))}</p><div class="actions"><button type="button" onclick="render('${htmlText(v)}',{noHistory:true})">${bi("Retry","Újrapróbálás")}</button><button type="button" class="ghost-btn" onclick="render('workshop_workflow',{noHistory:true})">${bi("Open Workshop","Műhely megnyitása")}</button></div></div>`;
  }finally{
   target.classList.remove("i18n-rendering");
  }
@@ -4925,7 +4986,9 @@ function initLocalizedModalRendering(){
 
 initLoginExperience();
 initLocalizedModalRendering();
-if(token){loadLanguage();loadTheme();boot();}else{loadLanguage();loadTheme();applyLanguageToDOM(document.getElementById("login"));loadBranding().then(()=>applyLanguageToDOM(document.getElementById("login")));}
+window.addEventListener("unhandledrejection",event=>{if(applicationBooting){console.error("Unhandled rejection during bootstrap",event.reason);handleApplicationBootstrapError(event.reason||new Error("BOOT_UNHANDLED_REJECTION"));}});
+window.addEventListener("error",event=>{if(applicationBooting){console.error("Unhandled error during bootstrap",event.error||event.message);handleApplicationBootstrapError(event.error||new Error(event.message||"BOOT_UNHANDLED_ERROR"));}});
+if(token){loadLanguage();loadTheme();void boot().catch(handleApplicationBootstrapError);}else{loadLanguage();loadTheme();applyLanguageToDOM(document.getElementById("login"));loadBranding().then(()=>applyLanguageToDOM(document.getElementById("login")));}
 
 
 
