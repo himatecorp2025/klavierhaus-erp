@@ -21,6 +21,7 @@ const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
+const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -60,6 +61,7 @@ fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
+hydrateRuntimeSecrets(db, process.env);
 const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
@@ -111,7 +113,8 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
   { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" },
-  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" }
+  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
+  { key: "system_integrations", group_key: "technical", label_en: "System Activation & Integrations", label_hu: "Rendszeraktiválás és integrációk" }
 ]);
 
 function seedDefaultPermissions(){
@@ -863,6 +866,7 @@ const googleCalendar=createGoogleCalendarIntegration({
   getJob:(id)=>db.prepare(jobsSelectSql("WHERE j.id=?")).get(id),
   createNotification
 });
+registerSystemIntegrationRoutes({app,db,auth,permit,requireSuperadmin,audit,googleCalendar,env:process.env});
 
 function canCloseJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
@@ -2455,6 +2459,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "calendar_oauth_states",
       "external_calendar_events",
       "calendar_integrations",
+      "system_integration_delete_tokens",
+      "system_integration_backups",
+      "system_integration_health",
+      "system_integration_secrets",
       "event_checkins",
       "event_attendance_exports",
       "event_attendance_actions",
