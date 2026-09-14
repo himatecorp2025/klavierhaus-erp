@@ -24,6 +24,7 @@ const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const { analyzeClientWorkbook, commitClientImportRecords } = require("./client-import");
+const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -1791,6 +1792,11 @@ app.get("/api/contacts/:id", auth, (req,res)=>{
   res.json(row);
 });
 
+app.get("/api/steinway-reference/lookup", auth, (req,res)=>{
+  const result=lookupSteinwayReference({db,brand:req.query.brand||"",model:req.query.model||"",serial_no:req.query.serial_no||req.query.serial||""});
+  res.json(result);
+});
+
 app.get("/api/pianos", auth, (req,res)=>{
   const rows=db.prepare(`
     SELECT p.*,
@@ -1837,9 +1843,14 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
   const estimated=Number(req.body.estimated_value||0);
   const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,req.body.build_year||null,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  const steinway=lookupSteinwayReference({db,brand,model,serial_no:req.body.serial_no||""});
+  const buildYear=req.body.build_year||steinway.build_year||null;
+  const sizeCm=req.body.size_cm||steinway.size_cm||null;
+  const sizeIn=req.body.size_in||steinway.size_in||null;
+  const sizeDisplay=req.body.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null)||steinway.size_display||null;
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
@@ -1848,7 +1859,20 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const before=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!before)return res.status(404).json({error:"Piano not found"});
-  const allowed=["brand","model","serial_no","year","build_year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
+  const candidate={...before,...req.body};
+  if(isSteinwayBrand(candidate.brand)){
+    const steinway=lookupSteinwayReference({db,brand:candidate.brand,model:candidate.model,serial_no:candidate.serial_no});
+    if(req.body.build_year===undefined && !candidate.build_year && steinway.build_year) req.body.build_year=steinway.build_year;
+    if(req.body.size_cm===undefined && !candidate.size_cm && steinway.size_cm) req.body.size_cm=steinway.size_cm;
+    if(req.body.size_in===undefined && !candidate.size_in && steinway.size_in) req.body.size_in=steinway.size_in;
+    if(req.body.size_display===undefined && !candidate.size_display && steinway.size_display) req.body.size_display=steinway.size_display;
+  }
+  if(req.body.size_display===undefined && (req.body.size_cm!==undefined || req.body.size_in!==undefined)){
+    const cm=String(req.body.size_cm!==undefined?req.body.size_cm:candidate.size_cm||"").trim();
+    const inch=String(req.body.size_in!==undefined?req.body.size_in:candidate.size_in||"").trim();
+    req.body.size_display=[cm?`${cm} cm`:"",inch?`(${inch})`:""].filter(Boolean).join(" ")||null;
+  }
+  const allowed=["brand","model","serial_no","year","build_year","size_cm","size_in","size_display","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
   if(req.body.owner_contact_id!==undefined || req.body.ownership_type!==undefined){
@@ -2271,9 +2295,14 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
   const ownershipType=req.body.ownership_type || "Customer owned";
   const estimated=Number(req.body.estimated_value||0);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
+  const steinway=lookupSteinwayReference({db,brand,model,serial_no:req.body.serial_no||""});
+  const buildYear=req.body.build_year||steinway.build_year||null;
+  const sizeCm=req.body.size_cm||steinway.size_cm||null;
+  const sizeIn=req.body.size_in||steinway.size_in||null;
+  const sizeDisplay=req.body.size_display||steinway.size_display||null;
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
 });
