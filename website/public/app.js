@@ -3,17 +3,20 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
+let publishedDesignSettings = null;
 async function applyPublishedDesignSettings() {
   try {
     const response = await fetch("/api/site/design-settings", { cache: "no-store" });
     if (!response.ok) { startHeatmapTracking(); return; }
     const settings = await response.json();
+    publishedDesignSettings = settings;
     const root = document.documentElement;
     const variables = { black: "--black", ivory: "--ivory", cream: "--ivory-soft", gold: "--gold", gold_bright: "--gold-bright", muted: "--ivory-muted", line: "--line" };
     Object.entries(variables).forEach(([key, variable]) => { if (/^#[0-9a-f]{6}$/i.test(String(settings[key] || ""))) root.style.setProperty(variable, settings[key]); });
     if (settings.display) root.style.setProperty("--display", settings.display);
     if (settings.sans) root.style.setProperty("--sans", settings.sans);
     if (settings.logo_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.logo_url)) document.querySelectorAll(".brand-logo").forEach(image => { image.src = settings.logo_url; });
+    if (document.documentElement.dataset.theme) applyPublicTheme(document.documentElement.dataset.theme);
   } catch (_error) { /* design settings are optional and must not block rendering */ }
 }
 applyPublishedDesignSettings();
@@ -609,3 +612,29 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
     } catch (_error) { setCustomerChatLookupMessage(language === "hu" ? "A keresés nem sikerült." : "We could not find the conversations.", true); }
   });
 }
+
+// Round 8: Solar (America/New_York) + persistent manual override theme engine.
+const klavierhausThemePreferenceKey = "theme_preference";
+function newYorkHour(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false, hourCycle: "h23" }).formatToParts(date);
+  return Number(parts.find((part) => part.type === "hour")?.value || 0) % 24;
+}
+function solarTheme(date = new Date()) { const hour = newYorkHour(date); return hour >= 7 && hour < 19 ? "light" : "dark"; }
+function applyPublicTheme(theme) {
+  const value = theme === "light" ? "light" : "dark";
+  const root = document.documentElement;
+  root.dataset.theme = value;
+  if (value === "light") { root.style.setProperty("--black", "#F9F8F5"); root.style.setProperty("--ivory", "#1A1A1A"); root.style.setProperty("--ivory-soft", "#2D3139"); root.style.setProperty("--ivory-muted", "#666158"); }
+  else { const d=publishedDesignSettings||{}; root.style.setProperty("--black", d.black||"#0E1117"); root.style.setProperty("--ivory", d.ivory||"#F2EFE8"); root.style.setProperty("--ivory-soft", d.cream||"#E8E1D5"); root.style.setProperty("--ivory-muted", d.muted||"#AAA49A"); }
+  document.querySelectorAll("[data-theme-icon]").forEach((icon) => { icon.textContent = value === "light" ? "☾" : "☀"; });
+}
+function initializeSolarTheme() {
+  const stored = localStorage.getItem(klavierhausThemePreferenceKey);
+  applyPublicTheme(stored === "light" || stored === "dark" ? stored : solarTheme());
+}
+initializeSolarTheme();
+document.querySelectorAll("[data-theme-toggle]").forEach((button) => button.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  localStorage.setItem(klavierhausThemePreferenceKey, next);
+  applyPublicTheme(next);
+}));
