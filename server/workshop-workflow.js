@@ -140,7 +140,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const search = clean(query.q, 160).toLowerCase();
     if (status && ["ACTIVE", "COMPLETED", "ABORTED"].includes(status)) { clauses.push("w.current_status=?"); values.push(status); }
     else if (query.include_closed !== "1" && query.include_closed !== "true") clauses.push("w.current_status='ACTIVE'");
-    if (date) { clauses.push("substr(w.final_due_at,1,10)=?"); values.push(date); }
+    if (date) { clauses.push("(substr(w.final_due_at,1,10)=? OR EXISTS (SELECT 1 FROM workflow_stages ds WHERE ds.workflow_id=w.id AND substr(ds.due_at,1,10)=?))"); values.push(date,date); }
     if (search) {
       clauses.push("lower(COALESCE(w.title,'')||' '||COALESCE(c.name,'')||' '||COALESCE(p.display_name,'')||' '||COALESCE(p.brand,'')||' '||COALESCE(p.model,'')||' '||COALESCE(p.serial_no,'')) LIKE ?");
       values.push(`%${search}%`);
@@ -276,11 +276,18 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
 
   app.get("/api/workflows/calendar-deadlines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     const from = clean(req.query.from, 10), to = clean(req.query.to, 10);
-    const rows = db.prepare(`SELECT w.id,w.workflow_key,w.title,w.final_due_at,w.current_status,c.name AS client_name,
-      p.display_name AS piano_name,p.brand,p.model,p.serial_no
-      FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id
-      WHERE w.final_due_at>=? AND w.final_due_at<? AND w.current_status IN ('ACTIVE','COMPLETED') AND (w.job_id IS NULL OR trim(w.job_id)='') ORDER BY w.final_due_at`).all(`${from || "0000-01-01"}T00:00`, `${to || "9999-12-31"}T00:00`);
-    res.json(rows.map((row) => ({ ...row, calendar_entry_type: "WORKFLOW_DEADLINE", start_time: row.final_due_at, end_time: row.final_due_at, assigned_to: "Workshop workflow", status: row.current_status === "COMPLETED" ? "Completed" : "Open", billed_amount: 0, planned_amount: 0, service_address: "" })));
+    const rows = db.prepare(`SELECT s.id AS stage_id,s.workflow_id,s.card_title,s.name_snapshot_en,s.name_snapshot_hu,s.status,s.assigned_user_id,s.assigned_to,s.due_at,
+      w.workflow_key,w.title AS workflow_title,w.current_status,c.name AS client_name,p.display_name AS piano_name,p.brand,p.model,p.serial_no,u.calendar_color AS assigned_calendar_color
+      FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id
+      JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=s.assigned_user_id
+      WHERE s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.assigned_user_id IS NOT NULL AND trim(s.assigned_user_id)<>''
+        AND s.due_at>=? AND s.due_at<? AND s.status NOT IN ('NOT_REQUIRED','ABORTED') ORDER BY s.due_at`).all(`${from || "0000-01-01"}T00:00`, `${to || "9999-12-31"}T00:00`);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year:"numeric",month:"2-digit",day:"2-digit" }).format(new Date());
+    res.json(rows.map((row) => {
+      const closed = row.status === "COMPLETED" || row.current_status === "COMPLETED";
+      const overdue = !closed && String(row.due_at).slice(0,10) < today;
+      return { ...row, id: row.stage_id, title: row.card_title || row.name_snapshot_en || row.workflow_title, calendar_entry_type: "WORKFLOW_TASK", start_time: row.due_at, end_time: row.due_at, status: closed ? "Completed" : (overdue ? "Overdue" : "Open"), workflow_color_state: closed ? "CLOSED" : (overdue ? "OVERDUE" : "IN_PROGRESS"), billed_amount:0,planned_amount:0,service_address:"" };
+    }));
   });
 
   app.get("/api/workflows/previous", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
