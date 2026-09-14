@@ -189,7 +189,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,
-      p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.location AS piano_location,
+      p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
       cu.name AS created_by_name,
       tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
       FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id
@@ -319,7 +319,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.get("/api/workflows/calendar-deadlines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     const from = clean(req.query.from, 10), to = clean(req.query.to, 10);
     const rows = db.prepare(`SELECT s.id AS stage_id,s.workflow_id,s.card_title,s.name_snapshot_en,s.name_snapshot_hu,s.status,s.assigned_user_id,s.assigned_to,s.due_at,
-      w.workflow_key,w.title AS workflow_title,w.current_status,c.name AS client_name,p.display_name AS piano_name,p.brand,p.model,p.serial_no,u.calendar_color AS assigned_calendar_color
+      w.workflow_key,w.title AS workflow_title,w.current_status,c.name AS client_name,p.display_name AS piano_name,p.brand,p.model,p.serial_no,p.build_year,p.size_cm,p.size_in,p.size_display,u.calendar_color AS assigned_calendar_color
       FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id
       JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=s.assigned_user_id
       WHERE s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.assigned_user_id IS NOT NULL AND trim(s.assigned_user_id)<>''
