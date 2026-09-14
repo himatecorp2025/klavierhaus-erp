@@ -1903,3 +1903,8 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
 .workflow-shell .workflow-row-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px}
 .workflow-shell .workflow-row-actions .workflow-row-open{margin-top:0}
 .workflow-shell .workflow-row-actions .danger-btn{min-height:38px;padding:8px 11px;font-size:12px;font-weight:900}
+
+/* Steinway reference engine — compact metadata and workshop card typography */
+.steinway-reference-status{margin-top:-2px;color:var(--muted);font-size:12px}.steinway-reference-status small{display:block;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:color-mix(in srgb,var(--panel2) 82%,transparent)}
+.client-piano-reference{display:grid;gap:3px;padding:8px 0;border-bottom:1px solid var(--line)}.client-piano-reference:last-child{border-bottom:0}.client-piano-reference b{font-size:13px}.client-piano-reference span{color:var(--muted);font-size:12px;line-height:1.4}
+.workflow-shell .workflow-piano-facts .workflow-piano-name{font-size:14px!important;font-weight:800!important;line-height:1.25!important}.workflow-shell .workflow-piano-facts .workflow-client-name{font-size:13px!important;font-weight:700!important}.workflow-shell .workflow-piano-reference-meta{display:block;color:#b9c8d5;font-size:11px!important;font-weight:700;line-height:1.35;overflow-wrap:anywhere}.workflow-shell .workflow-piano-facts .workflow-final-deadline{font-size:12px!important}
