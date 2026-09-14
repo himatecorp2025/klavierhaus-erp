@@ -57,6 +57,7 @@ function localized(row, language, erpBaseUrl) {
   if (row.person_name !== undefined) value.person_name = row.person_name;
   if (row.brand !== undefined) value.brand = row.brand;
   if (row.model !== undefined) value.model = row.model;
+  if (row.build_year !== undefined) { value.build_year = row.build_year ? Number(row.build_year) : null; value.age = value.build_year ? Math.max(0, new Date().getFullYear() - value.build_year) : null; }
   if (row.availability_status !== undefined) value.availability_status = row.availability_status;
   if (row.featured !== undefined) value.featured = Number(row.featured) === 1;
   return value;
@@ -182,9 +183,9 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         if (table === "website_showroom_pianos") {
           const status = cleanText(body.availability_status || "AVAILABLE", 30).toUpperCase();
           if (!statuses.has(status)) return res.status(400).json({ error: "INVALID_SHOWROOM_STATUS" });
-          db.prepare(`INSERT INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,gallery_json,availability_status,featured,published,sort_order,created_by_user_id,updated_by_user_id)
-            VALUES(@id,@slug_en,@slug_hu,@brand,@model,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@gallery_json,@availability_status,@featured,@published,@sort_order,@user_id,@user_id)`)
-            .run({ ...common, brand: cleanText(body.brand, 200), model: cleanText(body.model, 200), availability_status: status, published: bool(body.published, true) });
+          db.prepare(`INSERT INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,build_year,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,gallery_json,availability_status,featured,published,sort_order,created_by_user_id,updated_by_user_id)
+            VALUES(@id,@slug_en,@slug_hu,@brand,@model,@build_year,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@gallery_json,@availability_status,@featured,@published,@sort_order,@user_id,@user_id)`)
+            .run({ ...common, brand: cleanText(body.brand, 200), model: cleanText(body.model, 200), build_year: Number(body.build_year) || null, availability_status: status, published: bool(body.published, true) });
         } else {
           db.prepare(`INSERT INTO website_services(id,slug_en,slug_hu,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,visible,featured,sort_order,created_by_user_id,updated_by_user_id)
             VALUES(@id,@slug_en,@slug_hu,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@visible,@featured,@sort_order,@user_id,@user_id)`)
@@ -205,8 +206,8 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
       if (table === "website_showroom_pianos") {
         const status = cleanText(body.availability_status || "AVAILABLE", 30).toUpperCase();
         if (!statuses.has(status)) return res.status(400).json({ error: "INVALID_SHOWROOM_STATUS" });
-        db.prepare(`UPDATE website_showroom_pianos SET slug_en=?,slug_hu=?,brand=?,model=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,gallery_json=?,availability_status=?,featured=?,published=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(slugEn, slugHu, cleanText(body.brand, 200), cleanText(body.model, 200), cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), status, bool(body.featured), bool(body.published, true), Number(body.sort_order || 0), req.user.id, before.id);
+        db.prepare(`UPDATE website_showroom_pianos SET slug_en=?,slug_hu=?,brand=?,model=?,build_year=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,gallery_json=?,availability_status=?,featured=?,published=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(slugEn, slugHu, cleanText(body.brand, 200), cleanText(body.model, 200), Number(body.build_year) || null, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), status, bool(body.featured), bool(body.published, true), Number(body.sort_order || 0), req.user.id, before.id);
       } else {
         db.prepare(`UPDATE website_services SET slug_en=?,slug_hu=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,visible=?,featured=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(slugEn, slugHu, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), bool(body.visible, true), bool(body.featured), Number(body.sort_order || 0), req.user.id, before.id);
