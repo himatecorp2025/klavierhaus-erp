@@ -181,3 +181,30 @@ test("incremental synchronization reads the central calendar and stores a sync t
   integration.stop();
   db.close();
 });
+
+test("temporary Google test event always attempts cleanup after a delete failure", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init={}) => {
+    requests.push({url:String(url),method:init.method||"GET"});
+    if ((init.method||"GET") === "POST" && String(url).includes("/events")) return new Response(JSON.stringify({id:"temporary-test-event"}),{status:200,headers:{"Content-Type":"application/json"}});
+    if ((init.method||"GET") === "DELETE") {
+      const deletes=requests.filter(item=>item.method==="DELETE").length;
+      return new Response("",{status:deletes===1?500:204});
+    }
+    throw new Error(`unexpected request: ${url}`);
+  };
+  const { db, integration } = setup(fetchImpl);
+  await assert.rejects(() => integration.testConnection("temporary-write-token"), /GOOGLE_CALENDAR_TEST_EVENT_DELETE_FAILED/);
+  assert.equal(requests.filter(item=>item.method==="DELETE").length,2);
+  integration.stop(); db.close();
+});
+
+test("operational Google OAuth remains read-only while test OAuth requests write-only scope", () => {
+  const { db, integration } = setup();
+  const normal = new URL(integration.createAuthUrl("U-A"));
+  const testing = new URL(integration.createTestAuthUrl("U-A"));
+  assert.equal(normal.searchParams.get("scope"),"https://www.googleapis.com/auth/calendar.readonly");
+  assert.equal(testing.searchParams.get("scope"),"https://www.googleapis.com/auth/calendar.events");
+  assert.ok(testing.searchParams.get("state").startsWith("KHIT."));
+  integration.stop(); db.close();
+});
