@@ -69,17 +69,18 @@ test("closed-job revenue posting is idempotent and keeps revenue positive", () =
 test("calendar, workflow, client, piano and notes share the central Job domain", () => {
   const server = read("server/index.js");
   const workflow = read("server/workshop-workflow.js");
+  const domain = read("server/job-domain.js");
   const google = read("server/google-calendar.js");
   const schema = read("server/schema.sql");
   assert.match(server, /app\.patch\("\/api\/jobs\/:id\/schedule"/);
   assert.match(server, /normalizeJobRelationships/);
   assert.match(server, /CLIENT_NOT_FOUND/);
   assert.match(server, /PIANO_NOT_FOUND/);
-  assert.match(server, /JOB_NOT_MOVABLE/);
+  assert.match(domain, /JOB_NOT_MOVABLE/);
   assert.match(server, /b\.notes\|\|planned\.notes/);
   assert.match(workflow, /job_id/);
   assert.match(workflow, /workflow_id/);
-  assert.match(workflow, /postFinancialItemOnce/);
+  assert.match(workflow, /closeoutJobOrchestration/);
   assert.match(workflow, /syncLinkedJobAssignee/);
   assert.match(google, /notes=\?/);
   assert.match(google, /GOOGLE_EVENT_CLIENT_REQUIRED/);
@@ -106,7 +107,8 @@ test("New Job can create a missing client and piano without losing the draft", (
   const app = read("public/app.js");
   assert.match(app, /Client not found/);
   assert.match(app, /Create this client now\?/);
-  assert.match(app, /onSaved:client=>openJob/);
+  assert.match(app, /onSaved:client=>reopenDraft/);
+  assert.match(app, /onCancelled:\(\)=>reopenDraft\(\)/);
   assert.match(app, /openJobPianoCreate/);
   assert.match(app, /Notes/);
   assert.match(app, /name="next_notes"/);
