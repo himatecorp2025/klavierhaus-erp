@@ -1448,11 +1448,14 @@ function incomeStatementPayload(month){
   const liabilities=trialBalance.filter(a=>a.category==='LIABILITY').reduce((s,a)=>s+Number(a.balance||0),0);
   const equity=trialBalance.filter(a=>a.category==='EQUITY').reduce((s,a)=>s+Number(a.balance||0),0);
   const sources=liabilities+equity;
+  const balanceDifference=assets-sources;
+  const balanceAudit={balanced:Math.abs(balanceDifference)<0.01,difference:balanceDifference,absolute_difference:Math.abs(balanceDifference)};
   return {
     month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
     accountingLogic:{source:"financial_items",generalLedger:"simple_internal_finance_register"},
     counts:{openJobs,closedJobs:closedJobs.length,financialItems:rows.length},
     totals:{passiveIncome,oneTimeIncome,revenue,recurringExpenses,oneTimeExpenses,expenses,profit:revenue-expenses,assets,liabilities,equity,sources,netWorth:assets-sources},
+    balanceAudit,
     trialBalance,
     items:rows
   };
@@ -1834,9 +1837,9 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
   const estimated=Number(req.body.estimated_value||0);
   const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,req.body.build_year||null,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
@@ -1845,7 +1848,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const before=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!before)return res.status(404).json({error:"Piano not found"});
-  const allowed=["brand","model","serial_no","year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
+  const allowed=["brand","model","serial_no","year","build_year","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
   if(req.body.owner_contact_id!==undefined || req.body.ownership_type!==undefined){
