@@ -667,40 +667,56 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.post("/api/workflows/:id/finalize", auth, permit("ADMIN"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id);
-      if (workflow.financial_status === "CLOSED") throw error("WORKFLOW_ALREADY_FINANCIALLY_CLOSED");
+      if (workflow.financial_status === "CLOSED" && workflow.current_status === "COMPLETED") return res.json(decorateWorkflow(workflowById(workflow.id), true));
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+      if (!workflow.job_id) throw error("WORKFLOW_JOB_LINK_REQUIRED");
       const stages = stageRows(workflow.id);
       if (stages.some((stage) => !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status))) throw error("WORKFLOW_STAGES_NOT_COMPLETE");
       if (stages.some((stage) => stage.status !== "NOT_REQUIRED" && stage.financial_status !== "CLOSED")) throw error("WORKFLOW_STAGE_FINANCE_NOT_CLOSED");
       const lines = financialRows(workflow.id), summary = signedFinanceSummary(lines), closureReason = clean(req.body?.closure_reason, 2000);
       if (summary.net_total === 0 && !closureReason) throw error("ZERO_WORKFLOW_CLOSE_REASON_REQUIRED");
       const closedAt = nowISO(), closedId = rid("WCJ");
-      db.transaction(() => {
-        lines.forEach((line) => {
-          const posted = domain.postFinancialItemOnce({
-            itemDate: closedAt.slice(0, 10),
-            title: line.title,
-            description: line.description || "",
-            amount: Math.max(0, numeric(line.amount)),
-            mainType: line.line_type === "REVENUE" ? "INCOME" : "EXPENSE",
-            category: line.category,
-            jobId: workflow.job_id || null,
-            clientId: workflow.client_id,
-            pianoId: workflow.piano_id,
-            sourceType: "workflow_financial_line",
-            sourceId: `WORKFLOW_LINE:${line.id}`,
-            createdBy: req.user.name
-          });
-          if (posted && String(line.posted_financial_item_id || "") !== String(posted.id)) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(posted.id, line.id);
-        });
-        db.prepare(`INSERT INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, closedAt, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow: workflow, stages, lines, materials: materialRows(workflow.id) }));
-        db.prepare("UPDATE workshop_workflows SET current_status='COMPLETED',financial_status='CLOSED',financial_closed_at=?,financial_closed_by_user_id=?,financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closedAt, req.user.id, closureReason || null, workflow.id);
-        if(workflow.job_id) db.prepare("UPDATE jobs SET status='Completed',workflow_status='COMPLETED',finalized_at=?,completed_at=COALESCE(completed_at,?),updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closedAt,closedAt,workflow.job_id);
-        directAudit(req, "WORKFLOW_FINANCIAL_CLOSED", workflow.id, workflow, { status: "COMPLETED", financial_status: "CLOSED", summary }, "Workflow financially finalized");
-      })();
+      domain.closeoutJobOrchestration({
+        jobId: workflow.job_id,
+        source: "WORKFLOW",
+        actor: req.user,
+        closeType: "Full",
+        complete: true,
+        now: closedAt,
+        financialEntries: lines.map((line) => ({
+          itemDate: closedAt.slice(0, 10),
+          title: line.title,
+          description: line.description || "",
+          amount: Math.max(0, numeric(line.amount)),
+          mainType: line.line_type === "REVENUE" ? "INCOME" : "EXPENSE",
+          category: line.category,
+          jobId: workflow.job_id,
+          clientId: workflow.client_id,
+          pianoId: workflow.piano_id,
+          sourceType: "workflow_financial_line",
+          sourceId: `WORKFLOW_LINE:${line.id}`,
+          createdBy: req.user.name
+        })),
+        mutate: ({ now }) => {
+          for (const line of lines) {
+            const existing = db.prepare("SELECT id FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=? LIMIT 1").get(`WORKFLOW_LINE:${line.id}`);
+            if (existing && String(line.posted_financial_item_id || "") !== String(existing.id)) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(existing.id, line.id);
+          }
+          db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines, materials: materialRows(workflow.id) }));
+          db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
+          return { closedId };
+        }
+      });
+      const refreshedLines=financialRows(workflow.id);
+      for(const line of refreshedLines){
+        if(line.posted_financial_item_id) continue;
+        const posted=db.prepare("SELECT id FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=? LIMIT 1").get(`WORKFLOW_LINE:${line.id}`);
+        if(posted) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(posted.id,line.id);
+      }
+      directAudit(req, "WORKFLOW_FINANCIAL_CLOSED", workflow.id, workflow, { status: "COMPLETED", financial_status: "CLOSED", summary }, "Workflow financially finalized through unified job closeout");
       res.json(decorateWorkflow(workflowById(workflow.id), true));
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : (e.status || 400)).json({ error: e.code || e.message }); }
   });
 
   app.post("/api/workflows/:id/secondary-delete", auth, permit("ADMIN"), (req, res) => {
