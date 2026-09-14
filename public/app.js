@@ -140,6 +140,8 @@ function adminGroupButtonMarkup(group){
 }
 
 async function loadAdminModuleState(){try{const payload=await api('/api/admin/modules');adminModuleState=Object.fromEntries((payload.modules||[]).map(item=>[item.key,Boolean(item.enabled)]));adminCardState=Object.fromEntries((payload.cards||[]).map(item=>[item.key,Boolean(item.enabled)]));window.__adminModules=payload;}catch(_error){adminModuleState={};adminCardState={};}}
+function navigationIcon(view){return adminNavigationIcons[view]||({workshop_workflow:"▦",scheduler:"📅",planned_jobs:"🗂",contacts:"👥",pianos:"🎹",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",website_design:"✦",users:"👤",audit_log:"🧾",settings:"⚙",digital_attendance:"☑",customer_inbox:"▣"}[view]||"•");}
+function navigationButtonMarkup(view){const label=navLabel(view),icon=navigationIcon(view);return `<button type="button" class="nav-btn nav-item-btn ${view===currentView?"active":""}" data-v="${view}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-label">${htmlText(label)}</span></button>`;}
 function renderNavigation(){
   if(!token || !user || !document.getElementById("nav")) return;
   const navEl=document.getElementById("nav");
@@ -147,7 +149,7 @@ function renderNavigation(){
    navEl.innerHTML=adminNavGroups.filter(group=>adminModuleState[group.id]!==false||isSuperadmin()).map(adminGroupButtonMarkup).join('');
    return;
   }
-  navEl.innerHTML=visibleNavigationItems().map(n=>`<button class="nav-btn ${n[0]===currentView?"active":""}" data-v="${n[0]}">${navLabel(n[0])}</button>`).join("");
+  navEl.innerHTML=visibleNavigationItems().map(([view])=>navigationButtonMarkup(view)).join("");
 }
 function updateStaticChromeLanguage(){
   const logout=document.getElementById("logoutBtn"); if(logout) logout.textContent=tr("logout");
@@ -680,6 +682,7 @@ const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
 let inactivityTimer = null;
 let countdownInterval = null;
 let logoutAt = 0;
+let pausedRemainingMs = INACTIVITY_LIMIT_MS;
 function logoutNow(){
   stopDigitalAttendanceLiveSync?.();
   if(token){try{fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token},keepalive:true});}catch(e){}}
@@ -690,27 +693,39 @@ function logoutNow(){
 function updateCountdownDisplay(){
   const el=document.getElementById("sessionCountdown");
   if(!el || !token) return;
-  const remaining=Math.max(0, logoutAt-Date.now());
+  const remaining=sessionActivity.paused?pausedRemainingMs:Math.max(0, logoutAt-Date.now());
   const totalSeconds=Math.ceil(remaining/1000);
   const mm=String(Math.floor(totalSeconds/60)).padStart(2,"0");
   const ss=String(totalSeconds%60).padStart(2,"0");
-  el.textContent=`${tr("logoutIn")}: ${mm}:${ss}`;
-  el.classList.toggle("warning", remaining<=60000);
+  el.textContent=sessionActivity.paused?`${tr("logoutIn")}: PAUSED`:`${tr("logoutIn")}: ${mm}:${ss}`;
+  el.classList.toggle("warning", !sessionActivity.paused&&remaining<=60000);
 }
-function resetInactivityTimer(){
+const sessionActivity={
+  activeModalCount:0,paused:false,observer:null,
+  pause(){if(this.paused)return;this.paused=true;pausedRemainingMs=logoutAt?Math.max(0,logoutAt-Date.now()):INACTIVITY_LIMIT_MS;if(inactivityTimer)clearTimeout(inactivityTimer);inactivityTimer=null;updateCountdownDisplay();},
+  resume(){if(this.activeModalCount>0||!token)return;this.paused=false;pausedRemainingMs=INACTIVITY_LIMIT_MS;resetInactivityTimer({force:true});},
+  touch(){if(!token||this.activeModalCount>0||this.paused)return;resetInactivityTimer({force:true});},
+  modalOpened(){this.activeModalCount+=1;this.pause();},
+  modalClosed(){this.activeModalCount=Math.max(0,this.activeModalCount-1);if(this.activeModalCount===0)this.resume();},
+  visibleModalCount(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay, .workflow-event-log-modal, .workflow-drawer')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay,.workflow-event-log-modal,.workflow-drawer'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;},
+  syncModalState(){const count=this.visibleModalCount();if(count===this.activeModalCount)return;this.activeModalCount=count;if(count>0)this.pause();else this.resume();},
+  install(){if(this.observer)return;this.observer=new MutationObserver(()=>this.syncModalState());this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});this.syncModalState();}
+};
+window.sessionActivity=sessionActivity;
+function resetInactivityTimer({force=false}={}){
   if(!token) return;
   if(isStandalonePWA()){ if(inactivityTimer)clearTimeout(inactivityTimer); if(countdownInterval)clearInterval(countdownInterval); const el=document.getElementById("sessionCountdown"); if(el)el.style.display="none"; return; }
-  logoutAt=Date.now()+INACTIVITY_LIMIT_MS;
+  if(sessionActivity.activeModalCount>0&&!force){sessionActivity.pause();return;}
+  sessionActivity.paused=false;pausedRemainingMs=INACTIVITY_LIMIT_MS;logoutAt=Date.now()+INACTIVITY_LIMIT_MS;
   if(inactivityTimer) clearTimeout(inactivityTimer);
   if(countdownInterval) clearInterval(countdownInterval);
-  inactivityTimer = setTimeout(async()=>{
-    await appAlert(tr("securityLogout"),"warning");
-    logoutNow();
-  }, INACTIVITY_LIMIT_MS);
+  inactivityTimer = setTimeout(()=>logoutNow(), INACTIVITY_LIMIT_MS);
   countdownInterval=setInterval(updateCountdownDisplay,1000);
   updateCountdownDisplay();
 }
-document.addEventListener("click", resetInactivityTimer, true);
+document.addEventListener("click",()=>sessionActivity.touch(),true);
+document.addEventListener("keydown",()=>sessionActivity.touch(),true);
+document.addEventListener("input",()=>sessionActivity.touch(),true);
 
 async function deleteEverything(){
   if(!isSuperadmin()) return showError("PERMISSION_DENIED");
@@ -908,6 +923,7 @@ async function boot(){
  const danger=document.getElementById("deleteEverythingBtn");
  if(danger) danger.classList.toggle("hidden", !isSuperadmin());
  resetInactivityTimer();
+ sessionActivity.install();
  initViewHistory();
  $("#nav").onclick=e=>{
    let b=e.target.closest("button");
@@ -915,7 +931,7 @@ async function boot(){
    if(!b.dataset.v)return;
    document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));
    b.classList.add("active");
-   $("#pageTitle").textContent=b.textContent;
+   $("#pageTitle").textContent=navLabel(b.dataset.v);
    render(b.dataset.v);
  };
  initMobileAppShell();
@@ -2178,8 +2194,27 @@ async function openJobPianoCreate(client,draft){
  applyLanguageToDOM(document.getElementById("modal"));
 }
 
+function captureJobDraftFromForm(){const form=document.getElementById("form");if(!form)return jobDraftState?{...jobDraftState}:{};const body=Object.fromEntries(new FormData(form));const start=document.getElementById("jobStart")?.value,end=document.getElementById("jobEnd")?.value;if(start)body.start_time=start;if(end)body.end_time=end;body.daily_rate_enabled=Boolean(document.getElementById("jobDailyRateEnabled")?.checked);body.daily_rate_allocated_amount=Number(document.getElementById("jobDailyRateAmount")?.value||0);return body;}
+function closeNestedClientModal(result=null){const overlay=document.querySelector(".nested-modal-overlay[data-nested-client]");if(overlay)overlay.remove();return result;}
+function openNestedClientModal({prefillName="",draft,onSaved,onCancelled}={}){
+ const schema=schemas.contacts,overlay=document.createElement("div");
+ overlay.className="nested-modal-overlay";overlay.dataset.nestedClient="1";
+ overlay.innerHTML=`<section class="nested-modal-card" role="dialog" aria-modal="true" aria-labelledby="nestedClientTitle"><div class="modal-header"><h3 id="nestedClientTitle">${bi("Add Client","Új ügyfél")}</h3><button type="button" class="modal-close" data-nested-cancel aria-label="${bi("Close","Bezárás")}">×</button></div><form class="nested-client-form"><div class="form-grid">${schema.fields.map(f=>field(f,f[0]==="name"?prefillName:"" )).join("")}</div><div class="actions"><button type="button" class="ghost-btn" data-nested-cancel>${bi("Cancel","Mégse")}</button><button type="submit">${bi("Save","Mentés")}</button></div></form></section>`;
+ let onKey=null;
+ const cleanup=()=>{if(onKey)document.removeEventListener('keydown',onKey,true);closeNestedClientModal();};
+ const cancel=()=>{cleanup();if(typeof onCancelled==="function")onCancelled(draft);};
+ overlay.querySelectorAll('[data-nested-cancel]').forEach(btn=>btn.addEventListener('click',cancel));
+ overlay.addEventListener('click',e=>{if(e.target===overlay)cancel();});
+ overlay.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));schema.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);try{const saved=await api('/api/contacts',{method:'POST',body:JSON.stringify(body)});cleanup();if(typeof onSaved==="function")await onSaved(saved,draft);}catch(error){showError(error);}});
+ document.body.appendChild(overlay);setupContactFormBehavior(null);applyLanguageToDOM(overlay);
+ onKey=e=>{if(e.key==='Escape'){e.preventDefault();cancel();}};document.addEventListener('keydown',onKey,true);
+ setTimeout(()=>overlay.querySelector('[name="name"]')?.focus(),20);return overlay;
+}
+function ensureInlineClientPrompt(clientInput,{contacts,onYes,onNo}){let box=document.getElementById('inlineUnknownClientPrompt');if(!box){box=document.createElement('div');box.id='inlineUnknownClientPrompt';box.className='inline-client-prompt hidden';clientInput.closest('.field')?.appendChild(box);}const refresh=()=>{const term=String(clientInput.value||'').trim(),matched=contacts.some(c=>String(c.name||'').trim().toLowerCase()===term.toLowerCase());if(term.length<=2||matched||clientInput.dataset.declinedClientTerm===term){box.classList.add('hidden');box.innerHTML='';return;}box.classList.remove('hidden');box.innerHTML=`<span>${bi('Client not found in the list. Create as a new client?','Ügyfél nem található a listában. Létrehozod új ügyfélként?')}</span><div><button type="button" class="small" data-client-create-yes>${bi('Yes','Igen')}</button><button type="button" class="ghost-btn small" data-client-create-no>${bi('No','Nem')}</button></div>`;box.querySelector('[data-client-create-yes]').onclick=()=>{clientInput.dataset.declinedClientTerm='';onYes(term);};box.querySelector('[data-client-create-no]').onclick=()=>{clientInput.dataset.declinedClientTerm=term;box.classList.add('hidden');onNo(term);};};clientInput.addEventListener('input',()=>{if(clientInput.dataset.declinedClientTerm&&clientInput.dataset.declinedClientTerm!==String(clientInput.value||'').trim())clientInput.dataset.declinedClientTerm='';refresh();});clientInput.addEventListener('blur',()=>setTimeout(refresh,120));refresh();return box;}
+
 async function openJob(prefill="", row=null, draft=null){
  const source=draft||row||{};
+ let allowAdHocClient=Boolean(source?.allow_ad_hoc_client||(!source?.client_id&&source?.client_name));
  const existingMinutes=Number(source?.planned_minutes)>0?Number(source.planned_minutes):Math.max(SCHEDULE_INTERVAL_MINUTES,wallClockDifferenceMinutes(source?.start_time,source?.end_time)||180);
  const start=roundWallClockToQuarter(source?.start_time || prefill || newYorkNowLocal());
  const end=roundWallClockToQuarter(source?.end_time || addWallClockMinutes(start,existingMinutes||180));
@@ -2218,6 +2253,7 @@ ${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end)}
 
  function fillClientData(){const c=contacts.find(x=>(x.name||"").trim().toLowerCase()===(clientInput.value||"").trim().toLowerCase());if(!c)return;phoneInput.value=c.phone||phoneInput.value||"";addressInput.value=c.address||addressInput.value||"";const ownedList=pianos.filter(p=>p.owner_contact_id===c.id);if(ownedList.length){const list=document.getElementById("pianoList");if(list)list.innerHTML=ownedList.map(p=>`<option value="${htmlText(p.display_name||`${p.brand||''} ${p.model||''}`.trim())}">${htmlText(`${p.serial_no||''} ${p.location||''}`)}</option>`).join('');if(!pianoInput.value)pianoInput.value=(ownedList[0].display_name||`${ownedList[0].brand||''} ${ownedList[0].model||''}`.trim());}}
  clientInput.addEventListener("change",fillClientData);clientInput.addEventListener("blur",fillClientData);
+ ensureInlineClientPrompt(clientInput,{contacts,onYes:(term)=>{jobDraftState={...captureJobDraftFromForm(),client_name:term};openNestedClientModal({prefillName:term,draft:jobDraftState,onSaved:(client,draftState)=>{allowAdHocClient=false;jobDraftState=null;contacts.push(client);clientInput.value=client.name||term;phoneInput.value=client.phone||draftState.client_phone||'';addressInput.value=client.address||draftState.service_address||'';clientInput.dataset.clientId=client.id;showToast(bi('Client created and linked.','Ügyfél létrehozva és összekapcsolva.'),'success');},onCancelled:()=>{jobDraftState=null;}});},onNo:(term)=>{allowAdHocClient=true;clientInput.dataset.clientId='';showToast(bi('Client will remain text-only for this job.','Az ügyfél ennél a munkánál csak szöveges adat marad.'),'info');}});
 
  function recalculateDuration(){const minutes=wallClockDifferenceMinutes(startInput.value,endInput.value);if(minutes>0){minutesInput.value=String(minutes);hoursInput.value=String(minutes/60);durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: ${formatDurationLabel(minutes)}`;}else{durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: —`;}}
  async function refreshDailyRateCapacity(){
@@ -2238,11 +2274,11 @@ ${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end)}
    if(b.job_type==="Part-work"&&!(b.instructions||"").trim()){appAlert(bi("Remaining tasks are required for part-work.","Részmunka esetén a hátralévő feladatok megadása kötelező."),"warning");return;}
    b.planned_minutes=plannedMinutes;b.planned_hours=plannedMinutes/60;b.planned_amount=Number(b.planned_amount||0);b.travel_minutes=0;b.priority=row?.priority||"Medium";b.daily_rate_enabled=dailyToggle.checked;b.daily_rate_allocated_amount=dailyToggle.checked?Number(dailyAmountInput.value||0):0;
    if(dailyToggle.checked){const cap=await refreshDailyRateCapacity();if(!cap)return;const requested=Number(b.daily_rate_allocated_amount||0);if(requested<=0){showError('DAILY_RATE_ALLOCATION_REQUIRED');return}if(requested>Number(cap.available||0)+0.0001){showError(`${bi('Daily rate limit exceeded. Available','Napidíjkeret túllépve. Elérhető')}: ${money(cap.available||0)}`);return;}}
-   if(row?.id){b.id=row.id;b.job_id=row.id;}if(row?.job_key)b.job_key=row.job_key;b.client_id=source?.client_id||null;b.piano_id=source?.piano_id||null;
-   const matchedClient=contacts.find(c=>(c.name||"").trim().toLowerCase()===(b.client_name||"").trim().toLowerCase());if(matchedClient){b.client_id=matchedClient.id;if(!b.client_phone&&matchedClient.phone)b.client_phone=matchedClient.phone;if(!b.service_address&&matchedClient.address)b.service_address=matchedClient.address;}
-   const matchedPiano=pianos.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());if(matchedPiano)b.piano_id=matchedPiano.id;
-   if(!matchedClient){const create=await appConfirm(`${bi("Client not found","Ügyfél nem található")}: ${b.client_name}\n${bi("Create this client now? Your job data will be preserved.","Létrehozod most az ügyfelet? A munka adatai megmaradnak.")}`,{confirmText:bi("Create client","Ügyfél létrehozása")});if(create){jobDraftState={...b};const reopenDraft=(overrides={})=>{const saved={...(jobDraftState||b),...overrides};jobDraftState=null;return openJob(saved.start_time,null,saved);};openForm("contacts",null,{prefill:{name:b.client_name,phone:b.client_phone,address:b.service_address},onSaved:client=>reopenDraft({client_id:client.id,client_name:client.name,client_phone:client.phone||b.client_phone,service_address:client.address||b.service_address}),onCancelled:()=>reopenDraft()});}return;}
-   if(!matchedPiano){const createPiano=await appConfirm(`${bi("Piano not found","Zongora nem található")}: ${b.piano_name}\n${bi("Create this piano for the selected client now? Your job data will be preserved.","Létrehozod most ezt a zongorát a kiválasztott ügyfélhez? A munka adatai megmaradnak.")}`,{confirmText:bi("Create piano","Zongora létrehozása")});if(createPiano)await openJobPianoCreate(matchedClient,{...b,client_id:matchedClient.id,client_name:matchedClient.name});return;}
+   if(row?.id){b.id=row.id;b.job_id=row.id;}if(row?.job_key)b.job_key=row.job_key;b.client_id=clientInput.dataset.clientId||source?.client_id||null;b.piano_id=source?.piano_id||null;b.allow_ad_hoc_client=allowAdHocClient;
+   const matchedClient=contacts.find(c=>(c.name||"").trim().toLowerCase()===(b.client_name||"").trim().toLowerCase());if(matchedClient){b.client_id=matchedClient.id;b.allow_ad_hoc_client=false;if(!b.client_phone&&matchedClient.phone)b.client_phone=matchedClient.phone;if(!b.service_address&&matchedClient.address)b.service_address=matchedClient.address;}
+   const matchedPiano=allowAdHocClient?null:pianos.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===(b.piano_name||"").trim().toLowerCase());if(matchedPiano)b.piano_id=matchedPiano.id;
+   if(!matchedClient&&!allowAdHocClient){jobDraftState={...b};openNestedClientModal({prefillName:b.client_name,draft:jobDraftState,onSaved:(client,draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,{...draftState,client_id:client.id,client_name:client.name,client_phone:client.phone||draftState.client_phone,service_address:client.address||draftState.service_address,allow_ad_hoc_client:false});},onCancelled:(draftState)=>{jobDraftState=null;return openJob(draftState.start_time,null,{...draftState,allow_ad_hoc_client:false});}});return;}
+   if(!matchedPiano&&!allowAdHocClient){const createPiano=await appConfirm(`${bi("Piano not found","Zongora nem található")}: ${b.piano_name}\n${bi("Create this piano for the selected client now? Your job data will be preserved.","Létrehozod most ezt a zongorát a kiválasztott ügyfélhez? A munka adatai megmaradnak.")}`,{confirmText:bi("Create piano","Zongora létrehozása")});if(createPiano)await openJobPianoCreate(matchedClient,{...b,client_id:matchedClient.id,client_name:matchedClient.name});return;}
    try{const saved=row?await api(`/api/jobs/${encodeURIComponent(jobRef(row))}`,{method:"PUT",body:JSON.stringify(b)}):await api("/api/jobs",{method:"POST",body:JSON.stringify(b)});currentWeekStart=startOfWeek(saved.start_time||b.start_time);closeModal();await refreshCalendarAfterMutation(saved);}catch(err){showError(err)}
  };
 }
