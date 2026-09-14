@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { inspectImageFile } = require("./upload-middleware");
 const { pages, routeDefinitions, globalCopy } = require("../website/server/site-content");
+const { defaultLandingSections, normalizeLandingSections } = require("./round8-domain");
 
 const LANGUAGES = new Set(["en", "hu"]);
 const PAGE_KEYS = new Set(["global", ...Object.keys(routeDefinitions)]);
@@ -112,13 +113,27 @@ function registerWebsiteContentRoutes(options) {
     return parsePageRoutes(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(PAGE_ROUTE_SETTINGS_KEY)?.setting_value);
   }
   function designSettings() { return parseDesignSettings(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(WEBSITE_DESIGN_SETTINGS_KEY)?.setting_value); }
+  function landingSections() {
+    const existing = db.prepare("SELECT section_key,is_active,order_index FROM landing_sections ORDER BY order_index,section_key").all();
+    if (!existing.length) {
+      const insert = db.prepare("INSERT OR IGNORE INTO landing_sections(section_key,is_active,order_index) VALUES(?,?,?)");
+      defaultLandingSections().forEach((row) => insert.run(row.section_key, row.is_active, row.order_index));
+    }
+    return normalizeLandingSections(db.prepare("SELECT section_key,is_active,order_index FROM landing_sections ORDER BY order_index,section_key").all());
+  }
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
+    let content = parseStoredPage(row, pageKey, language);
+    if (pageKey === "global" && Array.isArray(content?.nav)) {
+      const active = new Set(landingSections().filter((item) => Number(item.is_active) === 1).map((item) => item.section_key));
+      const sectionForNav = { events:"salon_events", pianos:"featured_pianos", services:"craftsmanship", contact:"contact_cta" };
+      content = { ...content, nav: content.nav.filter((item) => !sectionForNav[item.key] || active.has(sectionForNav[item.key])) };
+    }
     return {
       page_key: pageKey,
       language,
-      content: parseStoredPage(row, pageKey, language),
+      content,
       version: Number(row?.version || 0),
       updated_at: row?.updated_at || null,
       source: row ? "database" : "bundled"
@@ -193,6 +208,21 @@ function registerWebsiteContentRoutes(options) {
     res.json({ routes: pageRoutes() });
   });
   app.get("/api/public/website-design-settings", (_req, res) => { res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60"); res.json(designSettings()); });
+  app.get("/api/public/landing-sections", (_req, res) => { res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=30"); res.json(landingSections()); });
+  app.get("/api/landing-sections", auth, admin, (_req, res) => res.json(landingSections()));
+  app.put("/api/landing-sections", auth, admin, (req, res) => {
+    const requested = Array.isArray(req.body?.sections) ? req.body.sections : [];
+    const normalized = normalizeLandingSections(requested);
+    const before = landingSections();
+    db.transaction(() => {
+      const upsert = db.prepare(`INSERT INTO landing_sections(section_key,is_active,order_index,updated_by_user_id,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(section_key) DO UPDATE SET is_active=excluded.is_active,order_index=excluded.order_index,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`);
+      normalized.forEach((row, index) => upsert.run(row.section_key, row.is_active, index, req.user.id));
+    })();
+    const after = landingSections();
+    audit(req, "UPDATE_LANDING_SECTIONS", "website", "home", before, after, 1, "Landing section visibility and order updated");
+    res.json(after);
+  });
   app.get("/api/website-design-settings", auth, admin, (_req, res) => res.json(designSettings()));
   app.put("/api/website-design-settings", auth, admin, (req, res) => {
     const before = designSettings(); const candidate = { ...before, ...req.body };
