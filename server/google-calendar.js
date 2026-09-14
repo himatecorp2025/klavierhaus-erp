@@ -261,6 +261,11 @@ function createGoogleCalendarIntegration(options) {
   }
 
   function normalizeEmail(value) { return String(value || "").trim().toLowerCase(); }
+  function cleanText(value, max = 8000) { return String(value || "").replace(/\u0000/g, "").trim().slice(0, max); }
+  function isQuarterHour(value) {
+    const match = String(value || "").match(/^\d{4}-\d{2}-\d{2}T\d{2}:(\d{2})(?::(\d{2}))?$/);
+    return Boolean(match) && Number(match[1]) % 15 === 0 && Number(match[2] || 0) === 0;
+  }
 
   function mappedUser(event) {
     const email = normalizeEmail(event.creator?.email);
@@ -398,10 +403,10 @@ function createGoogleCalendarIntegration(options) {
       const effectiveAssignee = job.assigned_user_id ? { id: job.assigned_user_id, name: job.assigned_to } : assignee;
       const conflicts = effectiveAssignee ? findScheduleConflicts(effectiveAssignee.id, effectiveAssignee.name, startTime, endTime, job.id) : [];
       const plannedMinutes=wallClockMinutes(startTime,endTime);
-      db.prepare(`UPDATE jobs SET title=?,start_time=?,end_time=?,instructions=?,planned_minutes=?,planned_hours=?,
+      db.prepare(`UPDATE jobs SET title=?,start_time=?,end_time=?,instructions=?,notes=?,planned_minutes=?,planned_hours=?,
         assigned_user_id=?,assigned_to=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(
-          String(event.summary || "Google Calendar event / Google Naptár-esemény").trim(), startTime, endTime, importedInstructions(event),
+          String(event.summary || "Google Calendar event / Google Naptár-esemény").trim(), startTime, endTime, importedInstructions(event), cleanText(event.description || "", 8000),
           plannedMinutes,plannedMinutes/60,
           effectiveAssignee?.id || null, effectiveAssignee?.name || "Unassigned / Nincs hozzárendelve", job.id
         );
@@ -415,12 +420,12 @@ function createGoogleCalendarIntegration(options) {
     const jobId = rid("J");
     db.prepare(`INSERT INTO jobs(
       id,job_key,workflow_root_id,workflow_step_no,workflow_status,title,job_type,assigned_user_id,assigned_to,created_by,
-      priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         jobId, stableJobKey(), jobId, 1, "ACTIVE", String(event.summary || "Google Calendar event / Google Naptár-esemény").trim(),
         "Standalone", assignee?.id || null, assignee?.name || "Unassigned / Nincs hozzárendelve", "Google Calendar",
-        "Medium", "Open", startTime, endTime, "America/New_York", 0, wallClockMinutes(startTime,endTime)/60, wallClockMinutes(startTime,endTime), 0, "", importedInstructions(event)
+        "Medium", "Open", startTime, endTime, "America/New_York", 0, wallClockMinutes(startTime,endTime)/60, wallClockMinutes(startTime,endTime), 0, event.location || "", importedInstructions(event), cleanText(event.description || "", 8000)
       );
     const job = getJob(jobId);
     upsertExternalEvent(event, { jobId, reviewStatus: "NEEDS_REVIEW", conflictFlag: conflicts.length > 0 });
@@ -587,6 +592,9 @@ function createGoogleCalendarIntegration(options) {
     const job = getJob(jobId);
     if (!job) throw new Error("JOB_NOT_FOUND");
     if (!job.assigned_user_id) throw new Error("GOOGLE_EVENT_ASSIGNEE_REQUIRED");
+    if (!job.client_id) throw new Error("GOOGLE_EVENT_CLIENT_REQUIRED");
+    if (!job.piano_id) throw new Error("GOOGLE_EVENT_PIANO_REQUIRED");
+    if (!isQuarterHour(job.start_time) || !isQuarterHour(job.end_time)) throw new Error("GOOGLE_EVENT_TIME_ALIGNMENT_REQUIRED");
     const conflicts = job.assigned_user_id ? findScheduleConflicts(job.assigned_user_id, job.assigned_to, job.start_time, job.end_time, job.id) : [];
     if (conflicts.length) throw new Error("GOOGLE_EVENT_CONFLICT_UNRESOLVED");
     db.prepare(`UPDATE external_calendar_events SET review_status='REVIEWED',conflict_flag=?,reviewed_at=CURRENT_TIMESTAMP,
