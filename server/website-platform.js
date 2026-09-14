@@ -136,7 +136,9 @@ function registerWebsitePlatformRoutes(options) {
   const sampleAsset = (fileName) => `${publicWebsiteUrl}/assets/media/${fileName}`;
   const upload = websiteImageUpload.single("website_image");
   const deviceSecret = clean(env.WEBSITE_DEVICE_SECRET || env.JWT_SECRET);
-  const cipher = createCipher(env.MARKETING_TOKEN_ENCRYPTION_KEY || env.GOOGLE_TOKEN_ENCRYPTION_KEY || env.JWT_SECRET);
+  const integrationEncryptionSecret = clean(env.SYSTEM_INTEGRATION_ENCRYPTION_KEY || env.MARKETING_TOKEN_ENCRYPTION_KEY);
+  if (String(env.NODE_ENV || "").toLowerCase() === "production" && integrationEncryptionSecret.length < 32) throw new Error("SYSTEM_INTEGRATION_ENCRYPTION_KEY_REQUIRED");
+  const cipher = createCipher(integrationEncryptionSecret);
   const recentRequests = new Map();
 
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -516,7 +518,7 @@ function registerWebsitePlatformRoutes(options) {
     return row ? { provider, status: row.status, config: parseJson(row.public_config_json), has_secret: Boolean(row.encrypted_secret), last_tested_at: row.last_tested_at, last_sync_at: row.last_sync_at, last_error: row.last_error } : { provider, status: "DISCONNECTED", config: {}, has_secret: false };
   }) : []));
 
-  app.put("/api/marketing/integrations/:provider", auth, requireSuperadmin, (req, res) => {
+  app.put("/api/marketing/integrations/:provider", auth, admin, (req, res) => {
     const provider = clean(req.params.provider, 40).toUpperCase();
     if (!PROVIDERS.has(provider)) return res.status(404).json({ error: "INTEGRATION_PROVIDER_NOT_FOUND" });
     const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : {};
