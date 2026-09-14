@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -12,127 +11,24 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <title>Klavierhaus Work Management</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/system-integrations.css">
 </head>
 <body>
   <section id="login" class="login-page">
     <div class="login-card">
       <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
-      <h1><span data-brand-name>Klavierhaus</span> Work Management</h1>
-      <p>Calendar-first job management</p>
-      <form id="loginForm" method="post" action="/api/login" autocomplete="on">
-        <label>Email</label>
-        <input id="loginEmail" name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false">
-        <label>Password</label>
-        <div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button id="toggleLoginPassword" class="password-toggle password-hidden" type="button" aria-label="Show password" title="Show password" aria-pressed="false"><svg class="password-eye-icon" aria-hidden="true" viewBox="0 0 24 24"><path class="password-eye-shape" d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle class="password-eye-shape" cx="12" cy="12" r="2.7"/><path class="password-eye-slash" d="M3 3l18 18"/></svg></button></div>
-        <button id="loginSubmitButton" type="submit">Login</button>
-      </form>
-      <form id="activationForm" class="activation-form hidden" autocomplete="one-time-code">
-        <h2 id="activationTitle">Verify your account</h2>
-        <p id="activationDescription">Enter the six-digit code sent to your contact email.</p>
-        <p id="activationRecipient" class="activation-recipient"></p>
-        <label id="activationCodeLabel" for="activationCode">Activation code</label>
-        <input id="activationCode" name="activation_code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
-        <button id="activationVerifyButton" type="submit">Verify and continue</button>
-        <button id="activationResendButton" type="button" class="secondary">Send a new code</button>
-        <button id="activationBackButton" type="button" class="ghost-btn">Back to login</button>
-      </form>
+      <h1><span data-brand-name>Klavierhaus</span> Work Management</h1><p>Calendar-first job management</p>
+      <form id="loginForm" method="post" action="/api/login" autocomplete="on"><label>Email</label><input id="loginEmail" name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false"><label>Password</label><div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button id="toggleLoginPassword" class="password-toggle password-hidden" type="button" aria-label="Show password" title="Show password" aria-pressed="false"><svg class="password-eye-icon" aria-hidden="true" viewBox="0 0 24 24"><path class="password-eye-shape" d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle class="password-eye-shape" cx="12" cy="12" r="2.7"/><path class="password-eye-slash" d="M3 3l18 18"/></svg></button></div><button id="loginSubmitButton" type="submit">Login</button></form>
+      <form id="activationForm" class="activation-form hidden" autocomplete="one-time-code"><h2 id="activationTitle">Verify your account</h2><p id="activationDescription">Enter the six-digit code sent to your contact email.</p><p id="activationRecipient" class="activation-recipient"></p><label id="activationCodeLabel" for="activationCode">Activation code</label><input id="activationCode" name="activation_code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required><button id="activationVerifyButton" type="submit">Verify and continue</button><button id="activationResendButton" type="button" class="secondary">Send a new code</button><button id="activationBackButton" type="button" class="ghost-btn">Back to login</button></form>
     </div>
   </section>
-
-
-  <section id="notificationActivationGate" class="notification-activation-gate hidden" aria-live="polite">
-    <div class="notification-activation-card">
-      <div class="notification-activation-icon">🔔</div>
-      <h1 id="notificationGateTitle">Enable work notifications</h1>
-      <p id="notificationGateText">Notifications are required to receive job assignments, schedule changes, internal messages and reminders.</p>
-      <div id="notificationGateStatus" class="notification-gate-status"></div>
-      <div class="notification-activation-actions">
-        <button id="notificationGateEnable" type="button">Enable notifications</button>
-        <button id="notificationGateCheck" type="button" class="secondary">Check again</button>
-        <button id="notificationGateHelp" type="button" class="secondary">How to enable notifications</button>
-        <button id="notificationGateLogout" type="button" class="danger">Log out</button>
-      </div>
-      <div id="notificationGateHelpPanel" class="notification-gate-help hidden"></div>
-    </div>
-  </section>
-
-  <section id="app" class="app-shell hidden">
-    <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle menu">☰</button>
-    <button id="mobileGlobalNotificationBell" class="notification-bell mobile-global-notification-bell hidden" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button>
-    <aside class="sidebar">
-      <button id="brandHomeButton" class="brand brand-home-button" type="button" aria-label="Open Scheduler / Naptár megnyitása">
-        <div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div>
-        <div>
-          <h2 data-brand-name>Klavierhaus</h2>
-          <small id="userInfo"></small>
-        </div>
-      </button>
-      <nav id="nav" class="nav"></nav>
-      <button id="deleteEverythingBtn" class="delete-everything-btn hidden" type="button" onclick="deleteEverything()">Delete Everything / Mindent töröl</button>
-      <button id="logoutBtn" class="logout-btn">Logout / Kilépés</button>
-    </aside>
-
-    <main class="main">
-      <header class="main-header">
-        <div class="header-left">
-          <h1 id="pageTitle">Scheduler / Naptár</h1>
-          <p id="headerSubtitle">New York time based operations / New York-i időzóna szerinti működés</p>
-        </div>
-        <div class="header-right">
-          <button id="desktopNotificationBell" class="notification-bell" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button><div id="sessionCountdown" class="session-countdown" title="Automatic logout countdown">Logout in: 10:00</div>
-        </div>
-      </header>
-
-      <section id="today" class="view"></section>
-      <section id="scheduler" class="view active"></section>
-      <section id="planned_jobs" class="view"></section>
-      <section id="contacts" class="view"></section>
-      <section id="pianos" class="view"></section>
-      <section id="closed_jobs" class="view"></section>
-      <section id="knowledge_base" class="view"></section>
-      <section id="finance" class="view"></section>
-      <section id="income_statement" class="view"></section>
-      <section id="inventory" class="view"></section>
-      <section id="events" class="view"></section>
-      <section id="accounts" class="view"></section>
-      <section id="users" class="view"></section>
-      <section id="audit_log" class="view"></section>
-      <section id="settings" class="view"></section>
-      <section id="notifications" class="view"></section>
+  <section id="notificationActivationGate" class="notification-activation-gate hidden" aria-live="polite"><div class="notification-activation-card"><div class="notification-activation-icon">🔔</div><h1 id="notificationGateTitle">Enable work notifications</h1><p id="notificationGateText">Notifications are required to receive job assignments, schedule changes, internal messages and reminders.</p><div id="notificationGateStatus" class="notification-gate-status"></div><div class="notification-activation-actions"><button id="notificationGateEnable" type="button">Enable notifications</button><button id="notificationGateCheck" type="button" class="secondary">Check again</button><button id="notificationGateHelp" type="button" class="secondary">How to enable notifications</button><button id="notificationGateLogout" type="button" class="danger">Log out</button></div><div id="notificationGateHelpPanel" class="notification-gate-help hidden"></div></div></section>
+  <section id="app" class="app-shell hidden"><button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle menu">☰</button><button id="mobileGlobalNotificationBell" class="notification-bell mobile-global-notification-bell hidden" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button><aside class="sidebar"><button id="brandHomeButton" class="brand brand-home-button" type="button" aria-label="Open Scheduler / Naptár megnyitása"><div class="brand-badge" data-brand-logo><img src="/icons/icon-512.png" alt=""></div><div><h2 data-brand-name>Klavierhaus</h2><small id="userInfo"></small></div></button><nav id="nav" class="nav"></nav><button id="deleteEverythingBtn" class="delete-everything-btn hidden" type="button" onclick="deleteEverything()">Delete Everything / Mindent töröl</button><button id="logoutBtn" class="logout-btn">Logout / Kilépés</button></aside>
+    <main class="main"><header class="main-header"><div class="header-left"><h1 id="pageTitle">Scheduler / Naptár</h1><p id="headerSubtitle">New York time based operations / New York-i időzóna szerinti működés</p></div><div class="header-right"><button id="desktopNotificationBell" class="notification-bell" type="button" aria-label="Notifications" title="Notifications">🔔<span class="notification-badge hidden">0</span></button><div id="sessionCountdown" class="session-countdown" title="Automatic logout countdown">Logout in: 10:00</div></div></header>
+      <section id="today" class="view"></section><section id="scheduler" class="view active"></section><section id="planned_jobs" class="view"></section><section id="contacts" class="view"></section><section id="pianos" class="view"></section><section id="closed_jobs" class="view"></section><section id="knowledge_base" class="view"></section><section id="finance" class="view"></section><section id="income_statement" class="view"></section><section id="inventory" class="view"></section><section id="events" class="view"></section><section id="accounts" class="view"></section><section id="users" class="view"></section><section id="audit_log" class="view"></section><section id="settings" class="view"></section><section id="notifications" class="view"></section><section id="system_integrations" class="view"></section>
     </main>
-
-    <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Mobile navigation">
-      <button type="button" class="mobile-nav-btn" data-mobile-view="today"><span class="mobile-nav-icon" aria-hidden="true">◷</span><span data-mobile-label="today">Today</span></button>
-      <button type="button" class="mobile-nav-btn" data-mobile-view="contacts"><span class="mobile-nav-icon" aria-hidden="true">👥</span><span data-mobile-label="contacts">Clients</span></button>
-      <button type="button" id="mobileAddJobBtn" class="mobile-nav-btn mobile-add-btn" aria-label="Add job"><span class="mobile-nav-icon" aria-hidden="true">＋</span><span data-mobile-label="newJob">New Job</span></button>
-      <button type="button" class="mobile-nav-btn" data-mobile-view="pianos"><span class="mobile-nav-icon" aria-hidden="true">🎹</span><span data-mobile-label="pianos">Pianos</span></button>
-      <button type="button" id="mobileMoreBtn" class="mobile-nav-btn"><span class="mobile-nav-icon" aria-hidden="true">⋯</span><span data-mobile-label="more">More</span></button>
-    </nav>
-    <div id="mobileMoreSheet" class="mobile-more-sheet hidden" aria-hidden="true">
-      <button class="mobile-sheet-backdrop" type="button" aria-label="Close"></button>
-      <div class="mobile-sheet-panel">
-        <div class="mobile-sheet-handle"></div>
-        <div class="mobile-sheet-head"><strong id="mobileMoreTitle">More</strong><button type="button" id="mobileMoreClose" class="mobile-sheet-close">×</button></div>
-        <div id="mobileMoreItems" class="mobile-more-items"></div>
-      </div>
-    </div>
+    <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Mobile navigation"><button type="button" class="mobile-nav-btn" data-mobile-view="today"><span class="mobile-nav-icon" aria-hidden="true">◷</span><span data-mobile-label="today">Today</span></button><button type="button" class="mobile-nav-btn" data-mobile-view="contacts"><span class="mobile-nav-icon" aria-hidden="true">👥</span><span data-mobile-label="contacts">Clients</span></button><button type="button" id="mobileAddJobBtn" class="mobile-nav-btn mobile-add-btn" aria-label="Add job"><span class="mobile-nav-icon" aria-hidden="true">＋</span><span data-mobile-label="newJob">New Job</span></button><button type="button" class="mobile-nav-btn" data-mobile-view="pianos"><span class="mobile-nav-icon" aria-hidden="true">🎹</span><span data-mobile-label="pianos">Pianos</span></button><button type="button" id="mobileMoreBtn" class="mobile-nav-btn"><span class="mobile-nav-icon" aria-hidden="true">⋯</span><span data-mobile-label="more">More</span></button></nav><div id="mobileMoreSheet" class="mobile-more-sheet hidden" aria-hidden="true"><button class="mobile-sheet-backdrop" type="button" aria-label="Close"></button><div class="mobile-sheet-panel"><div class="mobile-sheet-handle"></div><div class="mobile-sheet-head"><strong id="mobileMoreTitle">More</strong><button type="button" id="mobileMoreClose" class="mobile-sheet-close">×</button></div><div id="mobileMoreItems" class="mobile-more-items"></div></div></div>
   </section>
-
-  <div id="modal" class="modal hidden">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3 id="modalTitle"></h3>
-        <button type="button" class="modal-close" onclick="closeModal()">×</button>
-      </div>
-      <form id="form"></form>
-    </div>
-  </div>
-
-  <script src="/app.js"></script>
-  <script>
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => navigator.serviceWorker.register("/service-worker.js").catch(console.error));
-    }
-  </script>
-</body>
-</html>
+  <div id="modal" class="modal hidden"><div class="modal-box"><div class="modal-header"><h3 id="modalTitle"></h3><button type="button" class="modal-close" onclick="closeModal()">×</button></div><form id="form"></form></div></div>
+  <script src="/app.js"></script><script src="/system-integrations.js"></script><script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(console.error));}</script>
+</body></html>
