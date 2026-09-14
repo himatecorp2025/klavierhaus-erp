@@ -67,3 +67,56 @@ test('login completion and persisted-session startup both attach a bootstrap fai
   assert.match(appSource, /window\.addEventListener\("unhandledrejection"/);
   assert.match(appSource, /window\.addEventListener\("error"/);
 });
+
+test('session modal synchronization is state-aware and repeated observer callbacks cannot restart the timer forever', () => {
+  const start = appSource.indexOf('function createSessionActivityController(');
+  const end = appSource.indexOf('function updateCountdownDisplay()', start);
+  assert.ok(start >= 0 && end > start, 'Session controller factory must exist');
+  const source = appSource.slice(start, end);
+  let timerStarts = 0;
+  let timerClears = 0;
+  let nextId = 1;
+  const context = {
+    setTimeout: () => { timerStarts += 1; return nextId++; },
+    clearTimeout: () => { timerClears += 1; },
+    Date,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(`${source}\nglobalThis.__createSessionActivityController=createSessionActivityController;`, context);
+  const controller = context.__createSessionActivityController({
+    timeoutMs: 600000,
+    setTimer: context.setTimeout,
+    clearTimer: context.clearTimeout,
+    now: () => 1000,
+    canRun: () => true
+  });
+  controller.resetTimer();
+  assert.equal(timerStarts, 1);
+  controller.setModalCount(0);
+  controller.setModalCount(0);
+  controller.setModalCount(0);
+  assert.equal(timerStarts, 1, 'Unchanged modal count must not repeatedly reset the inactivity timer');
+  controller.setModalCount(1);
+  assert.equal(controller.snapshot().paused, true);
+  controller.setModalCount(1);
+  assert.equal(timerStarts, 1, 'Repeated open-state sync must remain a no-op');
+  controller.setModalCount(0);
+  assert.equal(timerStarts, 2, 'Timer restarts exactly once when the final modal closes');
+  assert.ok(timerClears >= 1);
+});
+
+test('bootstrap validates /api/me first and 401/auth failures return to a clean login state', () => {
+  assert.match(appSource, /function safeStoredJson\(key,fallback=null\)/);
+  assert.match(appSource, /async function validateAuthenticatedSession\(\)/);
+  assert.match(appSource, /apiRequest\("\/api\/me"/);
+  assert.match(appSource, /response\.status===401/);
+  assert.match(appSource, /localStorage\.removeItem\("kh_token"\)/);
+  assert.match(appSource, /localStorage\.removeItem\("kh_user"\)/);
+  const bootStart = appSource.indexOf('async function boot(){');
+  const bootEnd = appSource.indexOf('function updateSidebarToggle()', bootStart);
+  const bootBlock = appSource.slice(bootStart, bootEnd);
+  const validateIndex = bootBlock.indexOf('await validateAuthenticatedSession()');
+  const hideLoginIndex = bootBlock.indexOf('document.getElementById("login")?.classList.add("hidden")');
+  assert.ok(validateIndex >= 0 && hideLoginIndex > validateIndex, 'Token must be validated before the login screen is hidden');
+});
