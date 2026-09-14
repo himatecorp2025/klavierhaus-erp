@@ -22,6 +22,7 @@ const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
+const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -428,18 +429,9 @@ function localDateTimeValue(value){
   if(date.getUTCFullYear()!==Number(year)||date.getUTCMonth()!==Number(month)-1||date.getUTCDate()!==Number(day)||date.getUTCHours()!==Number(hour)||date.getUTCMinutes()!==Number(minute))return NaN;
   return stamp;
 }
-function isFiveMinuteTime(value){
-  const match=String(value||"").trim().match(/^\d{4}-\d{2}-\d{2}T\d{2}:(\d{2})(?::(\d{2}))?$/);
-  return Boolean(match) && Number(match[1])%5===0 && Number(match[2]||0)===0 && Number.isFinite(localDateTimeValue(value));
-}
-function timeRangeMinutes(startTime,endTime){
-  const start=localDateTimeValue(startTime),end=localDateTimeValue(endTime);
-  return Number.isFinite(start)&&Number.isFinite(end)&&end>start?Math.round((end-start)/60000):0;
-}
-function isFiveMinuteDurationHours(value){
-  const minutes=Number(value)*60;
-  return Number.isFinite(minutes) && minutes>0 && Math.abs(minutes-Math.round(minutes))<0.0001 && Math.round(minutes)%5===0;
-}
+function isFiveMinuteTime(value){ return isScheduleTime(value); }
+function timeRangeMinutes(startTime,endTime){ return domainTimeRangeMinutes(startTime,endTime); }
+function isFiveMinuteDurationHours(value){ return isScheduleDurationHours(value); }
 function findScheduleConflicts(assignedUserId,assignedTo,startTime,endTime,excludeJobId=null){
   if((!assignedUserId&&!assignedTo) || !startTime || !endTime) return [];
   let sql=`SELECT id,job_key,title,assigned_user_id,assigned_to,start_time,end_time,status FROM jobs
@@ -509,24 +501,9 @@ function inventoryRowsActive(){
   return db.prepare("SELECT * FROM inventory_items WHERE COALESCE(status,'')!='Deleted' ORDER BY created_at DESC").all();
 }
 
+const jobDomain=createJobDomain({db,rid,balanceAccountFromPaymentMethod});
 function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
-  const amount=Number(billed||0);
-  if(!amount || amount<=0) return null;
-  const existing=db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get("closed_job", job.id);
-  if(existing) return existing;
-  const id=rid("FI");
-  const title=`Closed job revenue / Lezárt munka bevétele: ${job.title||job.job_key||job.id}`;
-  const description=[
-    job.client_name ? `Client / Ügyfél: ${job.client_name}` : "",
-    job.piano_name ? `Piano / Zongora: ${job.piano_name}` : "",
-    logId ? `Job log / Lezárási napló: ${logId}` : ""
-  ].filter(Boolean).join("\n");
-  db.prepare(`INSERT INTO financial_items(
-    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,nyToday(),title,description,amount,"INCOME","SERVICE_REVENUE","ONE_TIME",payment||"",balanceAccountFromPaymentMethod(payment),job.id,job.client_id||null,job.piano_id||null,"closed_job",job.id,userName||"System"
-  );
-  return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
+  return jobDomain.postClosedJobRevenue(job,{logId,billedAmount:billed,paymentMethod:payment,createdBy:userName||"System"});
 }
 
 
@@ -799,7 +776,8 @@ registerBusinessOperationsRoutes({
   documentService: businessDocuments,
   ticketService,
   customerConversationUpload,
-  notifyUser: createNotification
+  notifyUser: createNotification,
+  jobDomain
 });
 registerWorkshopWorkflowRoutes({
   app,
@@ -810,7 +788,8 @@ registerWorkshopWorkflowRoutes({
   rid,
   nowISO,
   upload,
-  notifyUser: createNotification
+  notifyUser: createNotification,
+  jobDomain
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
@@ -822,6 +801,28 @@ function resolveActiveUser(userId, userName){
   if(userId){const byId=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(userId);if(byId)return byId;}
   if(userName){return db.prepare("SELECT id,name FROM users WHERE lower(trim(name))=lower(trim(?)) AND status='Active' LIMIT 1").get(userName)||null;}
   return null;
+}
+function resolveClient(clientId, clientName){
+  if(clientId){const row=db.prepare("SELECT * FROM contacts WHERE id=?").get(clientId);if(row)return row;}
+  if(clientName){return db.prepare("SELECT * FROM contacts WHERE lower(trim(name))=lower(trim(?)) ORDER BY created_at LIMIT 1").get(clientName)||null;}
+  return null;
+}
+function resolvePiano(pianoId, pianoName, clientId=null){
+  if(pianoId){const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);if(row)return row;}
+  if(pianoName){
+    const normalized=String(pianoName||"").trim().toLowerCase();
+    const rows=clientId?db.prepare("SELECT * FROM pianos WHERE owner_contact_id=?").all(clientId):db.prepare("SELECT * FROM pianos").all();
+    return rows.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===normalized)||null;
+  }
+  return null;
+}
+function normalizeJobRelationships(body, existing={}){
+  const client=resolveClient(body.client_id!==undefined?body.client_id:existing.client_id, body.client_name!==undefined?body.client_name:existing.client_name);
+  if(!client) return {error:"CLIENT_NOT_FOUND"};
+  const piano=resolvePiano(body.piano_id!==undefined?body.piano_id:existing.piano_id, body.piano_name!==undefined?body.piano_name:existing.piano_name, client.id);
+  if(!piano) return {error:"PIANO_NOT_FOUND"};
+  if(piano.owner_contact_id && String(piano.owner_contact_id)!==String(client.id)) return {error:"PIANO_CLIENT_MISMATCH"};
+  return {client,piano};
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
 function jobsSelectSql(where=""){
@@ -1210,11 +1211,11 @@ app.post("/api/planned-jobs/:id/convert", auth, permit("ADMIN","MANAGER","WORKER
   db.prepare(`INSERT INTO jobs(
     id,job_key,planned_job_id,parent_job_id,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
     assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
-    planned_hours,planned_minutes,travel_minutes,service_address,instructions
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     jobId,stableJobKey(),planned.id,null,title,"Standalone",planned.client_id||null,planned.client_name||"",planned.client_phone||"",planned.piano_id||null,planned.piano_name||"",
     assignedUser?.id||null,assigned,req.user.id,req.user.name,planned.priority||"Medium","Open",start,end,"America/New_York",Number(b.planned_amount||planned.expected_revenue||0),b.pricing_basis||"Converted from planned job / Tervezett munkából áthelyezve",
-    Number(b.planned_hours||0),Number(b.planned_minutes||0),Number(b.travel_minutes||0),b.service_address||planned.service_address||"",b.instructions||planned.next_step||planned.notes||""
+    Number(b.planned_hours||0),Number(b.planned_minutes||0),Number(b.travel_minutes||0),b.service_address||planned.service_address||"",b.instructions||planned.next_step||"",b.notes||planned.notes||""
   );
   db.prepare("UPDATE planned_jobs SET status='Converted / Naptárba helyezve', converted_job_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(jobId, planned.id);
   res.json({ok:true,planned:db.prepare("SELECT * FROM planned_jobs WHERE id=?").get(planned.id),job:db.prepare(jobsSelectSql("WHERE j.id=?")).get(jobId)});
@@ -2002,6 +2003,10 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   for(const r of ["title","start_time","end_time"]) if(!req.body[r]) return res.status(400).json({error:`${r} is required`});
   const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
   if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
+  const relationships=normalizeJobRelationships(req.body);
+  if(relationships.error) return res.status(400).json({error:relationships.error});
+  req.body.client_id=relationships.client.id; req.body.client_name=relationships.client.name; req.body.client_phone=req.body.client_phone||relationships.client.phone||"";
+  req.body.piano_id=relationships.piano.id; req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();
   if(!isValidTimeRange(req.body.start_time,req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
   if(!isFiveMinuteTime(req.body.start_time)||!isFiveMinuteTime(req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_STEP"});
   const conflicts=findScheduleConflicts(assigned.id,assigned.name,req.body.start_time,req.body.end_time);
@@ -2012,7 +2017,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   data.workflow_root_id=data.workflow_root_id||id;
   data.workflow_step_no=Number(data.workflow_step_no||1);
   data.workflow_status=data.workflow_status||"ACTIVE";
-  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","planned_job_id"]
+  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
   const created=db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
@@ -2032,13 +2037,19 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     "title","job_type","client_id","client_name","client_phone",
     "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
-    "planned_hours","planned_minutes","travel_minutes","service_address","instructions"
+    "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id"
   ];
 
   if(req.body.job_type==="Part-work" && (!req.body.instructions || !String(req.body.instructions).trim())){
     return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
   }
 
+  if(req.body.client_id!==undefined||req.body.client_name!==undefined||req.body.piano_id!==undefined||req.body.piano_name!==undefined){
+    const relationships=normalizeJobRelationships(req.body,job);
+    if(relationships.error) return res.status(400).json({error:relationships.error});
+    req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||job.client_phone||"";
+    req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();
+  }
   let effectiveAssigned={id:job.assigned_user_id||null,name:job.assigned_to||""};
   if(req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined){
     const assigned=resolveActiveUser(req.body.assigned_user_id,req.body.assigned_to);
@@ -2087,9 +2098,35 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     if(job.client_id!==updated.client_id||job.client_name!==updated.client_name)changes.push('client');
     if(job.service_address!==updated.service_address)changes.push('location');
     if(job.priority!==updated.priority)changes.push('priority');
-    if(job.title!==updated.title||job.instructions!==updated.instructions)changes.push('details');
+    if(job.title!==updated.title||job.instructions!==updated.instructions||job.notes!==updated.notes)changes.push('details');
     if(changes.length && updated.assigned_user_id && String(updated.assigned_user_id)!==String(req.user.id)) createNotification({recipientUserId:updated.assigned_user_id,senderUserId:req.user.id,type:'JOB_UPDATED',job:updated,eventKey:`JOB_UPDATED:${updated.id}:${updated.updated_at}:${changes.join('-')}`,titleEn:'Your assigned job was updated',titleHu:'Módosították a hozzád rendelt munkát',bodyEn:`${jobDescription(updated)} · Changed: ${changes.join(', ')}`,bodyHu:`${jobDescription(updated)} · Módosult: ${changes.join(', ')}`,metadata:{changes}});
   }
+  res.json(updated);
+});
+
+app.patch("/api/jobs/:id/schedule", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const job=getJobByAnyId(req.params.id,req.body||{});
+  if(!job) return res.status(404).json({error:"JOB_NOT_FOUND"});
+  if(['Completed','Partially completed','Failed','Cancelled'].includes(String(job.status||''))) return res.status(409).json({error:"JOB_NOT_MOVABLE"});
+  const assigned=resolveActiveUser(req.body.assigned_user_id!==undefined?req.body.assigned_user_id:job.assigned_user_id,req.body.assigned_to!==undefined?req.body.assigned_to:job.assigned_to);
+  if(!assigned) return res.status(400).json({error:"INVALID_ASSIGNEE"});
+  const start=req.body.start_time!==undefined?String(req.body.start_time):String(job.start_time||"");
+  const end=req.body.end_time!==undefined?String(req.body.end_time):String(job.end_time||"");
+  if(!isValidTimeRange(start,end)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
+  if(!isScheduleTime(start)||!isScheduleTime(end)) return res.status(400).json({error:"INVALID_TIME_STEP",interval_minutes:SCHEDULE_INTERVAL_MINUTES});
+  const conflicts=findScheduleConflicts(assigned.id,assigned.name,start,end,job.id);
+  if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
+  const minutes=timeRangeMinutes(start,end);
+  db.prepare(`UPDATE jobs SET start_time=?,end_time=?,assigned_user_id=?,assigned_to=?,planned_minutes=?,planned_hours=?,timezone='America/New_York',last_reassigned_by=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE last_reassigned_by END,last_reassigned_by_user_id=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE last_reassigned_by_user_id END,reassignment_note=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(start,end,assigned.id,assigned.name,minutes,minutes/60,assigned.id,req.user.name,assigned.id,req.user.id,assigned.id,req.body.reassignment_note||"Calendar drag/drop",job.id);
+  if(job.workflow_id) db.transaction(() => {
+    db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(end,job.workflow_id);
+    db.prepare("UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'").run(end,job.workflow_id);
+  })();
+  const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  workAudit(req,'SCHEDULE_UPDATE',job.id,job,updated,1,`interval=${SCHEDULE_INTERVAL_MINUTES}; source=${req.body.source||'calendar'}`);
+  const assigneeChanged=String(job.assigned_user_id||'')!==String(updated.assigned_user_id||'');
+  if(assigneeChanged) notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
   res.json(updated);
 });
 
@@ -2136,7 +2173,7 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const childJobs=db.prepare("SELECT id FROM jobs WHERE parent_job_id=?").all(job.id);
   googleCalendar.ignoreDeletedJob(job.id);
   childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?)").run(job.id, job.id);
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type='job_close_revenue' AND source_id=?)").run(job.id, job.id, `JOB_CLOSE:${job.id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
@@ -2212,12 +2249,12 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
         db.prepare(`INSERT INTO jobs(
           id,job_key,parent_job_id,workflow_root_id,workflow_step_no,workflow_status,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
           assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
-          planned_hours,planned_minutes,travel_minutes,service_address,instructions
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           nextJobId,stableJobKey(),job.id,rootId,Number(maxStep)+1,"ACTIVE",req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
           nextAssigned.id,nextAssigned.name,req.user.id,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",
           Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",timeRangeMinutes(req.body.next_start_time,req.body.next_end_time)/60,timeRangeMinutes(req.body.next_start_time,req.body.next_end_time),Number(req.body.next_travel_minutes||0),
-          req.body.next_service_address||job.service_address,req.body.next_instructions||""
+          req.body.next_service_address||job.service_address,req.body.next_instructions||"",req.body.next_notes||job.notes||""
         );
         db.prepare(`UPDATE jobs SET status='Partially completed', close_type='Partial', workflow_root_id=?, workflow_status='IN_PROGRESS', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
@@ -2350,7 +2387,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
 app.delete("/api/closed-jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const log=db.prepare("SELECT * FROM job_logs WHERE id=?").get(req.params.id);
   if(!log) return res.status(404).json({error:"Closed job log not found"});
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?)").run(log.job_id, log.job_id);
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type='job_close_revenue' AND source_id=?)").run(log.job_id, log.job_id, `JOB_CLOSE:${log.job_id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(log.job_id);
   db.prepare("DELETE FROM job_logs WHERE id=?").run(log.id);
   const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(log.job_id);
