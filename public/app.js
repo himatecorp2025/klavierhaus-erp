@@ -1,6 +1,10 @@
 
+function safeStoredJson(key,fallback=null){
+  try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):fallback;}
+  catch(error){console.warn(`Invalid localStorage JSON for ${key}; clearing stale value.`,error);localStorage.removeItem(key);return fallback;}
+}
 let token=localStorage.getItem("kh_token");
-let user=JSON.parse(localStorage.getItem("kh_user")||"null");
+let user=safeStoredJson("kh_user",null);
 let pendingAccountActivation=null;
 let currentWeekStart=startOfWeek(new Date());
 let currentView="workshop_workflow";
@@ -140,7 +144,7 @@ function adminGroupButtonMarkup(group){
  return `<button type="button" class="nav-btn admin-group-btn ${currentView===group.id?'active':''} ${disabled?'is-disabled':''}" data-v="${group.id}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span class="nav-icon" aria-hidden="true">${group.icon}</span><span class="nav-label">${htmlText(label)}</span>${disabled?'<span class="nav-disabled-dot" aria-hidden="true">•</span>':''}</button>`;
 }
 
-async function loadAdminModuleState(){try{const payload=await api('/api/admin/modules');adminModuleState=Object.fromEntries((payload.modules||[]).map(item=>[item.key,Boolean(item.enabled)]));adminCardState=Object.fromEntries((payload.cards||[]).map(item=>[item.key,Boolean(item.enabled)]));window.__adminModules=payload;}catch(_error){adminModuleState={};adminCardState={};}}
+async function loadAdminModuleState(){try{const payload=await api('/api/admin/modules');adminModuleState=Object.fromEntries((payload.modules||[]).map(item=>[item.key,Boolean(item.enabled)]));adminCardState=Object.fromEntries((payload.cards||[]).map(item=>[item.key,Boolean(item.enabled)]));window.__adminModules=payload;}catch(error){if(isAuthenticationError(error))throw error;adminModuleState={};adminCardState={};}}
 function navigationIcon(view){return adminNavigationIcons[view]||({workshop_workflow:"▦",scheduler:"📅",planned_jobs:"🗂",contacts:"👥",pianos:"🎹",closed_jobs:"✅",knowledge_base:"🧾",finance:"💵",income_statement:"📊",inventory:"📦",events:"🎟",website_design:"✦",users:"👤",audit_log:"🧾",settings:"⚙",digital_attendance:"☑",customer_inbox:"▣"}[view]||"•");}
 function navigationButtonMarkup(view){const label=navLabel(view),icon=navigationIcon(view);return `<button type="button" class="nav-btn nav-item-btn ${view===currentView?"active":""}" data-v="${view}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-label">${htmlText(label)}</span></button>`;}
 function renderNavigation(){
@@ -279,13 +283,48 @@ function invalidateMasterDataCache(url=""){
  if(path.startsWith("/api/pianos")||path.startsWith("/api/imports/pianos")){apiResponseCache.delete("/api/pianos");apiResponseCache.delete("/api/contacts");}
  if(path.startsWith("/api/users")){apiResponseCache.delete("/api/schedule-workers");schedulerWorkersCache=null;}
 }
+function isAuthenticationError(error){return Number(error?.status||0)===401||error?.code==="AUTH_EXPIRED";}
+function showCleanLoginState(message=""){
+  hideNotificationActivationGate?.();
+  document.getElementById("app")?.classList.add("hidden");
+  document.getElementById("notificationActivationGate")?.classList.add("hidden");
+  const login=document.getElementById("login");if(login)login.classList.remove("hidden");
+  document.body.classList.remove("notification-gate-open");
+  const form=document.getElementById("loginForm");if(form)form.classList.remove("hidden");
+  document.getElementById("activationForm")?.classList.add("hidden");
+  const submit=document.getElementById("loginSubmitButton");if(submit)submit.disabled=false;
+  if(message){
+    const card=document.querySelector(".login-card");
+    if(card){let status=document.getElementById("loginSessionStatus");if(!status){status=document.createElement("p");status.id="loginSessionStatus";status.className="login-session-status";card.appendChild(status);}status.textContent=message;}
+  }
+}
+function clearAuthenticationState(message=""){
+  token=null;user=null;userPermissions={all:false,permissions:[]};
+  apiResponseCache.clear();schedulerWorkersCache=null;
+  localStorage.removeItem("kh_token");localStorage.removeItem("kh_user");
+  try{sessionActivity?.destroy?.();}catch(_error){}
+  if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
+  applicationBooting=false;applicationBootPromise=null;
+  showCleanLoginState(message||bi("Your session expired. Please sign in again.","A munkamenet lejárt. Jelentkezz be újra."));
+}
+async function validateAuthenticatedSession(){
+  if(!token){clearAuthenticationState();return null;}
+  try{
+    const freshUser=await apiRequest("/api/me",{masterCache:false,timeoutMs:8000,skipAuthReset:true});
+    if(!freshUser||!freshUser.id){const error=new Error("INVALID_SESSION_USER");error.code="AUTH_EXPIRED";error.status=401;throw error;}
+    user=freshUser;localStorage.setItem("kh_user",JSON.stringify(user));return user;
+  }catch(error){
+    if(isAuthenticationError(error)){clearAuthenticationState();error.code="AUTH_EXPIRED";}
+    throw error;
+  }
+}
 async function apiRequest(url,opt={}){
  const timeoutMs=Math.max(1000,Number(opt.timeoutMs)||API_REQUEST_TIMEOUT_MS);
- const requestOptions={...opt};delete requestOptions.timeoutMs;
+ const requestOptions={...opt};delete requestOptions.timeoutMs;delete requestOptions.masterCache;const skipAuthReset=Boolean(requestOptions.skipAuthReset);delete requestOptions.skipAuthReset;
  const response=await fetchWithTimeout(url,{...requestOptions,headers:{...(requestOptions.body instanceof FormData?{}:{"Content-Type":"application/json"}),Authorization:"Bearer "+token,...(requestOptions.headers||{})}},timeoutMs);
  const text=await response.text();let body={};
  try{body=text?JSON.parse(text):{}}catch(_error){body={error:text||"Non-JSON response"}}
- if(!response.ok){const error=new Error(body.error||`API ${response.status}`);error.details=body;error.status=response.status;throw error}
+ if(!response.ok){const error=new Error(body.error||`API ${response.status}`);error.details=body;error.status=response.status;if(response.status===401){error.code="AUTH_EXPIRED";if(!skipAuthReset)clearAuthenticationState();}throw error}
  return body;
 }
 async function api(url,opt={}){
@@ -658,7 +697,8 @@ function completeLoginSession(result,email=""){
  void boot().catch(handleApplicationBootstrapError);
 }
 
-$("#loginForm").onsubmit=async e=>{
+const loginFormElement=document.getElementById("loginForm");
+if(loginFormElement)loginFormElement.onsubmit=async e=>{
  e.preventDefault();
  const fd=Object.fromEntries(new FormData(e.target));
  fd.email=String(fd.email||"").trim().toLowerCase();
@@ -671,7 +711,8 @@ $("#loginForm").onsubmit=async e=>{
   completeLoginSession(r,fd.email);
  }catch(_error){showError("LOGIN_SERVICE_UNAVAILABLE");}
 };
-$("#activationForm").onsubmit=async e=>{
+const activationFormElement=document.getElementById("activationForm");
+if(activationFormElement)activationFormElement.onsubmit=async e=>{
  e.preventDefault();
  if(!pendingAccountActivation?.token)return showLoginStep();
  const activationCode=String(document.getElementById("activationCode")?.value||"").trim();
@@ -683,7 +724,8 @@ $("#activationForm").onsubmit=async e=>{
   completeLoginSession(result,localStorage.getItem("kh_last_login_email")||"");
  }catch(_error){showError("LOGIN_SERVICE_UNAVAILABLE");}
 };
-$("#activationResendButton").onclick=async()=>{
+const activationResendElement=document.getElementById("activationResendButton");
+if(activationResendElement)activationResendElement.onclick=async()=>{
  if(!pendingAccountActivation?.token)return showLoginStep();
  const button=document.getElementById("activationResendButton");button.disabled=true;
  try{
@@ -696,8 +738,8 @@ $("#activationResendButton").onclick=async()=>{
   showToast(bi("A new activation code has been sent.","Az új aktiválókódot elküldtük."),"success");
  }catch(_error){showError("EMAIL_DELIVERY_FAILED");}finally{button.disabled=false;}
 };
-$("#activationBackButton").onclick=showLoginStep;
-$("#logoutBtn").onclick=()=>logoutNow();
+const activationBackElement=document.getElementById("activationBackButton");if(activationBackElement)activationBackElement.onclick=showLoginStep;
+const logoutElement=document.getElementById("logoutBtn");if(logoutElement)logoutElement.onclick=()=>logoutNow();
 
 const INACTIVITY_LIMIT_MS = 10 * 60 * 1000;
 let countdownInterval = null;
@@ -729,7 +771,14 @@ function createSessionActivityController({timeoutMs=10*60*1000,setTimer=setTimeo
     touch(){if(!canRun()||this.activeModalCount>0||this.paused)return null;return this.resetTimer();},
     modalOpened(){this.activeModalCount+=1;this.pause();return this.activeModalCount;},
     modalClosed(){this.activeModalCount=Math.max(0,this.activeModalCount-1);if(this.activeModalCount===0)this.resume();else notify();return this.activeModalCount;},
-    setModalCount(count){this.activeModalCount=Math.max(0,Number(count)||0);if(this.activeModalCount>0)this.pause();else this.resume();return this.activeModalCount;},
+    setModalCount(count){
+      const next=Math.max(0,Number(count)||0),previous=this.activeModalCount;
+      if(next===previous){if(next>0&&!this.paused)this.pause();return this.activeModalCount;}
+      this.activeModalCount=next;
+      if(next>0){if(!this.paused)this.pause();else notify();}
+      else this.resume();
+      return this.activeModalCount;
+    },
     remaining(){return this.paused?remainingMs:(deadline?Math.max(0,deadline-now()):remainingMs);},
     snapshot(){return {activeModalCount:this.activeModalCount,paused:this.paused,remainingMs:this.remaining(),timerActive:Boolean(timer)};},
     destroy(){if(timer){clearTimer(timer);timer=null;}deadline=0;this.activeModalCount=0;this.paused=false;remainingMs=timeoutMs;notify();}
@@ -756,7 +805,14 @@ const sessionActivity=createSessionActivityController({
 sessionActivity.observer=null;
 sessionActivity.visibleModalCount=function(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay, .workflow-event-log-modal, .workflow-drawer')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay,.workflow-event-log-modal,.workflow-drawer'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;};
 sessionActivity.syncModalState=function(){this.setModalCount(this.visibleModalCount());};
-sessionActivity.install=function(){if(this.observer)return;this.observer=new MutationObserver(()=>this.syncModalState());this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});this.syncModalState();};
+sessionActivity.install=function(){
+ if(this.observer||!document.body)return;
+ let syncQueued=false;
+ const scheduleSync=()=>{if(syncQueued)return;syncQueued=true;queueMicrotask(()=>{syncQueued=false;this.syncModalState();});};
+ this.observer=new MutationObserver(scheduleSync);
+ this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});
+ this.syncModalState();
+};
 window.sessionActivity=sessionActivity;
 function resetInactivityTimer({force=false}={}){
   if(!token)return;
@@ -959,6 +1015,7 @@ function showApplicationBootstrapState(message=bi("Loading workspace…","Munkat
 function handleApplicationBootstrapError(error){
  console.error("Application bootstrap failed",error);
  applicationBooting=false;applicationBootPromise=null;
+ if(isAuthenticationError(error)||!token){clearAuthenticationState();return null;}
  hideNotificationActivationGate();
  document.getElementById("login")?.classList.add("hidden");
  document.getElementById("app")?.classList.remove("hidden");
@@ -982,6 +1039,7 @@ async function boot(){
    await loadBranding();
    loadLanguage();
    loadTheme();
+   try{await validateAuthenticatedSession();}catch(error){if(isAuthenticationError(error))return false;throw error;}
    document.getElementById("login")?.classList.add("hidden");
    showApplicationBootstrapState();
    document.body.classList.add("sidebar-collapsed");
@@ -991,7 +1049,7 @@ async function boot(){
    updateSidebarToggle();
    const userInfo=document.getElementById("userInfo");
    if(userInfo)userInfo.textContent=`${user?.name||""} · ${user?.role||""}`;
-   try{userPermissions=await api("/api/my-permissions");}catch(error){console.warn("Permissions unavailable during bootstrap:",error?.message||error);userPermissions={all:isSuperadmin(),permissions:[]};}
+   try{userPermissions=await api("/api/my-permissions");}catch(error){if(isAuthenticationError(error))return false;console.warn("Permissions unavailable during bootstrap:",error?.message||error);userPermissions={all:isSuperadmin(),permissions:[]};}
    await loadAdminModuleState();
    renderNavigation();
    updateStaticChromeLanguage();
@@ -1016,6 +1074,10 @@ async function boot(){
    if(notificationsReady){
     document.getElementById("app")?.classList.remove("hidden");
     await render(viewFromLocation()||"workshop_workflow",{noHistory:true,replaceHistory:true});
+   }else{
+    const gate=document.getElementById("notificationActivationGate");
+    const gateVisible=Boolean(gate&&!gate.classList.contains("hidden"));
+    if(!gateVisible){throw new Error("NOTIFICATION_GATE_UNAVAILABLE");}
    }
    const googleResult=new URLSearchParams(location.search).get("googleCalendar");
    if(googleResult){
@@ -1411,6 +1473,7 @@ async function render(v,opts={}){
   enhanceAdminDatePickers(target);
  }catch(error){
   console.error(`View render failed: ${v}`,error);
+  if(isAuthenticationError(error)||!token){clearAuthenticationState();return;}
   target.innerHTML=`<div class="panel app-recovery-panel"><h3>${bi("This view could not be loaded.","A nézet betöltése nem sikerült.")}</h3><p class="danger-text">${htmlText(error?.message||String(error))}</p><div class="actions"><button type="button" onclick="render('${htmlText(v)}',{noHistory:true})">${bi("Retry","Újrapróbálás")}</button><button type="button" class="ghost-btn" onclick="render('workshop_workflow',{noHistory:true})">${bi("Open Workshop","Műhely megnyitása")}</button></div></div>`;
  }finally{
   target.classList.remove("i18n-rendering");
