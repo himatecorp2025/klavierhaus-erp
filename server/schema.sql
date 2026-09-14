@@ -981,7 +981,61 @@ CREATE TABLE IF NOT EXISTS website_integration_settings (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-\nCREATE TABLE IF NOT EXISTS system_integration_secrets (\n  provider TEXT PRIMARY KEY CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),\n  public_config_json TEXT NOT NULL DEFAULT '{}',\n  encrypted_secret TEXT,\n  secret_hint TEXT,\n  requires_restart INTEGER NOT NULL DEFAULT 0 CHECK(requires_restart IN (0,1)),\n  updated_by_user_id TEXT,\n  created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL\n);\n\nCREATE TABLE IF NOT EXISTS system_integration_health (\n  provider TEXT PRIMARY KEY CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),\n  status TEXT NOT NULL DEFAULT 'DISCONNECTED' CHECK(status IN ('DISCONNECTED','CONFIGURED','CONNECTED','ERROR')),\n  last_tested_at TEXT,\n  last_success_at TEXT,\n  last_connection_at TEXT,\n  last_error TEXT,\n  updated_by_user_id TEXT,\n  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL\n);\n\nCREATE TABLE IF NOT EXISTS system_integration_backups (\n  id TEXT PRIMARY KEY, provider TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_by_user_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL\n);\n\nCREATE TABLE IF NOT EXISTS system_integration_delete_tokens (\n  token_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, requested_by_user_id TEXT NOT NULL, record_counts_json TEXT NOT NULL DEFAULT '{}', expires_at TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n  FOREIGN KEY(requested_by_user_id) REFERENCES users(id) ON DELETE CASCADE\n);\n
+CREATE TABLE IF NOT EXISTS system_integration_secrets (
+  provider TEXT PRIMARY KEY CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),
+  public_config_json TEXT NOT NULL DEFAULT '{}',
+  encrypted_secret TEXT,
+  secret_hint TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS system_integration_health (
+  provider TEXT PRIMARY KEY CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED' CHECK(status IN ('DISCONNECTED','CONFIGURED','CONNECTED','ERROR','DISABLED')),
+  last_tested_at TEXT,
+  last_success_at TEXT,
+  last_connection_at TEXT,
+  last_error TEXT,
+  updated_by_user_id TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS system_integration_backups (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),
+  snapshot_json TEXT NOT NULL,
+  backup_file_path TEXT NOT NULL,
+  backup_sha256 TEXT NOT NULL,
+  created_by_user_id TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS system_integration_delete_tokens (
+  token_hash TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),
+  requested_by_user_id TEXT NOT NULL,
+  record_counts_json TEXT NOT NULL DEFAULT '{}',
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(requested_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS system_integration_test_tokens (
+  state_hash TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK(provider='GOOGLE_CALENDAR'),
+  requested_by_user_id TEXT NOT NULL,
+  access_token_encrypted TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(requested_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS website_integration_oauth_states (
   state_hash TEXT PRIMARY KEY,
   provider TEXT NOT NULL DEFAULT 'GOOGLE',
