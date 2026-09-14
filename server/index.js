@@ -23,6 +23,7 @@ const { createBusinessDocumentService, registerBusinessOperationsRoutes } = requ
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
+const { analyzeClientWorkbook, commitClientImportRecords } = require("./client-import");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -525,50 +526,45 @@ function parseSharedStrings(xml){
   }
   return out;
 }
-function parseXlsxSheet(buffer,sheetName){
+function parseXlsxSheets(buffer){
   const zip=new AdmZip(buffer);
   const read=name=>zip.getEntry(name)?.getData().toString('utf8')||'';
   const workbook=read('xl/workbook.xml');
   const rels=read('xl/_rels/workbook.xml.rels');
   if(!workbook||!rels)throw new Error('INVALID_XLSX_STRUCTURE');
-  let relId='';
-  for(const m of workbook.matchAll(/<(?:[A-Za-z0-9_]+:)?sheet\b([^>]*)\/?>(?:<\/(?:[A-Za-z0-9_]+:)?sheet>)?/g)){
-    const attrs=m[1];
-    const name=xmlDecode(attrs.match(/\bname="([^"]*)"/)?.[1]||'');
-    if(name===sheetName){relId=attrs.match(/\br:id="([^"]+)"/)?.[1]||'';break;}
-  }
-  if(!relId)throw new Error('IMPORT_READY_SHEET_MISSING');
-  let target='';
+  const relationships=new Map();
   for(const m of rels.matchAll(/<Relationship\b([^>]*)\/?>(?:<\/Relationship>)?/g)){
-    const attrs=m[1];
-    if((attrs.match(/\bId="([^"]+)"/)?.[1]||'')===relId){target=attrs.match(/\bTarget="([^"]+)"/)?.[1]||'';break;}
+    const attrs=m[1],id=attrs.match(/\bId="([^"]+)"/)?.[1]||'',target=attrs.match(/\bTarget="([^"]+)"/)?.[1]||'';
+    if(id&&target)relationships.set(id,target);
   }
-  if(!target)throw new Error('IMPORT_READY_SHEET_MISSING');
-  target=target.replace(/^\//,'');
-  if(!target.startsWith('xl/'))target='xl/'+target.replace(/^\.\//,'');
-  const sheetXml=read(target);
-  if(!sheetXml)throw new Error('IMPORT_READY_SHEET_MISSING');
   const shared=parseSharedStrings(read('xl/sharedStrings.xml'));
-  const rows=[];
-  for(const rowMatch of sheetXml.matchAll(/<(?:[A-Za-z0-9_]+:)?row\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?row>/g)){
-    const row=[];
-    for(const cMatch of rowMatch[1].matchAll(/<(?:[A-Za-z0-9_]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?c>)/g)){
-      const attrs=cMatch[1], body=cMatch[2]||'';
-      const ref=attrs.match(/\br="([^"]+)"/)?.[1]||'';
-      const type=attrs.match(/\bt="([^"]+)"/)?.[1]||'';
-      const col=excelColumnIndex(ref);
-      let value='';
-      if(type==='inlineStr'){
-        value=[...body.matchAll(/<(?:[A-Za-z0-9_]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?t>/g)].map(x=>xmlDecode(x[1])).join('');
-      }else{
-        const raw=xmlDecode(body.match(/<(?:[A-Za-z0-9_]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?v>/)?.[1]||'');
-        value=type==='s' ? (shared[Number(raw)]??'') : raw;
+  const sheets=[];
+  for(const m of workbook.matchAll(/<(?:[A-Za-z0-9_]+:)?sheet\b([^>]*)\/?>(?:<\/(?:[A-Za-z0-9_]+:)?sheet>)?/g)){
+    const attrs=m[1],name=xmlDecode(attrs.match(/\bname="([^"]*)"/)?.[1]||''),relId=attrs.match(/\br:id="([^"]+)"/)?.[1]||'';
+    let target=relationships.get(relId)||'';
+    if(!target)continue;
+    target=target.replace(/^\//,'');if(!target.startsWith('xl/'))target='xl/'+target.replace(/^\.\//,'');
+    const sheetXml=read(target);if(!sheetXml)continue;
+    const rows=[];
+    for(const rowMatch of sheetXml.matchAll(/<(?:[A-Za-z0-9_]+:)?row\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?row>/g)){
+      const row=[];
+      for(const cMatch of rowMatch[1].matchAll(/<(?:[A-Za-z0-9_]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?c>)/g)){
+        const attrs=cMatch[1],body=cMatch[2]||'',ref=attrs.match(/\br="([^"]+)"/)?.[1]||'',type=attrs.match(/\bt="([^"]+)"/)?.[1]||'',col=excelColumnIndex(ref);
+        let value='';
+        if(type==='inlineStr')value=[...body.matchAll(/<(?:[A-Za-z0-9_]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?t>/g)].map(x=>xmlDecode(x[1])).join('');
+        else{const raw=xmlDecode(body.match(/<(?:[A-Za-z0-9_]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?v>/)?.[1]||'');value=type==='s'?(shared[Number(raw)]??''):raw;}
+        row[col]=value;
       }
-      row[col]=value;
+      rows.push(row);
     }
-    rows.push(row);
+    sheets.push({name,rows});
   }
-  return rows;
+  return sheets;
+}
+function parseXlsxSheet(buffer,sheetName){
+  const sheet=parseXlsxSheets(buffer).find(item=>item.name===sheetName);
+  if(!sheet)throw new Error('IMPORT_READY_SHEET_MISSING');
+  return sheet.rows;
 }
 function normalizeText(value){return String(value??'').trim().toLowerCase().replace(/\s+/g,' ');}
 function normalizeEmailList(value){return String(value??'').split(/[;,\n]+/).map(x=>x.trim().toLowerCase()).filter(x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));}
@@ -591,52 +587,8 @@ function excelDateToIso(value){
   const d=new Date(text); return Number.isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function analyzeClientImportFile(buffer,originalFilename){
-  const rows=parseXlsxSheet(buffer,'Import Ready');
-  if(!rows.length)throw new Error('IMPORT_READY_EMPTY');
-  const headers=(rows[0]||[]).map(x=>String(x??'').trim());
-  const required=['External Reference','Client Name','Contact Full Name','Phone','Email','Billing Address','Service Address','Status','Last Contact','Next Step','Notes','Review Status'];
-  const missing=required.filter(h=>!headers.includes(h));
-  if(missing.length){const e=new Error('MISSING_COLUMNS');e.missingColumns=missing;throw e;}
-  const index=Object.fromEntries(headers.map((h,i)=>[h,i]));
-  const source='NEW_YORK_CUSTOMER_LIST_2024';
   const existing=db.prepare('SELECT id,name,email,phone,address,external_reference,import_source FROM contacts').all();
-  const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
-  const existingEmails=new Map(); const existingPhones=new Map(); const existingNameAddress=new Map();
-  for(const c of existing){
-    for(const e of normalizeEmailList(c.email))if(!existingEmails.has(e))existingEmails.set(e,c);
-    for(const p of normalizePhones(c.phone))if(!existingPhones.has(p))existingPhones.set(p,c);
-    const key=`${normalizeText(c.name)}::${normalizeText(c.address)}`; if(normalizeText(c.name)&&normalizeText(c.address)&&!existingNameAddress.has(key))existingNameAddress.set(key,c);
-  }
-  const seenRefs=new Set(); const records=[];
-  for(let r=1;r<rows.length;r++){
-    const cells=rows[r]||[];
-    if(!cells.some(v=>String(v??'').trim()))continue;
-    const get=h=>String(cells[index[h]]??'').trim();
-    const rec={rowNumber:r+1,externalReference:get('External Reference'),name:get('Client Name'),contactFullName:get('Contact Full Name'),phone:get('Phone'),email:get('Email'),billingAddress:get('Billing Address'),serviceAddress:get('Service Address'),status:get('Status')||'General',lastContact:excelDateToIso(get('Last Contact')),nextStep:get('Next Step'),notes:get('Notes'),reviewStatus:get('Review Status')};
-    rec.missingFields=[]; if(!normalizeEmailList(rec.email).length&&!normalizePhones(rec.phone).length)rec.missingFields.push('Phone or Email'); if(!rec.serviceAddress)rec.missingFields.push('Address'); rec.hasMissingData=rec.missingFields.length>0;
-    let category='NEW',reason='';
-    if(!rec.name){category='INVALID';reason='MISSING_CLIENT_NAME';}
-    else if(normalizeText(rec.reviewStatus)!=='ready'){category='INVALID';reason='NOT_READY';}
-    else if(!rec.externalReference){category='INVALID';reason='MISSING_EXTERNAL_REFERENCE';}
-    else if(seenRefs.has(rec.externalReference)){category='INVALID';reason='DUPLICATE_REFERENCE_IN_FILE';}
-    else{
-      seenRefs.add(rec.externalReference);
-      const exact=exactRefs.get(`${source}::${rec.externalReference}`);
-      if(exact){category='ALREADY_IMPORTED';reason='EXTERNAL_REFERENCE_MATCH';rec.match=exact;}
-      else{
-        const emailMatch=normalizeEmailList(rec.email).map(e=>existingEmails.get(e)).find(Boolean);
-        const phoneMatch=normalizePhones(rec.phone).map(p=>existingPhones.get(p)).find(Boolean);
-        const nameAddressMatch=existingNameAddress.get(`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`);
-        const match=emailMatch||phoneMatch||nameAddressMatch;
-        if(match){category='POSSIBLE_DUPLICATE';reason=emailMatch?'EMAIL_MATCH':phoneMatch?'PHONE_MATCH':'NAME_ADDRESS_MATCH';rec.match=match;}
-      }
-    }
-    rec.category=category;rec.reason=reason;records.push(rec);
-  }
-  if(!records.length)throw new Error('IMPORT_READY_EMPTY');
-  const count=cat=>records.filter(x=>x.category===cat).length;
-  const summary={filename:originalFilename,totalRows:records.length,newClients:count('NEW'),alreadyImported:count('ALREADY_IMPORTED'),possibleDuplicates:count('POSSIBLE_DUPLICATE'),invalidRows:count('INVALID'),missingDataClients:records.filter(x=>x.category==='NEW'&&x.hasMissingData).length};
-  return {source,headers,summary,records};
+  return analyzeClientWorkbook(buffer,originalFilename,existing);
 }
 
 function normalizePianoDescription(value){
@@ -1282,6 +1234,43 @@ app.post("/api/inventory/complete", auth, permit("ADMIN","MANAGER","WORKER","SUP
   res.json({ok:true,check:db.prepare("SELECT * FROM inventory_checks WHERE id=?").get(id),nextDue:addMonthsToDate(checkDate,3)});
 });
 
+app.get("/api/employee-daily-rates", auth, permit("ADMIN"), (req,res)=>{
+  const date=String(req.query.date||nyToday()).slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({error:"INVALID_DATE"});
+  const users=db.prepare("SELECT id,name,email,role,status FROM users WHERE status='Active' ORDER BY name").all();
+  const rows=users.map(employee=>{
+    const rate=jobDomain.employeeDailyRateForDate(employee.id,date);
+    return {...employee,effective_date:rate?.effective_date||null,rate:Number(rate?.rate||0),currency:rate?.currency||'USD'};
+  });
+  res.json({date,employees:rows});
+});
+
+app.put("/api/employee-daily-rates/:userId", auth, permit("ADMIN"), (req,res)=>{
+  const employee=db.prepare("SELECT id,name,email,role,status FROM users WHERE id=?").get(req.params.userId);
+  if(!employee) return res.status(404).json({error:"USER_NOT_FOUND"});
+  const rate=Number(req.body.rate);
+  const effectiveDate=String(req.body.effective_date||nyToday()).slice(0,10);
+  const currency=String(req.body.currency||'USD').trim().toUpperCase().slice(0,3)||'USD';
+  if(!Number.isFinite(rate)||rate<0) return res.status(400).json({error:"INVALID_DAILY_RATE"});
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) return res.status(400).json({error:"INVALID_DATE"});
+  db.prepare(`INSERT INTO employee_daily_rates(user_id,rate,currency,effective_date,created_by) VALUES(?,?,?,?,?)
+    ON CONFLICT(user_id,effective_date) DO UPDATE SET rate=excluded.rate,currency=excluded.currency,created_at=CURRENT_TIMESTAMP,created_by=excluded.created_by`)
+    .run(employee.id,Math.round(rate*100)/100,currency,effectiveDate,req.user.id);
+  const saved=jobDomain.employeeDailyRateForDate(employee.id,effectiveDate);
+  audit(req,'UPDATE','employee_daily_rates',`${employee.id}:${effectiveDate}`,null,{user_id:employee.id,rate:saved?.rate||0,currency:saved?.currency||currency,effective_date:effectiveDate},1,'Employee daily rate updated','FINANCIAL');
+  res.json({employee,rate:saved});
+});
+
+app.get("/api/employee-daily-rates/:userId/capacity", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const date=String(req.query.date||'').slice(0,10);
+  const jobId=String(req.query.job_id||'').trim()||null;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({error:"INVALID_DATE"});
+  const employee=resolveActiveUser(req.params.userId,'');
+  if(!employee) return res.status(404).json({error:"USER_NOT_FOUND"});
+  const summary=jobDomain.dailyRateAllocationSummary({userId:employee.id,dateStr:date,excludeJobId:jobId});
+  res.json({user_id:employee.id,date,...summary});
+});
+
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const rows=db.prepare("SELECT * FROM financial_items ORDER BY item_date DESC, created_at DESC").all();
   res.json(rows.map(r=>({...r,lines:[]})));
@@ -1384,6 +1373,7 @@ function incomeStatementPayload(month){
     OTHER_INCOME:["Other Income","Egyéb bevétel","REVENUE"],
     MATERIALS:["Materials Expense","Anyagköltség","EXPENSE"],
     CONTRACTOR:["Contractor Labor","Alvállalkozói munkadíj","EXPENSE"],
+    LABOR_EXPENSE:["Employee Daily Rate","Munkavállalói napidíj","EXPENSE"],
     TRANSPORT:["Transportation","Szállítás","EXPENSE"],
     RENT:["Rent","Bérleti díj","EXPENSE"],
     INSURANCE:["Insurance","Biztosítás","EXPENSE"],
@@ -1413,7 +1403,7 @@ function incomeStatementPayload(month){
   const accountOrder={
     REVENUE:0,EXPENSE:100,ASSET:200,LIABILITY:300,EQUITY:400,
     SERVICE_REVENUE:1,PIANO_SALE:2,PASSIVE_REVENUE:3,OTHER_INCOME:20,
-    TAX:101,MATERIALS:102,CONTRACTOR:103,TRANSPORT:104,RENT:105,INSURANCE:106,OTHER_EXPENSE:130,
+    TAX:101,MATERIALS:102,CONTRACTOR:103,LABOR_EXPENSE:104,TRANSPORT:105,RENT:106,INSURANCE:107,OTHER_EXPENSE:130,
     CASH:201,BANK:202,CHECKS:203,AR:204,INVENTORY:205,COMPANY_PIANOS:206,TOOLS:207,OTHER_ASSET:230,
     LOAN:301,BANK_LOAN:302,INSURANCE_LIABILITY:303,OTHER_LONG_TERM_SOURCE:304,AP:321,CHECK_PAYABLE:322,RENT_PAYABLE:323,UTILITIES_PAYABLE:324,SHORT_TERM_OPERATING:325,OTHER_SHORT_TERM_SOURCE:340,
     OWNER_EQUITY:401,OTHER_SOURCE:420
@@ -1646,7 +1636,7 @@ app.post('/api/imports/clients/analyze',auth,permit('ADMIN'),clientImportUpload.
     res.json({batchId,source:analysis.source,summary:analysis.summary,records:publicRecords});
   }catch(err){
     console.error('client import analyze failed:',err);
-    const known=['INVALID_XLSX_STRUCTURE','IMPORT_READY_SHEET_MISSING','IMPORT_READY_EMPTY','MISSING_COLUMNS'];
+    const known=['INVALID_XLSX_STRUCTURE','NO_IMPORTABLE_CLIENT_SHEET','IMPORT_READY_EMPTY','MISSING_COLUMNS'];
     const code=known.includes(err.message)?err.message:'IMPORT_ANALYSIS_FAILED';
     res.status(400).json({error:code,missingColumns:err.missingColumns||[]});
   }
@@ -1667,73 +1657,7 @@ app.post('/api/imports/clients/:batchId/commit',auth,permit('ADMIN'),(req,res)=>
   const source=String(stored.source||batch.import_source||'NEW_YORK_CUSTOMER_LIST_2024');
   if(!records.length)return res.status(409).json({error:'IMPORT_PREVIEW_DATA_MISSING'});
 
-  const commitImport=db.transaction(()=>{
-    const existing=db.prepare('SELECT id,name,email,phone,address,external_reference,import_source FROM contacts').all();
-    const exactRefs=new Map(existing.filter(x=>x.import_source&&x.external_reference).map(x=>[`${x.import_source}::${x.external_reference}`,x]));
-    const existingEmails=new Map(); const existingPhones=new Map(); const existingNameAddress=new Map();
-    for(const c of existing){
-      for(const e of normalizeEmailList(c.email))if(!existingEmails.has(e))existingEmails.set(e,c);
-      for(const p of normalizePhones(c.phone))if(!existingPhones.has(p))existingPhones.set(p,c);
-      const key=`${normalizeText(c.name)}::${normalizeText(c.address)}`;
-      if(normalizeText(c.name)&&normalizeText(c.address)&&!existingNameAddress.has(key))existingNameAddress.set(key,c);
-    }
-
-    const idRows=db.prepare("SELECT id FROM contacts WHERE id LIKE 'C-%'").all();
-    let maxId=0;
-    for(const row of idRows){const m=String(row.id||'').match(/^C-(\d{1,5})$/);if(m)maxId=Math.max(maxId,Number(m[1]));}
-    const nextImportContactId=()=>{maxId+=1;if(maxId>99999)throw new Error('CONTACT_ID_LIMIT_REACHED');return `C-${String(maxId).padStart(5,'0')}`;};
-
-    const insert=db.prepare(`INSERT INTO contacts(
-      id,name,company,type,email,phone,address,billing_address,priority,status,owner,relationship_holder,loss_risk,last_contact,next_step,notes,
-      has_piano,interested_buying,external_reference,import_source,import_batch_id
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-
-    let importedClients=0, skippedDuplicates=0, missingDataClients=0, failedRows=0;
-    const skipped=[];
-    for(const rec of records){
-      if(rec.category!=='NEW'){skippedDuplicates+=1;continue;}
-      if(!String(rec.name||'').trim() || !String(rec.externalReference||'').trim()){failedRows+=1;continue;}
-      const refKey=`${source}::${rec.externalReference}`;
-      let match=exactRefs.get(refKey);
-      let reason=match?'EXTERNAL_REFERENCE_MATCH':'';
-      if(!match){
-        match=normalizeEmailList(rec.email).map(e=>existingEmails.get(e)).find(Boolean);
-        if(match)reason='EMAIL_MATCH';
-      }
-      if(!match){
-        match=normalizePhones(rec.phone).map(p=>existingPhones.get(p)).find(Boolean);
-        if(match)reason='PHONE_MATCH';
-      }
-      if(!match){
-        match=existingNameAddress.get(`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`);
-        if(match)reason='NAME_ADDRESS_MATCH';
-      }
-      if(match){skippedDuplicates+=1;skipped.push({externalReference:rec.externalReference,name:rec.name,reason,matchId:match.id});continue;}
-
-      const id=nextImportContactId();
-      const status='Active';
-      insert.run(
-        id,String(rec.name||'').trim(),'','General',String(rec.email||'').trim(),String(rec.phone||'').trim(),String(rec.serviceAddress||'').trim(),String(rec.billingAddress||'').trim(),
-        'Medium',status,'',String(rec.contactFullName||'').trim(),'Unknown',rec.lastContact||null,String(rec.nextStep||'').trim(),String(rec.notes||'').trim(),
-        0,0,String(rec.externalReference||'').trim(),source,batchId
-      );
-      const added={id,name:rec.name,email:rec.email,phone:rec.phone,address:rec.serviceAddress,external_reference:rec.externalReference,import_source:source};
-      exactRefs.set(refKey,added);
-      for(const e of normalizeEmailList(rec.email))if(!existingEmails.has(e))existingEmails.set(e,added);
-      for(const p of normalizePhones(rec.phone))if(!existingPhones.has(p))existingPhones.set(p,added);
-      const nameAddressKey=`${normalizeText(rec.name)}::${normalizeText(rec.serviceAddress)}`;
-      if(normalizeText(rec.name)&&normalizeText(rec.serviceAddress)&&!existingNameAddress.has(nameAddressKey))existingNameAddress.set(nameAddressKey,added);
-      importedClients+=1;
-      if(rec.hasMissingData)missingDataClients+=1;
-    }
-
-    const result={
-      batchId,source,filename:batch.original_filename,totalRows:records.length,importedClients,missingDataClients,skippedDuplicates,failedRows,skipped
-    };
-    db.prepare(`UPDATE import_batches SET status='COMPLETED',imported_clients=?,skipped_duplicates=?,missing_data_clients=?,failed_rows=?,completed_at=CURRENT_TIMESTAMP,summary_json=? WHERE id=? AND status='PREVIEW'`)
-      .run(importedClients,skippedDuplicates,missingDataClients,failedRows,JSON.stringify(result),batchId);
-    return result;
-  });
+  const commitImport=()=>commitClientImportRecords(db,{records,source,batchId});
 
   try{
     const result=commitImport();
@@ -2012,12 +1936,19 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const conflicts=findScheduleConflicts(assigned.id,assigned.name,req.body.start_time,req.body.end_time);
   if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
   const id=req.body.id || rid("J");
+  const dailyRateEnabled=Boolean(req.body.daily_rate_enabled===true||req.body.daily_rate_enabled===1||String(req.body.daily_rate_enabled||'')==='1'||String(req.body.daily_rate_enabled||'').toLowerCase()==='true');
+  const dailyRateDate=String(req.body.start_time).slice(0,10);
+  try{jobDomain.validateDailyRateAllocation({userId:assigned.id,dateStr:dailyRateDate,jobId:id,enabled:dailyRateEnabled,amount:req.body.daily_rate_allocated_amount});}
+  catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
   const data={...req.body,assigned_user_id:assigned.id,assigned_to:assigned.name,created_by_user_id:req.user.id,created_by:req.user.name};
   data.planned_minutes=timeRangeMinutes(data.start_time,data.end_time);data.planned_hours=data.planned_minutes/60;
   data.workflow_root_id=data.workflow_root_id||id;
   data.workflow_step_no=Number(data.workflow_step_no||1);
   data.workflow_status=data.workflow_status||"ACTIVE";
-  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id"]
+  data.daily_rate_enabled=dailyRateEnabled?1:0;
+  data.daily_rate_allocated_amount=dailyRateEnabled?Math.round(Number(req.body.daily_rate_allocated_amount||0)*100)/100:0;
+  data.daily_rate_date=dailyRateEnabled?dailyRateDate:null;
+  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id","daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
   db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
   const created=db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
@@ -2037,7 +1968,8 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     "title","job_type","client_id","client_name","client_phone",
     "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
-    "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id"
+    "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id",
+    "daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"
   ];
 
   if(req.body.job_type==="Part-work" && (!req.body.instructions || !String(req.body.instructions).trim())){
@@ -2066,6 +1998,15 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     req.body.planned_minutes=timeRangeMinutes(effectiveStart,effectiveEnd);
     req.body.planned_hours=req.body.planned_minutes/60;
   }
+  const effectiveDailyEnabled=req.body.daily_rate_enabled!==undefined?Boolean(req.body.daily_rate_enabled===true||req.body.daily_rate_enabled===1||String(req.body.daily_rate_enabled||'')==='1'||String(req.body.daily_rate_enabled||'').toLowerCase()==='true'):Number(job.daily_rate_enabled||0)===1;
+  const effectiveDailyAmount=req.body.daily_rate_allocated_amount!==undefined?Number(req.body.daily_rate_allocated_amount||0):Number(job.daily_rate_allocated_amount||0);
+  const effectiveDailyDate=String(effectiveStart||'').slice(0,10);
+  try{jobDomain.validateDailyRateAllocation({userId:effectiveAssigned.id,dateStr:effectiveDailyDate,jobId:job.id,enabled:effectiveDailyEnabled,amount:effectiveDailyAmount});}
+  catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
+  if(req.body.daily_rate_enabled!==undefined) req.body.daily_rate_enabled=effectiveDailyEnabled?1:0;
+  if(effectiveDailyEnabled){req.body.daily_rate_allocated_amount=Math.round(effectiveDailyAmount*100)/100;req.body.daily_rate_date=effectiveDailyDate;}
+  else if(req.body.daily_rate_enabled!==undefined){req.body.daily_rate_allocated_amount=0;req.body.daily_rate_date=null;}
+  else if(timeChanged && Number(job.daily_rate_enabled||0)===1){req.body.daily_rate_date=effectiveDailyDate;}
   const schedulingChanged=req.body.start_time!==undefined || req.body.end_time!==undefined || req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined;
   if(schedulingChanged){
     const conflicts=findScheduleConflicts(effectiveAssigned.id,effectiveAssigned.name,effectiveStart,effectiveEnd,job.id);
@@ -2124,7 +2065,7 @@ app.patch("/api/jobs/:id/schedule", auth, permit("ADMIN","MANAGER","WORKER"), (r
     res.json(updated);
   }catch(error){
     if(error.code==='SCHEDULE_CONFLICT') return rejectScheduleConflict(req,res,assigned,error.details?.conflicts||[]);
-    res.status(error.status||400).json({error:error.code||error.message,interval_minutes:error.details?.interval_minutes});
+    res.status(error.status||400).json({error:error.code||error.message,interval_minutes:error.details?.interval_minutes,...(error.details||{})});
   }
 });
 
@@ -2144,6 +2085,10 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   if(!isValidTimeRange(job.start_time,job.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
   const conflicts=findScheduleConflicts(assigned.id,assigned.name,job.start_time,job.end_time,job.id);
   if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
+  if(Number(job.daily_rate_enabled||0)===1){
+    try{jobDomain.validateDailyRateAllocation({userId:assigned.id,dateStr:String(job.start_time||'').slice(0,10),jobId:job.id,enabled:true,amount:job.daily_rate_allocated_amount});}
+    catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
+  }
 
   db.prepare("UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
     .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",job.id);
@@ -2171,7 +2116,7 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const childJobs=db.prepare("SELECT id FROM jobs WHERE parent_job_id=?").all(job.id);
   googleCalendar.ignoreDeletedJob(job.id);
   childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type='job_close_revenue' AND source_id=?)").run(job.id, job.id, `JOB_CLOSE:${job.id}`);
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
@@ -2283,7 +2228,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
         title:`Closed job revenue / Lezárt munka bevétele: ${domainJob.title||domainJob.job_key||domainJob.id}`,
         description:[domainJob.client_name?`Client / Ügyfél: ${domainJob.client_name}`:"",domainJob.piano_name?`Piano / Zongora: ${domainJob.piano_name}`:"",mutation?.logId?`Job log / Lezárási napló: ${mutation.logId}`:""].filter(Boolean).join("\n"),
         amount:billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
-        sourceType:"job_close_revenue",sourceId:`JOB_CLOSE:${domainJob.id}`
+        sourceType:"JOB_REVENUE",sourceId:`JOB_REVENUE:${domainJob.id}`
       }]:[]
     });
     const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
@@ -2396,7 +2341,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
 app.delete("/api/closed-jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const log=db.prepare("SELECT * FROM job_logs WHERE id=?").get(req.params.id);
   if(!log) return res.status(404).json({error:"Closed job log not found"});
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type='job_close_revenue' AND source_id=?)").run(log.job_id, log.job_id, `JOB_CLOSE:${log.job_id}`);
+  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(log.job_id, log.job_id, `JOB_CLOSE:${log.job_id}`, `JOB_REVENUE:${log.job_id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(log.job_id);
   db.prepare("DELETE FROM job_logs WHERE id=?").run(log.id);
   const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(log.job_id);
