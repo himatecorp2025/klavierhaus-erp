@@ -112,7 +112,7 @@ function createGoogleCalendarIntegration(options) {
       client_id: config.clientId,
       redirect_uri: config.redirectUri,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      scope: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "true",
@@ -480,6 +480,27 @@ function createGoogleCalendarIntegration(options) {
     return true;
   }
 
+
+  async function testConnection() {
+    const start = new Date(Date.now() + 5 * 60 * 1000);
+    const end = new Date(start.getTime() + 5 * 60 * 1000);
+    const created = await googleRequest(`/calendars/${encodeURIComponent(config.calendarId)}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        summary: "Klavierhaus ERP integration test (temporary)",
+        description: "Created and deleted automatically by System Activation & Integrations.",
+        start: { dateTime: start.toISOString() },
+        end: { dateTime: end.toISOString() }
+      })
+    });
+    if (!created?.id) throw new Error("GOOGLE_CALENDAR_TEST_EVENT_CREATE_FAILED");
+    const token = await accessToken(false);
+    const response = await fetchImpl(`${config.apiBase}/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(created.id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok && response.status !== 204) throw new Error(`GOOGLE_CALENDAR_TEST_EVENT_DELETE_FAILED:HTTP_${response.status}`);
+    return { live_data: true, temporary_event_created: true, temporary_event_deleted: true, event_id: created.id };
+  }
+
   async function disconnect() {
     stopTimers();
     db.prepare(`UPDATE calendar_integrations SET status='DISCONNECTED',access_token_encrypted=NULL,refresh_token_encrypted=NULL,token_expiry=NULL,
@@ -538,6 +559,7 @@ function createGoogleCalendarIntegration(options) {
     registerWatch,
     handleWebhook,
     disconnect,
+    testConnection,
     markReviewed,
     ignoreDeletedJob,
     stop: stopTimers,
