@@ -163,12 +163,17 @@ CREATE TABLE IF NOT EXISTS jobs (
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','POSTED')),
   financial_ledger_id TEXT,
   closed_at TEXT,
+  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
+  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
+  daily_rate_date TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(parent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status);
 
 CREATE TABLE IF NOT EXISTS job_logs (
   id TEXT PRIMARY KEY,
@@ -321,6 +326,9 @@ CREATE TABLE IF NOT EXISTS events (
   refund_policy_version TEXT NOT NULL DEFAULT 'KH-48H-V1',
   published_at TEXT,
   closed_at TEXT,
+  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
+  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
+  daily_rate_date TEXT,
   closed_by_user_id TEXT,
   closure_snapshot_json TEXT,
   sold_out_at TEXT,
@@ -543,6 +551,9 @@ CREATE TABLE IF NOT EXISTS event_attendance_sessions (
   started_at TEXT,
   started_by_user_id TEXT,
   closed_at TEXT,
+  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
+  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
+  daily_rate_date TEXT,
   closed_by_user_id TEXT,
   reopened_at TEXT,
   reopened_by_user_id TEXT,
@@ -640,6 +651,9 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   last_message_at TEXT,
   last_activity_at TEXT,
   closed_at TEXT,
+  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
+  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
+  daily_rate_date TEXT,
   auto_closed_at TEXT,
   closure_note TEXT,
   reopen_reason TEXT,
@@ -1198,6 +1212,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
 
+
+CREATE TABLE IF NOT EXISTS employee_daily_rates (
+  user_id TEXT NOT NULL,
+  rate REAL NOT NULL CHECK(rate >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  effective_date TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_by TEXT,
+  PRIMARY KEY(user_id,effective_date),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_employee_daily_rates_user_date ON employee_daily_rates(user_id,effective_date DESC);
 
 CREATE TABLE IF NOT EXISTS financial_items (
   id TEXT PRIMARY KEY,
