@@ -17,6 +17,48 @@ const MATERIAL_STATUS = new Set(["REQUESTED", "RESERVED", "CONSUMED", "RELEASED"
 const FINANCE_TYPES = new Set(["REVENUE", "COST"]);
 const FINANCE_CATEGORIES = new Set(["LABOR", "MATERIAL", "TRANSPORT", "PURCHASE", "CONTRACTOR", "OTHER"]);
 
+
+function releaseWorkflowReservations(db, workflowId) {
+  const rows = db.prepare(`SELECT id,inventory_item_id,requested_quantity,consumed_quantity,status FROM workflow_materials WHERE workflow_id=?`).all(workflowId);
+  rows.filter((item) => item.inventory_item_id && item.status !== "CONSUMED").forEach((item) => {
+    const release = Math.max(0, Number(item.requested_quantity || 0) - Number(item.consumed_quantity || 0));
+    db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(release, release, item.inventory_item_id);
+  });
+  return rows.length;
+}
+
+function hardDeleteWorkflowData({ db, workflowId, audit }) {
+  const workflow = db.prepare("SELECT * FROM workshop_workflows WHERE id=?").get(workflowId);
+  if (!workflow) return null;
+  const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages WHERE workflow_id=?").get(workflowId).count;
+  const tx = db.transaction(() => {
+    releaseWorkflowReservations(db, workflowId);
+    db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
+    db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
+    db.prepare("DELETE FROM workflow_stages WHERE workflow_id=?").run(workflowId);
+    db.prepare("DELETE FROM workshop_workflows WHERE id=?").run(workflowId);
+    if (typeof audit === "function") audit({ workflow, stageCount });
+  });
+  tx();
+  return { workflow, stageCount };
+}
+
+function purgeAllWorkflowData({ db, audit }) {
+  const workflowCount = db.prepare("SELECT COUNT(*) AS count FROM workshop_workflows").get().count;
+  const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages").get().count;
+  const workflowIds = db.prepare("SELECT id FROM workshop_workflows").all().map((row) => row.id);
+  const tx = db.transaction(() => {
+    workflowIds.forEach((workflowId) => releaseWorkflowReservations(db, workflowId));
+    db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
+    db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
+    db.prepare("DELETE FROM workflow_stages").run();
+    db.prepare("DELETE FROM workshop_workflows").run();
+    if (typeof audit === "function") audit({ workflowCount, stageCount });
+  });
+  tx();
+  return { workflowCount, stageCount };
+}
+
 function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadmin, rid, nowISO, upload, notifyUser, jobDomain }) {
   const domain = jobDomain || createJobDomain({ db, rid });
   const isSuper = (user) => Boolean(user && (user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1));
@@ -745,19 +787,28 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
+  app.post("/api/workflows/purge-all", auth, requireSuperadmin, (req, res) => {
+    try {
+      const result = purgeAllWorkflowData({
+        db,
+        audit: ({ workflowCount, stageCount }) => directAudit(req, "PURGE_ALL_WORKFLOWS", "ALL", { workflow_count: workflowCount, stage_count: stageCount }, null, `Purged ${workflowCount} workflows and ${stageCount} stages`, "WORK")
+      });
+      res.json({ ok: true, message: "ALL_WORKFLOWS_PURGED", deleted_workflows: result.workflowCount, deleted_stages: result.stageCount });
+    } catch (e) { res.status(400).json({ error: e.code || e.message }); }
+  });
+
   app.delete("/api/workflows/:id", auth, requireSuperadmin, (req, res) => {
     try {
-      const workflow = requireWorkflow(req.params.id), reason = clean(req.body?.reason, 2000);
-      if (!reason) throw error("WORKFLOW_DELETE_REASON_REQUIRED");
-      const materials = materialRows(workflow.id), lines = financialRows(workflow.id), snapshot = decorateWorkflow(workflow, true);
-      directAudit(req, "SUPERADMIN_WORKFLOW_DELETE", workflow.id, snapshot, null, reason, "WORK");
-      db.transaction(() => {
-        materials.filter((item) => item.inventory_item_id && item.status !== "CONSUMED").forEach((item) => db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Math.max(0, numeric(item.requested_quantity) - numeric(item.consumed_quantity)), Math.max(0, numeric(item.requested_quantity) - numeric(item.consumed_quantity)), item.inventory_item_id));
-        if (lines.length) db.prepare(`DELETE FROM financial_items WHERE source_type='workflow' AND source_id IN (${lines.map(() => "?").join(",")})`).run(...lines.map((line) => line.id));
-        db.prepare("DELETE FROM knowledge_base WHERE workflow_id=?").run(workflow.id);
-        db.prepare("DELETE FROM workshop_workflows WHERE id=?").run(workflow.id);
-      })();
-      res.json({ ok: true, deleted_workflow_id: workflow.id, audit_preserved: true });
+      const workflow = requireWorkflow(req.params.id);
+      const reason = clean(req.body?.reason || "SUPERADMIN_CONFIRMED_HARD_DELETE", 2000);
+      const snapshot = decorateWorkflow(workflow, true);
+      const result = hardDeleteWorkflowData({
+        db,
+        workflowId: workflow.id,
+        audit: ({ stageCount }) => directAudit(req, "SUPERADMIN_WORKFLOW_DELETE", workflow.id, snapshot, null, `${reason} · deleted_stages=${stageCount}`, "WORK")
+      });
+      if (!result) throw error("WORKFLOW_NOT_FOUND");
+      res.json({ ok: true, success: true, deleted_id: workflow.id, deleted_workflow_id: workflow.id, deleted_stages: result.stageCount, audit_preserved: true });
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
@@ -778,4 +829,4 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   });
 }
 
-module.exports = { registerWorkshopWorkflowRoutes, DEFAULT_STAGES };
+module.exports = { registerWorkshopWorkflowRoutes, DEFAULT_STAGES, hardDeleteWorkflowData, purgeAllWorkflowData };
