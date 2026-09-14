@@ -62,8 +62,8 @@ test("closed-job revenue posting is idempotent and keeps revenue positive", () =
   assert.equal(db.rows.length, 1);
   assert.equal(db.rows[0].main_type, "INCOME");
   assert.equal(db.rows[0].amount, 1200);
-  assert.equal(db.rows[0].source_type, "job_close_revenue");
-  assert.equal(db.rows[0].source_id, "JOB_CLOSE:J-1");
+  assert.equal(db.rows[0].source_type, "JOB_REVENUE");
+  assert.equal(db.rows[0].source_id, "JOB_REVENUE:J-1");
 });
 
 test("calendar, workflow, client, piano and notes share the central Job domain", () => {
