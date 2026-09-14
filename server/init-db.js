@@ -5,6 +5,7 @@ const { backfillUserCalendarColors } = require("./calendar-colors");
 const { SAMPLE_VERSION_KEY } = require("./sample-content");
 const { nextTicketCode } = require("./ticket-code");
 const { parseGuestName } = require("./name-format");
+const { ensureSteinwayReferenceTables } = require("./steinway-reference");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -631,6 +632,9 @@ function runMigrations() {
 
     // Pianos and piano import.
     ensureColumn("pianos", "build_year", "INTEGER");
+    ensureColumn("pianos", "size_cm", "TEXT");
+    ensureColumn("pianos", "size_in", "TEXT");
+    ensureColumn("pianos", "size_display", "TEXT");
     ensureColumn("pianos", "ownership_type", "TEXT DEFAULT 'Customer owned'");
     ensureColumn("pianos", "display_name", "TEXT");
     ensureColumn("pianos", "asset_recorded", "INTEGER DEFAULT 0");
@@ -642,6 +646,10 @@ function runMigrations() {
 
     // Jobs and immutable user/workflow links.
     ensureColumn("website_showroom_pianos", "build_year", "INTEGER");
+    ensureColumn("website_showroom_pianos", "serial_no", "TEXT");
+    ensureColumn("website_showroom_pianos", "size_cm", "TEXT");
+    ensureColumn("website_showroom_pianos", "size_in", "TEXT");
+    ensureColumn("website_showroom_pianos", "size_display", "TEXT");
     ensureColumn("jobs", "job_type", "TEXT DEFAULT 'Standalone'");
     ensureColumn("jobs", "pricing_basis", "TEXT");
     ensureColumn("jobs", "last_reassigned_by", "TEXT");
@@ -911,6 +919,9 @@ function runMigrations() {
   db.prepare("UPDATE jobs SET job_key='JK-'||id WHERE job_key IS NULL OR job_key='' ").run();
   db.prepare("UPDATE jobs SET workflow_root_id=COALESCE(NULLIF(workflow_root_id,''),id),workflow_step_no=COALESCE(workflow_step_no,1),workflow_status=COALESCE(NULLIF(workflow_status,''),CASE WHEN status='Completed' THEN 'COMPLETED' WHEN status='Partially completed' THEN 'IN_PROGRESS' WHEN status='Failed' THEN 'FAILED' ELSE 'ACTIVE' END)").run();
   db.prepare("UPDATE jobs SET planned_minutes=CAST(ROUND(COALESCE(planned_hours,0)*60) AS INTEGER) WHERE COALESCE(planned_minutes,0)=0 AND COALESCE(planned_hours,0)>0").run();
+  ensureSteinwayReferenceTables(db);
+  log("Steinway serial/model reference tables synchronized");
+
   db.prepare("UPDATE pianos SET ownership_type=COALESCE(NULLIF(ownership_type,''),ownership,'Customer owned')").run();
   db.prepare("UPDATE pianos SET display_name=trim(COALESCE(NULLIF(original_description,''),COALESCE(brand,'')||' '||COALESCE(model,''))) WHERE display_name IS NULL OR display_name='' ").run();
 
