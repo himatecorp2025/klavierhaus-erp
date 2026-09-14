@@ -214,7 +214,7 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
         <ul>${navItems}</ul>
       </nav>
       <div class="header-actions">
-        <button class="theme-toggle" type="button" data-theme-toggle aria-label="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}" title="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}"><span data-theme-icon aria-hidden="true">☀</span></button>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}" title="${language === "hu" ? "Világos/sötét téma" : "Light/dark theme"}" aria-pressed="false"><span data-theme-icon aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" focusable="false"><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.72 5.28l-1.42 1.42M6.7 17.3l-1.42 1.42M18.72 18.72 17.3 17.3M6.7 6.7 5.28 5.28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span></button>
         <a class="language-switch" href="${escapeHtml(alternateRoute)}" hreflang="${alternateLanguage === "hu" ? "hu-HU" : "en-US"}">${escapeHtml(copy.alternateLabel)}</a>
         <button class="header-consultation" type="button" data-private-viewing-open><span class="header-consultation__label">${escapeHtml(copy.consultationLabel)}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button>
       </div>
