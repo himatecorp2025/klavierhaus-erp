@@ -613,67 +613,44 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
   });
 }
 
-// Public website theme engine: solar default (America/New_York) + persistent manual override.
+// Round 8: Solar (America/New_York) + persistent manual override theme engine.
 const klavierhausThemePreferenceKey = "theme_preference";
-const publicThemeIcons = Object.freeze({
-  light: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M21 12.8A8.4 8.4 0 1 1 11.2 3a6.7 6.7 0 0 0 9.8 9.8Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  dark: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.72 5.28l-1.42 1.42M6.7 17.3l-1.42 1.42M18.72 18.72 17.3 17.3M6.7 6.7 5.28 5.28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
-});
 function newYorkHour(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false, hourCycle: "h23" }).formatToParts(date);
   return Number(parts.find((part) => part.type === "hour")?.value || 0) % 24;
 }
-function solarTheme(date = new Date()) {
-  const hour = newYorkHour(date);
-  return hour >= 7 && hour < 19 ? "light" : "dark";
+function solarTheme(date = new Date()) { const hour = newYorkHour(date); return hour >= 7 && hour < 19 ? "light" : "dark"; }
+function themeIconSvg(theme) {
+  if (theme === "light") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.2 15.2A8.3 8.3 0 0 1 8.8 3.8a8.4 8.4 0 1 0 11.4 11.4Z"/></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.6"/><path d="M12 2.2v2.1M12 19.7v2.1M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M2.2 12h2.1M19.7 12h2.1M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5"/></svg>`;
 }
 function applyPublicTheme(theme) {
   const value = theme === "light" ? "light" : "dark";
   const root = document.documentElement;
-  const design = publishedDesignSettings || {};
   root.dataset.theme = value;
-
-  // Compatibility variables keep the historical public components theme-aware.
-  if (value === "light") {
-    root.style.setProperty("--black", "#F7F5EF");
-    root.style.setProperty("--black-soft", "#F1EDE4");
-    root.style.setProperty("--black-raised", "#FCFBF7");
-    root.style.setProperty("--ivory", "#292B2A");
-    root.style.setProperty("--ivory-soft", "#555550");
-    root.style.setProperty("--ivory-muted", "#77736B");
-    root.style.setProperty("--gold", "#A98442");
-    root.style.setProperty("--gold-bright", "#C8AD76");
-    root.style.setProperty("--gold-dark", "#80642F");
-    root.style.setProperty("--line", "rgba(41, 43, 42, 0.12)");
-  } else {
-    root.style.setProperty("--black", design.black || "#0E1117");
-    root.style.setProperty("--black-soft", "#161B22");
-    root.style.setProperty("--black-raised", "#151512");
-    root.style.setProperty("--ivory", design.ivory || "#F2EFE8");
-    root.style.setProperty("--ivory-soft", design.cream || "#E8E1D5");
-    root.style.setProperty("--ivory-muted", design.muted || "#AAA49A");
-    root.style.setProperty("--gold", design.gold || "#B79A60");
-    root.style.setProperty("--gold-bright", design.gold_bright || "#D0B67F");
-    root.style.setProperty("--gold-dark", "#715D39");
-    root.style.setProperty("--line", design.line || "rgba(183, 154, 96, 0.25)");
-  }
-
+  root.style.removeProperty("--black");
+  root.style.removeProperty("--ivory");
+  root.style.removeProperty("--ivory-soft");
+  root.style.removeProperty("--ivory-muted");
   document.querySelectorAll("[data-theme-icon]").forEach((icon) => {
-    icon.innerHTML = publicThemeIcons[value];
+    icon.classList.add("theme-toggle__icon");
+    icon.innerHTML = themeIconSvg(value);
   });
   document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    button.setAttribute("aria-pressed", String(value === "dark"));
-    button.dataset.currentTheme = value;
+    const target = value === "light" ? "dark" : "light";
+    button.setAttribute("aria-label", target === "dark" ? "Switch to dark theme" : "Switch to light theme");
+    button.setAttribute("data-current-theme", value);
   });
 }
 function initializeSolarTheme() {
-  let stored = null;
-  try { stored = localStorage.getItem(klavierhausThemePreferenceKey); } catch (_error) { stored = null; }
+  const stored = localStorage.getItem(klavierhausThemePreferenceKey);
   applyPublicTheme(stored === "light" || stored === "dark" ? stored : solarTheme());
 }
 initializeSolarTheme();
 document.querySelectorAll("[data-theme-toggle]").forEach((button) => button.addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-  try { localStorage.setItem(klavierhausThemePreferenceKey, next); } catch (_error) { /* private browsing may block storage */ }
+  localStorage.setItem(klavierhausThemePreferenceKey, next);
   applyPublicTheme(next);
 }));
