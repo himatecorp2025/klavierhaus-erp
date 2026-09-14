@@ -166,7 +166,7 @@ function migrationRequiresBackup() {
   const usersMissingContactEmail = tableExists("users") && !tableColumns("users").has("contact_email");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
-  const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id"].some((column) => !tableColumns("jobs").has(column));
+  const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id","financial_status","financial_ledger_id","closed_at"].some((column) => !tableColumns("jobs").has(column));
   const workflowMissingJobLink = tableExists("workshop_workflows") && !tableColumns("workshop_workflows").has("job_id");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
@@ -656,6 +656,9 @@ function runMigrations() {
     ensureColumn("jobs", "planned_minutes", "INTEGER DEFAULT 0");
     ensureColumn("jobs", "notes", "TEXT");
     ensureColumn("jobs", "workflow_id", "TEXT");
+    ensureColumn("jobs", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
+    ensureColumn("jobs", "financial_ledger_id", "TEXT");
+    ensureColumn("jobs", "closed_at", "TEXT");
 
     // Import batches.
     ensureColumn("import_batches", "imported_pianos", "INTEGER DEFAULT 0");
