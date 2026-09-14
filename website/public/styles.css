@@ -1864,3 +1864,195 @@ html[data-theme="light"]{--black:#F9F8F5;--black-soft:#F4F1EA;--ivory:#1A1A1A;--
 html[data-theme="light"] body,html[data-theme="light"] .site-header,html[data-theme="light"] .navigation-panel{background:#F9F8F5;color:#1A1A1A}
 html[data-theme="light"] .catalog-card,html[data-theme="light"] .event-card,html[data-theme="light"] .review-card,html[data-theme="light"] dialog{background:#F4F1EA;color:#1A1A1A;border-color:#C5A059}
 html[data-theme="dark"]{color-scheme:dark}
+
+/* Luxury Light Mode — Ivory, Ebony & Brass */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #F7F5EF;
+  --color-bg-alt: #F1EDE4;
+  --color-surface: #FCFBF7;
+  --color-surface-raised: #FFFEFA;
+  --color-surface-muted: #ECE7DD;
+  --color-photo-mat: #F3F0E8;
+  --color-heading: #171817;
+  --color-text: #292B2A;
+  --color-text-secondary: #555550;
+  --color-text-muted: #77736B;
+  --color-text-disabled: #A09A90;
+  --color-gold: #A98442;
+  --color-gold-soft: #B89A61;
+  --color-gold-dark: #80642F;
+  --color-gold-highlight: #C8AD76;
+  --color-border: rgba(41, 43, 42, 0.12);
+  --color-border-strong: rgba(41, 43, 42, 0.20);
+  --color-border-gold: rgba(128, 100, 47, 0.30);
+  --color-link: #71572D;
+  --color-link-hover: #493719;
+  --color-focus: rgba(169, 132, 66, 0.34);
+  --color-success: #49614B;
+  --color-error: #8E3F37;
+  --shadow-xs: 0 1px 2px rgba(30, 26, 18, 0.035);
+  --shadow-sm: 0 5px 18px rgba(37, 30, 18, 0.055);
+  --shadow-md: 0 14px 42px rgba(37, 30, 18, 0.075);
+  --surface-highlight: rgba(255, 255, 255, 0.72);
+  --surface-inset: rgba(128, 100, 47, 0.07);
+
+  /* Compatibility tokens used by the established public design system. */
+  --black: var(--color-bg);
+  --black-soft: var(--color-bg-alt);
+  --black-raised: var(--color-surface);
+  --ivory: var(--color-text);
+  --ivory-soft: var(--color-text-secondary);
+  --ivory-muted: var(--color-text-muted);
+  --gold: var(--color-gold);
+  --gold-bright: var(--color-gold-highlight);
+  --gold-dark: var(--color-gold-dark);
+  --line: var(--color-border);
+  --line-soft: rgba(128, 100, 47, 0.16);
+  --shadow: var(--shadow-md);
+}
+
+html[data-theme="light"] {
+  background: var(--color-bg);
+  scrollbar-color: var(--color-gold-dark) var(--color-bg-alt);
+}
+html[data-theme="light"] body {
+  color: var(--color-text);
+  background:
+    radial-gradient(circle at 86% 14%, rgba(169, 132, 66, 0.055), transparent 25rem),
+    linear-gradient(180deg, var(--color-bg), #F5F2EB 68%, var(--color-bg-alt));
+}
+html[data-theme="light"] ::selection { color: var(--color-surface-raised); background: var(--color-gold-dark); }
+html[data-theme="light"] :where(h1,h2,h3,.brand-wordmark) { color: var(--color-heading); }
+html[data-theme="light"] :where(.section-copy,.hero-lead,.section-heading>p:not(.eyebrow),.catalog-card__body>p,.public-event-card__excerpt) { color: var(--color-text-secondary); }
+html[data-theme="light"] .eyebrow,
+html[data-theme="light"] .section-label,
+html[data-theme="light"] .catalog-status {
+  color: var(--color-gold-dark);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+html[data-theme="light"] .site-header,
+html[data-theme="light"] .site-header.is-scrolled,
+html[data-theme="light"] .template-legal .site-header,
+html[data-theme="light"] .template-not-found .site-header {
+  border-bottom: 1px solid rgba(128, 100, 47, 0.16);
+  background: rgba(247, 245, 239, 0.92);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 1px 0 rgba(255,255,255,.5), var(--shadow-xs);
+}
+html[data-theme="light"] .navigation-panel { background: transparent; }
+html[data-theme="light"] .brand { color: var(--color-heading); }
+html[data-theme="light"] .primary-navigation a,
+html[data-theme="light"] .language-switch { color: var(--color-text-secondary); }
+html[data-theme="light"] .primary-navigation a:hover,
+html[data-theme="light"] .primary-navigation a[aria-current="page"],
+html[data-theme="light"] .language-switch:hover { color: var(--color-gold-dark); }
+html[data-theme="light"] .menu-toggle span { background: var(--color-heading); }
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(128, 100, 47, 0.30);
+  border-radius: 50%;
+  background: rgba(255, 254, 250, 0.08);
+  color: var(--gold-bright);
+  transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+.theme-toggle svg { display:block; }
+.theme-toggle:hover { transform: translateY(-1px); border-color: var(--gold); }
+html[data-theme="light"] .theme-toggle {
+  background: rgba(255, 254, 250, 0.66);
+  color: var(--color-gold-dark);
+  box-shadow: var(--shadow-xs);
+}
+html[data-theme="light"] .theme-toggle:hover { background: rgba(169, 132, 66, 0.08); border-color: var(--color-gold); }
+
+html[data-theme="light"] .button--primary,
+html[data-theme="light"] .header-consultation,
+html[data-theme="light"] .event-card-action--checkout {
+  min-height: 44px;
+  border-color: var(--color-gold-dark);
+  background: var(--color-gold-dark);
+  color: var(--color-surface-raised);
+  box-shadow: none;
+}
+html[data-theme="light"] .button--primary:hover,
+html[data-theme="light"] .header-consultation:hover,
+html[data-theme="light"] .event-card-action--checkout:hover {
+  border-color: #6A5125;
+  background: #6A5125;
+  color: var(--color-surface-raised);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(92,70,30,.18);
+}
+html[data-theme="light"] .button--ghost,
+html[data-theme="light"] .button:not(.button--primary):not(.header-consultation) {
+  border-color: rgba(128, 100, 47, 0.42);
+  color: var(--color-text);
+}
+html[data-theme="light"] .button--ghost:hover { background: rgba(169,132,66,.07); border-color: var(--color-gold); }
+
+html[data-theme="light"] :where(.catalog-card,.public-event-card,.event-card,.review-card,.event-facts,.invitation-card) {
+  border-color: var(--color-border);
+  background: linear-gradient(145deg, rgba(255,255,255,.50), rgba(247,244,236,.20)), var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+html[data-theme="light"] :where(.catalog-card,.public-event-card,.review-card):hover {
+  border-color: var(--color-border-gold);
+  box-shadow: var(--shadow-md);
+}
+html[data-theme="light"] :where(.catalog-card__image,.public-event-card__media,.detail-gallery figure,.piano-brand-instrument__media,.editorial-image,.editorial-feature-image,.statement-image,.visual-media figure) {
+  background: var(--color-photo-mat);
+}
+html[data-theme="light"] .catalog-card__image::after,
+html[data-theme="light"] .piano-brand-card .catalog-card__image::after,
+html[data-theme="light"] .piano-brand-instrument__media::after { background: linear-gradient(transparent 68%, rgba(23,24,23,.18)); }
+html[data-theme="light"] .public-event-card__media::after { background: linear-gradient(180deg, transparent 56%, rgba(23,24,23,.35)); }
+html[data-theme="light"] .public-event-card__number { color: #FFFEFA; text-shadow: 0 1px 12px rgba(0,0,0,.35); }
+
+html[data-theme="light"] :where(input,textarea,select) {
+  border-color: var(--color-border-strong);
+  background: rgba(255,254,250,.76);
+  color: var(--color-text);
+}
+html[data-theme="light"] :where(input,textarea,select):focus {
+  border-color: var(--color-gold);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-focus);
+}
+html[data-theme="light"] :where(.privacy-dialog,.interest-dialog,.service-dialog) {
+  border-color: var(--color-border-gold);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: 0 24px 72px rgba(37,30,18,.16);
+}
+html[data-theme="light"] :where(.privacy-dialog,.interest-dialog,.service-dialog)::backdrop { background: rgba(23,24,23,.38); }
+html[data-theme="light"] .dialog-close { border-color: var(--color-border); background: var(--color-surface-muted); color: var(--color-heading); }
+
+html[data-theme="light"] .section--quote,
+html[data-theme="light"] .section--statement,
+html[data-theme="light"] .home-event-showcase,
+html[data-theme="light"] .review-showcase { background-color: transparent; }
+html[data-theme="light"] .section--cards:nth-of-type(even),
+html[data-theme="light"] .section--editorial:nth-of-type(even) { background: rgba(241,237,228,.58); }
+
+/* A controlled dark footer anchors the light composition to the original Klavierhaus identity. */
+html[data-theme="light"] .site-footer {
+  border-top: 1px solid rgba(200, 173, 118, 0.32);
+  background: #191A18;
+  color: #E8E2D7;
+}
+html[data-theme="light"] .site-footer :where(.footer-brand p,.footer-column a,.footer-column address,.footer-bottom,.footer-privacy-button) { color: #D5CEC1; }
+html[data-theme="light"] .site-footer :where(.footer-label,.footer-column a:hover,.footer-privacy-button:hover) { color: #C8AD76; }
+
+html[data-theme="light"] a:focus-visible,
+html[data-theme="light"] button:focus-visible { outline-color: var(--color-gold-dark); box-shadow: 0 0 0 3px var(--color-focus); }
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle,
+  html[data-theme="light"] :where(.catalog-card,.public-event-card,.review-card,.button) { transition: none !important; transform: none !important; }
+}
