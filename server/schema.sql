@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS pianos (
   serial_no TEXT,
   year INTEGER,
   build_year INTEGER,
+  size_cm TEXT,
+  size_in TEXT,
+  size_display TEXT,
   ownership TEXT,
   owner_contact_id TEXT,
   location TEXT,
@@ -115,6 +118,18 @@ CREATE TABLE IF NOT EXISTS pianos (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(owner_contact_id) REFERENCES contacts(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS steinway_serial_registry (
+  start_serial INTEGER PRIMARY KEY,
+  build_year INTEGER NOT NULL CHECK(build_year BETWEEN 1853 AND 2100)
+);
+
+CREATE TABLE IF NOT EXISTS steinway_model_reference (
+  model_key TEXT PRIMARY KEY,
+  size_cm TEXT NOT NULL,
+  size_in TEXT NOT NULL,
+  size_display TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -822,6 +837,10 @@ CREATE TABLE IF NOT EXISTS website_showroom_pianos (
   brand TEXT NOT NULL,
   model TEXT,
   build_year INTEGER,
+  serial_no TEXT,
+  size_cm TEXT,
+  size_in TEXT,
+  size_display TEXT,
   title_en TEXT NOT NULL,
   title_hu TEXT NOT NULL,
   summary_en TEXT,
