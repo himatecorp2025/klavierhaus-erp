@@ -4,60 +4,160 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
+const { spawnSync } = require("node:child_process");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const app = read("public/app.js");
 const styles = read("public/styles.css");
-const server = read("server/index.js");
 
-function modalTransitionSequence() {
-  const state = { activeModalCount: 0, paused: false, resumes: 0 };
-  const pause = () => { state.paused = true; };
-  const resume = () => { if (state.activeModalCount === 0) { state.paused = false; state.resumes += 1; } };
-  const opened = () => { state.activeModalCount += 1; pause(); };
-  const closed = () => { state.activeModalCount = Math.max(0, state.activeModalCount - 1); if (state.activeModalCount === 0) resume(); };
-  opened();
-  opened();
-  closed();
-  const intermediate = { ...state };
-  closed();
-  return { intermediate, final: { ...state } };
+function extractNamedFunction(source, name) {
+  const endings = {
+    createSessionActivityController: "\nfunction updateCountdownDisplay",
+    createNestedClientStateMachine: "\nfunction entityFormFieldsMarkup"
+  };
+  const marker = `function ${name}(`;
+  const start = source.indexOf(marker);
+  assert.ok(start >= 0, `${name} must exist in public/app.js`);
+  const ending = endings[name];
+  assert.ok(ending, `No extraction boundary configured for ${name}`);
+  const end = source.indexOf(ending, start);
+  assert.ok(end > start, `${name} extraction boundary must exist`);
+  return source.slice(start, end).trim();
 }
 
-test("Nested Client Creation Flow: inline offer, nested modal, saved client and text-only decline", () => {
-  assert.match(app, /ensureInlineClientPrompt\(clientInput/);
-  assert.match(app, /Client not found in the list\. Create as a new client\?/);
-  assert.match(app, /openNestedClientModal\(/);
-  assert.match(app, /prefillName:term/);
-  assert.match(app, /clientInput\.dataset\.clientId=client\.id/);
-  assert.match(app, /allowAdHocClient=true/);
-  assert.match(app, /Client will remain text-only for this job/);
-  assert.match(server, /allowAdHocClient/);
-  assert.match(server, /req\.body\.client_id=null/);
-  assert.match(server, /relationships\.adHocClient/);
-  assert.match(styles, /\.nested-modal-overlay/);
-  assert.match(styles, /\.inline-client-prompt/);
+function loadFunction(name, extras = {}) {
+  const source = extractNamedFunction(app, name);
+  return vm.runInNewContext(`(${source})`, { ...extras });
+}
+
+function fakeClock() {
+  let now = 0, sequence = 0;
+  const timers = new Map();
+  return {
+    now: () => now,
+    setTimer(fn, delay) { const id = ++sequence; timers.set(id, { fn, at: now + Number(delay || 0) }); return id; },
+    clearTimer(id) { timers.delete(id); },
+    tick(ms) {
+      const target = now + ms;
+      while (true) {
+        const due = [...timers.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        const [id, timer] = due; timers.delete(id); now = timer.at; timer.fn();
+      }
+      now = target;
+    },
+    pending: () => timers.size
+  };
+}
+
+function makeSessionController({ isPWA = false, timeoutMs = 600000 } = {}) {
+  const createController = loadFunction("createSessionActivityController");
+  const clock = fakeClock();
+  let loggedOut = 0;
+  const controller = createController({
+    timeoutMs,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+    now: clock.now,
+    onTimeout: () => { loggedOut += 1; },
+    canRun: () => true,
+    onStateChange: () => {},
+    isStandalonePWA: () => isPWA
+  });
+  return { controller, clock, loggedOut: () => loggedOut };
+}
+
+function runChildTest(relativePath) {
+  const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", relativePath], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, NODE_ENV: "test" }
+  });
+  assert.equal(result.status, 0, `${relativePath} failed\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+  return result.stdout;
+}
+
+test("Universal Timeout Suite: browser és standalone PWA módban is lefut a kötelező timeout", () => {
+  for (const isPWA of [false, true]) {
+    const { controller, clock, loggedOut } = makeSessionController({ isPWA, timeoutMs: 100 });
+    controller.resetTimer();
+    assert.equal(controller.snapshot().timerActive, true);
+    clock.tick(99);
+    assert.equal(loggedOut(), 0);
+    clock.tick(1);
+    assert.equal(loggedOut(), 1, `${isPWA ? "PWA" : "browser"} módban is kötelező a kijelentkeztetés`);
+  }
+  const resetSource = app.slice(app.indexOf("function resetInactivityTimer"), app.indexOf('document.addEventListener("click"', app.indexOf("function resetInactivityTimer")));
+  assert.doesNotMatch(resetSource, /isStandalonePWA\s*\(/, "A session timeout nem tartalmazhat PWA bypass-t");
 });
 
-test("Modal Counter & Inactivity Pause: 0 -> 1 -> 2 -> 1 -> 0 and timer resumes only at zero", () => {
-  const { intermediate, final } = modalTransitionSequence();
-  assert.equal(intermediate.activeModalCount, 1);
-  assert.equal(intermediate.paused, true);
-  assert.equal(intermediate.resumes, 0);
-  assert.equal(final.activeModalCount, 0);
-  assert.equal(final.paused, false);
-  assert.equal(final.resumes, 1);
-  assert.match(app, /const sessionActivity=\{/);
-  assert.match(app, /activeModalCount:0/);
-  assert.match(app, /modalOpened\(\).*activeModalCount\+=1/);
-  assert.match(app, /modalClosed\(\).*Math\.max\(0,this\.activeModalCount-1\)/);
-  assert.match(app, /if\(this\.activeModalCount===0\)this\.resume\(\)/);
-  assert.match(app, /\.nested-modal-overlay, \.system-dialog-overlay, \.workflow-event-log-modal, \.workflow-drawer/);
-  assert.match(app, /setTimeout\(\(\)=>logoutNow\(\), INACTIVITY_LIMIT_MS\)/);
+test("Modal Lifecycle & Counter Suite: a tényleges session controller 0 -> 1 -> 2 -> 1 -> 0 állapotot kezel", () => {
+  const { controller, clock, loggedOut } = makeSessionController({ timeoutMs: 100 });
+  controller.resetTimer();
+  assert.equal(controller.activeModalCount, 0);
+  controller.modalOpened();
+  assert.equal(controller.activeModalCount, 1);
+  assert.equal(controller.paused, true);
+  controller.modalOpened();
+  assert.equal(controller.activeModalCount, 2);
+  clock.tick(500);
+  assert.equal(loggedOut(), 0, "Nyitott nested modal alatt a timernek szünetelnie kell");
+  controller.modalClosed();
+  assert.equal(controller.activeModalCount, 1);
+  assert.equal(controller.paused, true);
+  clock.tick(500);
+  assert.equal(loggedOut(), 0, "2 -> 1 átmenetnél a timer nem indulhat újra");
+  controller.modalClosed();
+  assert.equal(controller.activeModalCount, 0);
+  assert.equal(controller.paused, false);
+  clock.tick(99);
+  assert.equal(loggedOut(), 0);
+  clock.tick(1);
+  assert.equal(loggedOut(), 1, "Csak az utolsó modal bezárása után indul új teljes timeout");
 });
 
-test("Sidebar Role & Icon Contract: permission-first filtering and icon-only collapsed state", () => {
+test("Nested Client State Machine Suite: Unknown -> Nem/Igen -> Save/Cancel draftmegőrzéssel", () => {
+  const createStateMachine = loadFunction("createNestedClientStateMachine");
+  const original = { title: "Tuning", assigned_user_id: "U1", start_time: "2032-08-04T10:00", end_time: "2032-08-04T11:00", notes: "Megjegyzés", planned_amount: 250 };
+
+  const declineFlow = createStateMachine(original);
+  const declined = declineFlow.decline("Ad-hoc Ügyfél", original);
+  assert.equal(declineFlow.mode, "adhoc");
+  assert.equal(declined.client_name, "Ad-hoc Ügyfél");
+  assert.equal(declined.client_id, "");
+  assert.equal(declined.allow_ad_hoc_client, true);
+  assert.equal(declined.notes, "Megjegyzés");
+
+  const saveFlow = createStateMachine(original);
+  const creating = saveFlow.begin("Új Ügyfél", original);
+  assert.equal(saveFlow.mode, "creating");
+  assert.equal(creating.notes, original.notes);
+  const saved = saveFlow.saved({ id: "C99", name: "Új Ügyfél", phone: "555-0199", address: "1 Main St" });
+  assert.equal(saveFlow.mode, "saved");
+  assert.equal(saved.client_id, "C99");
+  assert.equal(saved.client_name, "Új Ügyfél");
+  assert.equal(saved.client_phone, "555-0199");
+  assert.equal(saved.service_address, "1 Main St");
+  assert.equal(saved.notes, original.notes);
+  assert.equal(saved.start_time, original.start_time);
+
+  const cancelFlow = createStateMachine(original);
+  cancelFlow.begin("Mégse Ügyfél", original);
+  const cancelled = cancelFlow.cancelled();
+  assert.equal(cancelFlow.mode, "cancelled");
+  assert.equal(cancelled.title, original.title);
+  assert.equal(cancelled.notes, original.notes);
+  assert.equal(cancelled.start_time, original.start_time);
+  assert.equal(cancelled.client_name, "Mégse Ügyfél");
+
+  assert.match(app, /entityFormFieldsMarkup\("contacts",null,initial\)/, "Nested Clientnek a közös Contacts form renderert kell használnia");
+  assert.match(app, /saveEntityFormRecord\('contacts',null,e\.target\)/, "Nested Clientnek a közös Contacts mentési útvonalat kell használnia");
+  assert.match(app, /<div id=\"contactPianoSection\"><\/div>/, "A teljes Contacts DOM része a contactPianoSection");
+});
+
+test("Sidebar Role & Icon Contract: permission-first filtering, collapsed icon-only és accessibility", () => {
   const visibleIndex = app.indexOf("function visibleNavigationItems()");
   const renderIndex = app.indexOf("function renderNavigation()");
   assert.ok(visibleIndex >= 0 && renderIndex > visibleIndex);
@@ -71,19 +171,7 @@ test("Sidebar Role & Icon Contract: permission-first filtering and icon-only col
   assert.match(styles, /body\.sidebar-collapsed \.nav-item-btn\{width:48px/);
 });
 
-test("Cross-Module Regression: Round 5/6 contracts remain present", () => {
-  const domain = read("server/job-domain.js");
-  const clientImport = read("server/client-import.js");
-  const round6 = read("test/round6-finance-daily-rate.test.js");
-  const round5 = read("test/job-domain-integration.test.js");
-  assert.match(domain, /SCHEDULE_INTERVAL_MINUTES\s*=\s*15/);
-  assert.match(domain, /JOB_REVENUE/);
-  assert.match(domain, /DAILY_RATE/);
-  assert.match(domain, /closeoutJobOrchestration/);
-  assert.match(clientImport, /detectClientSheet/);
-  assert.match(clientImport, /commitClientImportRecords/);
-  assert.match(round6, /Master Rate & Limit Check/);
-  assert.match(round6, /Excel Import Pipeline/);
-  assert.match(round5, /Unified Closeout/);
-  assert.match(app, /\['00','15','30','45'\]/);
+test("Active Cross-Module Verification: Round 5 és Round 6 funkcionális tesztek ténylegesen lefutnak", () => {
+  runChildTest("test/job-domain-integration.test.js");
+  runChildTest("test/round6-finance-daily-rate.test.js");
 });
