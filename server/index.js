@@ -2107,27 +2107,25 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
 app.patch("/api/jobs/:id/schedule", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const job=getJobByAnyId(req.params.id,req.body||{});
   if(!job) return res.status(404).json({error:"JOB_NOT_FOUND"});
-  if(['Completed','Partially completed','Failed','Cancelled'].includes(String(job.status||''))) return res.status(409).json({error:"JOB_NOT_MOVABLE"});
   const assigned=resolveActiveUser(req.body.assigned_user_id!==undefined?req.body.assigned_user_id:job.assigned_user_id,req.body.assigned_to!==undefined?req.body.assigned_to:job.assigned_to);
-  if(!assigned) return res.status(400).json({error:"INVALID_ASSIGNEE"});
-  const start=req.body.start_time!==undefined?String(req.body.start_time):String(job.start_time||"");
-  const end=req.body.end_time!==undefined?String(req.body.end_time):String(job.end_time||"");
-  if(!isValidTimeRange(start,end)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
-  if(!isScheduleTime(start)||!isScheduleTime(end)) return res.status(400).json({error:"INVALID_TIME_STEP",interval_minutes:SCHEDULE_INTERVAL_MINUTES});
-  const conflicts=findScheduleConflicts(assigned.id,assigned.name,start,end,job.id);
-  if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
-  const minutes=timeRangeMinutes(start,end);
-  db.prepare(`UPDATE jobs SET start_time=?,end_time=?,assigned_user_id=?,assigned_to=?,planned_minutes=?,planned_hours=?,timezone='America/New_York',last_reassigned_by=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE last_reassigned_by END,last_reassigned_by_user_id=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE last_reassigned_by_user_id END,reassignment_note=CASE WHEN COALESCE(assigned_user_id,'')<>? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(start,end,assigned.id,assigned.name,minutes,minutes/60,assigned.id,req.user.name,assigned.id,req.user.id,assigned.id,req.body.reassignment_note||"Calendar drag/drop",job.id);
-  if(job.workflow_id) db.transaction(() => {
-    db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(end,job.workflow_id);
-    db.prepare("UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'").run(end,job.workflow_id);
-  })();
-  const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
-  workAudit(req,'SCHEDULE_UPDATE',job.id,job,updated,1,`interval=${SCHEDULE_INTERVAL_MINUTES}; source=${req.body.source||'calendar'}`);
-  const assigneeChanged=String(job.assigned_user_id||'')!==String(updated.assigned_user_id||'');
-  if(assigneeChanged) notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
-  res.json(updated);
+  try{
+    const result=jobDomain.patchJobSchedule({
+      jobId:job.id,
+      startTime:req.body.start_time!==undefined?String(req.body.start_time):String(job.start_time||""),
+      endTime:req.body.end_time!==undefined?String(req.body.end_time):String(job.end_time||""),
+      assignedUser:assigned,
+      actor:req.user,
+      reassignmentNote:req.body.reassignment_note||"Calendar drag/drop",
+      findConflicts:findScheduleConflicts
+    });
+    const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+    workAudit(req,'SCHEDULE_UPDATE',job.id,job,updated,1,`interval=${SCHEDULE_INTERVAL_MINUTES}; source=${req.body.source||'calendar'}`);
+    if(result.assigneeChanged) notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
+    res.json(updated);
+  }catch(error){
+    if(error.code==='SCHEDULE_CONFLICT') return rejectScheduleConflict(req,res,assigned,error.details?.conflicts||[]);
+    res.status(error.status||400).json({error:error.code||error.message,interval_minutes:error.details?.interval_minutes});
+  }
 });
 
 app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
@@ -2197,15 +2195,19 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const job=getJobByAnyId(jobId,req.body);
   if(!job){removeUploadedFile();return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});}
   if(!canCloseJob(req.user,job)){removeUploadedFile();return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});}
+  if(String(job.status||'')==='Completed' && String(job.financial_status||'')==='POSTED'){
+    removeUploadedFile();
+    return res.json({ok:true,idempotent:true,job});
+  }
 
   const rootId=job.workflow_root_id||job.id;
   const rootJob=db.prepare("SELECT status,workflow_status,finalized_at FROM jobs WHERE id=?").get(rootId);
   const existingCloseLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(job.id);
-  if(existingCloseLog || job.finalized_at || ['Completed','Partially completed','Failed'].includes(String(job.status||''))){
+  if(existingCloseLog || job.finalized_at || ['Partially completed','Failed'].includes(String(job.status||''))){
     removeUploadedFile();
     return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
   }
-  if(rootJob && (rootJob.finalized_at || String(rootJob.workflow_status||'')==='COMPLETED')){
+  if(rootJob && rootId!==job.id && (rootJob.finalized_at || String(rootJob.workflow_status||'')==='COMPLETED')){
     removeUploadedFile();
     return res.status(409).json({error:"WORKFLOW_ALREADY_FINALIZED"});
   }
@@ -2218,7 +2220,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(!desc){removeUploadedFile();return res.status(400).json({error:"Close description is required"});}
   const payment=req.body.payment_method||"";
   if(billed>0&&!payment){removeUploadedFile();return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
-  if(billed>0&&!req.file) return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});
+  if(billed>0&&!req.file){removeUploadedFile();return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});}
   const storedPath=req.file?"/uploads/"+path.basename(req.file.path):null;
   let partialNextAssigned=null;
   if(closeType==="Partial"){
@@ -2229,61 +2231,68 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
     partialNextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
     if(!partialNextAssigned){removeUploadedFile();return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});}
     if(!isValidTimeRange(req.body.next_start_time,req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_RANGE"});}
-    if(!isFiveMinuteTime(req.body.next_start_time)||!isFiveMinuteTime(req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_STEP"});}
+    if(!isScheduleTime(req.body.next_start_time)||!isScheduleTime(req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_STEP",interval_minutes:SCHEDULE_INTERVAL_MINUTES});}
     const conflicts=findScheduleConflicts(partialNextAssigned.id,partialNextAssigned.name,req.body.next_start_time,req.body.next_end_time);
     if(conflicts.length){removeUploadedFile();return rejectScheduleConflict(req,res,partialNextAssigned,conflicts);}
   }
 
   try{
-    const result=db.transaction(()=>{
-      const fresh=db.prepare("SELECT status,workflow_status,finalized_at FROM jobs WHERE id=?").get(job.id);
-      const freshLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(job.id);
-      const freshRoot=db.prepare("SELECT workflow_status,finalized_at FROM jobs WHERE id=?").get(rootId);
-      if(!fresh || freshLog || fresh.finalized_at || ['Completed','Partially completed','Failed'].includes(String(fresh.status||''))) throw new Error("JOB_ALREADY_CLOSED");
-      if(freshRoot && (freshRoot.finalized_at || String(freshRoot.workflow_status||'')==='COMPLETED')) throw new Error("WORKFLOW_ALREADY_FINALIZED");
-      let nextJobId=null;
-      if(closeType==="Partial"){
-        const nextAssigned=partialNextAssigned;
-        const maxStep=db.prepare("SELECT COALESCE(MAX(workflow_step_no),0) AS n FROM jobs WHERE workflow_root_id=? OR id=?").get(rootId,rootId)?.n||0;
-        nextJobId=rid("J");
-        db.prepare(`INSERT INTO jobs(
-          id,job_key,parent_job_id,workflow_root_id,workflow_step_no,workflow_status,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
-          assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
-          planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          nextJobId,stableJobKey(),job.id,rootId,Number(maxStep)+1,"ACTIVE",req.body.next_title,"Part-work",job.client_id,job.client_name,job.client_phone,job.piano_id,job.piano_name,
-          nextAssigned.id,nextAssigned.name,req.user.id,req.user.name,req.body.next_priority||job.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",
-          Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",timeRangeMinutes(req.body.next_start_time,req.body.next_end_time)/60,timeRangeMinutes(req.body.next_start_time,req.body.next_end_time),Number(req.body.next_travel_minutes||0),
-          req.body.next_service_address||job.service_address,req.body.next_instructions||"",req.body.next_notes||job.notes||""
-        );
-        db.prepare(`UPDATE jobs SET status='Partially completed', close_type='Partial', workflow_root_id=?, workflow_status='IN_PROGRESS', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
-      } else if(closeType==="Full"){
-        const finalTime=nowISO();
-        db.prepare(`UPDATE jobs SET status='Completed', workflow_root_id=?, workflow_status='COMPLETED', finalized_at=?, completed_at=COALESCE(completed_at,?), updated_at=CURRENT_TIMESTAMP WHERE id=? OR workflow_root_id=?`)
-          .run(rootId,finalTime,finalTime,rootId,rootId);
-        db.prepare(`UPDATE jobs SET close_type='Full', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, finalized_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,finalTime,finalTime,job.id);
-      } else {
-        db.prepare(`UPDATE jobs SET status='Failed', close_type='Failed', workflow_root_id=?, workflow_status='FAILED', billed_amount=?, payment_method=?, invoice_status=?, invoice_number=?, close_notes=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,nowISO(),job.id);
-      }
-
-      const logId=rid("LOG");
-      db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-        .run(logId,job.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
-      db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(rid("KB"),job.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${job.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",job.priority);
-      const financialItem=createFinancialItemForClosedJob(job,logId,billed,payment,req.user.name);
-      return {nextJobId,financialItem};
-    })();
+    const result=jobDomain.closeoutJobOrchestration({
+      jobId:job.id,
+      source:'DIRECT',
+      actor:req.user,
+      closeType,
+      complete:closeType==='Full',
+      mutate:({job:domainJob,now})=>{
+        const freshLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(domainJob.id);
+        if(freshLog) throw new Error("JOB_ALREADY_CLOSED");
+        let nextJobId=null;
+        if(closeType==="Partial"){
+          const maxStep=db.prepare("SELECT COALESCE(MAX(workflow_step_no),0) AS n FROM jobs WHERE workflow_root_id=? OR id=?").get(rootId,rootId)?.n||0;
+          nextJobId=rid("J");
+          db.prepare(`INSERT INTO jobs(
+            id,job_key,parent_job_id,workflow_root_id,workflow_step_no,workflow_status,title,job_type,client_id,client_name,client_phone,piano_id,piano_name,
+            assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,pricing_basis,
+            planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes
+          ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+            nextJobId,stableJobKey(),domainJob.id,rootId,Number(maxStep)+1,"ACTIVE",req.body.next_title,"Part-work",domainJob.client_id,domainJob.client_name,domainJob.client_phone,domainJob.piano_id,domainJob.piano_name,
+            partialNextAssigned.id,partialNextAssigned.name,req.user.id,req.user.name,req.body.next_priority||domainJob.priority,"Open",req.body.next_start_time,req.body.next_end_time,"America/New_York",
+            Number(req.body.next_planned_amount||0),req.body.next_pricing_basis||"",timeRangeMinutes(req.body.next_start_time,req.body.next_end_time)/60,timeRangeMinutes(req.body.next_start_time,req.body.next_end_time),Number(req.body.next_travel_minutes||0),
+            req.body.next_service_address||domainJob.service_address,req.body.next_instructions||"",req.body.next_notes||domainJob.notes||""
+          );
+          db.prepare(`UPDATE jobs SET status='Partially completed',close_type='Partial',workflow_root_id=?,workflow_status='IN_PROGRESS',billed_amount=?,payment_method=?,invoice_status=?,invoice_number=?,close_notes=?,completed_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,now,domainJob.id);
+        }else if(closeType==="Full"){
+          db.prepare(`UPDATE jobs SET status='Completed',workflow_root_id=?,workflow_status='COMPLETED',finalized_at=?,completed_at=COALESCE(completed_at,?),billed_amount=?,payment_method=?,invoice_status=?,invoice_number=?,close_type='Full',close_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(rootId,now,now,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,domainJob.id);
+          db.prepare(`UPDATE jobs SET status='Completed',workflow_status='COMPLETED',finalized_at=COALESCE(finalized_at,?),completed_at=COALESCE(completed_at,?),updated_at=CURRENT_TIMESTAMP WHERE workflow_root_id=? AND id<>?`)
+            .run(now,now,rootId,domainJob.id);
+        }else{
+          db.prepare(`UPDATE jobs SET status='Failed',close_type='Failed',workflow_root_id=?,workflow_status='FAILED',billed_amount=?,payment_method=?,invoice_status=?,invoice_number=?,close_notes=?,completed_at=?,closed_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(rootId,billed,payment,billed>0?(req.body.invoice_status||"Invoiced"):"Not billable",req.body.invoice_number||"",desc,now,now,domainJob.id);
+        }
+        const logId=rid("LOG");
+        db.prepare(`INSERT INTO job_logs(id,job_id,log_type,description,billed_amount,payment_method,invoice_number,document_path,next_job_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+          .run(logId,domainJob.id,closeType,desc,billed,payment,req.body.invoice_number||"",storedPath,nextJobId,req.user.name);
+        db.prepare(`INSERT INTO knowledge_base(id,job_id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(rid("KB"),domainJob.id,`${closeType} close / ${closeType==="Full"?"Teljes lezárás":(closeType==="Failed"?"Sikertelen lezárás":"Részlezárás")}: ${domainJob.title}`,closeType==="Full"?"Closed Job":(closeType==="Failed"?"Failed Job":"Partial Close"),"Job Record",desc,storedPath,req.user.name,billed,payment,req.body.invoice_number||"",domainJob.priority);
+        return {nextJobId,logId};
+      },
+      financialEntries:({job:domainJob,mutation,now})=>billed>0?[{
+        itemDate:String(now).slice(0,10),
+        title:`Closed job revenue / Lezárt munka bevétele: ${domainJob.title||domainJob.job_key||domainJob.id}`,
+        description:[domainJob.client_name?`Client / Ügyfél: ${domainJob.client_name}`:"",domainJob.piano_name?`Piano / Zongora: ${domainJob.piano_name}`:"",mutation?.logId?`Job log / Lezárási napló: ${mutation.logId}`:""].filter(Boolean).join("\n"),
+        amount:billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
+        sourceType:"job_close_revenue",sourceId:`JOB_CLOSE:${domainJob.id}`
+      }]:[]
+    });
     const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
-    workAudit(req,closeType==='Partial'?'PARTIAL_CLOSE':(closeType==='Full'?'FULL_CLOSE':'FAILED_CLOSE'),job.id,job,updated,1,`workflow_root_id=${rootId}; next_job_id=${result.nextJobId||''}`);
-    res.json({ok:true,next_job_id:result.nextJobId,storedPath,financial_item_id:result.financialItem?.id||null,workflow_root_id:rootId});
+    workAudit(req,closeType==='Partial'?'PARTIAL_CLOSE':(closeType==='Full'?'FULL_CLOSE':'FAILED_CLOSE'),job.id,job,updated,1,`workflow_root_id=${rootId}; next_job_id=${result.mutation?.nextJobId||''}`);
+    res.json({ok:true,idempotent:result.idempotent,next_job_id:result.mutation?.nextJobId||null,storedPath,financial_item_id:result.financialItems?.[0]?.id||updated.financial_ledger_id||null,workflow_root_id:rootId});
   }catch(err){
     removeUploadedFile();
-    const code=err.message||"Close operation failed";
-    res.status(['JOB_ALREADY_CLOSED','WORKFLOW_ALREADY_FINALIZED'].includes(code)?409:400).json({error:code});
+    const code=err.code||err.message||"Close operation failed";
+    res.status(['JOB_ALREADY_CLOSED','WORKFLOW_ALREADY_FINALIZED'].includes(code)?409:(err.status||400)).json({error:code});
   }
 });
 
