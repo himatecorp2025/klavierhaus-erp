@@ -769,12 +769,14 @@ function resolvePiano(pianoId, pianoName, clientId=null){
   return null;
 }
 function normalizeJobRelationships(body, existing={}){
+  const allowAdHocClient=Boolean(body.allow_ad_hoc_client===true||body.allow_ad_hoc_client===1||String(body.allow_ad_hoc_client||'').toLowerCase()==='true');
   const client=resolveClient(body.client_id!==undefined?body.client_id:existing.client_id, body.client_name!==undefined?body.client_name:existing.client_name);
-  if(!client) return {error:"CLIENT_NOT_FOUND"};
-  const piano=resolvePiano(body.piano_id!==undefined?body.piano_id:existing.piano_id, body.piano_name!==undefined?body.piano_name:existing.piano_name, client.id);
-  if(!piano) return {error:"PIANO_NOT_FOUND"};
-  if(piano.owner_contact_id && String(piano.owner_contact_id)!==String(client.id)) return {error:"PIANO_CLIENT_MISMATCH"};
-  return {client,piano};
+  if(!client&&!allowAdHocClient) return {error:"CLIENT_NOT_FOUND"};
+  if(!client&&allowAdHocClient)return {client:null,piano:null,adHocClient:true};
+  const piano=resolvePiano(body.piano_id!==undefined?body.piano_id:existing.piano_id, body.piano_name!==undefined?body.piano_name:existing.piano_name, client?.id||null);
+  if(!piano&&!allowAdHocClient) return {error:"PIANO_NOT_FOUND"};
+  if(client&&piano?.owner_contact_id && String(piano.owner_contact_id)!==String(client.id)) return {error:"PIANO_CLIENT_MISMATCH"};
+  return {client,piano,adHocClient:!client&&allowAdHocClient};
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
 function jobsSelectSql(where=""){
@@ -1929,8 +1931,8 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
   const relationships=normalizeJobRelationships(req.body);
   if(relationships.error) return res.status(400).json({error:relationships.error});
-  req.body.client_id=relationships.client.id; req.body.client_name=relationships.client.name; req.body.client_phone=req.body.client_phone||relationships.client.phone||"";
-  req.body.piano_id=relationships.piano.id; req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();
+  if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||"").trim();}
+  if(relationships.piano){req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();}else if(relationships.adHocClient){req.body.piano_id=null;}
   if(!isValidTimeRange(req.body.start_time,req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
   if(!isFiveMinuteTime(req.body.start_time)||!isFiveMinuteTime(req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_STEP"});
   const conflicts=findScheduleConflicts(assigned.id,assigned.name,req.body.start_time,req.body.end_time);
@@ -1979,8 +1981,8 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   if(req.body.client_id!==undefined||req.body.client_name!==undefined||req.body.piano_id!==undefined||req.body.piano_name!==undefined){
     const relationships=normalizeJobRelationships(req.body,job);
     if(relationships.error) return res.status(400).json({error:relationships.error});
-    req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||job.client_phone||"";
-    req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();
+    if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||job.client_phone||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||job.client_name||"").trim();}
+    if(relationships.piano){req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();}else if(relationships.adHocClient){req.body.piano_id=null;}
   }
   let effectiveAssigned={id:job.assigned_user_id||null,name:job.assigned_to||""};
   if(req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined){
