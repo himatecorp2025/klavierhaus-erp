@@ -167,6 +167,7 @@ function migrationRequiresBackup() {
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id","financial_status","financial_ledger_id","closed_at"].some((column) => !tableColumns("jobs").has(column));
+  const round6DailyRateMissing = tableExists("users") && (!tableExists("employee_daily_rates") || (tableExists("jobs") && ["daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"].some((column) => !tableColumns("jobs").has(column))));
   const workflowMissingJobLink = tableExists("workshop_workflows") && !tableColumns("workshop_workflows").has("job_id");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
@@ -181,7 +182,7 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || workflowMissingJobLink;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -659,6 +660,23 @@ function runMigrations() {
     ensureColumn("jobs", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
     ensureColumn("jobs", "financial_ledger_id", "TEXT");
     ensureColumn("jobs", "closed_at", "TEXT");
+    ensureColumn("jobs", "daily_rate_enabled", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("jobs", "daily_rate_allocated_amount", "REAL NOT NULL DEFAULT 0");
+    ensureColumn("jobs", "daily_rate_date", "TEXT");
+
+    db.exec(`CREATE TABLE IF NOT EXISTS employee_daily_rates (
+      user_id TEXT NOT NULL,
+      rate REAL NOT NULL CHECK(rate >= 0),
+      currency TEXT NOT NULL DEFAULT 'USD',
+      effective_date TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      created_by TEXT,
+      PRIMARY KEY(user_id,effective_date),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    ensureIndex("idx_employee_daily_rates_user_date", "CREATE INDEX IF NOT EXISTS idx_employee_daily_rates_user_date ON employee_daily_rates(user_id,effective_date DESC)");
+
+    ensureIndex("idx_jobs_daily_rate_capacity", "CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status)");
 
     // Import batches.
     ensureColumn("import_batches", "imported_pianos", "INTEGER DEFAULT 0");
