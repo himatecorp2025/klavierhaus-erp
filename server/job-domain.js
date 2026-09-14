@@ -81,10 +81,36 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
       jobId: job.id,
       clientId: job.client_id,
       pianoId: job.piano_id,
-      sourceType: "job_close_revenue",
-      sourceId: `JOB_CLOSE:${job.id}`,
+      sourceType: "JOB_REVENUE",
+      sourceId: `JOB_REVENUE:${job.id}`,
       createdBy
     });
+  }
+
+
+  function employeeDailyRateForDate(userId, dateStr) {
+    if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return null;
+    return db.prepare(`SELECT * FROM employee_daily_rates WHERE user_id=? AND effective_date<=? ORDER BY effective_date DESC, created_at DESC LIMIT 1`).get(userId, dateStr) || null;
+  }
+
+  function dailyRateAllocationSummary({ userId, dateStr, excludeJobId = null }) {
+    const rateRow = employeeDailyRateForDate(userId, dateStr);
+    const allocated = db.prepare(`SELECT COALESCE(SUM(daily_rate_allocated_amount),0) AS amount FROM jobs
+      WHERE assigned_user_id=? AND daily_rate_date=? AND COALESCE(daily_rate_enabled,0)=1
+        AND (? IS NULL OR id<>?) AND COALESCE(status,'Open') NOT IN ('Cancelled','Failed')`).get(userId, dateStr, excludeJobId, excludeJobId)?.amount || 0;
+    const limit = normalizeMoney(rateRow?.rate || 0);
+    const used = normalizeMoney(allocated);
+    return { rate: rateRow, limit, allocated: used, available: normalizeMoney(Math.max(0, limit - used)) };
+  }
+
+  function validateDailyRateAllocation({ userId, dateStr, jobId = null, enabled = false, amount = 0 }) {
+    if (!enabled) return { enabled: false, date: dateStr || null, requested: 0, limit: 0, allocated: 0, available: 0 };
+    const requested = normalizeMoney(amount);
+    if (requested <= 0) throw domainError("DAILY_RATE_ALLOCATION_REQUIRED", 400);
+    const summary = dailyRateAllocationSummary({ userId, dateStr, excludeJobId: jobId });
+    if (!summary.rate || summary.limit <= 0) throw domainError("DAILY_RATE_NOT_CONFIGURED", 400, { user_id: userId, date: dateStr });
+    if (requested > summary.available + 0.0001) throw domainError("DAILY_RATE_LIMIT_EXCEEDED", 409, { ...summary, requested, user_id: userId, date: dateStr });
+    return { enabled: true, date: dateStr, requested, ...summary };
   }
 
   function patchJobSchedule({ jobId, startTime, endTime, assignedUser, actor = {}, reassignmentNote = "Calendar drag/drop", findConflicts = () => [] }) {
@@ -96,14 +122,16 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     if (!isScheduleTime(startTime) || !isScheduleTime(endTime)) throw domainError("INVALID_TIME_STEP", 400, { interval_minutes: SCHEDULE_INTERVAL_MINUTES });
     const conflicts = findConflicts(assignedUser.id, assignedUser.name, startTime, endTime, job.id) || [];
     if (conflicts.length) throw domainError("SCHEDULE_CONFLICT", 409, { conflicts });
+    const targetDate = String(startTime).slice(0, 10);
+    if (Number(job.daily_rate_enabled || 0) === 1) validateDailyRateAllocation({ userId: assignedUser.id, dateStr: targetDate, jobId: job.id, enabled: true, amount: job.daily_rate_allocated_amount });
     const minutes = timeRangeMinutes(startTime, endTime);
     const changedAssignee = String(job.assigned_user_id || "") !== String(assignedUser.id);
     const update = db.transaction(() => {
-      db.prepare(`UPDATE jobs SET start_time=?,end_time=?,assigned_user_id=?,assigned_to=?,planned_minutes=?,planned_hours=?,timezone=?,
+      db.prepare(`UPDATE jobs SET start_time=?,end_time=?,assigned_user_id=?,assigned_to=?,planned_minutes=?,planned_hours=?,timezone=?,daily_rate_date=CASE WHEN COALESCE(daily_rate_enabled,0)=1 THEN ? ELSE daily_rate_date END,
         last_reassigned_by=CASE WHEN ? THEN ? ELSE last_reassigned_by END,
         last_reassigned_by_user_id=CASE WHEN ? THEN ? ELSE last_reassigned_by_user_id END,
         reassignment_note=CASE WHEN ? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(startTime, endTime, assignedUser.id, assignedUser.name, minutes, minutes / 60, JOB_TIMEZONE,
+        .run(startTime, endTime, assignedUser.id, assignedUser.name, minutes, minutes / 60, JOB_TIMEZONE, targetDate,
           changedAssignee ? 1 : 0, actor.name || "", changedAssignee ? 1 : 0, actor.id || null, changedAssignee ? 1 : 0, reassignmentNote, job.id);
       if (job.workflow_id) {
         db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(endTime, job.workflow_id);
@@ -144,6 +172,24 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         });
         if (item) posted.push(item);
       }
+      if (complete && Number(job.daily_rate_enabled || 0) === 1 && normalizeMoney(job.daily_rate_allocated_amount) > 0) {
+        const dailyExpense = postFinancialItemOnce({
+          itemDate: job.daily_rate_date || String(job.start_time || now).slice(0, 10),
+          title: `Employee daily rate expense / Munkavállalói napidíj: ${job.assigned_to || job.assigned_user_id || job.id}`,
+          description: `Job / Munka: ${job.title || job.job_key || job.id}`,
+          amount: job.daily_rate_allocated_amount,
+          mainType: "EXPENSE",
+          category: "LABOR_EXPENSE",
+          paymentMethod: "",
+          jobId: job.id,
+          clientId: job.client_id,
+          pianoId: job.piano_id,
+          sourceType: "DAILY_RATE",
+          sourceId: `DAILY_RATE:${job.id}`,
+          createdBy: actor.name || "System"
+        });
+        if (dailyExpense) posted.push(dailyExpense);
+      }
       const primary = posted[0] || db.prepare("SELECT * FROM financial_items WHERE job_id=? ORDER BY created_at,id LIMIT 1").get(job.id) || null;
       if (complete) {
         db.prepare(`UPDATE jobs SET status='Completed',workflow_status='COMPLETED',finalized_at=COALESCE(finalized_at,?),completed_at=COALESCE(completed_at,?),
@@ -163,7 +209,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     return run();
   }
 
-  return { postFinancialItemOnce, postClosedJobRevenue, patchJobSchedule, closeoutJobOrchestration };
+  return { postFinancialItemOnce, postClosedJobRevenue, employeeDailyRateForDate, dailyRateAllocationSummary, validateDailyRateAllocation, patchJobSchedule, closeoutJobOrchestration };
 }
 
 module.exports = {
