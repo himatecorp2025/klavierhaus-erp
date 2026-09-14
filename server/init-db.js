@@ -114,6 +114,7 @@ function migrationRequiresBackup() {
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
   const websiteCatalogTablesMissing = tableExists("users") && (!tableExists("website_reviews") || !tableExists("website_showroom_pianos") || !tableExists("website_services"));
   const websitePlatformTablesMissing = tableExists("users") && (!tableExists("website_artists") || !tableExists("website_media") || !tableExists("website_contact_leads") || !tableExists("website_content_versions") || !tableExists("event_repeat_requests") || !tableExists("website_integration_settings") || !tableExists("website_integration_oauth_states") || !tableExists("marketing_campaigns") || !tableExists("website_tracking_events"));
+  const systemIntegrationTablesMissing = tableExists("users") && (!["system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens"].every(tableExists));
   const eventPlatformColumnsMissing = tableExists("events") && ["sold_out_at", "is_sample", "relaunch_source_event_id", "custom_type"].some((column) => !tableColumns("events").has(column));
   const eventArtistForeignKeyMissing = tableExists("events") && !db.prepare("PRAGMA foreign_key_list(events)").all().some((row) => row.from === "artist_id" && row.table === "website_artists");
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
@@ -121,7 +122,7 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing;
+  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -782,6 +783,9 @@ function runMigrations() {
   ensureIndex("idx_website_content_versions", "CREATE INDEX IF NOT EXISTS idx_website_content_versions ON website_content_versions(page_key,language,version DESC)");
   ensureIndex("idx_website_preview_expiry", "CREATE INDEX IF NOT EXISTS idx_website_preview_expiry ON website_preview_tokens(expires_at)");
   ensureIndex("idx_website_integration_oauth_expiry", "CREATE INDEX IF NOT EXISTS idx_website_integration_oauth_expiry ON website_integration_oauth_states(expires_at)");
+  ensureIndex("idx_system_integration_health_status", "CREATE INDEX IF NOT EXISTS idx_system_integration_health_status ON system_integration_health(status,provider)");
+  ensureIndex("idx_system_integration_backups_provider", "CREATE INDEX IF NOT EXISTS idx_system_integration_backups_provider ON system_integration_backups(provider,created_at DESC)");
+  ensureIndex("idx_system_integration_delete_expiry", "CREATE INDEX IF NOT EXISTS idx_system_integration_delete_expiry ON system_integration_delete_tokens(expires_at)");
   ensureIndex("idx_event_repeat_requests", "CREATE INDEX IF NOT EXISTS idx_event_repeat_requests ON event_repeat_requests(event_id,created_at DESC)");
   ensureIndex("idx_marketing_campaigns_active", "CREATE INDEX IF NOT EXISTS idx_marketing_campaigns_active ON marketing_campaigns(active,updated_at DESC)");
   ensureIndex("idx_website_tracking_events", "CREATE INDEX IF NOT EXISTS idx_website_tracking_events ON website_tracking_events(event_name,created_at DESC)");
