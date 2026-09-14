@@ -6,6 +6,7 @@ const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
 const { normalizeEventTimes, slugify } = require("./events");
 const { SAMPLE_VERSION_KEY } = require("./sample-content");
+const { createIntegrationCipher, saveIntegrationProvider, getIntegrationProvider, testIntegrationProvider } = require("./system-integrations");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
@@ -136,9 +137,7 @@ function registerWebsitePlatformRoutes(options) {
   const sampleAsset = (fileName) => `${publicWebsiteUrl}/assets/media/${fileName}`;
   const upload = websiteImageUpload.single("website_image");
   const deviceSecret = clean(env.WEBSITE_DEVICE_SECRET || env.JWT_SECRET);
-  const integrationEncryptionSecret = clean(env.SYSTEM_INTEGRATION_ENCRYPTION_KEY || env.MARKETING_TOKEN_ENCRYPTION_KEY);
-  if (String(env.NODE_ENV || "").toLowerCase() === "production" && integrationEncryptionSecret.length < 32) throw new Error("SYSTEM_INTEGRATION_ENCRYPTION_KEY_REQUIRED");
-  const cipher = createCipher(integrationEncryptionSecret);
+  const cipher = createIntegrationCipher(env);
   const recentRequests = new Map();
 
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -514,37 +513,40 @@ function registerWebsitePlatformRoutes(options) {
   });
 
   app.get("/api/marketing/integrations", auth, admin, (_req, res) => res.json(PROVIDERS.size ? [...PROVIDERS].map((provider) => {
+    if (["GA4","CLARITY","SEARCH_CONSOLE"].includes(provider)) return getIntegrationProvider(db, provider, env);
     const row = db.prepare("SELECT * FROM website_integration_settings WHERE provider=?").get(provider);
     return row ? { provider, status: row.status, config: parseJson(row.public_config_json), has_secret: Boolean(row.encrypted_secret), last_tested_at: row.last_tested_at, last_sync_at: row.last_sync_at, last_error: row.last_error } : { provider, status: "DISCONNECTED", config: {}, has_secret: false };
   }) : []));
 
-  app.put("/api/marketing/integrations/:provider", auth, admin, (req, res) => {
+  app.put("/api/marketing/integrations/:provider", auth, requireSuperadmin, (req, res) => {
     const provider = clean(req.params.provider, 40).toUpperCase();
     if (!PROVIDERS.has(provider)) return res.status(404).json({ error: "INTEGRATION_PROVIDER_NOT_FOUND" });
+    if (["GA4","CLARITY","SEARCH_CONSOLE"].includes(provider)) {
+      try { saveIntegrationProvider(db, provider, req.body || {}, req.user, env); return res.json(getIntegrationProvider(db, provider, env)); }
+      catch (error) { return res.status(error.status || 400).json({ error: error.message }); }
+    }
     const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : {};
+    if (req.body?.secret && !cipher.ready()) return res.status(503).json({ error: "SYSTEM_INTEGRATION_ENCRYPTION_KEY_REQUIRED" });
     const secret = clean(req.body?.secret, 10000);
     db.prepare(`INSERT INTO website_integration_settings(provider,status,public_config_json,encrypted_secret,updated_by_user_id,updated_at)
       VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(provider) DO UPDATE SET status=excluded.status,public_config_json=excluded.public_config_json,
       encrypted_secret=CASE WHEN excluded.encrypted_secret IS NULL THEN website_integration_settings.encrypted_secret ELSE excluded.encrypted_secret END,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`)
       .run(provider, "CONFIGURED", JSON.stringify(config).slice(0, 20000), secret ? cipher.encrypt(secret) : null, req.user.id);
-    audit(req, "CONFIGURE", "marketing_integrations", provider, null, { provider, config, has_secret: Boolean(secret) }, 1, "Marketing integration configured; secret omitted from audit");
     res.json({ provider, status: "CONFIGURED", config, has_secret: Boolean(secret || db.prepare("SELECT encrypted_secret FROM website_integration_settings WHERE provider=?").get(provider)?.encrypted_secret) });
   });
 
   app.post("/api/marketing/integrations/:provider/test", auth, admin, async (req, res) => {
     const provider = clean(req.params.provider, 40).toUpperCase();
+    if (["GA4","CLARITY","SEARCH_CONSOLE"].includes(provider)) {
+      try { const details = await testIntegrationProvider({ db, provider, body: req.body || {}, env }); return res.json({ ok: true, provider, ...details }); }
+      catch (error) { return res.status(error.status || 400).json({ ok: false, provider, error: error.message }); }
+    }
     const row = db.prepare("SELECT * FROM website_integration_settings WHERE provider=?").get(provider);
     if (!row) return res.status(404).json({ error: "INTEGRATION_NOT_CONFIGURED" });
     const config = parseJson(row.public_config_json);
-    let valid = false;
-    if (provider === "GA4") valid = /^G-[A-Z0-9]{4,20}$/i.test(clean(config.measurement_id));
-    if (provider === "SEARCH_CONSOLE") valid = /^https?:\/\//.test(clean(config.property_url)) || clean(config.property_url).startsWith("sc-domain:");
-    if (provider === "CLARITY") valid = /^[A-Za-z0-9_-]{4,80}$/.test(clean(config.project_id));
-    if (provider === "GOOGLE_OAUTH") valid = /\.apps\.googleusercontent\.com$/.test(clean(config.client_id)) && Boolean(row.encrypted_secret);
-    const nextStatus = valid ? (row.status === "CONNECTED" ? "CONNECTED" : "CONFIGURED") : "ERROR";
-    db.prepare("UPDATE website_integration_settings SET status=?,last_tested_at=CURRENT_TIMESTAMP,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE provider=?")
-      .run(nextStatus, valid ? null : "INVALID_OR_INCOMPLETE_CONFIGURATION", provider);
-    res.status(valid ? 200 : 400).json({ ok: valid, provider, status: nextStatus, live_data: false });
+    const valid = provider === "GOOGLE_OAUTH" && /\.apps\.googleusercontent\.com$/.test(clean(config.client_id)) && Boolean(row.encrypted_secret);
+    db.prepare("UPDATE website_integration_settings SET status=?,last_tested_at=CURRENT_TIMESTAMP,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE provider=?").run(valid ? row.status : "ERROR", valid ? null : "INVALID_OR_INCOMPLETE_CONFIGURATION", provider);
+    res.status(valid ? 200 : 400).json({ ok: valid, provider, status: valid ? row.status : "ERROR", live_data: false });
   });
   app.post("/api/marketing/google/connect", auth, requireSuperadmin, (req, res) => {
     const row = db.prepare("SELECT * FROM website_integration_settings WHERE provider='GOOGLE_OAUTH'").get();
@@ -621,6 +623,7 @@ function registerWebsitePlatformRoutes(options) {
   });
   app.delete("/api/marketing/integrations/:provider", auth, requireSuperadmin, (req, res) => {
     const provider = clean(req.params.provider, 40).toUpperCase();
+    if (["GA4","CLARITY","SEARCH_CONSOLE"].includes(provider)) return res.status(409).json({ error: "USE_SYSTEM_INTEGRATIONS_DELETE_FLOW" });
     if (!PROVIDERS.has(provider)) return res.status(404).json({ error: "INTEGRATION_PROVIDER_NOT_FOUND" });
     db.prepare("DELETE FROM website_integration_settings WHERE provider=?").run(provider);
     res.json({ ok: true });
