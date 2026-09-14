@@ -45,8 +45,8 @@ function normalizeBaseUrl(value, fallback) {
 function createStripeSandbox(options = {}) {
   const db = options.db;
   const env = options.env || process.env;
-  const secretKey = cleanText(options.secretKey ?? env.STRIPE_SECRET_KEY, 500);
-  const webhookSecret = cleanText(options.webhookSecret ?? env.STRIPE_WEBHOOK_SECRET, 500);
+  let secretKey = cleanText(options.secretKey ?? env.STRIPE_SECRET_KEY, 500);
+  let webhookSecret = cleanText(options.webhookSecret ?? env.STRIPE_WEBHOOK_SECRET, 500);
   const websiteBaseUrl = normalizeBaseUrl(options.websiteBaseUrl ?? env.WEBSITE_BASE_URL, "https://klavierhaus-home.onrender.com");
   const onPaymentFulfilled = typeof options.onPaymentFulfilled === "function" ? options.onPaymentFulfilled : null;
   const onPaymentRefunded = typeof options.onPaymentRefunded === "function" ? options.onPaymentRefunded : null;
@@ -62,8 +62,20 @@ function createStripeSandbox(options = {}) {
     throw new Error("STRIPE_WEBHOOK_SECRET must begin with whsec_");
   }
 
-  const stripe = options.stripeClient || (secretKey ? new Stripe(secretKey, { maxNetworkRetries: 2 }) : null);
-  const enabled = Boolean(stripe && secretKey && webhookSecret);
+  let stripe = options.stripeClient || (secretKey ? new Stripe(secretKey, { maxNetworkRetries: 2 }) : null);
+  let integrationEnabled = true;
+  let enabled = Boolean(stripe && secretKey && webhookSecret);
+  function reconfigure({ secretKey: nextSecretKey, webhookSecret: nextWebhookSecret, enabled: nextEnabled = true } = {}) {
+    const candidateSecret = nextSecretKey === undefined ? secretKey : cleanText(nextSecretKey, 500);
+    const candidateWebhook = nextWebhookSecret === undefined ? webhookSecret : cleanText(nextWebhookSecret, 500);
+    if (LIVE_SECRET_PREFIXES.some((prefix) => candidateSecret.startsWith(prefix))) throw new Error("Live Stripe keys are not accepted while Stripe Sandbox mode is enforced");
+    if (candidateSecret && !TEST_SECRET_PREFIXES.some((prefix) => candidateSecret.startsWith(prefix))) throw new Error("STRIPE_SECRET_KEY must be a Stripe test secret key beginning with sk_test_ or rk_test_");
+    if (candidateWebhook && !candidateWebhook.startsWith("whsec_")) throw new Error("STRIPE_WEBHOOK_SECRET must begin with whsec_");
+    secretKey = candidateSecret; webhookSecret = candidateWebhook; integrationEnabled = Boolean(nextEnabled);
+    stripe = secretKey ? new Stripe(secretKey, { maxNetworkRetries: 2 }) : null;
+    enabled = integrationEnabled && Boolean(stripe && secretKey && webhookSecret);
+    return configuration();
+  }
 
   function requireConfigured() {
     if (!enabled) {
@@ -384,9 +396,10 @@ function createStripeSandbox(options = {}) {
     return { enabled, test_mode: true, hold_minutes: HOLD_MINUTES, live_keys_accepted: false };
   }
 
-  return Object.freeze({
-    enabled,
+  return {
+    get enabled() { return enabled; },
     testMode: true,
+    reconfigure,
     activeHoldCount,
     availableCapacity,
     configuration,
@@ -397,7 +410,7 @@ function createStripeSandbox(options = {}) {
     handleWebhook,
     processWebhookEvent,
     refundPaymentForTicket
-  });
+  };
 }
 
 module.exports = {
