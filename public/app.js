@@ -32,6 +32,8 @@ let currentNotifications=[];
 let currentTimeLineInterval=null;
 let calendarAutoRefreshBusy=false;
 let jobDetailsRequestSequence=0;
+let jobDraftState=null;
+let activeModalCancelHandler=null;
 let contactsRenderTimer=null;
 let pianosRenderTimer=null;
 let contactsRenderData={data:[],pianos:[]};
@@ -2294,7 +2296,15 @@ ${workerSelectOptions(source?.assigned_user_id,source?.assigned_to)}
    if(matchedPiano) b.piano_id=matchedPiano.id;
    if(!matchedClient){
      const create=await appConfirm(`${bi("Client not found","Ügyfél nem található")}: ${b.client_name}\n${bi("Create this client now? Your job data will be preserved.","Létrehozod most az ügyfelet? A munka adatai megmaradnak.")}`,{confirmText:bi("Create client","Ügyfél létrehozása")});
-     if(create){const savedDraft={...b};openForm("contacts",null,{prefill:{name:b.client_name,phone:b.client_phone,address:b.service_address},onSaved:client=>openJob(savedDraft.start_time,null,{...savedDraft,client_id:client.id,client_name:client.name,client_phone:client.phone||savedDraft.client_phone,service_address:client.address||savedDraft.service_address})});}
+     if(create){
+       jobDraftState={...b};
+       const reopenDraft=(overrides={})=>{const saved={...(jobDraftState||b),...overrides};jobDraftState=null;return openJob(saved.start_time,null,saved);};
+       openForm("contacts",null,{
+         prefill:{name:b.client_name,phone:b.client_phone,address:b.service_address},
+         onSaved:client=>reopenDraft({client_id:client.id,client_name:client.name,client_phone:client.phone||b.client_phone,service_address:client.address||b.service_address}),
+         onCancelled:()=>reopenDraft()
+       });
+     }
      return;
    }
    if(!matchedPiano){
@@ -2958,14 +2968,14 @@ async function commitPianoImport(){
 }
 function renderPianoImportCompleted(result){const box=document.getElementById('pianoImportResult');if(!box)return;box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Piano import completed','A zongoraimport befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported pianos','Importált zongorák')}</span><strong>${Number(result.importedPianos||0)}</strong></div><div class="import-stat"><span>${bi('Clients updated as owners','Owner státuszra frissített ügyfelek')}</span><strong>${Number(result.updatedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Unidentified owner','Ismeretlen tulajdonos')}</span><strong>${Number(result.unidentifiedOwnerPianos||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedAlreadyImported||0)+Number(result.skippedPossibleDuplicates||0)}</strong></div><div class="import-stat"><span>${bi('Client not found','Ügyfél nem található')}</span><strong>${Number(result.clientNotFound||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Invalid/failed rows','Hibás sorok')}</span><strong>${Number(result.invalidRows||0)+Number(result.failedRows||0)}</strong></div></div><div class="actions"><button type="button" onclick="closeModal();render('pianos')">${bi('View pianos','Zongorák megtekintése')}</button></div></div>`;}
 
-function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
+function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};activeModalCancelHandler=typeof options.onCancelled==="function"?options.onCancelled:null;$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);const pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";$("#form").innerHTML=`<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div><div id="contactPianoSection"></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
  if(key==="pianos") setupPianoFormBehavior(row);
  applyLanguageToDOM(document.getElementById("modal"));
  $("#form").onsubmit=async e=>{e.preventDefault();let body=Object.fromEntries(new FormData(e.target));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}try{let saved;
 if(row) saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)}); else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});
 if(key==="contacts"){const clientId=(row&&row.id)||saved.id; const allPianoChecks=[...document.querySelectorAll('input[name="client_piano_ids"]')]; const ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value); if(clientId && allPianoChecks.length) await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}
-closeModal();if(typeof options.onSaved==="function") await options.onSaved(saved); else render(key)}catch(err){showError(err)}}}
+activeModalCancelHandler=null;closeModal();if(typeof options.onSaved==="function") await options.onSaved(saved); else render(key)}catch(err){showError(err)}}}
 function field(f,val=""){let[name,label,type,opts]=f;const cls=`field field-${name} ${type==="textarea"?"full":""}`;if(type==="textarea")return `<div class="${cls}" data-field="${name}"><label>${label}</label><textarea name="${name}">${val||""}</textarea></div>`;if(type==="select")return `<div class="${cls}" data-field="${name}"><label>${label}</label><select name="${name}" onchange="if(typeof updateContactConditionalUI==='function')updateContactConditionalUI()">${opts.map(o=>{const value=Array.isArray(o)?o[0]:o;const text=Array.isArray(o)?o[1]:o;return `<option value="${value}" ${String(value)===String(val??"")?"selected":""}>${text}</option>`}).join("")}</select></div>`;return `<div class="${cls}" data-field="${name}"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${val??""}"></div>`}
 
 function updateContactConditionalUI(){
@@ -3025,7 +3035,7 @@ async function addInlinePianoToClient(clientId){
  }catch(err){showError(err)}
 }
 
-function closeModal(){stopEventDetailsAttendanceLiveSync?.();stopDigitalAttendanceLiveSync?.();digitalAttendanceSelectedEventId='';$("#modal").classList.remove("digital-attendance-modal-shell");$("#modal").classList.add("hidden")}
+function closeModal(){const onCancelled=activeModalCancelHandler;activeModalCancelHandler=null;stopEventDetailsAttendanceLiveSync?.();stopDigitalAttendanceLiveSync?.();digitalAttendanceSelectedEventId='';$("#modal").classList.remove("digital-attendance-modal-shell");$("#modal").classList.add("hidden");if(typeof onCancelled==="function")setTimeout(()=>onCancelled(),0)}
 function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){appAlert(bi("No data","Nincs adat"),"info");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
 const financialCategoryOptions={
  INCOME:[
