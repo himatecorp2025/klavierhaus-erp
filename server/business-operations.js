@@ -49,6 +49,26 @@ function clean(value, max = 5000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
 }
 
+function parseFinancialNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+  let raw = String(value ?? "").trim().replace(/\s+/g, "");
+  if (!raw) return NaN;
+  const comma = raw.lastIndexOf(",");
+  const dot = raw.lastIndexOf(".");
+  if (comma >= 0 && dot >= 0) {
+    if (comma > dot) raw = raw.replace(/\./g, "").replace(",", ".");
+    else raw = raw.replace(/,/g, "");
+  } else if (comma >= 0) raw = raw.replace(",", ".");
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function roundFinancial(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.round((parsed + Number.EPSILON) * 100) / 100;
+}
+
 function normalizeEmail(value) { return clean(value, 320).toLowerCase(); }
 function validEmail(value) { return EMAIL_PATTERN.test(normalizeEmail(value)); }
 function newId(prefix) { return `${prefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`; }
@@ -458,7 +478,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
 }
 
 function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK" }) {
-  function money(value) { const n = Number(value || 0); return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; }
+  function money(value) { const n = parseFinancialNumber(value); return Number.isFinite(n) ? roundFinancial(n) : 0; }
   function paymentMethod(value) { return normalizePaymentMethod(value); }
   function nextNumber(direction, issueDate) {
     const year = String(issueDate || new Date().toISOString().slice(0, 10)).slice(0, 4);
@@ -539,19 +559,31 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
   function createJobInvoices({ job, actor = {}, now = new Date().toISOString(), entries = [] }) {
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
-    const method = entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null;
+    const method = paymentMethod(entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null);
     const estimated = money(job.planned_amount || entries.find((entry) => entry.mainType !== "EXPENSE")?.amount || 0);
+    const dailyRateAmount = Number(job.daily_rate_enabled || 0) === 1 ? money(job.daily_rate_allocated_amount) : 0;
+    if ((estimated > 0 || dailyRateAmount > 0) && !method) {
+      const problem = new Error("PAYMENT_METHOD_REQUIRED");
+      problem.status = 400;
+      throw problem;
+    }
     const created = [];
     if (estimated > 0) created.push(createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: job.client_id || null, sourceType: "job", sourceId: job.id, summary: `Job completed: ${job.title || job.job_key || job.id}`, taxRate: 0, paymentMethod: method, status: "issued", items: [{ item_description: job.title || "Completed service", quantity: 1, unit_price: estimated, line_type: "fee" }] }));
-    if (Number(job.daily_rate_enabled || 0) === 1 && money(job.daily_rate_allocated_amount) > 0) {
+    if (dailyRateAmount > 0) {
       const partner = ensureContractorPartner(job);
-      created.push(createInvoice({ direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "job", sourceId: job.id, summary: `Daily rate: ${job.assigned_to || job.assigned_user_id || "Contractor"}`, taxRate: partner?.default_tax_rate || 0, status: "issued", items: [{ item_description: `Daily rate — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: money(job.daily_rate_allocated_amount), line_type: "fee" }] }));
+      created.push(createInvoice({ direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "job", sourceId: job.id, summary: `Daily rate: ${job.assigned_to || job.assigned_user_id || "Contractor"}`, taxRate: partner?.default_tax_rate || 0, paymentMethod: method, status: "issued", items: [{ item_description: `Daily rate — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: dailyRateAmount, line_type: "fee" }] }));
     }
     return created;
   }
-  function createWorkflowInvoice({ workflow, materials = [], lines = [], actor = {}, now = new Date().toISOString() }) {
+  function createWorkflowInvoice({ workflow, materials = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null }) {
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
+    const method = paymentMethod(requestedPaymentMethod);
+    if (!method) {
+      const problem = new Error("PAYMENT_METHOD_REQUIRED");
+      problem.status = 400;
+      throw problem;
+    }
     const items = [];
     for (const material of materials) {
       const qty = Math.max(0, Number(material.consumed_quantity || 0));
@@ -562,14 +594,14 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       const amount = Math.max(0, money(line.amount));
       if (amount > 0) items.push({ item_description: line.title || line.description || "Workshop fee", quantity: 1, unit_price: amount, line_type: "fee" });
     }
-    const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, status: "issued", items });
+    const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "issued", items });
     for (const material of materials) {
       const qty = Math.max(0, Number(material.consumed_quantity || 0));
       const amount = money(qty * Number(material.unit_cost || 0));
       const sourceId = `WORKFLOW_INVOICE_MATERIAL:${material.id}`;
       if (amount > 0 && !db.prepare("SELECT 1 FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").get(sourceId)) {
         db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
-          VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME','',?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop material charge: ${material.item_name || "Material"}`, workflow.title || "", amount, "ACCOUNTS_RECEIVABLE", workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_MATERIAL", sourceId, actor.name || "System");
+          VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME',?,?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop material charge: ${material.item_name || "Material"}`, workflow.title || "", amount, method, balanceAccountFromPaymentMethod(method), workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_MATERIAL", sourceId, actor.name || "System");
       }
     }
     return invoice;
@@ -645,9 +677,12 @@ function registerBusinessOperationsRoutes(options) {
       try {
         const direction = clean(req.body?.direction, 20);
         if (!["receivable", "payable"].includes(direction)) return res.status(400).json({ error: "INVALID_INVOICE_DIRECTION" });
-        const counterpartyType = clean(req.body?.counterparty_type, 20);
-        const counterpartyId = clean(req.body?.counterparty_id, 160);
+        const explicitPartnerId = clean(req.body?.partner_id, 160);
+        const explicitClientId = clean(req.body?.client_id, 160);
+        const counterpartyType = clean(req.body?.counterparty_type, 20) || (explicitPartnerId ? "partner" : explicitClientId ? "client" : "");
+        const counterpartyId = clean(req.body?.counterparty_id, 160) || (counterpartyType === "partner" ? explicitPartnerId : explicitClientId);
         if (!counterpartyId || !["partner", "client"].includes(counterpartyType)) return res.status(400).json({ error: "INVOICE_COUNTERPARTY_REQUIRED" });
+        if ((counterpartyType === "partner" && explicitClientId) || (counterpartyType === "client" && explicitPartnerId)) return res.status(400).json({ error: "INVOICE_COUNTERPARTY_CONFLICT" });
         if (direction === "payable" && counterpartyType !== "partner") return res.status(400).json({ error: "PAYABLE_REQUIRES_PARTNER" });
         const partner = counterpartyType === "partner" ? db.prepare("SELECT * FROM partners WHERE id=? AND status='active'").get(counterpartyId) : null;
         const client = counterpartyType === "client" ? db.prepare("SELECT * FROM contacts WHERE id=?").get(counterpartyId) : null;
@@ -664,9 +699,11 @@ function registerBusinessOperationsRoutes(options) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: "INVALID_INVOICE_DATE" });
         if (financialStatus === "pending" && dueDate < issueDate) return res.status(400).json({ error: "DUE_DATE_BEFORE_ISSUE_DATE" });
         const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
-        const items = rawItems.map((item) => ({ item_description: clean(item?.item_description || item?.description, 1000), quantity: Number(item?.quantity), unit_price: Number(item?.unit_price), line_type: "custom" }));
-        if (!items.length || items.some((item) => !item.item_description || !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unit_price) || item.unit_price < 0)) return res.status(400).json({ error: "INVALID_INVOICE_ITEMS" });
-        const requestedRate = req.body?.tax_rate === undefined || req.body?.tax_rate === null || req.body?.tax_rate === "" ? Number(partner?.default_tax_rate || 0) : Number(req.body.tax_rate);
+        const items = rawItems.map((item) => ({ item_description: clean(item?.item_description || item?.description, 1000), quantity: parseFinancialNumber(item?.quantity), unit_price: parseFinancialNumber(item?.unit_price), line_type: "custom" }));
+        if (!items.length || items.some((item) => !item.item_description || !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unit_price) || item.unit_price < 0)) return res.status(400).json({ error: "INVALID_INVOICE_ITEMS" });
+        const subtotal = roundFinancial(items.reduce((sum, item) => sum + roundFinancial(item.quantity * item.unit_price), 0));
+        if (!(subtotal > 0)) return res.status(400).json({ error: "INVOICE_TOTAL_REQUIRED" });
+        const requestedRate = req.body?.tax_rate === undefined || req.body?.tax_rate === null || req.body?.tax_rate === "" ? parseFinancialNumber(partner?.default_tax_rate || 0) : parseFinancialNumber(req.body.tax_rate);
         if (!Number.isFinite(requestedRate) || requestedRate < 0) return res.status(400).json({ error: "INVALID_TAX_RATE" });
         const created = db.transaction(() => {
           const invoice = invoiceEngine.createInvoice({
@@ -739,7 +776,7 @@ function registerBusinessOperationsRoutes(options) {
     });
     app.post("/api/partners", auth, admin, (req, res) => {
       const companyName = clean(req.body?.company_name,300); if (!companyName) return res.status(400).json({error:"PARTNER_COMPANY_NAME_REQUIRED"});
-      const id = newId("PTR"), rate = Math.max(0,Number(req.body?.default_tax_rate||0));
+      const id = newId("PTR"), parsedRate = parseFinancialNumber(req.body?.default_tax_rate ?? 0); if (!Number.isFinite(parsedRate) || parsedRate < 0) return res.status(400).json({error:"INVALID_TAX_RATE"}); const rate = roundFinancial(parsedRate);
       db.prepare(`INSERT INTO partners(id,company_name,tax_id,billing_address,contact_person,contact_email,contact_phone,default_tax_rate,status) VALUES(?,?,?,?,?,?,?,?,?)`).run(id,companyName,clean(req.body?.tax_id,120),clean(req.body?.billing_address,1000),clean(req.body?.contact_person,300),normalizeEmail(req.body?.contact_email),clean(req.body?.contact_phone,120),rate,req.body?.status==='inactive'?'inactive':'active');
       for(const userId of Array.isArray(req.body?.user_ids)?req.body.user_ids:[]) if(db.prepare("SELECT 1 FROM users WHERE id=?").get(userId)) db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,NULL)").run(newId("PC"),id,userId);
       const after=db.prepare("SELECT * FROM partners WHERE id=?").get(id); audit(req,"CREATE","partners",id,null,after,1,"Partner created","FINANCIAL"); res.status(201).json(after);
@@ -747,7 +784,7 @@ function registerBusinessOperationsRoutes(options) {
     app.patch("/api/partners/:id", auth, admin, (req, res) => {
       const before=db.prepare("SELECT * FROM partners WHERE id=?").get(req.params.id); if(!before)return res.status(404).json({error:"PARTNER_NOT_FOUND"});
       const next={...before}; for(const key of ["company_name","tax_id","billing_address","contact_person","contact_email","contact_phone","status"]) if(Object.prototype.hasOwnProperty.call(req.body||{},key)) next[key]=key==='contact_email'?normalizeEmail(req.body[key]):clean(req.body[key],1000);
-      if(Object.prototype.hasOwnProperty.call(req.body||{},"default_tax_rate")) next.default_tax_rate=Math.max(0,Number(req.body.default_tax_rate||0));
+      if(Object.prototype.hasOwnProperty.call(req.body||{},"default_tax_rate")){const parsedRate=parseFinancialNumber(req.body.default_tax_rate);if(!Number.isFinite(parsedRate)||parsedRate<0)return res.status(400).json({error:"INVALID_TAX_RATE"});next.default_tax_rate=roundFinancial(parsedRate);}
       if(!next.company_name)return res.status(400).json({error:"PARTNER_COMPANY_NAME_REQUIRED"}); if(!["active","inactive"].includes(next.status))next.status="active";
       db.prepare(`UPDATE partners SET company_name=?,tax_id=?,billing_address=?,contact_person=?,contact_email=?,contact_phone=?,default_tax_rate=?,status=? WHERE id=?`).run(next.company_name,next.tax_id,next.billing_address,next.contact_person,next.contact_email,next.contact_phone,next.default_tax_rate,next.status,before.id);
       if(Array.isArray(req.body?.user_ids)){db.prepare("DELETE FROM partner_contractors WHERE partner_id=?").run(before.id); for(const userId of req.body.user_ids) if(db.prepare("SELECT 1 FROM users WHERE id=?").get(userId)) db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,NULL)").run(newId("PC"),before.id,userId);}
@@ -1005,8 +1042,8 @@ function registerBusinessOperationsRoutes(options) {
     if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
     if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
     if (ticket.event_status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
-    if (ticket.ticket_variant !== "ON_SITE") return res.status(400).json({ error: "ONLY_ON_SITE_TICKETS_CAN_BE_PAID_HERE" });
-    if (Number(ticket.price_cents || 0) <= 0) return res.status(400).json({ error: "ON_SITE_PRICE_REQUIRED" });
+    if (!["ON_SITE", "PUBLIC_PAID"].includes(ticket.ticket_variant)) return res.status(400).json({ error: "TICKET_VARIANT_NOT_PAYABLE_HERE" });
+    if (Number(ticket.price_cents || 0) <= 0) return res.status(400).json({ error: "TICKET_PRICE_REQUIRED" });
     try {
       const paymentMethod = normalizePaymentMethod(req.body?.payment_method || ticket.payment_method || "Cash", { allowEmpty: false });
       if (!paymentMethod) return res.status(400).json({ error: "INVALID_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
@@ -1019,10 +1056,10 @@ function registerBusinessOperationsRoutes(options) {
       const invoice = documentService.invoicePdfForTicket(paid.id);
       let email = { status: "NOT_REQUESTED" };
       if (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1") {
-        email = await documentService.sendTicketDocuments({ eventId: paid.event_id, ticketIds: [paid.id], deliveryType: "EVENT_ON_SITE_TICKET" });
+        email = await documentService.sendTicketDocuments({ eventId: paid.event_id, ticketIds: [paid.id], deliveryType: ticket.ticket_variant === "ON_SITE" ? "EVENT_ON_SITE_TICKET" : "EVENT_PUBLIC_PAID_TICKET" });
       }
       const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(paid.id);
-      audit(req, "MARK_ON_SITE_TICKET_PAID", "event_tickets", paid.id, ticket, after, 1, "On-site reservation paid and finalized");
+      audit(req, "MARK_EVENT_TICKET_PAID", "event_tickets", paid.id, ticket, after, 1, `${ticket.ticket_variant} ticket paid and finalized`);
       res.json({ ok: true, ticket: after, documents, invoice: { invoice_number: invoice.invoice_number, stored_path: invoice.stored_path }, email });
     } catch (error) { sendError(res, error); }
   });
