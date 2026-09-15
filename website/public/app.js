@@ -620,29 +620,13 @@ function newYorkHour(date = new Date()) {
   return Number(parts.find((part) => part.type === "hour")?.value || 0) % 24;
 }
 function solarTheme(date = new Date()) { const hour = newYorkHour(date); return hour >= 7 && hour < 19 ? "light" : "dark"; }
-function themeIconSvg(theme) {
-  if (theme === "light") {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.2 15.2A8.3 8.3 0 0 1 8.8 3.8a8.4 8.4 0 1 0 11.4 11.4Z"/></svg>`;
-  }
-  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.6"/><path d="M12 2.2v2.1M12 19.7v2.1M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M2.2 12h2.1M19.7 12h2.1M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5"/></svg>`;
-}
 function applyPublicTheme(theme) {
   const value = theme === "light" ? "light" : "dark";
   const root = document.documentElement;
   root.dataset.theme = value;
-  root.style.removeProperty("--black");
-  root.style.removeProperty("--ivory");
-  root.style.removeProperty("--ivory-soft");
-  root.style.removeProperty("--ivory-muted");
-  document.querySelectorAll("[data-theme-icon]").forEach((icon) => {
-    icon.classList.add("theme-toggle__icon");
-    icon.innerHTML = themeIconSvg(value);
-  });
-  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    const target = value === "light" ? "dark" : "light";
-    button.setAttribute("aria-label", target === "dark" ? "Switch to dark theme" : "Switch to light theme");
-    button.setAttribute("data-current-theme", value);
-  });
+  if (value === "light") { root.style.setProperty("--black", "#F9F8F5"); root.style.setProperty("--ivory", "#1A1A1A"); root.style.setProperty("--ivory-soft", "#2D3139"); root.style.setProperty("--ivory-muted", "#666158"); }
+  else { const d=publishedDesignSettings||{}; root.style.setProperty("--black", d.black||"#0E1117"); root.style.setProperty("--ivory", d.ivory||"#F2EFE8"); root.style.setProperty("--ivory-soft", d.cream||"#E8E1D5"); root.style.setProperty("--ivory-muted", d.muted||"#AAA49A"); }
+  document.querySelectorAll("[data-theme-icon]").forEach((icon) => { icon.textContent = value === "light" ? "☾" : "☀"; });
 }
 function initializeSolarTheme() {
   const stored = localStorage.getItem(klavierhausThemePreferenceKey);
