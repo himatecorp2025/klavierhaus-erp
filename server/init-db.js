@@ -183,7 +183,8 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  return usersSql.includes("'VIEWER'") || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
+  const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal"));
+  return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -595,6 +596,88 @@ function purgeLegacyRoundOneEvents() {
   }
 }
 
+function canonicalPaymentMethodSql(columnName) {
+  return `CASE
+    WHEN ${columnName} IS NULL OR trim(${columnName})='' THEN NULL
+    WHEN upper(trim(${columnName})) IN ('CREDIT CARD','CARD','STRIPE_TEST','STRIPE') THEN 'Credit Card'
+    WHEN upper(trim(${columnName})) IN ('BANK TRANSFER / ACH','BANK TRANSFER','ACH','WIRE','WIRE TRANSFER','ELECTRONIC','ELECTRONIC TRANSFER','DIRECT DEBIT') THEN 'Bank Transfer / ACH'
+    WHEN upper(trim(${columnName}))='ZELLE' THEN 'Zelle'
+    WHEN upper(trim(${columnName})) IN ('CHECK','CHEQUE') THEN 'Check'
+    WHEN upper(trim(${columnName})) IN ('PAYMENT LINK','PAYMENT_LINK') THEN 'Payment Link'
+    WHEN upper(trim(${columnName}))='PAYPAL' THEN 'PayPal'
+    WHEN upper(trim(${columnName})) IN ('CASH','ON_SITE','ON SITE') THEN 'Cash'
+    ELSE NULL
+  END`;
+}
+
+function normalizePaymentMethodColumns() {
+  for (const tableName of ['jobs','job_logs','knowledge_base','journal_entries','financial_items','event_tickets']) {
+    if (!tableExists(tableName) || !tableColumns(tableName).has('payment_method')) continue;
+    db.exec(`UPDATE ${tableName} SET payment_method=${canonicalPaymentMethodSql('payment_method')} WHERE payment_method IS NOT NULL AND trim(payment_method)<>''`);
+  }
+}
+
+function migrateInvoicePaymentStandards() {
+  if (!tableExists('invoices')) return;
+  const columns = tableColumns('invoices');
+  const sql = tableSql('invoices');
+  const constraintReady = sql.includes('Payment Link') && sql.includes('PayPal');
+  const columnsReady = columns.has('payment_link_url') && columns.has('notes');
+  if (constraintReady && columnsReady) {
+    normalizePaymentMethodColumns();
+    return;
+  }
+  log('Migrating invoices to the seven-method payment standard');
+  const paymentLinkExpr = columns.has('payment_link_url') ? 'payment_link_url' : 'NULL';
+  const notesExpr = columns.has('notes') ? 'notes' : 'NULL';
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`DROP TABLE IF EXISTS invoices_payment_v2;
+        CREATE TABLE invoices_payment_v2 (
+          id TEXT PRIMARY KEY,
+          direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')),
+          invoice_number TEXT NOT NULL UNIQUE,
+          issue_date TEXT NOT NULL,
+          due_date TEXT,
+          partner_id TEXT,
+          client_id TEXT,
+          source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
+          source_id TEXT,
+          summary TEXT,
+          subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0),
+          tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0),
+          tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
+          total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
+          currency TEXT NOT NULL DEFAULT 'USD',
+          payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+          payment_link_url TEXT,
+          notes TEXT,
+          status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+          voided_at TEXT,
+          voided_by TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
+          FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
+        )`);
+      db.exec(`INSERT INTO invoices_payment_v2(
+        id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,voided_at,voided_by,created_at
+      ) SELECT id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,
+        ${canonicalPaymentMethodSql('payment_method')},${paymentLinkExpr},${notesExpr},status,voided_at,voided_by,created_at FROM invoices`);
+      db.exec('DROP TABLE invoices; ALTER TABLE invoices_payment_v2 RENAME TO invoices;');
+    })();
+    ensureIndex('idx_invoices_direction_issue', 'CREATE INDEX IF NOT EXISTS idx_invoices_direction_issue ON invoices(direction,issue_date DESC)');
+    ensureIndex('idx_invoices_source', 'CREATE INDEX IF NOT EXISTS idx_invoices_source ON invoices(source_type,source_id)');
+    ensureIndex('idx_invoices_status_due', 'CREATE INDEX IF NOT EXISTS idx_invoices_status_due ON invoices(status,due_date)');
+    ensureIndex('idx_invoices_source_direction_unique', "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_source_direction_unique ON invoices(direction,source_type,source_id) WHERE source_id IS NOT NULL AND trim(source_id)<>''");
+    normalizePaymentMethodColumns();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+  const fkProblems = db.prepare('PRAGMA foreign_key_check').all();
+  if (fkProblems.length) throw new Error(`Invoice payment migration produced ${fkProblems.length} foreign-key violation(s)`);
+}
+
 function runMigrations() {
   // Startup migrations must never delete existing business or sample records.
   // Historical content is preserved; removal is an explicit administrator action.
@@ -704,7 +787,8 @@ function runMigrations() {
       issue_date TEXT NOT NULL, due_date TEXT, partner_id TEXT, client_id TEXT, source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
       source_id TEXT, summary TEXT, subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0), tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0),
       tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0), total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0), currency TEXT NOT NULL DEFAULT 'USD',
-      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Cash')),
+      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+      payment_link_url TEXT, notes TEXT,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), voided_at TEXT, voided_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL, FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
     );
@@ -713,6 +797,8 @@ function runMigrations() {
       unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0), total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
       line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     )`);
+    ensureColumn("invoices", "payment_link_url", "TEXT");
+    ensureColumn("invoices", "notes", "TEXT");
     ensureIndex("idx_partners_status_name", "CREATE INDEX IF NOT EXISTS idx_partners_status_name ON partners(status,company_name)");
     ensureIndex("idx_partner_contractors_partner", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_partner ON partner_contractors(partner_id)");
     ensureIndex("idx_partner_contractors_user", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id)");
@@ -851,6 +937,7 @@ function runMigrations() {
   });
 
   migrateColumns();
+  migrateInvoicePaymentStandards();
   migrateEventTicketData();
   migrateWebsiteContactLeadStatuses();
   migrateCustomerConversationSchema();
