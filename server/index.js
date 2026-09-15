@@ -2389,12 +2389,13 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
   const workflowRows=db.prepare(`SELECT wc.id AS workflow_closed_id,wc.workflow_id,w.id AS log_id,w.workflow_key AS job_key,w.title,
       c.name AS client_name,COALESCE(p.display_name,TRIM(COALESCE(p.brand,'')||' '||COALESCE(p.model,''))) AS piano_name,
       'Workshop Workflow' AS job_type,wf.name AS responsible_at_close,u.name AS closed_by,wc.closed_at AS closed_at,
-      'Workflow' AS close_type,wc.net_total AS billed_amount,NULL AS payment_method,
-      NULL AS invoice_number,NULL AS document_path,wc.closure_reason AS close_description,NULL AS next_job_id,NULL AS next_job_key,NULL AS next_job_title
+      'Workflow' AS close_type,wc.net_total AS billed_amount,wi.payment_method AS payment_method,
+      wi.invoice_number AS invoice_number,NULL AS document_path,wc.closure_reason AS close_description,NULL AS next_job_id,NULL AS next_job_key,NULL AS next_job_title
     FROM workflow_closed_jobs wc JOIN workshop_workflows w ON w.id=wc.workflow_id
     JOIN contacts c ON c.id=wc.client_id JOIN pianos p ON p.id=wc.piano_id
     LEFT JOIN users u ON u.id=wc.closed_by_user_id
     LEFT JOIN users wf ON wf.id=w.transport_responsible_user_id
+    LEFT JOIN invoices wi ON wi.source_type='workflow' AND wi.source_id=w.id AND wi.direction='receivable' AND wi.status<>'void'
     ORDER BY wc.closed_at DESC`).all();
   res.json([...rows,...workflowRows].sort((a,b)=>String(b.closed_at||'').localeCompare(String(a.closed_at||''))));
 });
