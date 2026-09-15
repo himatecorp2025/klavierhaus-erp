@@ -40,6 +40,7 @@ try{webpush=require("web-push");}catch(error){console.warn("web-push unavailable
 require("dotenv").config();
 
 const app = express();
+app.set("trust proxy", 1);
 const OPERATIONAL_CONTRACT_KEYS = Object.freeze(["helpdesk", "notification_audit"]);
 const PORT = process.env.PORT || 3030;
 const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
@@ -655,8 +656,9 @@ function auth(req,res,next){
   if(!token) return res.status(401).json({error:"Missing token"});
   try{
     const tokenUser=jwt.verify(token, JWT_SECRET);
-    const currentUser=db.prepare("SELECT id,name,email,contact_email,role,status,google_calendar_email,hidden_user,is_superadmin FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
+    const currentUser=db.prepare("SELECT id,name,email,contact_email,role,status,google_calendar_email,hidden_user,is_superadmin,session_version FROM users WHERE id=? AND status='Active'").get(tokenUser.id);
     if(!currentUser) return res.status(401).json({error:"User no longer exists or is inactive"});
+    if(Number(tokenUser.session_version||0)!==Number(currentUser.session_version||0)) return res.status(401).json({error:"SESSION_REVOKED"});
     req.user={...tokenUser,...currentUser,role:Number(currentUser.is_superadmin||0)===1?'SUPERADMIN':currentUser.role};
     next();
   } catch(e){
@@ -889,7 +891,8 @@ function loginUserPayload(row){
     contact_email:row.contact_email||'',
     google_calendar_email:row.google_calendar_email||'',
     role:isSuper?'SUPERADMIN':row.role,
-    is_superadmin:isSuper?1:0
+    is_superadmin:isSuper?1:0,
+    session_version:Number(row.session_version||0)
   };
 }
 function createAuthenticatedSession(row){
@@ -915,22 +918,42 @@ function activationResendCooldown(row){
   return Number.isFinite(elapsed)&&elapsed<cooldownMs?Math.ceil((cooldownMs-elapsed)/1000):0;
 }
 
-app.post("/api/login",(req,res)=>{
+const LOGIN_RATE_WINDOW_MS=15*60*1000;
+const LOGIN_IP_LIMIT=20;
+const LOGIN_ACCOUNT_LIMIT=7;
+const loginRateBuckets=new Map();
+const LOGIN_DUMMY_HASH=bcrypt.hashSync("klavierhaus-invalid-login-placeholder",10);
+function loginRateKey(req,email){return {ip:`ip:${String(req.ip||req.socket?.remoteAddress||"unknown")}`,account:`account:${normalizeUserEmail(email)||"unknown"}`};}
+function loginRateState(key,limit,now=Date.now()){
+  const bucket=loginRateBuckets.get(key);
+  if(!bucket||now-bucket.windowStarted>=LOGIN_RATE_WINDOW_MS){const fresh={windowStarted:now,count:0};loginRateBuckets.set(key,fresh);return {blocked:false,bucket:fresh,retryAfter:0};}
+  const retryAfter=Math.max(1,Math.ceil((LOGIN_RATE_WINDOW_MS-(now-bucket.windowStarted))/1000));
+  return {blocked:bucket.count>=limit,bucket,retryAfter};
+}
+function consumeLoginFailure(req,email){const now=Date.now(),keys=loginRateKey(req,email);for(const [key,limit] of [[keys.ip,LOGIN_IP_LIMIT],[keys.account,LOGIN_ACCOUNT_LIMIT]]){const state=loginRateState(key,limit,now);state.bucket.count+=1;loginRateBuckets.set(key,state.bucket);}}
+function loginBlocked(req,email){const now=Date.now(),keys=loginRateKey(req,email),ip=loginRateState(keys.ip,LOGIN_IP_LIMIT,now),account=loginRateState(keys.account,LOGIN_ACCOUNT_LIMIT,now);const blocked=ip.blocked||account.blocked;return {blocked,retryAfter:Math.max(ip.retryAfter,account.retryAfter)};}
+function clearLoginAccountBucket(email){loginRateBuckets.delete(`account:${normalizeUserEmail(email)||"unknown"}`);}
+setInterval(()=>{const cutoff=Date.now()-LOGIN_RATE_WINDOW_MS*2;for(const [key,value] of loginRateBuckets){if(value.windowStarted<cutoff)loginRateBuckets.delete(key);}},LOGIN_RATE_WINDOW_MS).unref();
+function bcryptCompareAsync(password,hash){return new Promise(resolve=>bcrypt.compare(password,hash,(error,valid)=>resolve(!error&&Boolean(valid))));}
+
+app.post("/api/login",async(req,res)=>{
   const normalizedEmail=normalizeUserEmail(req.body?.email);
   const password=String(req.body?.password||'');
   if(!normalizedEmail || !password) return res.status(400).json({error:"REQUIRED_FIELDS"});
 
+  const rate=loginBlocked(req,normalizedEmail);
+  if(rate.blocked){res.setHeader("Retry-After",String(rate.retryAfter));return res.status(429).json({error:"LOGIN_TEMPORARILY_UNAVAILABLE"});}
   const matches=db.prepare("SELECT * FROM users WHERE lower(trim(email))=? ORDER BY created_at,id").all(normalizedEmail);
   const activeMatches=matches.filter(row=>String(row.status||'').trim().toLowerCase()==='active');
-  if(matches.length && !activeMatches.length) return res.status(403).json({error:"ACCOUNT_INACTIVE"});
-  if(activeMatches.length>1) return res.status(409).json({error:"USER_EMAIL_CONFLICT"});
-  const u=activeMatches[0]||null;
-  let valid=false;
-  try{valid=!!u && bcrypt.compareSync(password,u.password_hash);}catch(_error){valid=false;}
-  if(!valid){
+  const u=activeMatches.length===1?activeMatches[0]:null;
+  const hash=u?.password_hash||LOGIN_DUMMY_HASH;
+  const valid=await bcryptCompareAsync(password,hash);
+  if(!u||!valid){
+    consumeLoginFailure(req,normalizedEmail);
     if(!u || Number(u.is_superadmin||0)!==1) audit({user:u?{id:u.id,name:u.name,email:u.email,role:u.role,is_superadmin:0}:{id:'',name:'',email:normalizedEmail,role:'',is_superadmin:0}},'LOGIN_FAILED','authentication',u?.id||'',null,{email:normalizedEmail},0,'Invalid login','TECHNICAL');
     return res.status(401).json({error:"INVALID_LOGIN"});
   }
+  clearLoginAccountBucket(normalizedEmail);
   const isSuper=Number(u.is_superadmin||0)===1;
   if(!isSuper && !VISIBLE_USER_ROLES.includes(u.role)) return res.status(403).json({error:"ACCOUNT_ROLE_INVALID"});
   const activation=accountActivation.state(u.id);
@@ -972,7 +995,7 @@ app.post('/api/account-activation/resend',async(req,res)=>{
   if(delivery.status!=='ACCEPTED')return res.status(502).json({error:delivery.error||'EMAIL_DELIVERY_FAILED'});
   res.json({ok:true,activation_token:createActivationToken(activationUser),contact_email_masked:accountActivation.maskEmail(activationUser.contact_email)});
 });
-app.post("/api/logout",auth,(req,res)=>{audit(req,'LOGOUT','authentication',req.user.id,null,null,1,'User logout','TECHNICAL');res.json({ok:true});});
+app.post("/api/logout",auth,(req,res)=>{db.prepare("UPDATE users SET session_version=COALESCE(session_version,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id);audit(req,'LOGOUT','authentication',req.user.id,null,{session_revoked:true},1,'User logout and session revocation','TECHNICAL');res.json({ok:true});});
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
 
 app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
@@ -1829,7 +1852,12 @@ function refreshClientHasPiano(clientId){
   const count=db.prepare("SELECT COUNT(*) AS c FROM pianos WHERE owner_contact_id=?").get(clientId).c;
   db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(count>0?1:0,clientId);
 }
+function normalizedPianoSerial(value){return String(value||"").trim().toLowerCase();}
+function existingPianoBySerial(serial,excludeId=null){const normalized=normalizedPianoSerial(serial);if(!normalized)return null;let sql="SELECT * FROM pianos WHERE lower(trim(serial_no))=?";const args=[normalized];if(excludeId){sql+=" AND id<>?";args.push(excludeId);}sql+=" LIMIT 1";return db.prepare(sql).get(...args)||null;}
+function rejectDuplicatePianoSerial(res,serial,excludeId=null){const existing=existingPianoBySerial(serial,excludeId);if(!existing)return false;res.status(409).json({error:"PIANO_SERIAL_ALREADY_EXISTS",existing_piano_id:existing.id,serial_no:existing.serial_no});return true;}
+
 app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  if(rejectDuplicatePianoSerial(res,req.body.serial_no))return;
   const id=req.body.id || rid("P");
   const brand=req.body.brand || "";
   const model=req.body.model || "";
@@ -1854,6 +1882,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
 app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const before=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!before)return res.status(404).json({error:"Piano not found"});
+  if(req.body.serial_no!==undefined&&rejectDuplicatePianoSerial(res,req.body.serial_no,req.params.id))return;
   const candidate={...before,...req.body};
   const reference=centralPianoLookup(db,{serial:candidate.serial_no||"",brand:candidate.brand||"",model:candidate.model||"",currentYear:2026});
   if(req.body.build_year===undefined && !candidate.build_year && reference.build_year) req.body.build_year=reference.build_year;
@@ -2292,6 +2321,7 @@ app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"
 app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
+  if(rejectDuplicatePianoSerial(res,req.body.serial_no))return;
   const id=req.body.id || rid("P");
   const reference=centralPianoLookup(db,{serial:req.body.serial_no||"",brand:req.body.brand||"",model:req.body.model||"",currentYear:2026});
   const brand=req.body.brand || reference.brand || "";
