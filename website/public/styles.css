@@ -2047,8 +2047,8 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 
 
 /* UI34 — reviews move horizontally only; card height stays stable between slides */
-.review-carousel{--review-slide-height:clamp(28rem,48vw,36rem);min-height:var(--review-slide-height);overflow:hidden}
-.review-track{display:flex!important;grid-auto-flow:unset!important;grid-auto-columns:unset!important;width:100%;min-height:var(--review-slide-height);overflow:visible!important;align-items:stretch;transform:translate3d(0,0,0);transition:transform .52s cubic-bezier(.22,.61,.36,1);will-change:transform;scroll-snap-type:none!important}
+.review-carousel{--review-slide-height:clamp(28rem,48vw,36rem);min-height:var(--review-slide-height);overflow-x:hidden;overflow-y:hidden;contain:layout paint}
+.review-track{display:flex!important;grid-auto-flow:unset!important;grid-auto-columns:unset!important;width:100%;min-height:var(--review-slide-height);overflow:visible!important;align-items:stretch;transform:translateX(0);transition:transform .52s cubic-bezier(.22,.61,.36,1);will-change:transform;scroll-snap-type:none!important}
 .review-card{flex:0 0 100%;width:100%;min-height:var(--review-slide-height);align-self:stretch;scroll-snap-align:none!important}
 @media(max-width:760px){.review-carousel{--review-slide-height:clamp(32rem,125vw,42rem)}.review-card{align-content:start}}
 @media(prefers-reduced-motion:reduce){.review-track{transition:none!important}}
