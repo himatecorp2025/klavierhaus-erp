@@ -4,6 +4,7 @@ const { normalizePaymentMethod } = require("./payment-methods");
 
 const SCHEDULE_INTERVAL_MINUTES = 15;
 const JOB_TIMEZONE = "America/New_York";
+const TECHNICIAN_DAILY_BASE_RATE = 300;
 
 function clean(value, max = 4000) { return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max); }
 function localDateTimeValue(value) {
@@ -95,24 +96,51 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     return db.prepare(`SELECT * FROM employee_daily_rates WHERE user_id=? AND effective_date<=? ORDER BY effective_date DESC, created_at DESC LIMIT 1`).get(userId, dateStr) || null;
   }
 
-  function dailyRateAllocationSummary({ userId, dateStr, excludeJobId = null }) {
-    const rateRow = employeeDailyRateForDate(userId, dateStr);
-    const allocated = db.prepare(`SELECT COALESCE(SUM(daily_rate_allocated_amount),0) AS amount FROM jobs
+  function activeDailyRateJobs(userId, dateStr, excludeJobId = null) {
+    if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return [];
+    return db.prepare(`SELECT id,daily_rate_allocated_amount,created_at FROM jobs
       WHERE assigned_user_id=? AND daily_rate_date=? AND COALESCE(daily_rate_enabled,0)=1
-        AND (? IS NULL OR id<>?) AND COALESCE(status,'Open') NOT IN ('Cancelled','Failed')`).get(userId, dateStr, excludeJobId, excludeJobId)?.amount || 0;
-    const limit = normalizeMoney(rateRow?.rate || 0);
-    const used = normalizeMoney(allocated);
-    return { rate: rateRow, limit, allocated: used, available: normalizeMoney(Math.max(0, limit - used)) };
+        AND (? IS NULL OR id<>?) AND COALESCE(status,'Open') NOT IN ('Cancelled','Failed')
+      ORDER BY CASE WHEN COALESCE(daily_rate_allocated_amount,0)>0 THEN 0 ELSE 1 END, created_at, id`).all(userId, dateStr, excludeJobId, excludeJobId);
   }
 
-  function validateDailyRateAllocation({ userId, dateStr, jobId = null, enabled = false, amount = 0 }) {
-    if (!enabled) return { enabled: false, date: dateStr || null, requested: 0, limit: 0, allocated: 0, available: 0 };
-    const requested = normalizeMoney(amount);
-    if (requested <= 0) throw domainError("DAILY_RATE_ALLOCATION_REQUIRED", 400);
+  function dailyRateAllocationSummary({ userId, dateStr, excludeJobId = null }) {
+    const current = excludeJobId ? db.prepare("SELECT id,assigned_user_id,daily_rate_date,daily_rate_enabled,daily_rate_allocated_amount,status FROM jobs WHERE id=?").get(excludeJobId) : null;
+    const otherJobs = activeDailyRateJobs(userId, dateStr, excludeJobId);
+    const currentOwnsBase = Boolean(current && String(current.assigned_user_id || "") === String(userId || "") && String(current.daily_rate_date || "") === String(dateStr || "") && Number(current.daily_rate_enabled || 0) === 1 && !["Cancelled", "Failed"].includes(String(current.status || "")) && normalizeMoney(current.daily_rate_allocated_amount) > 0);
+    const alreadyActivated = otherJobs.length > 0;
+    const suggested = currentOwnsBase ? TECHNICIAN_DAILY_BASE_RATE : (alreadyActivated ? 0 : TECHNICIAN_DAILY_BASE_RATE);
+    return {
+      rate: { user_id: userId, rate: TECHNICIAN_DAILY_BASE_RATE, currency: "USD", effective_date: String(dateStr || ""), fixed_base: true },
+      limit: TECHNICIAN_DAILY_BASE_RATE,
+      allocated: alreadyActivated ? TECHNICIAN_DAILY_BASE_RATE : 0,
+      available: alreadyActivated ? 0 : TECHNICIAN_DAILY_BASE_RATE,
+      suggested_allocation: suggested,
+      current_owns_base: currentOwnsBase,
+      base_rate_already_activated: alreadyActivated && !currentOwnsBase,
+      active_job_count: otherJobs.length + (currentOwnsBase ? 1 : 0)
+    };
+  }
+
+  function rebalanceDailyRateAllocations({ userId, dateStr }) {
+    if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return { changed: 0, winner_job_id: null };
+    const rows = activeDailyRateJobs(userId, dateStr, null);
+    const winner = rows[0] || null;
+    const update = db.prepare("UPDATE jobs SET daily_rate_allocated_amount=?,daily_rate_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
+    let changed = 0;
+    for (const row of rows) {
+      const next = row.id === winner?.id ? TECHNICIAN_DAILY_BASE_RATE : 0;
+      if (Math.abs(normalizeMoney(row.daily_rate_allocated_amount) - next) > 0.0001) { update.run(next, dateStr, row.id); changed += 1; }
+    }
+    return { changed, winner_job_id: winner?.id || null, active_job_count: rows.length };
+  }
+
+  function validateDailyRateAllocation({ userId, dateStr, jobId = null, enabled = false }) {
+    if (!enabled) return { enabled: false, date: dateStr || null, requested: 0, limit: TECHNICIAN_DAILY_BASE_RATE, allocated: 0, available: TECHNICIAN_DAILY_BASE_RATE, suggested_allocation: 0 };
+    if (!userId) throw domainError("DAILY_RATE_EMPLOYEE_REQUIRED", 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) throw domainError("INVALID_DAILY_RATE_DATE", 400);
     const summary = dailyRateAllocationSummary({ userId, dateStr, excludeJobId: jobId });
-    if (!summary.rate || summary.limit <= 0) throw domainError("DAILY_RATE_NOT_CONFIGURED", 400, { user_id: userId, date: dateStr });
-    if (requested > summary.available + 0.0001) throw domainError("DAILY_RATE_LIMIT_EXCEEDED", 409, { ...summary, requested, user_id: userId, date: dateStr });
-    return { enabled: true, date: dateStr, requested, ...summary };
+    return { enabled: true, date: dateStr, requested: summary.suggested_allocation, ...summary };
   }
 
   function patchJobSchedule({ jobId, startTime, endTime, assignedUser, actor = {}, reassignmentNote = "Calendar drag/drop", findConflicts = () => [] }) {
@@ -125,16 +153,23 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     const conflicts = findConflicts(assignedUser.id, assignedUser.name, startTime, endTime, job.id) || [];
     if (conflicts.length) throw domainError("SCHEDULE_CONFLICT", 409, { conflicts });
     const targetDate = String(startTime).slice(0, 10);
-    if (Number(job.daily_rate_enabled || 0) === 1) validateDailyRateAllocation({ userId: assignedUser.id, dateStr: targetDate, jobId: job.id, enabled: true, amount: job.daily_rate_allocated_amount });
     const minutes = timeRangeMinutes(startTime, endTime);
     const changedAssignee = String(job.assigned_user_id || "") !== String(assignedUser.id);
+    const previousDate = String(job.daily_rate_date || job.start_time || "").slice(0, 10);
+    const dailyEnabled = Number(job.daily_rate_enabled || 0) === 1;
+    const bucketChanged = dailyEnabled && (changedAssignee || previousDate !== targetDate);
     const update = db.transaction(() => {
       db.prepare(`UPDATE jobs SET start_time=?,end_time=?,assigned_user_id=?,assigned_to=?,planned_minutes=?,planned_hours=?,timezone=?,daily_rate_date=CASE WHEN COALESCE(daily_rate_enabled,0)=1 THEN ? ELSE daily_rate_date END,
+        daily_rate_allocated_amount=CASE WHEN ? THEN 0 ELSE daily_rate_allocated_amount END,
         last_reassigned_by=CASE WHEN ? THEN ? ELSE last_reassigned_by END,
         last_reassigned_by_user_id=CASE WHEN ? THEN ? ELSE last_reassigned_by_user_id END,
         reassignment_note=CASE WHEN ? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(startTime, endTime, assignedUser.id, assignedUser.name, minutes, minutes / 60, JOB_TIMEZONE, targetDate,
+        .run(startTime, endTime, assignedUser.id, assignedUser.name, minutes, minutes / 60, JOB_TIMEZONE, targetDate, bucketChanged ? 1 : 0,
           changedAssignee ? 1 : 0, actor.name || "", changedAssignee ? 1 : 0, actor.id || null, changedAssignee ? 1 : 0, reassignmentNote, job.id);
+      if (dailyEnabled) {
+        if (bucketChanged && job.assigned_user_id && previousDate) rebalanceDailyRateAllocations({ userId: job.assigned_user_id, dateStr: previousDate });
+        rebalanceDailyRateAllocations({ userId: assignedUser.id, dateStr: targetDate });
+      }
       if (job.workflow_id) {
         db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(endTime, job.workflow_id);
         db.prepare("UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'").run(endTime, job.workflow_id);
@@ -192,6 +227,25 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         });
         if (dailyExpense) posted.push(dailyExpense);
       }
+      const extraCompensation = normalizeMoney(job.technician_extra_compensation);
+      if (complete && extraCompensation > 0) {
+        const extraExpense = postFinancialItemOnce({
+          itemDate: String(job.start_time || now).slice(0, 10),
+          title: `Field-service technician compensation / Kiszállási technikusi munkadíj: ${job.assigned_to || job.assigned_user_id || job.id}`,
+          description: `Job / Munka: ${job.title || job.job_key || job.id}`,
+          amount: extraCompensation,
+          mainType: "EXPENSE",
+          category: "FIELD_SERVICE_COMPENSATION",
+          paymentMethod: "",
+          jobId: job.id,
+          clientId: job.client_id,
+          pianoId: job.piano_id,
+          sourceType: "TECHNICIAN_EXTRA_COMPENSATION",
+          sourceId: `TECHNICIAN_EXTRA_COMPENSATION:${job.id}`,
+          createdBy: actor.name || "System"
+        });
+        if (extraExpense) posted.push(extraExpense);
+      }
       const primary = posted[0] || db.prepare("SELECT * FROM financial_items WHERE job_id=? ORDER BY created_at,id LIMIT 1").get(job.id) || null;
       if (complete && source !== "WORKFLOW" && invoiceEngine?.createJobInvoices) invoiceEngine.createJobInvoices({ job, actor, now, entries });
       if (complete) {
@@ -212,12 +266,13 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     return run();
   }
 
-  return { postFinancialItemOnce, postClosedJobRevenue, employeeDailyRateForDate, dailyRateAllocationSummary, validateDailyRateAllocation, patchJobSchedule, closeoutJobOrchestration };
+  return { postFinancialItemOnce, postClosedJobRevenue, employeeDailyRateForDate, dailyRateAllocationSummary, validateDailyRateAllocation, rebalanceDailyRateAllocations, patchJobSchedule, closeoutJobOrchestration };
 }
 
 module.exports = {
   SCHEDULE_INTERVAL_MINUTES,
   JOB_TIMEZONE,
+  TECHNICIAN_DAILY_BASE_RATE,
   localDateTimeValue,
   isValidTimeRange,
   isScheduleTime,
