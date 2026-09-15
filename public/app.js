@@ -9,7 +9,6 @@ let pendingAccountActivation=null;
 let currentWeekStart=startOfWeek(new Date());
 let currentView="workshop_workflow";
 let currentLang="en";
-let currentTheme="dark";
 let currentSchedulerWorker=null;
 let currentSchedulerEntryFilter="ALL";
 let currentClientStatusFilter="ALL";
@@ -103,11 +102,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",activationTitle:"Verify your account",activationDescription:"Enter the six-digit code sent to your contact email.",activationCode:"Activation code",activationVerify:"Verify and continue",activationResend:"Send a new code",activationBack:"Back to login",activationRecipient:"Code sent to",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",events:"Events",website_design:"Landing Page Design",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Search as you type...", themeDark:"Dark", themeLight:"Light", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Invoices",finance:"Finance",income_statement:"Income Statement",inventory:"Inventory",events:"Events",website_design:"Landing Page Design",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Search as you type...", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",activationTitle:"Fiók ellenőrzése",activationDescription:"Add meg a kapcsolattartási e-mail-címedre küldött hatjegyű kódot.",activationCode:"Aktiválókód",activationVerify:"Ellenőrzés és belépés",activationResend:"Új kód küldése",activationBack:"Vissza a belépéshez",activationRecipient:"A kód címzettje",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",events:"Események",website_design:"Weboldal dizájn",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Gépelés közbeni keresés...", themeDark:"Sötét", themeLight:"Világos", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Számlák",finance:"Pénzügy",income_statement:"Eredménykimutatás",inventory:"Leltár",events:"Események",website_design:"Weboldal dizájn",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Gépelés közbeni keresés...", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
 let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
@@ -208,9 +207,6 @@ function applyLanguageToDOM(root=currentLanguageRoot()){
   const logoutBtn=document.getElementById("logoutBtn"); if(logoutBtn) logoutBtn.textContent=tr("logout");
   const delBtn=document.getElementById("deleteEverythingBtn"); if(delBtn) delBtn.textContent=tr("deleteEverything");
   updateLanguageButtons();
-  updateThemeButtons();
-  const themeDark=document.getElementById("themeDarkBtn"); if(themeDark) themeDark.title=tr("themeDark");
-  const themeLight=document.getElementById("themeLightBtn"); if(themeLight) themeLight.title=tr("themeLight");
   updateCountdownDisplay();
   syncAllCustomSelects();
 }
@@ -220,14 +216,12 @@ function updateLanguageButtons(){
   if(hu) hu.classList.toggle("active",currentLang==="hu");
 }
 
-function userThemeKey(){return user?.id ? `kh_theme_${user.id}` : "kh_theme_guest";}
-function loadTheme(){currentTheme=localStorage.getItem(userThemeKey())||"dark"; if(!["dark","light"].includes(currentTheme)) currentTheme="dark"; applyTheme();}
-function setTheme(theme){currentTheme=theme==="light"?"light":"dark"; localStorage.setItem(userThemeKey(),currentTheme); applyTheme();}
-function applyTheme(){document.documentElement.setAttribute("data-theme",currentTheme); updateThemeButtons();}
-function updateThemeButtons(){
-  const dark=document.getElementById("themeDarkBtn"), light=document.getElementById("themeLightBtn");
-  if(dark) dark.classList.toggle("active",currentTheme==="dark");
-  if(light) light.classList.toggle("active",currentTheme==="light");
+function enforceDarkAppearance(){
+  document.documentElement.removeAttribute("data-theme");
+  try{
+    localStorage.removeItem("kh_theme_guest");
+    if(user?.id)localStorage.removeItem(`kh_theme_${user.id}`);
+  }catch(_error){}
 }
 
 const API_REQUEST_TIMEOUT_MS=12000;
@@ -688,11 +682,15 @@ function showLoginStep(){
  document.getElementById("loginEmail")?.focus({preventScroll:true});
 }
 function completeLoginSession(result,email=""){
- token=result.token;user=result.user;
+ applicationBootPromise=null;applicationBooting=false;
+ apiResponseCache.clear();schedulerWorkersCache=null;
+ token=String(result?.token||"");user=result?.user||null;
+ if(!token||!user?.id)return showError("INVALID_LOGIN");
  localStorage.setItem("kh_token",token);
  localStorage.setItem("kh_user",JSON.stringify(user));
  if(email)localStorage.setItem("kh_last_login_email",email);
  pendingAccountActivation=null;
+ enforceDarkAppearance();
  loadLanguage();
  void boot().catch(handleApplicationBootstrapError);
 }
@@ -1038,7 +1036,7 @@ async function boot(){
   const run=(async()=>{
    await loadBranding();
    loadLanguage();
-   loadTheme();
+   enforceDarkAppearance();
    try{await validateAuthenticatedSession();}catch(error){if(isAuthenticationError(error))return false;throw error;}
    document.getElementById("login")?.classList.add("hidden");
    showApplicationBootstrapState();
@@ -4108,7 +4106,7 @@ function openUser(row=null, selfProfile=false){
  const roleField = canFullEdit || !isEdit ? `<div class="field"><label>${bi("Role","Szerepkör")}</label><select name="role">${roleOptions.map(r=>`<option ${row?.role===r?"selected":""}>${r}</option>`).join("")}</select></div>` : "";
  const statusField = canFullEdit ? `<div class="field"><label>${bi("Status","Állapot")}</label><select name="status"><option ${row?.status==="Active"?"selected":""}>Active</option><option ${row?.status==="Inactive"?"selected":""}>Inactive</option></select></div>` : "";
  const colorField = (canFullEdit || canCreate) ? `<div class="field calendar-color-field"><label>${bi("Calendar color","Naptárszín")}</label><input name="calendar_color" type="color" value="${workerColor(row?.name||"",row?.calendar_color||"#0891B2")}" required><small class="calendar-color-help">${bi("Reserved status colors cannot be selected: orange, green, red and gray.","A lefoglalt állapotszínek nem választhatók: narancssárga, zöld, piros és szürke.")}</small></div>` : "";
- const preferenceFields=selfProfile?`<div class="field profile-preferences"><label>${bi("Language","Nyelv")}</label><select name="profile_language"><option value="en" ${currentLang==="en"?"selected":""}>American English</option><option value="hu" ${currentLang==="hu"?"selected":""}>Magyar</option></select></div><div class="field profile-preferences"><label>${bi("Appearance","Megjelenés")}</label><select name="profile_theme"><option value="dark" ${currentTheme==="dark"?"selected":""}>${bi("Dark","Sötét")}</option><option value="light" ${currentTheme==="light"?"selected":""}>${bi("Light","Világos")}</option></select></div><div class="field full profile-role-info"><label>${bi("Role","Szerepkör")}</label><input value="${htmlText(row?.role||user?.role||"")}" disabled></div>`:"";
+ const preferenceFields=selfProfile?`<div class="field profile-preferences"><label>${bi("Language","Nyelv")}</label><select name="profile_language"><option value="en" ${currentLang==="en"?"selected":""}>American English</option><option value="hu" ${currentLang==="hu"?"selected":""}>Magyar</option></select></div><div class="field full profile-role-info"><label>${bi("Role","Szerepkör")}</label><input value="${htmlText(row?.role||user?.role||"")}" disabled></div>`:"";
  const passwordRequired=isEdit?"":"required";
  const passwordHelp=isEdit?`<small>${tr("leaveEmpty")}</small>`:"";
  const passwordFields=`<div class="field user-password-field"><label for="userPassword">${isEdit?tr("newPassword"):tr("password")}</label><div class="password-field"><input id="userPassword" name="password" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPassword" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div><div class="field user-password-field"><label for="userPasswordConfirmation">${isEdit?bi("Confirm new password","Új jelszó megerősítése"):bi("Confirm password","Jelszó megerősítése")}</label><div class="password-field"><input id="userPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" ${passwordRequired}><button id="toggleUserPasswordConfirmation" class="password-toggle" type="button" aria-label="${bi("Show password","Jelszó megjelenítése")}" title="${bi("Show password","Jelszó megjelenítése")}" aria-pressed="false"></button></div>${passwordHelp}</div>`;
@@ -4121,8 +4119,7 @@ function openUser(row=null, selfProfile=false){
   try{
    let body=Object.fromEntries(new FormData(e.target));
    const selectedLanguage=body.profile_language;
-   const selectedTheme=body.profile_theme;
-   delete body.profile_language;delete body.profile_theme;
+   delete body.profile_language;
    body.email=String(body.email||"").trim().toLowerCase();
    body.contact_email=String(body.contact_email||"").trim().toLowerCase();
    if(body.password!==body.password_confirmation)return showError("PASSWORD_CONFIRMATION_MISMATCH");
@@ -4135,7 +4132,7 @@ function openUser(row=null, selfProfile=false){
    const {password_updated:_passwordUpdated,email_delivery_error:_deliveryError,activation_delivery_status:_deliveryStatus,...savedUser}=saved;
    if(isEdit&&row.id===user.id){
     user={...user,...savedUser};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;
-    if(selfProfile){if(selectedLanguage)setLanguage(selectedLanguage);if(selectedTheme)setTheme(selectedTheme);}
+    if(selfProfile&&selectedLanguage)setLanguage(selectedLanguage);
    }
    schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();
    if(!isEdit&&saved.activation_delivery_status!=="ACCEPTED")showToast(bi("User created, but the activation email was not sent. Configure email delivery, then use Resend activation code.","A felhasználó létrejött, de az aktiváló e-mail nem ment ki. Állítsd be az e-mail-küldést, majd használd az Aktiválókód újraküldése gombot."),"error");
@@ -5164,7 +5161,7 @@ initLoginExperience();
 initLocalizedModalRendering();
 window.addEventListener("unhandledrejection",event=>{if(applicationBooting){console.error("Unhandled rejection during bootstrap",event.reason);handleApplicationBootstrapError(event.reason||new Error("BOOT_UNHANDLED_REJECTION"));}});
 window.addEventListener("error",event=>{if(applicationBooting){console.error("Unhandled error during bootstrap",event.error||event.message);handleApplicationBootstrapError(event.error||new Error(event.message||"BOOT_UNHANDLED_ERROR"));}});
-if(token){loadLanguage();loadTheme();void boot().catch(handleApplicationBootstrapError);}else{loadLanguage();loadTheme();applyLanguageToDOM(document.getElementById("login"));loadBranding().then(()=>applyLanguageToDOM(document.getElementById("login")));}
+if(token){loadLanguage();enforceDarkAppearance();void boot().catch(handleApplicationBootstrapError);}else{loadLanguage();enforceDarkAppearance();applyLanguageToDOM(document.getElementById("login"));loadBranding().then(()=>applyLanguageToDOM(document.getElementById("login")));}
 
 
 
