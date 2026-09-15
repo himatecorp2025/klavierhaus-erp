@@ -754,10 +754,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines, materials: materialRows(workflow.id) }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
+          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now });
           return { closedId };
         }
       });
-      if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now: closedAt });
       const refreshedLines=financialRows(workflow.id);
       for(const line of refreshedLines){
         if(line.posted_financial_item_id) continue;
