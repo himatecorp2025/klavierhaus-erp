@@ -1840,7 +1840,7 @@ function createResourceRoutes(key, table, prefix, write, roles){
     res.json({ok:true});
   });
 }
-createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","billing_address","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","billing_address","tax_id","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/contacts/:id", auth, (req,res)=>{
   const row=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
