@@ -143,6 +143,12 @@ document.querySelectorAll("[data-review-carousel]").forEach((carousel) => {
   const dots = carousel.querySelector("[data-review-dots]");
   if (!track || !cards.length) return;
   let activeIndex = 0;
+  const stabilizeHeight = () => {
+    requestAnimationFrame(() => {
+      const height = Math.max(0, ...cards.map((card) => Math.ceil(card.scrollHeight || card.getBoundingClientRect().height || 0)));
+      if (height) carousel.style.setProperty("--review-slide-height", `${height}px`);
+    });
+  };
   const renderDots = () => {
     if (!dots) return;
     dots.innerHTML = cards.map((_, index) => `<button type="button" aria-label="${index + 1}" aria-current="${index === activeIndex ? "true" : "false"}"></button>`).join("");
@@ -150,12 +156,15 @@ document.querySelectorAll("[data-review-carousel]").forEach((carousel) => {
   };
   const show = (index) => {
     activeIndex = (index + cards.length) % cards.length;
-    cards[activeIndex].scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", inline: "start", block: "nearest" });
+    track.style.transform = `translate3d(-${activeIndex * 100}%, 0, 0)`;
     renderDots();
   };
+  cards.forEach((card) => card.querySelectorAll("img").forEach((image) => { if (!image.complete) image.addEventListener("load", stabilizeHeight, { once: true }); }));
+  window.addEventListener("resize", stabilizeHeight, { passive: true });
   carousel.querySelector("[data-review-previous]")?.addEventListener("click", () => show(activeIndex - 1));
   carousel.querySelector("[data-review-next]")?.addEventListener("click", () => show(activeIndex + 1));
-  renderDots();
+  stabilizeHeight();
+  show(0);
 });
 
 const revealElements = document.querySelectorAll("[data-reveal]");
