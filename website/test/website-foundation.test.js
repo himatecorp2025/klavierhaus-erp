@@ -214,7 +214,7 @@ test("base URL normalization uses the actual Render host as safe fallback", () =
 
 test("final luxury design contract keeps compact margins, safe titles and five-three-one horizontal event navigation", () => {
   const websiteRoot = path.join(__dirname, "..");
-  const css = fs.readFileSync(path.join(websiteRoot, "public", "design-v3.css"), "utf8");
+  const css = fs.readFileSync(path.join(websiteRoot, "public", "styles.css"), "utf8");
   const browserSource = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
   const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
   assert.match(css, /--kh-gutter:clamp\(/);
