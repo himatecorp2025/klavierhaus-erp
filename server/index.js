@@ -20,6 +20,7 @@ const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, createInvoiceEngine, registerBusinessOperationsRoutes } = require("./business-operations");
+const { normalizePaymentMethod } = require("./payment-methods");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
@@ -1335,10 +1336,12 @@ app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   if(!["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
   if(!["ONE_TIME","MONTHLY"].includes(recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
   if(Number.isNaN(amount) || amount<0) return res.status(400).json({error:"Amount must be a positive number / Az összeg nem lehet negatív"});
+  const normalizedPaymentMethod=req.body.payment_method?normalizePaymentMethod(req.body.payment_method,{allowEmpty:false}):null;
+  if(req.body.payment_method && !normalizedPaymentMethod) return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});
   db.prepare(`INSERT INTO financial_items(
     id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,req.body.payment_method||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.body.source_type||null,req.body.source_id||null,req.user.name
+    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,normalizedPaymentMethod||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.body.source_type||null,req.body.source_id||null,req.user.name
   );
   res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(id));
 });
@@ -1348,6 +1351,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   if(!existing) return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
   const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id","source_type","source_id"];
   const body={...req.body};
+  if(body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
   if(body.amount!==undefined) body.amount=Number(body.amount||0);
   if(body.main_type!==undefined && !["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(body.main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
   if(body.recurrence!==undefined && !["ONE_TIME","MONTHLY"].includes(body.recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
@@ -1793,13 +1797,17 @@ function createResourceRoutes(key, table, prefix, write, roles){
   app.get(`/api/${key}`, auth, (req,res)=>res.json(db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC`).all()));
   app.post(`/api/${key}`, auth, permit(...roles), (req,res)=>{
     const id=req.body.id || (key==="contacts" ? nextContactId() : rid(prefix));
-    const cols=["id",...write].filter(c=>c==="id" || req.body[c]!==undefined);
-    db.prepare(`INSERT INTO ${table}(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:req.body[c]));
+    const body={...req.body};
+    if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
+    const cols=["id",...write].filter(c=>c==="id" || body[c]!==undefined);
+    db.prepare(`INSERT INTO ${table}(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:body[c]));
     res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id));
   });
   app.put(`/api/${key}/:id`, auth, permit(...roles), (req,res)=>{
-    const cols=write.filter(c=>req.body[c]!==undefined);
-    if(cols.length) db.prepare(`UPDATE ${table} SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
+    const body={...req.body};
+    if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
+    const cols=write.filter(c=>body[c]!==undefined);
+    if(cols.length) db.prepare(`UPDATE ${table} SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]), req.params.id);
     res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
   });
   app.delete(`/api/${key}/:id`, auth, requireSuperadmin, (req,res)=>{
@@ -2229,8 +2237,8 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   if(Number.isNaN(billed)){removeUploadedFile();return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
   const desc=String(req.body.close_description||"").trim();
   if(!desc){removeUploadedFile();return res.status(400).json({error:"Close description is required"});}
-  const payment=req.body.payment_method||"";
-  if(billed>0&&!payment){removeUploadedFile();return res.status(400).json({error:"Payment method is required when billed amount is greater than zero / Fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
+  const payment=billed>0?normalizePaymentMethod(req.body.payment_method,{allowEmpty:false}):null;
+  if(billed>0&&!payment){removeUploadedFile();return res.status(400).json({error:"A valid payment method is required when billed amount is greater than zero / Érvényes fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
   if(billed>0&&!req.file){removeUploadedFile();return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});}
   const storedPath=req.file?"/uploads/"+path.basename(req.file.path):null;
   let partialNextAssigned=null;
@@ -2381,7 +2389,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
   const workflowRows=db.prepare(`SELECT wc.id AS workflow_closed_id,wc.workflow_id,w.id AS log_id,w.workflow_key AS job_key,w.title,
       c.name AS client_name,COALESCE(p.display_name,TRIM(COALESCE(p.brand,'')||' '||COALESCE(p.model,''))) AS piano_name,
       'Workshop Workflow' AS job_type,wf.name AS responsible_at_close,u.name AS closed_by,wc.closed_at AS closed_at,
-      'Workflow' AS close_type,wc.net_total AS billed_amount,'Not applicable' AS payment_method,
+      'Workflow' AS close_type,wc.net_total AS billed_amount,NULL AS payment_method,
       NULL AS invoice_number,NULL AS document_path,wc.closure_reason AS close_description,NULL AS next_job_id,NULL AS next_job_key,NULL AS next_job_title
     FROM workflow_closed_jobs wc JOIN workshop_workflows w ON w.id=wc.workflow_id
     JOIN contacts c ON c.id=wc.client_id JOIN pianos p ON p.id=wc.piano_id
