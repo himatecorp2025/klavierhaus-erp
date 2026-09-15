@@ -1887,3 +1887,26 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
   .workflow-drawer{height:100dvh!important;max-height:100dvh!important}
 }
 .table-wrap,.contacts-table-wrap,.pianos-table-wrap,.finance-table-wrap,.seo-audit-table,.event-data-section{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* Scheduler pointer-drag HUD, fluid cross-day movement and in-place workflow drawer */
+.timeline-event[data-scheduler-movable="true"]{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;will-change:transform}
+.timeline-event[data-scheduler-movable="true"]:active{cursor:grabbing}
+.timeline-event.is-pointer-drag-source{opacity:.22;filter:saturate(.55)}
+.scheduler-drag-ghost{z-index:10020!important;pointer-events:none!important;opacity:.96!important;cursor:grabbing!important;will-change:transform;transform:translate3d(0,0,0);transition:none!important;box-shadow:0 18px 42px rgba(0,0,0,.46)!important}
+.scheduler-dragging,.scheduler-dragging *{cursor:grabbing!important}
+.timeline-day.is-drag-target{background:color-mix(in srgb,var(--blue) 10%,transparent);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--blue) 72%,#fff)}
+.scheduler-worker-drop.is-drag-target{outline:2px solid var(--yellow);outline-offset:2px;background:color-mix(in srgb,var(--worker-color) 28%,var(--panel2))}
+.scheduler-drag-hud{position:fixed;z-index:10030;top:84px;right:24px;display:grid;gap:3px;min-width:238px;max-width:min(360px,calc(100vw - 32px));padding:13px 16px;border:1px solid color-mix(in srgb,var(--yellow) 58%,var(--line));border-radius:12px;background:rgba(7,20,34,.96);color:var(--text);box-shadow:0 16px 42px rgba(0,0,0,.38);backdrop-filter:blur(12px);opacity:0;visibility:hidden;transform:translate3d(0,-8px,0);transition:opacity .12s ease,transform .12s ease,visibility .12s ease;pointer-events:none}
+.scheduler-drag-hud.is-visible{opacity:1;visibility:visible;transform:translate3d(0,0,0)}
+.scheduler-drag-hud strong{font-size:14px;line-height:1.3;color:#f5f7fa}
+.scheduler-drag-hud span{font-size:18px;font-weight:950;color:var(--yellow);font-variant-numeric:tabular-nums}
+.scheduler-drag-hud small{font-size:12px;font-weight:800;color:var(--muted)}
+.timeline-event.WorkflowTask{min-height:56px!important;padding-top:7px;padding-bottom:7px;overflow:hidden}
+.timeline-event.WorkflowTask .event-card-title{font-size:.78rem;font-weight:900}
+.timeline-event.WorkflowTask .event-card-primary,.timeline-event.WorkflowTask .event-card-secondary{display:block!important;font-size:.67rem;line-height:1.2}
+.scheduler-workflow-drawer-host{position:fixed;z-index:10010;inset:0;display:none;pointer-events:none;background:transparent}
+.scheduler-workflow-drawer-host.is-open{display:block}
+.scheduler-workflow-drawer-host .scheduler-workflow-shell{position:absolute;inset:0;min-height:0;pointer-events:none}
+.scheduler-workflow-drawer-host .workflow-drawer{position:fixed!important;top:0!important;right:0!important;bottom:0!important;width:min(760px,92vw)!important;max-width:92vw;min-width:min(560px,92vw)!important;height:100dvh!important;min-height:0!important;border-radius:14px 0 0 14px!important;pointer-events:auto;overflow:hidden}
+.scheduler-workflow-drawer-host .workflow-drawer-scroll{min-height:0;flex:1;overflow-y:auto}
+@media(max-width:900px){.scheduler-drag-hud{top:auto;right:12px;bottom:18px;left:12px;max-width:none;min-width:0}.timeline-event.WorkflowTask{min-height:56px!important}.scheduler-workflow-drawer-host .workflow-drawer{width:100vw!important;max-width:100vw!important;min-width:0!important;border-radius:0!important}}
