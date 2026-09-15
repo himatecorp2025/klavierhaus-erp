@@ -348,7 +348,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   const onSite = await request(baseUrl, "/api/events/individual-tickets", {
     token: adminToken,
     method: "POST",
-    body: { event_id: eventId, ticket_variant: "ON_SITE", attendee_name: "On Site Guest", contact_email: "onsite@example.com", price_cents: 1500, payment_status: "PENDING", payment_method: "ON_SITE" }
+    body: { event_id: eventId, ticket_variant: "ON_SITE", attendee_name: "On Site Guest", contact_email: "onsite@example.com", price_cents: 1500, payment_status: "PENDING", payment_method: "Cash" }
   });
   assert.equal(onSite.status, 201, JSON.stringify(onSite.payload));
   assert.equal(onSite.payload.ticket.payment_status, "PENDING");
@@ -356,7 +356,7 @@ test("event module enforces roles, capacity, invitations, printable guest lists,
   const onSitePaid = await request(baseUrl, `/api/events/tickets/${onSite.payload.ticket.id}/pay`, {
     token: adminToken,
     method: "POST",
-    body: { payment_method: "CASH" }
+    body: { payment_method: "Cash" }
   });
   assert.equal(onSitePaid.status, 200, JSON.stringify(onSitePaid.payload));
   assert.equal(onSitePaid.payload.ticket.payment_status, "PAID");
