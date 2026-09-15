@@ -728,6 +728,18 @@ function runMigrations() {
     ensureColumn("pianos", "import_batch_id", "TEXT");
     ensureColumn("pianos", "original_description", "TEXT");
     ensureColumn("pianos", "owner_resolution", "TEXT");
+    db.exec(`CREATE TABLE IF NOT EXISTS client_pianos (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      piano_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(client_id,piano_id),
+      FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
+      FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE
+    )`);
+    db.prepare(`INSERT OR IGNORE INTO client_pianos(id,client_id,piano_id)
+      SELECT 'CP-' || lower(hex(randomblob(12))), owner_contact_id, id FROM pianos
+      WHERE owner_contact_id IS NOT NULL AND trim(owner_contact_id)<>''`).run();
 
     // Jobs and immutable user/workflow links.
     ensureColumn("website_showroom_pianos", "build_year", "INTEGER");
@@ -758,6 +770,7 @@ function runMigrations() {
     ensureColumn("jobs", "daily_rate_enabled", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn("jobs", "daily_rate_allocated_amount", "REAL NOT NULL DEFAULT 0");
     ensureColumn("jobs", "daily_rate_date", "TEXT");
+    ensureColumn("jobs", "technician_extra_compensation", "REAL NOT NULL DEFAULT 0");
 
     db.exec(`CREATE TABLE IF NOT EXISTS employee_daily_rates (
       user_id TEXT NOT NULL,
@@ -958,6 +971,8 @@ function runMigrations() {
   ensureIndex("idx_pianos_import_batch", "CREATE INDEX IF NOT EXISTS idx_pianos_import_batch ON pianos(import_batch_id)");
   ensureIndex("idx_pianos_owner_resolution", "CREATE INDEX IF NOT EXISTS idx_pianos_owner_resolution ON pianos(owner_resolution)");
   ensureIndex("idx_pianos_owner_contact", "CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)");
+  ensureIndex("idx_client_pianos_client", "CREATE INDEX IF NOT EXISTS idx_client_pianos_client ON client_pianos(client_id,piano_id)");
+  ensureIndex("idx_client_pianos_piano", "CREATE INDEX IF NOT EXISTS idx_client_pianos_piano ON client_pianos(piano_id,client_id)");
   ensureFinancialSourceUniqueIndex();
   ensureIndex("idx_inventory_items_inventory_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id) WHERE inventory_id IS NOT NULL");
   ensureIndex("idx_inventory_items_category", "CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)");
