@@ -421,20 +421,42 @@ function ensureColumn(db, table, column, definition) {
   if (!columns.some((row) => row.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 function ensureCentralPianoReference(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS steinway_serial_registry (id INTEGER PRIMARY KEY AUTOINCREMENT, start_serial INTEGER NOT NULL UNIQUE, build_year INTEGER NOT NULL);
-  CREATE INDEX IF NOT EXISTS idx_steinway_serial_registry_start_serial ON steinway_serial_registry(start_serial);
-  CREATE TABLE IF NOT EXISTS steinway_models_registry (model TEXT PRIMARY KEY, size_cm TEXT NOT NULL, size_inch TEXT NOT NULL);`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS steinway_serial_registry (
+      start_serial INTEGER PRIMARY KEY,
+      build_year INTEGER NOT NULL CHECK(build_year BETWEEN 1853 AND 2100)
+    );
+    CREATE TABLE IF NOT EXISTS steinway_model_reference (
+      model_key TEXT PRIMARY KEY,
+      size_cm TEXT NOT NULL,
+      size_in TEXT NOT NULL,
+      size_display TEXT NOT NULL
+    );
+  `);
   ensureColumn(db, "pianos", "size_cm", "TEXT");
   ensureColumn(db, "pianos", "size_in", "TEXT");
   ensureColumn(db, "pianos", "size_display", "TEXT");
+
+  // One-time compatibility migration from the obsolete split-brain table.
+  // After migration the shadow table is removed and never recreated.
+  const legacyModelTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='steinway_models_registry'").get();
+  if (legacyModelTable) {
+    const legacyRows = db.prepare("SELECT model,size_cm,size_inch FROM steinway_models_registry").all();
+    const migrateModel = db.prepare("INSERT OR REPLACE INTO steinway_model_reference(model_key,size_cm,size_in,size_display) VALUES(?,?,?,?)");
+    db.transaction(() => {
+      legacyRows.forEach((row) => migrateModel.run(row.model, row.size_cm, row.size_inch, `${row.size_cm} cm (${row.size_inch})`));
+      db.exec("DROP TABLE steinway_models_registry");
+    })();
+  }
+
   const serialCount = Number(db.prepare("SELECT COUNT(*) AS c FROM steinway_serial_registry").get().c || 0);
-  const modelCount = Number(db.prepare("SELECT COUNT(*) AS c FROM steinway_models_registry").get().c || 0);
+  const modelCount = Number(db.prepare("SELECT COUNT(*) AS c FROM steinway_model_reference").get().c || 0);
   if (serialCount === 0 || modelCount === 0) {
-    const insertSerial = db.prepare("INSERT OR REPLACE INTO steinway_serial_registry(start_serial, build_year) VALUES(?, ?)");
-    const insertModel = db.prepare("INSERT OR REPLACE INTO steinway_models_registry(model, size_cm, size_inch) VALUES(?, ?, ?)");
+    const insertSerial = db.prepare("INSERT OR IGNORE INTO steinway_serial_registry(start_serial, build_year) VALUES(?, ?)");
+    const insertModel = db.prepare("INSERT OR IGNORE INTO steinway_model_reference(model_key, size_cm, size_in, size_display) VALUES(?, ?, ?, ?)");
     db.transaction(() => {
       if (serialCount === 0) DEFAULT_SERIAL_THRESHOLDS.forEach(([serial, year]) => insertSerial.run(serial, year));
-      if (modelCount === 0) Object.values(DEFAULT_MODELS).forEach((row) => insertModel.run(row.model, row.size_cm, row.size_inch));
+      if (modelCount === 0) Object.values(DEFAULT_MODELS).forEach((row) => insertModel.run(row.model, row.size_cm, row.size_inch, `${row.size_cm} cm (${row.size_inch})`));
     })();
   }
 }
@@ -443,12 +465,12 @@ function importReferenceWorkbook(db, buffer) {
   const parsed = extractReferenceWorkbook(buffer);
   ensureCentralPianoReference(db);
   const insertSerial = db.prepare("INSERT OR REPLACE INTO steinway_serial_registry(start_serial, build_year) VALUES(?, ?)");
-  const insertModel = db.prepare("INSERT OR REPLACE INTO steinway_models_registry(model, size_cm, size_inch) VALUES(?, ?, ?)");
+  const insertModel = db.prepare("INSERT OR REPLACE INTO steinway_model_reference(model_key, size_cm, size_in, size_display) VALUES(?, ?, ?, ?)");
   db.transaction(() => {
     db.prepare("DELETE FROM steinway_serial_registry").run();
-    db.prepare("DELETE FROM steinway_models_registry").run();
+    db.prepare("DELETE FROM steinway_model_reference").run();
     parsed.serials.forEach((row) => insertSerial.run(row.start_serial, row.build_year));
-    parsed.models.forEach((row) => insertModel.run(row.model, row.size_cm, row.size_inch));
+    parsed.models.forEach((row) => insertModel.run(row.model, row.size_cm, row.size_inch, `${row.size_cm} cm (${row.size_inch})`));
   })();
   return { ok: true, sheet: parsed.sheet, serial_records: parsed.serials.length, model_records: parsed.models.length, message: "141 serial reference rows detected, 8 Steinway models detected. Import successful." };
 }
@@ -461,8 +483,8 @@ function lookupYear(db, serialInput) {
 function lookupModel(db, modelInput) {
   const model = normalizeModel(modelInput);
   if (!model) return null;
-  const row = db.prepare("SELECT model, size_cm, size_inch FROM steinway_models_registry WHERE model=?").get(model);
-  return row ? { ...row, size_display: `${row.size_cm} cm (${row.size_inch})` } : null;
+  const row = db.prepare("SELECT model_key,size_cm,size_in,size_display FROM steinway_model_reference WHERE model_key=?").get(model);
+  return row ? { model: row.model_key, size_cm: row.size_cm, size_inch: row.size_in, size_display: row.size_display } : null;
 }
 function findExistingBySerial(db, serialInput) {
   const serial = normalizeSerial(serialInput); if (!serial) return null;
