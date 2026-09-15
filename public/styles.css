@@ -1910,3 +1910,45 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
 .scheduler-workflow-drawer-host .workflow-drawer{position:fixed!important;top:0!important;right:0!important;bottom:0!important;width:min(760px,92vw)!important;max-width:92vw;min-width:min(560px,92vw)!important;height:100dvh!important;min-height:0!important;border-radius:14px 0 0 14px!important;pointer-events:auto;overflow:hidden}
 .scheduler-workflow-drawer-host .workflow-drawer-scroll{min-height:0;flex:1;overflow-y:auto}
 @media(max-width:900px){.scheduler-drag-hud{top:auto;right:12px;bottom:18px;left:12px;max-width:none;min-width:0}.timeline-event.WorkflowTask{min-height:56px!important}.scheduler-workflow-drawer-host .workflow-drawer{width:100vw!important;max-width:100vw!important;min-width:0!important;border-radius:0!important}}
+
+/* Calendar and New Job refinement: US date + half-hour selectors, Daily Rate toggle, readable scheduler cards */
+.job-datetime-field{min-width:0}
+.job-datetime-control{display:grid;grid-template-columns:minmax(118px,1fr) minmax(118px,.8fr);gap:8px;align-items:center}
+.job-datetime-control input,.job-datetime-control select{min-width:0;width:100%;height:42px}
+.job-datetime-control select{appearance:auto;padding-right:28px}
+.job-date-format-hint{display:block;margin-top:5px;color:var(--muted);font-size:.72rem;line-height:1.25}
+.daily-rate-switch{display:flex;align-items:center;gap:10px;min-height:46px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#081525;cursor:pointer;user-select:none}
+.daily-rate-switch input{position:absolute;opacity:0;pointer-events:none}
+.daily-rate-switch-track{position:relative;display:inline-flex;flex:0 0 46px;width:46px;height:26px;border-radius:999px;background:#334155;border:1px solid rgba(255,255,255,.16);transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.daily-rate-switch-thumb{position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#e2e8f0;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .18s ease,background .18s ease}
+.daily-rate-switch input:checked + .daily-rate-switch-track{background:#16a34a;border-color:#4ade80;box-shadow:0 0 0 3px rgba(34,197,94,.12)}
+.daily-rate-switch input:checked + .daily-rate-switch-track .daily-rate-switch-thumb{transform:translateX(20px);background:#fff}
+.daily-rate-switch input:focus-visible + .daily-rate-switch-track{outline:2px solid var(--yellow);outline-offset:2px}
+.daily-rate-switch-label{font-size:.82rem;font-weight:750;line-height:1.25;color:var(--text)}
+.daily-rate-allocation-field.hidden{display:none!important}
+
+.timeline-event{min-height:72px!important;padding:7px 25px 7px 7px!important;gap:2px;line-height:1.3!important;overflow:hidden}
+.timeline-event.WorkflowTask{min-height:80px!important;padding:7px 25px 7px 7px!important;gap:2px;line-height:1.3!important}
+.timeline-event .event-card-time,.timeline-event .event-card-title,.timeline-event .event-card-primary,.timeline-event .event-card-secondary,.timeline-event .event-card-notes{line-height:1.3;margin:0;min-height:0}
+.timeline-event.WorkflowTask .event-card-title{font-size:.78rem!important;font-weight:900}
+.timeline-event.WorkflowTask .event-card-primary,.timeline-event.WorkflowTask .event-card-secondary{display:block!important;font-size:.68rem!important;line-height:1.3!important}
+.timeline-event.WorkflowTask.EventCompact .event-card-primary,.timeline-event.WorkflowTask.EventCompact .event-card-secondary,.timeline-event.WorkflowTask.EventMedium .event-card-secondary{display:block!important}
+.event-status{display:inline-flex;align-items:center;justify-content:center;right:4px!important;top:4px!important;width:18px;height:18px;max-width:18px;max-height:18px;border-radius:50%;font-size:.68rem!important;line-height:1!important;background:rgba(0,0,0,.18);z-index:4}
+.calendar-type-badge{position:absolute;left:6px;top:5px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;border:1px solid rgba(255,255,255,.28);background:rgba(4,12,22,.72);color:#fff;pointer-events:none;box-shadow:0 2px 6px rgba(0,0,0,.22)}
+.calendar-type-badge svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.calendar-type-badge.is-workflow{color:#fbbf24;border-color:rgba(251,191,36,.5)}
+.calendar-type-badge.is-job{color:#dbeafe;border-color:rgba(147,197,253,.48)}
+.timeline-event:has(.calendar-type-badge) .event-card-time,.timeline-event:has(.calendar-type-badge) .kh-event-ribbon{padding-left:24px}
+.scheduler-drag-ghost{min-height:72px!important;contain:layout paint style;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.scheduler-drag-ghost.WorkflowTask{min-height:80px!important}
+.scheduler-drag-hud span{font-variant-numeric:tabular-nums}
+
+@media(max-width:900px){
+ .job-datetime-control{grid-template-columns:1fr 1fr}
+ .timeline-event{min-height:72px!important}
+ .timeline-event.WorkflowTask{min-height:80px!important}
+}
+@media(max-width:620px){
+ .job-datetime-control{grid-template-columns:1fr}
+ .daily-rate-switch{min-height:48px}
+}
