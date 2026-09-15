@@ -550,4 +550,101 @@ function generateInvoicePdf({ company = {}, event, payment, tickets = [], invoic
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
+
+function money(value, currency = "USD") {
+  const amount = Number(value || 0);
+  return `${String(currency || "USD").toUpperCase()} ${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}`;
+}
+
+function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpartyName = "", metrics, logoResources }) {
+  const directionLabel = invoice.direction === "payable" ? "PAYABLE / VENDOR BILL" : "RECEIVABLE / CUSTOMER INVOICE";
+  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const lines = [
+    `${DARK} rg 0 0 612 792 re f\n`,
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 26, 26, logoResource),
+    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 54, 742, 22, CREAM),
+    textCommand(directionLabel, 54, 714, 9, GOLD),
+    textCommand(invoice.invoice_number || "", 390, 742, 16, CREAM),
+    textCommand(`Issue: ${invoice.issue_date || ""}`, 390, 716, 9, MUTED),
+    textCommand(`Due: ${invoice.due_date || "—"}`, 390, 700, 9, MUTED),
+    `${GOLD} RG .8 w 54 676 504 0 re\n`,
+    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILLED TO", 54, 650, 8, GOLD),
+    textCommand(counterpartyName || "—", 54, 630, 12, CREAM),
+    textCommand(invoice.summary || "", 54, 606, 9, MUTED),
+    textCommand("DESCRIPTION", 54, 568, 8, GOLD),
+    textCommand("QTY", 388, 568, 8, GOLD),
+    textCommand("UNIT", 438, 568, 8, GOLD),
+    textCommand("TOTAL", 510, 568, 8, GOLD),
+    `${MUTED} RG .5 w 54 555 504 0 re\n`
+  ];
+  let y = 532;
+  for (const item of items.slice(0, 15)) {
+    lines.push(textCommand(truncate(item.item_description || "Item", 315, 9, metrics), 54, y, 9, CREAM));
+    lines.push(textCommand(String(Number(item.quantity || 0)), 392, y, 9, CREAM));
+    lines.push(textCommand(Number(item.unit_price || 0).toFixed(2), 438, y, 9, CREAM));
+    lines.push(textCommand(Number(item.total_price || 0).toFixed(2), 506, y, 9, CREAM));
+    y -= 25;
+  }
+  lines.push(`${GOLD} RG .8 w 330 156 228 0 re\n`);
+  lines.push(textCommand("SUBTOTAL", 350, 132, 9, MUTED));
+  lines.push(textCommand(money(invoice.subtotal, invoice.currency), 450, 132, 10, CREAM));
+  lines.push(textCommand(`TAX (${Number(invoice.tax_rate || 0).toFixed(2)}%)`, 350, 110, 9, MUTED));
+  lines.push(textCommand(money(invoice.tax_amount, invoice.currency), 450, 110, 10, CREAM));
+  lines.push(textCommand("TOTAL", 350, 84, 10, GOLD));
+  lines.push(textCommand(money(invoice.total_amount, invoice.currency), 450, 84, 14, CREAM));
+  lines.push(textCommand(`Payment: ${invoice.payment_method || "—"} · Status: ${String(invoice.status || "").toUpperCase()}`, 54, 84, 8, MUTED));
+  return lines.join("");
+}
+
+function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], counterpartyName = "", fontPath, logoPath }) {
+  const labels = [company.trade_name, company.legal_name, invoice.invoice_number, invoice.summary, counterpartyName, ...items.map((item) => item.item_description), "RECEIVABLE", "PAYABLE", "SUBTOTAL", "TAX", "TOTAL"];
+  return createPdf({ pages: [(metrics, logoResources) => businessInvoicePage({ company, invoice, items, counterpartyName, metrics, logoResources })], size: LETTER, labels, title: `Klavierhaus ${invoice.invoice_number || "Invoice"}`, fontPath, logoPath });
+}
+
+function monthlyReportPage({ company = {}, month = "", summary = {}, paymentBreakdown = [], carried = [], rows = [], page = 1, pages = 1, metrics, logoResources }) {
+  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const lines = [
+    `${DARK} rg 0 0 612 792 re f\n`,
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 26, 26, logoResource),
+    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 54, 744, 21, CREAM),
+    textCommand(`MONTHLY FINANCIAL REPORT · ${month}`, 54, 716, 10, GOLD),
+    textCommand([company.address_line1, company.city, company.state, company.postal_code].filter(Boolean).join(", "), 54, 698, 8, MUTED),
+    textCommand(company.tax_id ? `Tax ID: ${company.tax_id}` : "", 54, 684, 8, MUTED),
+    textCommand(`Page ${page}/${pages}`, 500, 716, 8, MUTED),
+    textCommand("REALIZED REVENUE", 54, 668, 8, MUTED), textCommand(money(summary.revenue, "USD"), 54, 644, 17, CREAM),
+    textCommand("PAID COSTS", 225, 668, 8, MUTED), textCommand(money(summary.costs, "USD"), 225, 644, 17, CREAM),
+    textCommand("NET PROFIT / LOSS", 390, 668, 8, GOLD), textCommand(money(summary.net, "USD"), 390, 644, 17, CREAM),
+    `${GOLD} RG .8 w 54 620 504 0 re\n`,
+    textCommand("PAYMENT BREAKDOWN", 54, 596, 9, GOLD)
+  ];
+  let bx = 54;
+  for (const item of paymentBreakdown) {
+    lines.push(textCommand(`${item.payment_method || "Unspecified"}: ${money(item.amount, "USD")}`, bx, 574, 8, item.payment_method === "Zelle" ? GOLD : CREAM));
+    bx += 105;
+    if (bx > 480) bx = 54;
+  }
+  lines.push(textCommand(`CARRIED-OVER / OVERDUE: ${carried.length} · ${money(carried.reduce((sum, row) => sum + Number(row.total_amount || 0), 0), "USD")}`, 54, 540, 9, GOLD));
+  lines.push(textCommand("DATE / NUMBER", 54, 505, 8, GOLD));
+  lines.push(textCommand("COUNTERPARTY / SUMMARY", 185, 505, 8, GOLD));
+  lines.push(textCommand("DIRECTION", 420, 505, 8, GOLD));
+  lines.push(textCommand("AMOUNT", 510, 505, 8, GOLD));
+  let y = 482;
+  for (const row of rows) {
+    lines.push(textCommand(`${row.issue_date || ""} ${row.invoice_number || ""}`, 54, y, 8, CREAM));
+    lines.push(textCommand(truncate(row.counterparty_name || row.summary || "—", 210, 8, metrics), 185, y, 8, CREAM));
+    lines.push(textCommand(row.direction === "payable" ? "PAYABLE" : "RECEIVABLE", 420, y, 8, CREAM));
+    lines.push(textCommand(Number(row.total_amount || 0).toFixed(2), 510, y, 8, CREAM));
+    y -= 18;
+  }
+  return lines.join("");
+}
+
+function generateMonthlyInvoiceReportPdf({ company = {}, month = "", summary = {}, paymentBreakdown = [], carried = [], invoices = [], fontPath, logoPath }) {
+  const chunks = [];
+  for (let i = 0; i < invoices.length; i += 22) chunks.push(invoices.slice(i, i + 22));
+  if (!chunks.length) chunks.push([]);
+  const labels = [company.trade_name, company.legal_name, month, ...invoices.flatMap((row) => [row.invoice_number, row.counterparty_name, row.summary]), ...carried.map((row) => row.invoice_number)];
+  return createPdf({ pages: chunks.map((rows, index) => (metrics, logoResources) => monthlyReportPage({ company, month, summary, paymentBreakdown, carried, rows, page: index + 1, pages: chunks.length, metrics, logoResources })), size: LETTER, labels, title: `Klavierhaus Monthly Financial Report ${month}`, fontPath, logoPath });
+}
+
+module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
