@@ -645,7 +645,6 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   <link rel="icon" type="image/png" href="${escapeHtml(resolveBrand(copy).logoImage)}">
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(webPageStructuredData({ title: pageTitle, description: pageDescription, canonicalUrl, keywords }))}</script>
@@ -921,7 +920,6 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
   <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   ${[...structuredData, ...(keywords.length ? [webPageStructuredData({ title, description, canonicalUrl, keywords })] : [])].map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
   <title>${escapeHtml(title)}</title>
@@ -1198,7 +1196,6 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   <meta name="theme-color" content="#080807">
   <meta name="robots" content="${robots}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <link rel="stylesheet" href="/assets/design-v3.css?v=${VERSION}">
   <script src="/assets/app.js?v=${VERSION}" defer></script>
   <title>${escapeHtml(copy.notFoundTitle)} | Klavierhaus</title>
 </head>
