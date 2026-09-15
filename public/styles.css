@@ -1952,3 +1952,27 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
  .job-datetime-control{grid-template-columns:1fr}
  .daily-rate-switch{min-height:48px}
 }
+
+
+/* UI34 — hybrid US date entry, clean half-hour select, and clean scheduler surface */
+.job-datetime-control{align-items:stretch}
+.job-date-entry{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 42px;min-width:0;border:1px solid var(--line);border-radius:10px;background:#081525;transition:border-color .16s ease,box-shadow .16s ease}
+.job-date-entry:focus-within{border-color:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 18%,transparent)}
+.job-date-entry [data-job-date]{width:100%;min-width:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--text);font-variant-numeric:tabular-nums}
+.job-date-picker-button{display:grid;place-items:center;width:42px;min-width:42px;height:100%;min-height:42px;padding:0;border:0;border-left:1px solid var(--line);border-radius:0 9px 9px 0;background:transparent;color:#f3ede1;cursor:pointer}
+.job-date-picker-button:hover,.job-date-picker-button:focus-visible{color:var(--yellow);background:rgba(245,193,66,.08);outline:none}
+.job-date-picker-button .admin-date-control-icon{display:grid;place-items:center}
+.job-date-picker-button .admin-date-control-icon,.job-date-picker-button .admin-date-control-icon svg,.job-date-picker-button .admin-date-control-icon path,.job-date-picker-button .admin-date-control-icon rect{color:currentColor;stroke:currentColor}
+.job-datetime-control [data-job-time]{appearance:none;-webkit-appearance:none;-moz-appearance:none;min-width:128px;padding-right:12px!important;background-image:none!important;border:1px solid var(--line);border-radius:10px;background-color:#081525;color:var(--text);font-variant-numeric:tabular-nums;transition:border-color .16s ease,box-shadow .16s ease}
+.job-datetime-control [data-job-time]:focus,.job-datetime-control [data-job-time]:focus-visible{outline:none;border-color:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 18%,transparent)}
+.job-datetime-control input::-webkit-inner-spin-button,.job-datetime-control input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.job-datetime-control input[type=number]{-moz-appearance:textfield}
+.scheduler-worker-dropbar{display:none!important}
+
+
+/* UI34 — workflow reference date is hybrid MM/DD/YYYY text + dark calendar popup */
+.workflow-shell .workflow-date-picker.workflow-date-picker--primary{display:grid!important;grid-template-columns:minmax(8.7rem,1fr) 42px!important;align-items:stretch!important;gap:0!important;padding:0!important;overflow:hidden!important;min-height:44px!important}
+.workflow-shell .workflow-date-picker .workflow-date-text{position:relative!important;inset:auto!important;z-index:auto!important;width:100%!important;height:100%!important;min-width:0!important;margin:0!important;padding:9px 10px!important;border:0!important;opacity:1!important;pointer-events:auto!important;background:transparent!important;color:var(--text)!important;font:inherit!important;font-variant-numeric:tabular-nums!important;outline:none!important}
+.workflow-shell .workflow-date-picker .workflow-date-picker-button{display:grid;place-items:center;width:42px;min-width:42px;height:100%;min-height:42px;padding:0;border:0;border-left:1px solid color-mix(in srgb,var(--yellow) 45%,var(--line));background:transparent;color:#f3ede1;cursor:pointer}
+.workflow-shell .workflow-date-picker .workflow-date-picker-button:hover,.workflow-shell .workflow-date-picker .workflow-date-picker-button:focus-visible{background:rgba(245,193,66,.10);color:var(--yellow);outline:none}
+.workflow-shell .workflow-date-picker:focus-within{border-color:#e3bf5b!important;box-shadow:0 0 0 3px rgba(227,191,91,.18)!important}
