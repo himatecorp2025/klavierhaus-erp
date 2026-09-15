@@ -556,49 +556,82 @@ function money(value, currency = "USD") {
   return `${String(currency || "USD").toUpperCase()} ${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}`;
 }
 
-function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpartyName = "", metrics, logoResources }) {
-  const directionLabel = invoice.direction === "payable" ? "PAYABLE / VENDOR BILL" : "RECEIVABLE / CUSTOMER INVOICE";
+function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpartyName = "", page = 1, pages = 1, showTotals = true, metrics, logoResources }) {
+  const directionLabel = invoice.direction === "payable" ? "VENDOR BILL" : "INVOICE";
+  const statusLabel = invoice.status === "paid" ? "Paid" : invoice.status === "void" ? "Void" : invoice.status === "carried_over" ? "Carried Over" : "Pending";
   const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const issuerAddress = [company.address_line1, company.address_line2, company.city, company.state, company.postal_code].filter(Boolean).join(", ");
+  const issuerContact = [company.email, company.phone].filter(Boolean).join(" · ");
+  const counterpartyAddress = safeText(invoice.counterparty_address || "");
+  const counterpartyTax = safeText(invoice.counterparty_tax_id || "");
+  const counterpartyContact = [invoice.counterparty_contact, invoice.counterparty_email, invoice.counterparty_phone].filter(Boolean).join(" · ");
   const lines = [
     `${DARK} rg 0 0 612 792 re f\n`,
-    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 26, 26, logoResource),
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 28, 28, logoResource),
     textCommand(company.trade_name || company.legal_name || "Klavierhaus", 54, 742, 22, CREAM),
-    textCommand(directionLabel, 54, 714, 9, GOLD),
+    textCommand(directionLabel, 54, 714, 10, GOLD),
+    textCommand(truncate(issuerAddress, 305, 8, metrics), 54, 696, 8, MUTED),
+    textCommand(truncate(issuerContact, 305, 8, metrics), 54, 682, 8, MUTED),
+    textCommand(company.tax_id ? `Tax ID / EIN: ${company.tax_id}` : "", 54, 668, 8, MUTED),
     textCommand(invoice.invoice_number || "", 390, 742, 16, CREAM),
-    textCommand(`Issue: ${invoice.issue_date || ""}`, 390, 716, 9, MUTED),
-    textCommand(`Due: ${invoice.due_date || "—"}`, 390, 700, 9, MUTED),
-    `${GOLD} RG .8 w 54 676 504 0 re\n`,
-    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILLED TO", 54, 650, 8, GOLD),
-    textCommand(counterpartyName || "—", 54, 630, 12, CREAM),
-    textCommand(invoice.summary || "", 54, 606, 9, MUTED),
-    textCommand("DESCRIPTION", 54, 568, 8, GOLD),
-    textCommand("QTY", 388, 568, 8, GOLD),
-    textCommand("UNIT", 438, 568, 8, GOLD),
-    textCommand("TOTAL", 510, 568, 8, GOLD),
-    `${MUTED} RG .5 w 54 555 504 0 re\n`
+    textCommand(`Issue Date: ${invoice.issue_date || ""}`, 390, 716, 9, MUTED),
+    textCommand(`Due Date: ${invoice.due_date || "—"}`, 390, 700, 9, MUTED),
+    textCommand(`Page ${page}/${pages}`, 500, 682, 8, MUTED),
+    `${GOLD} RG .8 w 54 652 504 0 re\n`,
+    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILL TO", 54, 630, 8, GOLD),
+    textCommand(counterpartyName || invoice.counterparty_name || "—", 54, 612, 12, CREAM),
+    textCommand(truncate(counterpartyAddress, 500, 8, metrics), 54, 594, 8, MUTED),
+    textCommand(counterpartyTax ? `Tax ID: ${counterpartyTax}` : "", 54, 578, 8, MUTED),
+    textCommand(truncate(counterpartyContact, 500, 8, metrics), 54, 562, 8, MUTED),
+    textCommand(truncate(invoice.summary || "", 500, 9, metrics), 54, 540, 9, CREAM),
+    textCommand("DESCRIPTION", 54, 512, 8, GOLD),
+    textCommand("QTY", 388, 512, 8, GOLD),
+    textCommand("UNIT PRICE", 430, 512, 8, GOLD),
+    textCommand("LINE TOTAL", 500, 512, 8, GOLD),
+    `${MUTED} RG .5 w 54 500 504 0 re\n`
   ];
-  let y = 532;
-  for (const item of items.slice(0, 15)) {
+  let y = 478;
+  for (const item of items.slice(0, 12)) {
     lines.push(textCommand(truncate(item.item_description || "Item", 315, 9, metrics), 54, y, 9, CREAM));
     lines.push(textCommand(String(Number(item.quantity || 0)), 392, y, 9, CREAM));
-    lines.push(textCommand(Number(item.unit_price || 0).toFixed(2), 438, y, 9, CREAM));
-    lines.push(textCommand(Number(item.total_price || 0).toFixed(2), 506, y, 9, CREAM));
-    y -= 25;
+    lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 430, y, 8, CREAM));
+    lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 500, y, 8, CREAM));
+    y -= 24;
   }
-  lines.push(`${GOLD} RG .8 w 330 156 228 0 re\n`);
-  lines.push(textCommand("SUBTOTAL", 350, 132, 9, MUTED));
-  lines.push(textCommand(money(invoice.subtotal, invoice.currency), 450, 132, 10, CREAM));
-  lines.push(textCommand(`TAX (${Number(invoice.tax_rate || 0).toFixed(2)}%)`, 350, 110, 9, MUTED));
-  lines.push(textCommand(money(invoice.tax_amount, invoice.currency), 450, 110, 10, CREAM));
-  lines.push(textCommand("TOTAL", 350, 84, 10, GOLD));
-  lines.push(textCommand(money(invoice.total_amount, invoice.currency), 450, 84, 14, CREAM));
-  lines.push(textCommand(`Payment: ${invoice.payment_method || "—"} · Status: ${String(invoice.status || "").toUpperCase()}`, 54, 84, 8, MUTED));
+  if (showTotals) {
+    lines.push(`${GOLD} RG .8 w 330 174 228 0 re\n`);
+    lines.push(textCommand("SUBTOTAL", 350, 150, 9, MUTED));
+    lines.push(textCommand(money(invoice.subtotal, invoice.currency), 450, 150, 10, CREAM));
+    lines.push(textCommand(`TAX (${Number(invoice.tax_rate || 0).toFixed(2)}%)`, 350, 128, 9, MUTED));
+    lines.push(textCommand(money(invoice.tax_amount, invoice.currency), 450, 128, 10, CREAM));
+    lines.push(textCommand("TOTAL USD", 350, 102, 10, GOLD));
+    lines.push(textCommand(money(invoice.total_amount, invoice.currency), 450, 102, 14, CREAM));
+    lines.push(textCommand(`Payment Method: ${invoice.payment_method || "—"}`, 54, 136, 8, MUTED));
+    lines.push(textCommand(`Payment Status: ${statusLabel}`, 54, 120, 8, MUTED));
+    if (invoice.payment_method === "Payment Link" && invoice.payment_link_url) lines.push(textCommand(truncate(`Payment Link: ${invoice.payment_link_url}`, 260, 8, metrics), 54, 104, 8, GOLD));
+    if (invoice.notes) lines.push(textCommand(truncate(`Notes: ${invoice.notes}`, 260, 8, metrics), 54, 86, 8, MUTED));
+  } else {
+    lines.push(textCommand("ITEMS CONTINUE ON THE NEXT PAGE", 54, 120, 8, GOLD));
+  }
+  lines.push(textCommand("Klavierhaus · New York", 54, 54, 7, MUTED));
   return lines.join("");
 }
 
 function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], counterpartyName = "", fontPath, logoPath }) {
-  const labels = [company.trade_name, company.legal_name, invoice.invoice_number, invoice.summary, counterpartyName, ...items.map((item) => item.item_description), "RECEIVABLE", "PAYABLE", "SUBTOTAL", "TAX", "TOTAL"];
-  return createPdf({ pages: [(metrics, logoResources) => businessInvoicePage({ company, invoice, items, counterpartyName, metrics, logoResources })], size: LETTER, labels, title: `Klavierhaus ${invoice.invoice_number || "Invoice"}`, fontPath, logoPath });
+  const sourceItems = Array.isArray(items) ? items : [];
+  const chunks = [];
+  for (let index = 0; index < sourceItems.length; index += 12) chunks.push(sourceItems.slice(index, index + 12));
+  if (!chunks.length) chunks.push([]);
+  const pageCount = chunks.length;
+  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.map((item) => item.item_description), "INVOICE", "VENDOR BILL", "BILL TO", "SUBTOTAL", "TAX", "TOTAL USD", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE"];
+  return createPdf({
+    pages: chunks.map((pageItems, index) => (metrics, logoResources) => businessInvoicePage({ company, invoice, items: pageItems, counterpartyName, page: index + 1, pages: pageCount, showTotals: index === pageCount - 1, metrics, logoResources })),
+    size: LETTER,
+    labels,
+    title: `Klavierhaus ${invoice.invoice_number || "Invoice"}`,
+    fontPath,
+    logoPath
+  });
 }
 
 function monthlyReportPage({ company = {}, month = "", summary = {}, paymentBreakdown = [], carried = [], rows = [], page = 1, pages = 1, metrics, logoResources }) {
@@ -617,18 +650,19 @@ function monthlyReportPage({ company = {}, month = "", summary = {}, paymentBrea
     `${GOLD} RG .8 w 54 620 504 0 re\n`,
     textCommand("PAYMENT BREAKDOWN", 54, 596, 9, GOLD)
   ];
-  let bx = 54;
-  for (const item of paymentBreakdown) {
-    lines.push(textCommand(`${item.payment_method || "Unspecified"}: ${money(item.amount, "USD")}`, bx, 574, 8, item.payment_method === "Zelle" ? GOLD : CREAM));
-    bx += 105;
-    if (bx > 480) bx = 54;
-  }
-  lines.push(textCommand(`CARRIED-OVER / OVERDUE: ${carried.length} · ${money(carried.reduce((sum, row) => sum + Number(row.total_amount || 0), 0), "USD")}`, 54, 540, 9, GOLD));
-  lines.push(textCommand("DATE / NUMBER", 54, 505, 8, GOLD));
-  lines.push(textCommand("COUNTERPARTY / SUMMARY", 185, 505, 8, GOLD));
-  lines.push(textCommand("DIRECTION", 420, 505, 8, GOLD));
-  lines.push(textCommand("AMOUNT", 510, 505, 8, GOLD));
-  let y = 482;
+  paymentBreakdown.forEach((item, index) => {
+    const column = index < 4 ? 0 : 1;
+    const row = index < 4 ? index : index - 4;
+    const x = column === 0 ? 54 : 310;
+    const y = 574 - row * 17;
+    lines.push(textCommand(`${item.payment_method || "Unspecified"}: ${money(item.amount, "USD")}`, x, y, 8, item.payment_method === "Zelle" ? GOLD : CREAM));
+  });
+  lines.push(textCommand(`CARRIED-OVER / OVERDUE: ${carried.length} · ${money(carried.reduce((sum, row) => sum + Number(row.total_amount || 0), 0), "USD")}`, 54, 510, 9, GOLD));
+  lines.push(textCommand("DATE / NUMBER", 54, 476, 8, GOLD));
+  lines.push(textCommand("COUNTERPARTY / SUMMARY", 185, 476, 8, GOLD));
+  lines.push(textCommand("DIRECTION", 420, 476, 8, GOLD));
+  lines.push(textCommand("AMOUNT", 510, 476, 8, GOLD));
+  let y = 453;
   for (const row of rows) {
     lines.push(textCommand(`${row.issue_date || ""} ${row.invoice_number || ""}`, 54, y, 8, CREAM));
     lines.push(textCommand(truncate(row.counterparty_name || row.summary || "—", 210, 8, metrics), 185, y, 8, CREAM));
