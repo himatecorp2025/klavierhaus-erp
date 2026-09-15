@@ -591,12 +591,16 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
     `${MUTED} RG .5 w 54 500 504 0 re\n`
   ];
   let y = 478;
-  for (const item of items.slice(0, 12)) {
+  for (const item of items.slice(0, 9)) {
     lines.push(textCommand(truncate(item.item_description || "Item", 315, 9, metrics), 54, y, 9, CREAM));
     lines.push(textCommand(String(Number(item.quantity || 0)), 392, y, 9, CREAM));
     lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 430, y, 8, CREAM));
     lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 500, y, 8, CREAM));
-    y -= 24;
+    const settlement = [];
+    if (item.payment_method) settlement.push(`Payment: ${item.payment_method}`);
+    if (item.financial_status) settlement.push(`Status: ${String(item.financial_status).toLowerCase() === "paid" ? "Paid" : "Pending"}`);
+    if (settlement.length) lines.push(textCommand(truncate(settlement.join(" · "), 315, 7, metrics), 54, y - 11, 7, MUTED));
+    y -= settlement.length ? 32 : 24;
   }
   if (showTotals) {
     lines.push(`${GOLD} RG .8 w 330 174 228 0 re\n`);
@@ -620,10 +624,10 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
 function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], counterpartyName = "", fontPath, logoPath }) {
   const sourceItems = Array.isArray(items) ? items : [];
   const chunks = [];
-  for (let index = 0; index < sourceItems.length; index += 12) chunks.push(sourceItems.slice(index, index + 12));
+  for (let index = 0; index < sourceItems.length; index += 9) chunks.push(sourceItems.slice(index, index + 9));
   if (!chunks.length) chunks.push([]);
   const pageCount = chunks.length;
-  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.map((item) => item.item_description), "INVOICE", "VENDOR BILL", "BILL TO", "SUBTOTAL", "TAX", "TOTAL USD", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE"];
+  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "SUBTOTAL", "TAX", "TOTAL USD", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE"];
   return createPdf({
     pages: chunks.map((pageItems, index) => (metrics, logoResources) => businessInvoicePage({ company, invoice, items: pageItems, counterpartyName, page: index + 1, pages: pageCount, showTotals: index === pageCount - 1, metrics, logoResources })),
     size: LETTER,
