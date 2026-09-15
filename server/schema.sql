@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS pianos (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_serial_no_unique ON pianos(lower(trim(serial_no))) WHERE serial_no IS NOT NULL AND trim(serial_no)<>'';
 
+CREATE TABLE IF NOT EXISTS client_pianos (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  piano_id TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id,piano_id),
+  FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_client_pianos_client ON client_pianos(client_id,piano_id);
+CREATE INDEX IF NOT EXISTS idx_client_pianos_piano ON client_pianos(piano_id,client_id);
+
 CREATE TABLE IF NOT EXISTS steinway_serial_registry (
   start_serial INTEGER PRIMARY KEY,
   build_year INTEGER NOT NULL CHECK(build_year BETWEEN 1853 AND 2100)
@@ -185,6 +197,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
   daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
   daily_rate_date TEXT,
+  technician_extra_compensation REAL NOT NULL DEFAULT 0 CHECK(technician_extra_compensation >= 0),
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(parent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
