@@ -1858,9 +1858,7 @@ html,body{max-width:100%;overflow-x:hidden}
 @media(max-width:800px){.statement-lower{grid-template-columns:1fr}.statement-image{aspect-ratio:16/10}}
 @media(max-width:680px){:root{--page-gutter:max(1rem,env(safe-area-inset-left))}.event-carousel{overflow:visible}.event-carousel .public-event-grid--home{grid-auto-columns:86%;padding-right:14%}.dynamic-event-list>.public-event-grid{grid-template-columns:1fr}.event-carousel__controls{justify-content:center}}
 
-/* Round 8 solar/manual theme */
-.theme-toggle{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--gold);border-radius:999px;background:transparent;color:var(--gold-bright);font-size:1.05rem;cursor:pointer}
-html[data-theme="light"]{--black:#F9F8F5;--black-soft:#F4F1EA;--ivory:#1A1A1A;--ivory-soft:#2D3139;--ivory-muted:#666158;--line:rgba(197,160,89,.38);color-scheme:light}
-html[data-theme="light"] body,html[data-theme="light"] .site-header,html[data-theme="light"] .navigation-panel{background:#F9F8F5;color:#1A1A1A}
-html[data-theme="light"] .catalog-card,html[data-theme="light"] .event-card,html[data-theme="light"] .review-card,html[data-theme="light"] dialog{background:#F4F1EA;color:#1A1A1A;border-color:#C5A059}
 html[data-theme="dark"]{color-scheme:dark}
+
+/* Dark-only consent containment hardening. */
+.consent-banner{overflow:hidden}
