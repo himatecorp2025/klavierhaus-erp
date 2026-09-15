@@ -56,8 +56,8 @@ test("closed-job revenue posting is idempotent and keeps revenue positive", () =
   let counter = 0;
   const domain = createJobDomain({ db, rid: () => `FI-${++counter}`, balanceAccountFromPaymentMethod: () => "BANK" });
   const job = { id:"J-1", title:"Concert tuning", client_id:"C-1", client_name:"Client", piano_id:"P-1", piano_name:"Steinway", completed_at:"2032-08-04T18:00:00Z" };
-  const first = domain.postClosedJobRevenue(job, { logId:"LOG-1", billedAmount:1200, paymentMethod:"Bank Transfer", createdBy:"Admin" });
-  const second = domain.postClosedJobRevenue(job, { logId:"LOG-2", billedAmount:1200, paymentMethod:"Bank Transfer", createdBy:"Admin" });
+  const first = domain.postClosedJobRevenue(job, { logId:"LOG-1", billedAmount:1200, paymentMethod:"Bank Transfer / ACH", createdBy:"Admin" });
+  const second = domain.postClosedJobRevenue(job, { logId:"LOG-2", billedAmount:1200, paymentMethod:"Bank Transfer / ACH", createdBy:"Admin" });
   assert.equal(first.id, second.id);
   assert.equal(db.rows.length, 1);
   assert.equal(db.rows[0].main_type, "INCOME");
