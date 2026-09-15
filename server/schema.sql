@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   contact_email TEXT,
   hidden_user INTEGER DEFAULT 0,
   is_superadmin INTEGER DEFAULT 0,
+  session_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -119,6 +120,8 @@ CREATE TABLE IF NOT EXISTS pianos (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(owner_contact_id) REFERENCES contacts(id) ON DELETE SET NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_serial_no_unique ON pianos(lower(trim(serial_no))) WHERE serial_no IS NOT NULL AND trim(serial_no)<>'';
 
 CREATE TABLE IF NOT EXISTS steinway_serial_registry (
   start_serial INTEGER PRIMARY KEY,
