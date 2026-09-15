@@ -156,7 +156,7 @@ document.querySelectorAll("[data-review-carousel]").forEach((carousel) => {
   };
   const show = (index) => {
     activeIndex = (index + cards.length) % cards.length;
-    track.style.transform = `translate3d(-${activeIndex * 100}%, 0, 0)`;
+    track.style.transform = `translateX(-${activeIndex * 100}%)`;
     renderDots();
   };
   cards.forEach((card) => card.querySelectorAll("img").forEach((image) => { if (!image.complete) image.addEventListener("load", stabilizeHeight, { once: true }); }));
