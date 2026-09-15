@@ -1908,3 +1908,13 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
 .steinway-reference-status{margin-top:-2px;color:var(--muted);font-size:12px}.steinway-reference-status small{display:block;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:color-mix(in srgb,var(--panel2) 82%,transparent)}
 .client-piano-reference{display:grid;gap:3px;padding:8px 0;border-bottom:1px solid var(--line)}.client-piano-reference:last-child{border-bottom:0}.client-piano-reference b{font-size:13px}.client-piano-reference span{color:var(--muted);font-size:12px;line-height:1.4}
 .workflow-shell .workflow-piano-facts .workflow-piano-name{font-size:14px!important;font-weight:800!important;line-height:1.25!important}.workflow-shell .workflow-piano-facts .workflow-client-name{font-size:13px!important;font-weight:700!important}.workflow-shell .workflow-piano-reference-meta{display:block;color:#b9c8d5;font-size:11px!important;font-weight:700;line-height:1.35;overflow-wrap:anywhere}.workflow-shell .workflow-piano-facts .workflow-final-deadline{font-size:12px!important}
+
+
+/* UI12 contract hardening: mobile touch, viewport and overflow safety. */
+@media(max-width:900px){
+  button,.small,.ghost-btn,.mobile-filter-toggle,.modal-close,.workflow-drawer-back,.workflow-shell .workflow-drawer-head .modal-close,.workflow-shell .workflow-drawer-actions button,.workflow-stage-editor-actions button,.digital-attendance-delete,.digital-attendance-check span{min-width:48px;min-height:48px}
+  .modal{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));overflow:hidden}
+  .modal-box{width:min(100%,900px);max-height:calc(100dvh - 16px);overflow:auto}
+  .workflow-drawer{height:100dvh!important;max-height:100dvh!important}
+}
+.table-wrap,.contacts-table-wrap,.pianos-table-wrap,.finance-table-wrap,.seo-audit-table,.event-data-section{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
