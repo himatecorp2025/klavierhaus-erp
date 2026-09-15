@@ -1163,6 +1163,38 @@ function bindQuarterHourPicker(id,onChange){
  const sync=()=>{if(!date.value)return;hidden.value=`${date.value}T${hour.value}:${minute.value}`;hidden.dispatchEvent(new Event('change',{bubbles:true}));if(onChange)onChange(hidden.value);};
  [date,hour,minute].forEach(el=>el.addEventListener('change',sync));
 }
+function formatAmericanDate(dateKey){
+ const match=String(dateKey||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ return match?`${match[2]}/${match[3]}/${match[1]}`:'';
+}
+function parseAmericanDate(value){
+ const match=String(value||'').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(!match)return null;
+ const month=Number(match[1]),day=Number(match[2]),year=Number(match[3]);if(month<1||month>12||day<1||day>31)return null;
+ const stamp=new Date(Date.UTC(year,month-1,day,12));if(stamp.getUTCFullYear()!==year||stamp.getUTCMonth()!==month-1||stamp.getUTCDate()!==day)return null;
+ return `${match[3]}-${match[1]}-${match[2]}`;
+}
+function time12Label(hhmm){
+ const [rawHour,rawMinute]=String(hhmm||'00:00').split(':').map(Number),suffix=rawHour>=12?'PM':'AM',hour=rawHour%12||12;
+ return `${String(hour).padStart(2,'0')}:${String(rawMinute||0).padStart(2,'0')} ${suffix}`;
+}
+function halfHourOptions(selected='10:00'){
+ const opts=[];for(let minutes=7*60;minutes<=21*60;minutes+=30){const value=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;opts.push(`<option value="${value}" ${value===selected?'selected':''}>${time12Label(value)}</option>`);}return opts.join('');
+}
+function snapHalfHourTime(value,fallback='10:00'){
+ const match=String(value||'').match(/T(\d{2}):(\d{2})/);if(!match)return fallback;
+ let minutes=Number(match[1])*60+Number(match[2]);minutes=Math.round(minutes/30)*30;minutes=Math.max(7*60,Math.min(21*60,minutes));return `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;
+}
+function jobDateTimePickerMarkup(id,name,label,value,{defaultTime='10:00'}={}){
+ const parts=localDateTimeParts(value)||localDateTimeParts(newYorkNowLocal()),dateKey=`${parts.year}-${String(parts.month).padStart(2,'0')}-${String(parts.day).padStart(2,'0')}`,time=snapHalfHourTime(value,defaultTime);
+ const normalized=`${dateKey}T${time}`;
+ return `<div class="field job-datetime-field"><label>${label}</label><input id="${id}" name="${name}" type="hidden" value="${normalized}"><div class="job-datetime-control" data-job-datetime="${id}"><input type="text" inputmode="numeric" autocomplete="off" data-job-date value="${formatAmericanDate(dateKey)}" placeholder="MM/DD/YYYY" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" required aria-label="${bi('Date MM/DD/YYYY','Dátum MM/DD/YYYY')}"><select data-job-time aria-label="${bi('Time','Idő')}">${halfHourOptions(time)}</select></div><small class="job-date-format-hint">MM/DD/YYYY · 07:00 AM–09:00 PM</small></div>`;
+}
+function bindJobDateTimePicker(id,onChange){
+ const hidden=document.getElementById(id),box=document.querySelector(`[data-job-datetime="${id}"]`);if(!hidden||!box)return;
+ const date=box.querySelector('[data-job-date]'),time=box.querySelector('[data-job-time]');
+ const sync=()=>{const dateKey=parseAmericanDate(date.value);date.setCustomValidity(dateKey?'':bi('Use MM/DD/YYYY format.','Használd az MM/DD/YYYY formátumot.'));if(!dateKey)return;hidden.value=`${dateKey}T${time.value}`;hidden.dispatchEvent(new Event('change',{bubbles:true}));if(onChange)onChange(hidden.value);};
+ date.addEventListener('change',sync);date.addEventListener('blur',sync);time.addEventListener('change',sync);
+}
 function formatDurationInput(minutes){const safe=Math.max(0,Math.round(Number(minutes)||0));return `${Math.floor(safe/60)}:${String(safe%60).padStart(2,"0")}`;}
 function formatDurationLabel(minutes){
  const safe=Math.max(0,Math.round(Number(minutes)||0)),hours=Math.floor(safe/60),mins=safe%60;
@@ -1343,10 +1375,18 @@ function calendarEventDensityClass(j){
  if(minutes<90) return " EventMedium";
  return " EventDetailed";
 }
+function calendarTypeIconMarkup(j){
+ const isWorkflow=["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type);
+ const label=isWorkflow?bi("Workshop workflow","Műhely workflow"):bi("Scheduled customer job","Ütemezett ügyfélmunka");
+ const svg=isWorkflow
+  ?`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3 17.7 3.3a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2l-3 3M13.3 7.7l3 3M4 20l7.4-7.4M2.8 21.2 4 17.5l2.5 2.5-3.7 1.2ZM9.5 4.5l2-2 4 4-2 2z"/></svg>`
+  :`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.25A3.75 3.75 0 1 0 12 15.75 3.75 3.75 0 0 0 12 8.25Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.2 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2v-4h.5A1.7 1.7 0 0 0 4.2 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.66 4.2l.06.06A1.7 1.7 0 0 0 8.6 4a1.7 1.7 0 0 0 1-.6A1.7 1.7 0 0 0 10 2.5V2h4v.5a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.9v4h-.9a1.7 1.7 0 0 0-1.7.6Z"/></svg>`;
+ return `<span class="calendar-type-badge ${isWorkflow?'is-workflow':'is-job'}" title="${htmlText(label)}" aria-label="${htmlText(label)}">${svg}</span>`;
+}
 function calendarEventCardMarkup(j){
  const time=`${String(j?.start_time||"").slice(11,16)}–${String(j?.end_time||"").slice(11,16)}`;
  if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type)){
-  return `<span class="kh-event-ribbon">${bi("WORKSHOP TASK","WORKFLOW MUNKA")}</span><strong class="event-card-time">${htmlText(String(j?.start_time||"").slice(11,16))}</strong><b class="event-card-title">${htmlText(j.title||"")}</b><small class="event-card-primary">${htmlText(j.client_name||"")} · ${htmlText(j.piano_name||"")}</small><small class="event-card-secondary">${htmlText(j.workflow_key||"")}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
+  return `${calendarTypeIconMarkup(j)}<span class="kh-event-ribbon">${bi("WORKSHOP TASK","WORKFLOW MUNKA")}</span><strong class="event-card-time">${htmlText(String(j?.start_time||"").slice(11,16))}</strong><b class="event-card-title">${htmlText(j.title||"")}</b><small class="event-card-primary">${htmlText(j.piano_name||j.client_name||"")}</small><small class="event-card-secondary">${htmlText(j.client_name||"")}${j.workflow_key?` · ${htmlText(j.workflow_key)}`:""}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
  }
  if(j?.calendar_entry_type==="KLAVIERHAUS_EVENT"){
   const title=currentLang==="hu"?(j.title_hu||j.title_en):(j.title_en||j.title_hu);
@@ -1356,7 +1396,7 @@ function calendarEventCardMarkup(j){
  }
  const client=String(j?.client_name||"—"),amount=calendarCardAmount(j);
  const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—"),notes=String(j?.notes||"").trim();
- return `<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small>${notes?`<small class="event-card-notes" title="${htmlText(notes)}">${htmlText(notes)}</small>`:""}<span class="event-status">${calendarStatusIcon(j)}</span>`;
+ return `${calendarTypeIconMarkup(j)}<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small>${notes?`<small class="event-card-notes" title="${htmlText(notes)}">${htmlText(notes)}</small>`:""}<span class="event-status">${calendarStatusIcon(j)}</span>`;
 }
 
 async function loadCalendarEntries(fromDate,toDateExclusive){
@@ -2281,7 +2321,7 @@ function updateSchedulerDragHud(target){
  if(!target){hud.classList.remove("is-visible");return;}
  const duration=schedulerEntryDurationMinutes(schedulerPointerDrag?.payload);
  const start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);
- hud.innerHTML=`<strong>${htmlText(schedulerDragDateLabel(target.date))}</strong><span>${htmlText(start.slice(11,16))} – ${htmlText(end.slice(11,16))}</span><small>${htmlText(schedulerDurationLabel(duration))}</small>`;
+ hud.innerHTML=`<strong>${htmlText(schedulerDragDateLabel(target.date))}</strong><span>${htmlText(time12Label(start.slice(11,16)))} – ${htmlText(time12Label(end.slice(11,16)))}</span><small>${htmlText(schedulerDurationLabel(duration))}</small>`;
  hud.classList.add("is-visible");
 }
 function schedulerTargetFromPoint(clientX,clientY,dragState=schedulerPointerDrag){
@@ -2300,7 +2340,8 @@ function schedulerTargetFromPoint(clientX,clientY,dragState=schedulerPointerDrag
 }
 function positionSchedulerDragGhost(state,clientX,clientY){
  if(!state?.ghost)return;
- state.ghost.style.transform=`translate3d(${Math.round(clientX-state.startX)}px,${Math.round(clientY-state.startY)}px,0)`;
+ state.lastClientX=clientX;state.lastClientY=clientY;if(state.rafId)return;
+ state.rafId=requestAnimationFrame(()=>{state.rafId=0;if(!state.ghost)return;state.ghost.style.transform=`translate3d(${Math.round(state.lastClientX-state.startX)}px,${Math.round(state.lastClientY-state.startY)}px,0)`;});
 }
 function schedulerAutoScroll(clientX,clientY){
  const scroll=document.querySelector(".timeline-scroll");if(!scroll)return;
@@ -2345,7 +2386,7 @@ function beginSchedulerPointerDrag(event,job){
  window.addEventListener("pointermove",move,{capture:true,passive:false});window.addEventListener("pointerup",finish,{capture:true,once:false});window.addEventListener("pointercancel",cancel,{capture:true,once:false});
 }
 function cleanupSchedulerPointerDrag(){
- const state=schedulerPointerDrag;if(state?.ghost)state.ghost.remove();if(state?.card)state.card.classList.remove("is-pointer-drag-source");
+ const state=schedulerPointerDrag;if(state?.rafId)cancelAnimationFrame(state.rafId);if(state?.ghost)state.ghost.remove();if(state?.card)state.card.classList.remove("is-pointer-drag-source");
  document.querySelectorAll(".timeline-day.is-drag-target,.scheduler-worker-drop.is-drag-target").forEach(el=>el.classList.remove("is-drag-target"));
  document.body.classList.remove("scheduler-dragging");updateSchedulerDragHud(null);schedulerPointerDrag=null;schedulerDragState=null;
 }
@@ -2504,11 +2545,13 @@ function ensureInlineClientPrompt(clientInput,{contacts,onYes,onNo}){let box=doc
 async function openJob(prefill="", row=null, draft=null){
  const source=draft||row||{};
  let allowAdHocClient=Boolean(source?.allow_ad_hoc_client||(!source?.client_id&&source?.client_name));
- const existingMinutes=Number(source?.planned_minutes)>0?Number(source.planned_minutes):Math.max(SCHEDULE_INTERVAL_MINUTES,wallClockDifferenceMinutes(source?.start_time,source?.end_time)||180);
- const preservesExistingExactTime=Boolean(row?.id&&source?.start_time&&source?.end_time&&(!isFiveMinuteDateTime(source.start_time)||!isFiveMinuteDateTime(source.end_time)));
- const dateTimeStep=preservesExistingExactTime?"any":String(SCHEDULE_INTERVAL_MINUTES*60);
- const start=preservesExistingExactTime?String(source.start_time).slice(0,16):roundWallClockToQuarter(source?.start_time || prefill || newYorkNowLocal());
- const end=preservesExistingExactTime?String(source.end_time).slice(0,16):roundWallClockToQuarter(source?.end_time || addWallClockMinutes(start,existingMinutes||180));
+ const existingMinutes=Number(source?.planned_minutes)>0?Number(source.planned_minutes):Math.max(30,wallClockDifferenceMinutes(source?.start_time,source?.end_time)||180);
+ const requestedDate=String(source?.start_time||prefill||newYorkNowLocal()).slice(0,10);
+ const startSource=source?.start_time?String(source.start_time).slice(0,16):`${requestedDate}T10:00`;
+ const start=`${requestedDate}T${snapHalfHourTime(startSource,'10:00')}`;
+ const rawEnd=source?.end_time?String(source.end_time).slice(0,16):addWallClockMinutes(start,existingMinutes||180);
+ const endDate=String(rawEnd||start).slice(0,10)||requestedDate;
+ const end=`${endDate}T${snapHalfHourTime(rawEnd,'13:00')}`;
  const [contacts,pianos]=await Promise.all([api("/api/contacts").catch(()=>[]),api("/api/pianos").catch(()=>[]),loadSchedulerWorkers().catch(()=>[])]).then(results=>[results[0],results[1]]);
  const clientOptions=contacts.map(c=>`<option value="${htmlText(c.name||'')}">${htmlText(`${c.phone||''} ${c.address||''}`)}</option>`).join('');
  const pianoOptions=pianos.map(p=>`<option value="${htmlText((p.display_name||`${p.brand||''} ${p.model||''}`.trim()))}">${htmlText(`${p.serial_no||''} ${p.location||''}`)}</option>`).join('');
@@ -2527,12 +2570,12 @@ async function openJob(prefill="", row=null, draft=null){
 <div class="field"><label>${bi('Client phone','Ügyfél telefonszáma')}</label><input id="clientPhoneInput" name="client_phone" value="${htmlText(source?.client_phone||'')}" placeholder="+1..."></div>
 
 <div class="field"><label>${req("Service address / Cím")}</label><input id="serviceAddressInput" name="service_address" value="${htmlText(source?.service_address||'')}" required></div>
-${quarterHourPickerMarkup('jobStart','start_time',req('Start / Kezdés'),start,{preserveExact:preservesExistingExactTime,step:dateTimeStep})}
-${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end,{preserveExact:preservesExistingExactTime,step:dateTimeStep})}
+${jobDateTimePickerMarkup('jobStart','start_time',req('Start / Kezdés'),start,{defaultTime:'10:00'})}
+${jobDateTimePickerMarkup('jobEnd','end_time',req('End / Befejezés'),end,{defaultTime:'13:00'})}
 
 <div class="field"><label>${bi('Estimated amount','Előzetes összeg')}</label><input name="planned_amount" type="number" min="0" step="0.01" value="${Number(source?.planned_amount||0)}"></div>
-<div class="field daily-rate-toggle-field"><label>${bi('Daily Rate?','Napidíjas?')}</label><label class="switch-row"><input id="jobDailyRateEnabled" name="daily_rate_enabled" type="checkbox" value="1" ${dailyEnabled?'checked':''}><span>${bi('Use employee daily-rate allocation','Napidíjkeret használata')}</span></label></div>
-<div class="field"><label>${bi('Daily Rate Allocation','Napidíj-allokáció')}</label><input id="jobDailyRateAmount" name="daily_rate_allocated_amount" type="number" min="0" step="0.01" value="${dailyAmount}" ${dailyEnabled?'':'disabled'}><small id="jobDailyRateCapacity" class="daily-rate-capacity muted">${bi('Daily rate disabled.','Napidíj kikapcsolva.')}</small></div>
+<div class="field daily-rate-toggle-field"><label>${bi('Daily Rate?','Napidíjas?')}</label><label class="daily-rate-switch"><input id="jobDailyRateEnabled" name="daily_rate_enabled" type="checkbox" value="1" ${dailyEnabled?'checked':''}><span class="daily-rate-switch-track" aria-hidden="true"><span class="daily-rate-switch-thumb"></span></span><span class="daily-rate-switch-label">${bi('Use employee daily-rate allocation','Napidíjkeret használata')}</span></label></div>
+<div class="field daily-rate-allocation-field ${dailyEnabled?'':'hidden'}" id="dailyRateAllocationField"><label>${bi('Daily Rate Allocation','Napidíj-allokáció')}</label><input id="jobDailyRateAmount" name="daily_rate_allocated_amount" type="number" min="0" step="0.01" value="${dailyAmount}" ${dailyEnabled?'':'disabled'}><small id="jobDailyRateCapacity" class="daily-rate-capacity muted">${bi('Daily rate disabled.','Napidíj kikapcsolva.')}</small></div>
 
 <div class="field full ${source?.job_type==="Part-work"?"":"hidden"}" id="instructionsField"><label>${bi('Remaining tasks','Hátralévő feladatok')}</label><textarea name="instructions">${htmlText(source?.instructions||'')}</textarea></div>
 <div class="field full"><label>${bi("Notes","Megjegyzés")}</label><textarea name="notes" rows="4" placeholder="${bi('Additional job notes','További megjegyzés a munkához')}">${htmlText(source?.notes||'')}</textarea></div>
@@ -2548,12 +2591,12 @@ ${quarterHourPickerMarkup('jobEnd','end_time',req('End / Befejezés'),end,{prese
 
  function recalculateDuration(){const minutes=wallClockDifferenceMinutes(startInput.value,endInput.value);if(minutes>0){minutesInput.value=String(minutes);hoursInput.value=String(minutes/60);durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: ${formatDurationLabel(minutes)}`;}else{durationLabel.textContent=`${bi('Planned duration','Tervezett időtartam')}: —`;}}
  async function refreshDailyRateCapacity(){
-   const enabled=dailyToggle.checked;dailyAmountInput.disabled=!enabled;
+   const enabled=dailyToggle.checked,allocationField=document.getElementById('dailyRateAllocationField');dailyAmountInput.disabled=!enabled;if(allocationField)allocationField.classList.toggle('hidden',!enabled);
    if(!enabled){dailyAmountInput.value='0';capacityLabel.textContent=bi('Daily rate disabled.','Napidíj kikapcsolva.');return null;}
    const userId=assignedInput.value,date=String(startInput.value||'').slice(0,10);if(!userId||!date){capacityLabel.textContent=bi('Select employee and date.','Válassz munkavállalót és dátumot.');return null;}
    try{const q=new URLSearchParams({date});if(row?.id)q.set('job_id',row.id);const cap=await api(`/api/employee-daily-rates/${encodeURIComponent(userId)}/capacity?${q}`);capacityLabel.dataset.available=String(cap.available||0);capacityLabel.textContent=`${bi('Daily Rate Limit','Napidíj limit')}: ${money(cap.limit||0)} · ${bi('Already Allocated','Már allokálva')}: ${money(cap.allocated||0)} · ${bi('Available','Elérhető')}: ${money(cap.available||0)}`;return cap;}catch(error){capacityLabel.dataset.available='0';capacityLabel.textContent=String(error.message||error);return null;}
  }
- bindQuarterHourPicker('jobStart',()=>{recalculateDuration();refreshDailyRateCapacity();});bindQuarterHourPicker('jobEnd',recalculateDuration);
+ bindJobDateTimePicker('jobStart',()=>{recalculateDuration();refreshDailyRateCapacity();});bindJobDateTimePicker('jobEnd',recalculateDuration);
  startInput.addEventListener('change',()=>{recalculateDuration();refreshDailyRateCapacity();});endInput.addEventListener('change',recalculateDuration);assignedInput.addEventListener('change',refreshDailyRateCapacity);dailyToggle.addEventListener('change',refreshDailyRateCapacity);dailyAmountInput.addEventListener('input',()=>{const available=Number(capacityLabel.dataset.available||0),requested=Number(dailyAmountInput.value||0);dailyAmountInput.setCustomValidity(dailyToggle.checked&&requested>available+0.0001?bi('Daily rate limit exceeded.','A napidíjkeret túllépve.'):'');});
  bindWorkerAvailability(assignedInput,startInput,endInput,row?.id||"");
  toggleInstructionsField();recalculateDuration();await refreshDailyRateCapacity();applyLanguageToDOM(document.getElementById("modal"));
