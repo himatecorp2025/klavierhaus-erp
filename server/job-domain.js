@@ -44,7 +44,7 @@ function domainError(code, status = 400, details = null) {
   return error;
 }
 
-function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BANK" }) {
+function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BANK", invoiceEngine = null }) {
   function postFinancialItemOnce({ itemDate, title, description = "", amount, mainType, category, paymentMethod = "", jobId = null, clientId = null, pianoId = null, sourceType, sourceId, createdBy = "System" }) {
     if (!sourceType || !sourceId) throw new Error("FINANCIAL_SOURCE_REQUIRED");
     const existing = db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get(sourceType, sourceId);
@@ -191,6 +191,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         if (dailyExpense) posted.push(dailyExpense);
       }
       const primary = posted[0] || db.prepare("SELECT * FROM financial_items WHERE job_id=? ORDER BY created_at,id LIMIT 1").get(job.id) || null;
+      if (complete && source !== "WORKFLOW" && invoiceEngine?.createJobInvoices) invoiceEngine.createJobInvoices({ job, actor, now, entries });
       if (complete) {
         db.prepare(`UPDATE jobs SET status='Completed',workflow_status='COMPLETED',finalized_at=COALESCE(finalized_at,?),completed_at=COALESCE(completed_at,?),
           financial_status='POSTED',financial_ledger_id=COALESCE(financial_ledger_id,?),closed_at=COALESCE(closed_at,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
