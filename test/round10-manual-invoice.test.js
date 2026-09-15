@@ -29,7 +29,9 @@ test("manual invoice UI is adjacent to monthly export and contains all required 
   assert.match(app, /openManualInvoiceModal/);
   assert.match(app, /Receivable \/ Outgoing/);
   assert.match(app, /Payable \/ Incoming/);
-  assert.match(app, /Search clients and partners/);
+  assert.match(app, /Search clients/);
+  assert.match(app, /Search partners/);
+  assert.match(app, /Add New Client\.\.\./);
   assert.match(app, /Add New Partner\.\.\./);
   assert.match(app, /addManualInvoiceItem/);
   assert.match(app, /Taxable Base/);
@@ -43,7 +45,7 @@ test("manual invoice API allocates a number only during the save transaction and
   const ops = read("server/business-operations.js");
   assert.match(ops, /app\.post\("\/api\/invoices\/manual"/);
   assert.match(ops, /sourceType:\s*"manual"/);
-  assert.match(ops, /financialStatus === "paid" \? "paid" : "issued"/);
+  assert.match(ops, /const invoiceStatus = settledItems\.every\(\(item\) => item\.financial_status === "paid"\) \? "paid" : "issued"/);
   assert.match(ops, /db\.transaction\(\(\) => \{[\s\S]*invoiceEngine\.createInvoice[\s\S]*invoiceEngine\.postManualInvoiceLedger/);
   assert.match(ops, /nextNumber\(direction, date\)/);
   assert.match(ops, /paymentLinkUrl/);
@@ -55,8 +57,8 @@ test("inline partner creation persists, refreshes and auto-selects the new partn
   const app = read("public/app.js");
   assert.match(app, /openInlinePartnerFromInvoice/);
   assert.match(app, /api\('\/api\/partners'/);
-  assert.match(app, /refreshManualInvoiceCounterparties\(saved\.id\)/);
-  assert.match(app, /selectManualInvoiceCounterparty\('partner',saved\.id\)/);
+  assert.match(app, /refreshManualInvoiceCounterparties\(\{type,id:saved\.id\}\)/);
+  assert.match(app, /selectManualInvoiceCounterparty\(type,saved\.id\)/);
   assert.match(app, /default_tax_rate/);
 });
 
