@@ -7,7 +7,7 @@ const projectRoot = path.join(__dirname, "..");
 const appSource = fs.readFileSync(path.join(projectRoot, "public", "app.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(projectRoot, "public", "index.html"), "utf8");
 const styles = fs.readFileSync(path.join(projectRoot, "public", "styles.css"), "utf8");
-const websiteStyles = fs.readFileSync(path.join(projectRoot, "website", "public", "design-v3.css"), "utf8");
+const websiteStyles = fs.readFileSync(path.join(projectRoot, "website", "public", "styles.css"), "utf8");
 const serviceWorker = fs.readFileSync(path.join(projectRoot, "public", "service-worker.js"), "utf8");
 const serverSource = fs.readFileSync(path.join(projectRoot, "server", "index.js"), "utf8");
 const websiteServer = fs.readFileSync(path.join(projectRoot, "website", "server", "index.js"), "utf8");
@@ -121,11 +121,11 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(appSource, /"today":'<circle/);
   assert.match(appSource, /"date":'<rect/);
   assert.match(appSource, /"calendar-grid":'<rect/);
-  assert.match(appSource, /class="workflow-date-value"/);
+  assert.match(appSource, /class="workflow-date-text"/);
   assert.match(appSource, /class="workflow-date-picker-icon"/);
   assert.match(appSource, /function workflowOpenDatePicker\(inputOrId,anchor\)/);
   assert.match(appSource, /function workflowBindDatePicker\(box\)/);
-  assert.match(appSource, /workflowOpenDatePicker\(input,picker\)/);
+  assert.match(appSource, /workflowOpenDatePicker\(input,button\|\|picker\)/);
   const dateLabelStart = appSource.indexOf("function workflowBoardDateLabel");
   const dateLabelEnd = appSource.indexOf("function workflowNYZoneLabel", dateLabelStart);
   assert.doesNotMatch(appSource.slice(dateLabelStart, dateLabelEnd), /weekday:"long"/);
@@ -161,12 +161,10 @@ test("workflow responsibility cards use the approved status priority and phase-o
 });
 
 test("workflow date control is compact and public arrows use the shared SVG contract", () => {
-  assert.match(appSource, /<span class="workflow-date-picker-icon" aria-hidden="true"><\/span><span class="workflow-date-value">/);
-  assert.match(styles, /\.workflow-shell \.workflow-date-picker\{[\s\S]*flex:0 0 auto!important;/);
-  assert.match(styles, /width:max-content!important/);
-  assert.match(styles, /flex-wrap:nowrap!important/);
-  assert.match(styles, /justify-content:center!important/);
-  assert.match(styles, /gap:9px!important/);
+  assert.match(appSource, /class="workflow-date-text"[\s\S]*class="workflow-date-picker-button"/);
+  assert.match(styles, /workflow-date-picker\.workflow-date-picker--primary\{[\s\S]*grid-template-columns/);
+  assert.match(styles, /workflow-date-text/);
+  assert.match(styles, /workflow-date-picker-button/);
   assert.match(websiteServer, /function renderPublicArrow\(direction = "external"\)/);
   assert.match(websiteServer, /class="button-arrow-icon button-arrow-icon--/);
   assert.match(websiteServer, /renderPublicArrow\("previous"\)/);
@@ -280,21 +278,16 @@ test("job details render one language immediately and expose only curated pendin
   assert.match(styles, /google-import-row dd\{[^}]*overflow-wrap:anywhere/);
 });
 
-test("manual scheduling uses wall-clock arithmetic, fifteen-minute steps and readable durations", () => {
+test("manual scheduling keeps wall-clock arithmetic while New Job uses half-hour selectors and calendar drag stays fifteen-minute", () => {
   assert.match(appSource, /function addWallClockMinutes/);
   assert.match(appSource, /function wallClockDifferenceMinutes/);
-  assert.match(appSource, /function isFiveMinuteDateTime/);
   assert.match(appSource, /function formatDurationLabel/);
-  assert.match(appSource, /preservesExistingExactTime/);
-  assert.match(appSource, /const timesUnchanged=Boolean/);
-  assert.ok((appSource.match(/step="300"/g) || []).length >= 4);
-  assert.match(appSource, /const dateTimeStep=preservesExistingExactTime\?"any":String\(SCHEDULE_INTERVAL_MINUTES\*60\)/);
+  assert.match(appSource, /function halfHourOptions/);
+  assert.match(appSource, /minutes<=21\*60;minutes\+=30/);
+  assert.match(appSource, /defaultTime='10:00'/);
+  assert.match(appSource, /const SCHEDULE_INTERVAL_MINUTES=15/);
   assert.match(appSource, /INVALID_TIME_STEP/);
   assert.match(appSource, /INVALID_PLANNED_DURATION/);
-  assert.match(serverSource, /function localDateTimeValue/);
-  assert.match(serverSource, /function isFiveMinuteTime/);
-  assert.match(appSource, /const SCHEDULE_INTERVAL_MINUTES=15/);
-  assert.match(appSource, /step="900"/);
   assert.match(serverSource, /planned_minutes=timeRangeMinutes/);
 });
 
