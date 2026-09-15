@@ -103,8 +103,10 @@ function ensureSteinwayReferenceTables(db) {
       size_display TEXT NOT NULL
     );
   `);
-  const serialInsert = db.prepare("INSERT INTO steinway_serial_registry(start_serial,build_year) VALUES(?,?) ON CONFLICT(start_serial) DO UPDATE SET build_year=excluded.build_year");
-  const modelInsert = db.prepare("INSERT INTO steinway_model_reference(model_key,size_cm,size_in,size_display) VALUES(?,?,?,?) ON CONFLICT(model_key) DO UPDATE SET size_cm=excluded.size_cm,size_in=excluded.size_in,size_display=excluded.size_display");
+  // Seed only missing defaults. Imported reference data is authoritative and
+  // must never be overwritten merely because a process restarts.
+  const serialInsert = db.prepare("INSERT OR IGNORE INTO steinway_serial_registry(start_serial,build_year) VALUES(?,?)");
+  const modelInsert = db.prepare("INSERT OR IGNORE INTO steinway_model_reference(model_key,size_cm,size_in,size_display) VALUES(?,?,?,?)");
   db.transaction(() => {
     SERIAL_THRESHOLDS.forEach(([serial, year]) => serialInsert.run(serial, year));
     Object.values(MODEL_REFERENCE).forEach((row) => modelInsert.run(row.model, row.size_cm, row.size_in, row.size_display));
