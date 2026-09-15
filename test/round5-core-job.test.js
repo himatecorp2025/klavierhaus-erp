@@ -103,13 +103,18 @@ test("scheduler supports drag, worker transfer, resize, rollback path and Notes 
   assert.match(styles, /-webkit-line-clamp:2/);
 });
 
-test("New Job can create a missing client and piano without losing the draft", () => {
+test("New Job can create a missing client and register a piano inline without losing the draft", () => {
   const app = read("public/app.js");
-  assert.match(app, /Client not found/);
-  assert.match(app, /Create this client now\?/);
-  assert.match(app, /onSaved:client=>reopenDraft/);
-  assert.match(app, /onCancelled:\(\)=>reopenDraft\(\)/);
-  assert.match(app, /openJobPianoCreate/);
+  const server = read("server/index.js");
+  const schema = read("server/schema.sql");
+  assert.match(app, /createNestedClientStateMachine/);
+  assert.match(app, /openNestedClientModal/);
+  assert.match(app, /Register New Piano for this Client/);
+  assert.match(app, /openNestedJobPianoModal/);
+  assert.match(app, /\/api\/contacts\/\$\{encodeURIComponent\(client\.id\)\}\/pianos/);
+  assert.match(server, /syncClientContactFromJob/);
+  assert.match(server, /INSERT OR IGNORE INTO client_pianos/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS client_pianos/);
   assert.match(app, /Notes/);
   assert.match(app, /name="next_notes"/);
 });
