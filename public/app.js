@@ -1211,7 +1211,8 @@ function bindJobDateTimePicker(id,onChange){
  hidden.dataset.jobDateBound='true';
  const date=box.querySelector('[data-job-date]'),time=box.querySelector('[data-job-time]'),dateButton=box.querySelector('[data-job-date-button]'),allowEmpty=box.dataset.jobAllowEmpty==='true';
  const sync=()=>{const raw=String(date.value||'').trim();if(!raw&&allowEmpty){date.setCustomValidity('');hidden.value='';hidden.dispatchEvent(new Event('change',{bubbles:true}));if(onChange)onChange(hidden.value);return;}const dateKey=parseAmericanDate(raw);date.setCustomValidity(dateKey?'':bi('Use MM/DD/YYYY format.','Use MM/DD/YYYY format.'));if(!dateKey)return;hidden.value=`${dateKey}T${time.value}`;hidden.dispatchEvent(new Event('change',{bubbles:true}));if(onChange)onChange(hidden.value);};
- const openCalendar=()=>{if(date.disabled)return;let proxy=box.querySelector('[data-job-date-proxy]');if(!proxy){proxy=document.createElement('input');proxy.type='date';proxy.tabIndex=-1;proxy.hidden=true;proxy.dataset.jobDateProxy='true';box.appendChild(proxy);proxy.addEventListener('change',()=>{if(!proxy.value)return;date.value=formatAmericanDate(proxy.value);sync();});}proxy.value=parseAmericanDate(date.value)||nyDateKey();adminDatePickerOpen(proxy,dateButton||date);};
+ const datePickerAdapter={type:'date',value:'',get disabled(){return Boolean(date.disabled);},dispatchEvent(event){if(event?.type==='change'&&this.value){date.value=formatAmericanDate(this.value);sync();}return true;}};
+ const openCalendar=()=>{if(date.disabled)return;datePickerAdapter.value=parseAmericanDate(date.value)||nyDateKey();adminDatePickerOpen(datePickerAdapter,dateButton||date);};
  date.addEventListener('change',sync);date.addEventListener('blur',sync);date.addEventListener('click',openCalendar);time.addEventListener('change',sync);dateButton?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();openCalendar();});
  setJobDateTimePickerDisabled(id,hidden.disabled);
 }
