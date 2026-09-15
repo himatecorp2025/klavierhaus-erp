@@ -737,9 +737,11 @@ function registerBusinessOperationsRoutes(options) {
           const itemStatus = itemStatusRaw || null;
           return { item_description: clean(item?.item_description || item?.description, 1000), quantity: parseFinancialNumber(item?.quantity), unit_price: parseFinancialNumber(item?.unit_price), line_type: "custom", payment_method: itemMethod, financial_status: itemStatus };
         });
-        if (!items.length || items.some((item) => !item.item_description || !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unit_price) || item.unit_price < 0)) return res.status(400).json({ error: "INVALID_INVOICE_ITEMS" });
+        if (!items.length || items.some((item) => item.item_description.trim().length < 3 || !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unit_price) || item.unit_price < 0)) return res.status(400).json({ error: "INVALID_INVOICE_ITEMS" });
         if (rawItems.some((item, index) => clean(item?.payment_method, 120) && !items[index].payment_method)) return res.status(400).json({ error: "INVALID_ITEM_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
         if (items.some((item) => item.financial_status && !["paid", "pending"].includes(item.financial_status))) return res.status(400).json({ error: "INVALID_ITEM_FINANCIAL_STATUS" });
+        const summary = clean(req.body?.summary, 2000);
+        if (summary.trim().length < 3) return res.status(400).json({ error: "INVOICE_SUMMARY_TOO_SHORT" });
         const settledItems = items.map((item) => ({ ...item, financial_status: item.financial_status || financialStatus }));
         const invoiceStatus = settledItems.every((item) => item.financial_status === "paid") ? "paid" : "issued";
         const subtotal = roundFinancial(settledItems.reduce((sum, item) => sum + roundFinancial(item.quantity * item.unit_price), 0));
@@ -749,7 +751,7 @@ function registerBusinessOperationsRoutes(options) {
         const created = db.transaction(() => {
           const invoice = invoiceEngine.createInvoice({
             direction, issueDate, dueDate, partnerId: partner?.id || null, clientId: client?.id || null, sourceType: "manual", sourceId: null,
-            summary: clean(req.body?.summary, 2000) || (direction === "receivable" ? "Manual receivable" : "Manual payable"), taxRate: requestedRate, currency: "USD",
+            summary, taxRate: requestedRate, currency: "USD",
             paymentMethod: method, paymentLinkUrl, notes: clean(req.body?.notes, 5000), status: invoiceStatus, items: settledItems
           });
           invoiceEngine.postManualInvoiceLedger(invoice, req.user);
