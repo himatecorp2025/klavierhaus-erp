@@ -31,6 +31,16 @@ function safeText(value) {
   return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function formatPdfDate(value) {
+  if (value == null || value === "") return "";
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return safeText(value);
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")}`;
+}
+
 function paethPredictor(left, above, upperLeft) {
   const estimate = left + above - upperLeft;
   const leftDistance = Math.abs(estimate - left);
@@ -561,45 +571,45 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
   const statusLabel = invoice.status === "paid" ? "Paid" : invoice.status === "void" ? "Void" : invoice.status === "carried_over" ? "Carried Over" : "Pending";
   const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
   const issuerAddress = [company.address_line1, company.address_line2, company.city, company.state, company.postal_code].filter(Boolean).join(", ");
-  const issuerContact = [company.email, company.phone].filter(Boolean).join(" · ");
+  const issuerContact = [company.email, company.phone].filter(Boolean).join(" | ");
   const counterpartyAddress = safeText(invoice.counterparty_address || "");
   const counterpartyTax = safeText(invoice.counterparty_tax_id || "");
-  const counterpartyContact = [invoice.counterparty_contact, invoice.counterparty_email, invoice.counterparty_phone].filter(Boolean).join(" · ");
+  const counterpartyContact = [invoice.counterparty_contact, invoice.counterparty_email, invoice.counterparty_phone].filter(Boolean).join(" | ");
   const lines = [
     `${DARK} rg 0 0 612 792 re f\n`,
-    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 28, 28, logoResource),
-    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 54, 742, 22, CREAM),
-    textCommand(directionLabel, 54, 714, 10, GOLD),
-    textCommand(truncate(issuerAddress, 305, 8, metrics), 54, 696, 8, MUTED),
-    textCommand(truncate(issuerContact, 305, 8, metrics), 54, 682, 8, MUTED),
-    textCommand(company.tax_id ? `Tax ID / EIN: ${company.tax_id}` : "", 54, 668, 8, MUTED),
-    textCommand(invoice.invoice_number || "", 390, 742, 16, CREAM),
-    textCommand(`Issue Date: ${invoice.issue_date || ""}`, 390, 716, 9, MUTED),
-    textCommand(`Due Date: ${invoice.due_date || "—"}`, 390, 700, 9, MUTED),
-    textCommand(`Page ${page}/${pages}`, 500, 682, 8, MUTED),
-    `${GOLD} RG .8 w 54 652 504 0 re\n`,
-    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILL TO", 54, 630, 8, GOLD),
-    textCommand(counterpartyName || invoice.counterparty_name || "—", 54, 612, 12, CREAM),
-    textCommand(truncate(counterpartyAddress, 500, 8, metrics), 54, 594, 8, MUTED),
-    textCommand(counterpartyTax ? `Tax ID: ${counterpartyTax}` : "", 54, 578, 8, MUTED),
-    textCommand(truncate(counterpartyContact, 500, 8, metrics), 54, 562, 8, MUTED),
-    textCommand(truncate(invoice.summary || "", 500, 9, metrics), 54, 540, 9, CREAM),
-    textCommand("DESCRIPTION", 54, 512, 8, GOLD),
-    textCommand("QTY", 388, 512, 8, GOLD),
-    textCommand("UNIT PRICE", 430, 512, 8, GOLD),
-    textCommand("LINE TOTAL", 500, 512, 8, GOLD),
-    `${MUTED} RG .5 w 54 500 504 0 re\n`
+    textCommand(directionLabel, 390, 748, 20, GOLD),
+    textCommand(invoice.invoice_number || "", 390, 724, 14, CREAM),
+    textCommand(`Issue Date: ${formatPdfDate(invoice.issue_date)}`, 390, 704, 9, MUTED),
+    textCommand(`Due Date: ${formatPdfDate(invoice.due_date) || "—"}`, 390, 688, 9, MUTED),
+    textCommand(`Page ${page}/${pages}`, 500, 670, 8, MUTED),
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 704, 30, 30, logoResource),
+    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 94, 708, 20, CREAM),
+    textCommand(truncate(issuerAddress, 310, 8, metrics), 54, 676, 8, MUTED),
+    textCommand(truncate(issuerContact, 310, 8, metrics), 54, 660, 8, MUTED),
+    textCommand(company.tax_id ? `Tax ID / EIN: ${company.tax_id}` : "", 54, 644, 8, MUTED),
+    `${GOLD} RG .8 w 54 626 504 0 re\n`,
+    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILL TO", 54, 604, 8, GOLD),
+    textCommand(counterpartyName || invoice.counterparty_name || "—", 54, 586, 12, CREAM),
+    textCommand(truncate(counterpartyAddress, 500, 8, metrics), 54, 568, 8, MUTED),
+    textCommand(counterpartyTax ? `Tax ID: ${counterpartyTax}` : "", 54, 552, 8, MUTED),
+    textCommand(truncate(counterpartyContact, 500, 8, metrics), 54, 536, 8, MUTED),
+    textCommand(truncate(invoice.summary || "", 500, 9, metrics), 54, 514, 9, CREAM),
+    textCommand("DESCRIPTION", 54, 486, 8, GOLD),
+    textCommand("QTY", 374, 486, 8, GOLD),
+    textCommand("UNIT PRICE", 416, 486, 8, GOLD),
+    textCommand("LINE TOTAL", 496, 486, 8, GOLD),
+    `${MUTED} RG .5 w 54 474 504 0 re\n`
   ];
-  let y = 478;
+  let y = 452;
   for (const item of items.slice(0, 9)) {
     lines.push(textCommand(truncate(item.item_description || "Item", 315, 9, metrics), 54, y, 9, CREAM));
-    lines.push(textCommand(String(Number(item.quantity || 0)), 392, y, 9, CREAM));
-    lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 430, y, 8, CREAM));
-    lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 500, y, 8, CREAM));
+    lines.push(textCommand(String(Number(item.quantity || 0)), 376, y, 9, CREAM));
+    lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 416, y, 8, CREAM));
+    lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 496, y, 8, CREAM));
     const settlement = [];
     if (item.payment_method) settlement.push(`Payment: ${item.payment_method}`);
     if (item.financial_status) settlement.push(`Status: ${String(item.financial_status).toLowerCase() === "paid" ? "Paid" : "Pending"}`);
-    if (settlement.length) lines.push(textCommand(truncate(settlement.join(" · "), 315, 7, metrics), 54, y - 11, 7, MUTED));
+    if (settlement.length) lines.push(textCommand(truncate(settlement.join(" | "), 315, 7, metrics), 54, y - 11, 7, MUTED));
     y -= settlement.length ? 32 : 24;
   }
   if (showTotals) {
@@ -617,7 +627,7 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
   } else {
     lines.push(textCommand("ITEMS CONTINUE ON THE NEXT PAGE", 54, 120, 8, GOLD));
   }
-  lines.push(textCommand("Klavierhaus · New York", 54, 54, 7, MUTED));
+  lines.push(textCommand("Klavierhaus | New York", 54, 54, 7, MUTED));
   return lines.join("");
 }
 
@@ -627,7 +637,7 @@ function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], co
   for (let index = 0; index < sourceItems.length; index += 9) chunks.push(sourceItems.slice(index, index + 9));
   if (!chunks.length) chunks.push([]);
   const pageCount = chunks.length;
-  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "SUBTOTAL", "TAX", "TOTAL USD", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE"];
+  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "DESCRIPTION", "QTY", "UNIT PRICE", "LINE TOTAL", "SUBTOTAL", "TAX", "TAX (0.00%)", "%", "TOTAL USD", "Issue Date", "Due Date", "Page", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE", "|"];
   return createPdf({
     pages: chunks.map((pageItems, index) => (metrics, logoResources) => businessInvoicePage({ company, invoice, items: pageItems, counterpartyName, page: index + 1, pages: pageCount, showTotals: index === pageCount - 1, metrics, logoResources })),
     size: LETTER,
