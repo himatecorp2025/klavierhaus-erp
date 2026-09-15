@@ -6,6 +6,7 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const { createEventClient } = require("./event-client");
+const { PAYMENT_METHODS } = require("../../server/payment-methods");
 const {
   VERSION,
   findRoute,
@@ -676,8 +677,8 @@ const eventCopy = Object.freeze({
     buyTickets: "Buy tickets",
     reservePlace: "Reserve a place",
     ticketsSoon: "Ticketing unavailable",
-    testMode: "TEST MODE",
-    testModeNote: "Stripe Sandbox checkout. No real charge will be made.",
+    testMode: "7 PAYMENT METHODS",
+    testModeNote: "Choose a payment method. Credit Card opens Stripe Sandbox; the other supported methods create a pending reservation for settlement.",
     quantity: "Number of tickets",
     total: "Total",
     decreaseQuantity: "Remove one ticket",
@@ -687,9 +688,11 @@ const eventCopy = Object.freeze({
     attendeeNames: "Guest names",
     guestNumber: "Guest",
     attendeeEmail: "Email address",
-    continueToCheckout: "Continue to secure test checkout",
+    paymentMethod: "Payment method",
+    continueToCheckout: "Continue with selected payment method",
     reservationSubmit: "Confirm complimentary reservation",
-    checkoutSuccess: "Your test payment was received. The ticket is issued after Stripe confirms the payment by webhook.",
+    checkoutSuccess: "Your test card payment was received. The ticket is issued after Stripe confirms the payment by webhook.",
+    checkoutPending: "Your ticket order is reserved and awaiting settlement with the selected payment method.",
     checkoutCancelled: "Checkout was cancelled. The temporary place will be released automatically.",
     checkoutError: "Checkout could not be started. Please try again.",
     reservationSuccess: "Your complimentary reservation has been recorded.",
@@ -733,8 +736,8 @@ const eventCopy = Object.freeze({
     buyTickets: "Jegyvásárlás",
     reservePlace: "Helyfoglalás",
     ticketsSoon: "A jegyvásárlás nem érhető el",
-    testMode: "TESZTÜZEM",
-    testModeNote: "Stripe Sandbox fizetés. Valódi terhelés nem történik.",
+    testMode: "7 FIZETÉSI MÓD",
+    testModeNote: "Válasszon fizetési módot. Bankkártyánál Stripe Sandbox indul; a többi támogatott mód függőben lévő, később rendezhető foglalást hoz létre.",
     quantity: "Jegyek száma",
     total: "Összesen",
     decreaseQuantity: "Egy jegy eltávolítása",
@@ -744,9 +747,11 @@ const eventCopy = Object.freeze({
     attendeeNames: "Vendégek neve",
     guestNumber: "Vendég",
     attendeeEmail: "E-mail-cím",
-    continueToCheckout: "Tovább a biztonságos tesztfizetéshez",
+    paymentMethod: "Fizetési mód",
+    continueToCheckout: "Tovább a kiválasztott fizetési móddal",
     reservationSubmit: "Díjmentes helyfoglalás megerősítése",
-    checkoutSuccess: "A tesztfizetés beérkezett. A jegy a Stripe webhook-visszaigazolása után készül el.",
+    checkoutSuccess: "A teszt bankkártyás fizetés beérkezett. A jegy a Stripe webhook-visszaigazolása után készül el.",
+    checkoutPending: "A jegyrendelést lefoglaltuk; a kiválasztott fizetési móddal történő rendezésre vár.",
     checkoutCancelled: "A fizetés megszakadt. Az ideiglenes helyfoglalás automatikusan felszabadul.",
     checkoutError: "A fizetés nem indítható el. Kérjük, próbálja újra.",
     reservationSuccess: "A díjmentes helyfoglalást rögzítettük.",
@@ -843,6 +848,11 @@ function attendeeNameFields(labels) {
   return `<fieldset class="attendee-names" data-attendee-names data-attendee-label="${escapeHtml(labels.guestNumber)}"><legend>${escapeHtml(labels.attendeeNames)}</legend><label><span>${escapeHtml(labels.guestNumber)} 1</span><input name="attendee_names" type="text" maxlength="200" autocomplete="name" required></label></fieldset>`;
 }
 
+function publicPaymentFields(labels) {
+  const options = PAYMENT_METHODS.map((method) => `<option value="${escapeHtml(method)}"${method === "Credit Card" ? " selected" : ""}>${escapeHtml(method)}</option>`).join("");
+  return `<div class="public-payment-fields"><label>${escapeHtml(labels.paymentMethod)}<select name="payment_method" required>${options}</select></label><label>${escapeHtml(labels.attendeeEmail)}<input name="contact_email" type="email" maxlength="320" autocomplete="email" required></label></div>`;
+}
+
 function renderEventCardAction(event, language, labels = resolveEventCopy(language)) {
   if (event.status === "CANCELLED") {
     return `<span class="event-card-action event-card-action--cancelled" aria-disabled="true">${escapeHtml(labels.cancelled)}</span>`;
@@ -855,6 +865,7 @@ function renderEventCardAction(event, language, labels = resolveEventCopy(langua
     return `<form class="event-card-checkout" method="post" action="${escapeHtml(eventPath(event, language))}/checkout">
       ${quantityControl(event, labels, id)}
       ${attendeeNameFields(labels)}
+      ${publicPaymentFields(labels)}
       <button class="event-card-action event-card-action--checkout" type="submit"><span>${escapeHtml(labels.buyTickets)}</span><small>${escapeHtml(labels.testMode)}</small></button>
     </form>`;
   }
@@ -1015,13 +1026,13 @@ function renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonc
   const description = event.description || event.short_description;
   const keywords = seoKeywords({ seoConfig, key: "events", language, title, description });
   const statusNotice = event.status === "CANCELLED" ? labels.cancelled : event.status === "RESCHEDULED" ? labels.rescheduled : "";
-  const resultNotice = ({ success: labels.checkoutSuccess, cancelled: labels.checkoutCancelled, error: labels.checkoutError, reserved: labels.reservationSuccess })[result] || "";
+  const resultNotice = ({ success: labels.checkoutSuccess, pending: labels.checkoutPending, cancelled: labels.checkoutCancelled, error: labels.checkoutError, reserved: labels.reservationSuccess })[result] || "";
   let ticketing = "";
   if (event.status !== "CANCELLED" && !event.sold_out && event.checkout_available) {
     const id = `${language}-detail-paid-${String(event.id).replace(/[^A-Za-z0-9_-]/g, "")}`;
     ticketing = `<form class="event-order-form" method="post" action="${escapeHtml(canonicalPath)}/checkout">
       <span class="test-mode-badge">${escapeHtml(labels.testMode)}</span><p>${escapeHtml(labels.testModeNote)}</p>
-      ${quantityControl(event, labels, id)}${attendeeNameFields(labels)}
+      ${quantityControl(event, labels, id)}${attendeeNameFields(labels)}${publicPaymentFields(labels)}
       <button class="button button--primary" type="submit">${escapeHtml(labels.continueToCheckout)}</button>
     </form>`;
   } else if (event.status !== "CANCELLED" && !event.sold_out && event.reservation_available) {
@@ -1463,7 +1474,7 @@ function createApp(options = {}) {
     try {
       const [event, globalContent, seoConfig] = await Promise.all([eventClient.detail(req.params.slug, language), eventClient.content("global", language).catch(() => null), loadSeoConfig()]);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-      const result = ["success", "cancelled", "error", "reserved"].includes(String(req.query.checkout || req.query.reservation || ""))
+      const result = ["success", "pending", "cancelled", "error", "reserved"].includes(String(req.query.checkout || req.query.reservation || ""))
         ? String(req.query.checkout || req.query.reservation)
         : "";
       res.type("html").send(renderPublicEventDetail({ event, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, result, globalOverride: globalContent?.content || null, seoConfig }));
@@ -1480,12 +1491,16 @@ function createApp(options = {}) {
     const quantity = Number(req.body?.quantity || 1);
     const attendeeNames = (Array.isArray(req.body?.attendee_names) ? req.body.attendee_names : [req.body?.attendee_names]).map((name) => String(name || "").trim()).filter(Boolean);
     try {
-      const checkout = await eventClient.createCheckout(req.params.slug, language, quantity, attendeeNames);
-      const target = new URL(String(checkout.checkout_url || ""));
-      if (target.protocol !== "https:" || !/(^|\.)stripe\.com$/i.test(target.hostname)) throw new Error("INVALID_CHECKOUT_URL");
-      res.redirect(303, target.toString());
+      const checkout = await eventClient.createCheckout(req.params.slug, language, quantity, attendeeNames, req.body?.payment_method, req.body?.contact_email);
+      if (checkout?.checkout_url) {
+        const target = new URL(String(checkout.checkout_url || ""));
+        if (target.protocol !== "https:" || !/(^|\.)stripe\.com$/i.test(target.hostname)) throw new Error("INVALID_CHECKOUT_URL");
+        return res.redirect(303, target.toString());
+      }
+      if (checkout?.status === "PENDING") return res.redirect(303, `${detailPath}?checkout=pending`);
+      throw new Error("INVALID_CHECKOUT_RESPONSE");
     } catch (error) {
-      console.warn(`[website] Stripe Sandbox checkout unavailable: ${error.code || error.message}`);
+      console.warn(`[website] Event checkout unavailable: ${error.code || error.message}`);
       res.redirect(303, `${detailPath}?checkout=error`);
     }
   });
