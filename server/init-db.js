@@ -372,19 +372,20 @@ function migrateUsersRoleConstraint() {
         contact_email TEXT,
         hidden_user INTEGER DEFAULT 0,
         is_superadmin INTEGER DEFAULT 0,
+        session_version INTEGER NOT NULL DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       )
     `);
     db.exec(`
       INSERT INTO users_new(
-        id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,contact_email,hidden_user,is_superadmin,created_at,updated_at
+        id,name,email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,contact_email,hidden_user,is_superadmin,session_version,created_at,updated_at
       )
       SELECT
         id,name,email,password_hash,
         CASE WHEN role IN ('ADMIN','MANAGER','WORKER') THEN role ELSE 'WORKER' END,
         CASE WHEN role='VIEWER' THEN 'Inactive' ELSE COALESCE(status,'Active') END,
-        phone,address,calendar_color,google_calendar_email,contact_email,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),created_at,updated_at
+        phone,address,calendar_color,google_calendar_email,contact_email,COALESCE(hidden_user,0),COALESCE(is_superadmin,0),COALESCE(session_version,0),created_at,updated_at
       FROM users
     `);
     db.exec("DROP TABLE users");
@@ -615,6 +616,7 @@ function runMigrations() {
     ensureColumn("users", "contact_email", "TEXT");
     ensureColumn("users", "hidden_user", "INTEGER DEFAULT 0");
     ensureColumn("users", "is_superadmin", "INTEGER DEFAULT 0");
+    ensureColumn("users", "session_version", "INTEGER NOT NULL DEFAULT 0");
 
     // Contacts and customer import.
     ensureColumn("contacts", "address", "TEXT");
