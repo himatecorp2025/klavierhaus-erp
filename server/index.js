@@ -19,7 +19,7 @@ const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
-const { createBusinessDocumentService, registerBusinessOperationsRoutes } = require("./business-operations");
+const { createBusinessDocumentService, createInvoiceEngine, registerBusinessOperationsRoutes } = require("./business-operations");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
@@ -504,7 +504,8 @@ function inventoryRowsActive(){
   return db.prepare("SELECT * FROM inventory_items WHERE COALESCE(status,'')!='Deleted' ORDER BY created_at DESC").all();
 }
 
-const jobDomain=createJobDomain({db,rid,balanceAccountFromPaymentMethod});
+const invoiceEngine=createInvoiceEngine({db,balanceAccountFromPaymentMethod});
+const jobDomain=createJobDomain({db,rid,balanceAccountFromPaymentMethod,invoiceEngine});
 function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
   return jobDomain.postClosedJobRevenue(job,{logId,billedAmount:billed,paymentMethod:payment,createdBy:userName||"System"});
 }
@@ -732,7 +733,8 @@ registerBusinessOperationsRoutes({
   ticketService,
   customerConversationUpload,
   notifyUser: createNotification,
-  jobDomain
+  jobDomain,
+  invoiceEngine
 });
 registerWorkshopWorkflowRoutes({
   app,
@@ -744,7 +746,8 @@ registerWorkshopWorkflowRoutes({
   nowISO,
   upload,
   notifyUser: createNotification,
-  jobDomain
+  jobDomain,
+  invoiceEngine
 });
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
@@ -2290,7 +2293,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
         itemDate:String(now).slice(0,10),
         title:`Closed job revenue / Lezárt munka bevétele: ${domainJob.title||domainJob.job_key||domainJob.id}`,
         description:[domainJob.client_name?`Client / Ügyfél: ${domainJob.client_name}`:"",domainJob.piano_name?`Piano / Zongora: ${domainJob.piano_name}`:"",mutation?.logId?`Job log / Lezárási napló: ${mutation.logId}`:""].filter(Boolean).join("\n"),
-        amount:billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
+        amount:closeType==='Full'?(Number(domainJob.planned_amount||0)>0?Number(domainJob.planned_amount):billed):billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
         sourceType:"JOB_REVENUE",sourceId:`JOB_REVENUE:${domainJob.id}`
       }]:[]
     });
