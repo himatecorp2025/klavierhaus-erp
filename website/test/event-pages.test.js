@@ -214,7 +214,7 @@ test("showroom brand routes render filtered alternating instruments with canonic
   });
 });
 
-test("Landing Page Design event labels are rendered on the public homepage without a redeploy", async () => {
+test("Pages & Content event labels are rendered on the public homepage without a redeploy", async () => {
   const api = createFakeApi();
   const originalFetch = api.fetchImpl;
   api.fetchImpl = async (url, options = {}) => {
