@@ -1,5 +1,7 @@
 "use strict";
 
+const { normalizePaymentMethod } = require("./payment-methods");
+
 const SCHEDULE_INTERVAL_MINUTES = 15;
 const JOB_TIMEZONE = "America/New_York";
 
@@ -57,7 +59,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, itemDate || nyDateKey(), clean(title, 500), clean(description, 8000), normalizedAmount,
       mainType === "EXPENSE" ? "EXPENSE" : "INCOME", clean(category, 120) || (mainType === "EXPENSE" ? "OTHER_EXPENSE" : "SERVICE_REVENUE"), "ONE_TIME",
-      paymentMethod || "", balanceAccountFromPaymentMethod(paymentMethod), jobId || null, clientId || null, pianoId || null,
+      normalizePaymentMethod(paymentMethod) || "", balanceAccountFromPaymentMethod(normalizePaymentMethod(paymentMethod) || ""), jobId || null, clientId || null, pianoId || null,
       clean(sourceType, 120), clean(sourceId, 500), clean(createdBy, 200) || "System"
     );
     return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
