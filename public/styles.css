@@ -708,7 +708,7 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
   .event-capacity-ring{min-width:54px;min-height:54px}
 }
 
-/* Landing Page Design administration v26 */
+/* Pages & Content administration v26 */
 .website-design-shell{display:grid;gap:20px;min-width:0;max-width:100%;overflow:hidden}
 .website-design-toolbar{align-items:flex-start}
 .website-design-toolbar .actions{display:flex;gap:9px;flex-wrap:wrap}
@@ -2141,4 +2141,71 @@ button .billing-svg-icon{pointer-events:none}
   .manual-invoice-item .manual-item-settlement{grid-template-columns:1fr}
   .manual-counterparty-details{grid-template-columns:1fr}
   .manual-native-select,.manual-item-settlement select{font-size:16px}
+}
+
+
+/* Round 14: enterprise modal containment, Manual Invoice strict validation, and premium admin SVG icons. */
+.admin-premium-icon{display:block;width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;color:#e6e4df}
+.admin-ia-card__icon .admin-premium-icon{width:28px;height:28px}
+.mobile-more-item .admin-premium-icon,.sidebar-nav .admin-premium-icon{width:22px;height:22px}
+.manual-counterparty-create{margin:6px;padding:8px 10px;border:1px solid rgba(230,199,107,.2);border-radius:9px;background:rgba(230,199,107,.055)}
+.manual-counterparty-create p{margin:0 0 5px;color:#e6e4df;font-size:.78rem}
+.manual-counterparty-create .manual-counterparty-add{margin:0;padding:7px 0 2px;border-top:0}
+.manual-invoice-date-picker{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:#081525;overflow:hidden}
+.manual-invoice-date-picker .workflow-date-text{width:100%;min-width:0;border:0;border-radius:0;background:transparent;color:var(--text);padding:10px 12px;font:inherit;font-variant-numeric:tabular-nums}
+.manual-invoice-date-picker .workflow-date-text:focus{outline:none;box-shadow:inset 0 0 0 1px rgba(230,199,107,.65)}
+.manual-invoice-date-picker .workflow-date-picker-button{display:grid;width:42px;height:42px;place-items:center;padding:0;border:0;border-left:1px solid var(--line);border-radius:0;background:transparent;color:#e6e4df;box-shadow:none}
+.manual-invoice-date-picker .workflow-date-picker-icon{display:grid;place-items:center}
+.manual-invoice-date-picker .billing-svg-icon{width:18px;height:18px}
+#manualInvoiceSaveButton:disabled{cursor:not-allowed;opacity:.42;filter:saturate(.45);box-shadow:none}
+#manualInvoiceForm [name="summary"][aria-invalid="true"],#manualInvoiceForm [name="item_description"][aria-invalid="true"]{border-color:#f87171!important;box-shadow:0 0 0 2px rgba(248,113,113,.15)!important}
+
+/* Every administration dialog stays inside the viewport with a minimum 16px safety margin. */
+.modal,.nested-modal-overlay,.workflow-event-log-modal,.workflow-next-stage-modal,.notification-activation-gate,.system-dialog-overlay,.payment-method-chooser-overlay{box-sizing:border-box;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+.modal-box,.nested-modal-card,.workflow-event-log-modal-card,.workflow-next-stage-card,.system-dialog,.payment-method-chooser-card{box-sizing:border-box;max-width:min(92vw,680px);max-height:calc(100dvh - 32px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+.manual-invoice-card,.manual-preview-card,.workflow-full-log-modal-card,.digital-attendance-modal-shell .modal-box{max-width:min(94vw,1100px);max-height:calc(100dvh - 32px)}
+.inline-partner-card{max-width:min(92vw,680px);max-height:calc(100dvh - 32px)}
+.modal-box input,.modal-box select,.modal-box textarea,.nested-modal-card input,.nested-modal-card select,.nested-modal-card textarea{max-width:100%;min-width:0}
+
+@media(max-width:768px){
+  .modal,.nested-modal-overlay,.workflow-event-log-modal,.workflow-next-stage-modal,.system-dialog-overlay,.payment-method-chooser-overlay{padding:16px}
+  .modal-box,.nested-modal-card,.manual-invoice-card,.manual-preview-card,.inline-partner-card,.workflow-event-log-modal-card,.workflow-next-stage-card,.workflow-full-log-modal-card,.payment-method-chooser-card{width:100%;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);margin:0}
+  .form-grid,.manual-invoice-grid,.manual-payment-fields,.manual-invoice-bottom,.manual-preview-footer,.workflow-inline-form,.workflow-config-row,.workflow-stage-editor-grid,.workflow-phase-fields-grid{grid-template-columns:minmax(0,1fr)!important}
+  .field.full,.manual-invoice-grid .full,.manual-payment-fields .full,.workflow-inline-form>*,.workflow-config-row>*,.workflow-stage-editor-grid>*,.workflow-phase-fields-grid>*{grid-column:1/-1!important}
+  .manual-invoice-item{grid-template-columns:minmax(0,1fr)!important}
+  .manual-invoice-item>*,.manual-invoice-item output,.manual-invoice-item button,.manual-invoice-item .manual-item-settlement{grid-column:1/-1!important;grid-row:auto!important;justify-self:stretch}
+  .manual-invoice-item output{text-align:left}
+  .manual-invoice-actions,.manual-section-head,.modal-header,.manual-invoice-card>header,.manual-preview-card>header,.inline-partner-card>header{min-width:0;flex-wrap:wrap}
+  .manual-invoice-actions>div,.actions{max-width:100%;flex-wrap:wrap}
+  .manual-invoice-actions button,.actions button{max-width:100%}
+  .invoice-preview{overflow-x:hidden}.invoice-preview table{display:block;max-width:100%;overflow-x:auto}
+}
+
+.manual-preview-summary{margin:0;padding:10px 12px;border-left:2px solid rgba(230,199,107,.45);background:rgba(230,199,107,.04);color:var(--muted,#aaa);overflow-wrap:anywhere}.manual-preview-summary b{color:#e6e4df}
+.modal-box:has(.table-wrap),.modal-box:has(.import-preview-table),.modal-box:has(.digital-attendance-modal-content),.modal-box:has(.website-preview-modal){max-width:min(94vw,1100px)}
+
+
+/* Round 14 final responsive sweep: every dialog/popover keeps a 16px viewport safety zone. */
+.notification-activation-card,.admin-date-picker-popover-card,.website-preview-modal,.workflow-drawer{
+  box-sizing:border-box;
+  max-height:calc(100vh - 32px);
+  max-height:calc(100dvh - 32px);
+}
+.notification-activation-card,.admin-date-picker-popover-card{max-width:min(92vw,680px);overflow-x:hidden;overflow-y:auto}
+.website-preview-modal{max-width:min(94vw,1100px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px)}
+.admin-date-picker-popover{max-width:calc(100vw - 32px)}
+.modal-box,.nested-modal-card,.workflow-event-log-modal-card,.workflow-next-stage-card,.system-dialog,.payment-method-chooser-card,.manual-invoice-card,.manual-preview-card,.inline-partner-card{
+  max-height:calc(100vh - 32px);
+  max-height:calc(100dvh - 32px);
+}
+@media(max-width:768px){
+  .notification-activation-gate{padding:16px!important}
+  .notification-activation-card{width:100%;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);margin:0}
+  .digital-attendance-modal-shell{align-items:center!important;padding:16px!important}
+  .digital-attendance-modal-shell .modal-box{width:100%!important;max-width:calc(100vw - 32px)!important;max-height:calc(100vh - 32px)!important;max-height:calc(100dvh - 32px)!important;border:1px solid #b79547!important;border-radius:12px!important;padding:10px!important}
+  .workflow-drawer{position:fixed;inset:16px;width:auto;height:auto;min-height:0;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .workflow-drawer-actions{position:sticky;left:auto;right:auto;bottom:0;padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  .admin-date-picker-popover{max-width:calc(100vw - 32px)}
+  .admin-date-picker-popover-card{max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto}
+  .website-preview-modal{width:100%;max-width:calc(100vw - 32px);height:min(760px,calc(100vh - 32px));height:min(760px,calc(100dvh - 32px))}
 }
