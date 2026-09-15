@@ -1,4 +1,5 @@
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, createJobDomain } = require("./job-domain");
+const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods");
 
 const DEFAULT_STAGES = [
   ["INBOUND", "Arrival & Transport", "Beérkezés és beszállítás"],
@@ -723,6 +724,8 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (stages.some((stage) => !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status))) throw error("WORKFLOW_STAGES_NOT_COMPLETE");
       if (stages.some((stage) => stage.status !== "NOT_REQUIRED" && stage.financial_status !== "CLOSED")) throw error("WORKFLOW_STAGE_FINANCE_NOT_CLOSED");
       const lines = financialRows(workflow.id), summary = signedFinanceSummary(lines), closureReason = clean(req.body?.closure_reason, 2000);
+      const paymentMethod = normalizePaymentMethod(req.body?.payment_method, { allowEmpty: false });
+      if (!paymentMethod) { const problem = error("INVALID_PAYMENT_METHOD"); problem.allowed = PAYMENT_METHODS; throw problem; }
       if (summary.net_total === 0 && !closureReason) throw error("ZERO_WORKFLOW_CLOSE_REASON_REQUIRED");
       const closedAt = nowISO(), closedId = rid("WCJ");
       domain.closeoutJobOrchestration({
@@ -744,6 +747,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           pianoId: workflow.piano_id,
           sourceType: "workflow_financial_line",
           sourceId: `WORKFLOW_LINE:${line.id}`,
+          paymentMethod,
           createdBy: req.user.name
         })),
         mutate: ({ now }) => {
@@ -754,7 +758,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines, materials: materialRows(workflow.id) }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
-          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now });
+          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now, paymentMethod });
           return { closedId };
         }
       });
