@@ -62,7 +62,7 @@ test("manual invoice backend accepts explicit partner/client ids, comma decimals
   assert.match(ops, /parseFinancialNumber\(item\?\.unit_price\)/);
   assert.match(ops, /Number\.isInteger\(item\.quantity\)/);
   assert.match(ops, /INVOICE_TOTAL_REQUIRED/);
-  assert.match(ops, /roundFinancial\(items\.reduce/);
+  assert.match(ops, /roundFinancial\(settledItems\.reduce/);
   assert.match(ops, /parsedRate = parseFinancialNumber\(req\.body\?\.default_tax_rate/);
 });
 
