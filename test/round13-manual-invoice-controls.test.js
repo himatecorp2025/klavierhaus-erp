@@ -26,10 +26,10 @@ test("manual payment and status controls are native-accessible and expose all se
 test("description is required and preview/save share the same line validation", () => {
   const app = read("public/app.js");
   const css = read("public/styles.css");
-  assert.ok(app.includes('name="item_description" required aria-required="true"'));
+  assert.ok(app.includes('name="item_description" required aria-required="true" minlength="3"'));
   assert.match(app, /function validateManualInvoiceItems/);
   assert.match(app, /manual-field-invalid/);
-  assert.match(app, /Service \/ item description is required on every line/);
+  assert.match(app, /Every service \/ item description must contain at least 3 characters/);
   assert.match(app, /function collectManualInvoicePayload\(\)[\s\S]*validateManualInvoiceItems/);
   assert.match(app, /function previewManualInvoiceDraft\(\)[\s\S]*collectManualInvoicePayload/);
   assert.match(css, /\.manual-field-invalid\{border-color:#f87171!important/);
