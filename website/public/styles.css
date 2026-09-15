@@ -2048,3 +2048,11 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 
 @media(max-width:760px){.review-carousel{--review-slide-height:clamp(32rem,125vw,42rem)}.review-card{align-content:start}}
 @media(prefers-reduced-motion:reduce){.review-track{transition:none!important}}
+
+/* Public paid-event checkout: canonical seven-method selector. */
+.public-payment-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.65rem;min-width:0}
+.public-payment-fields label{display:grid;gap:.32rem;min-width:0;color:var(--gold-bright);font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.public-payment-fields input,.public-payment-fields select{width:100%;min-width:0;min-height:2.85rem;padding:.65rem .72rem;border:1px solid rgba(245,239,224,.18);border-radius:8px;background:#080807;color:var(--cream);font:inherit}
+.event-order-form .public-payment-fields label{font-size:.72rem}
+.event-order-form .public-payment-fields input,.event-order-form .public-payment-fields select{min-height:3.25rem;border-radius:0;color:var(--ivory)}
+@media(max-width:800px){.public-payment-fields{grid-template-columns:1fr}}
