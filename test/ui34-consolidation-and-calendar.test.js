@@ -21,12 +21,31 @@ test("CSS consolidation removes design-v3 from runtime", () => {
 test("New Job uses hybrid MM\/DD\/YYYY calendar and half-hour single select", () => {
   assert.match(app, /placeholder="MM\/DD\/YYYY"/);
   assert.match(app, /data-job-date-button/);
-  assert.match(app, /adminDatePickerOpen\(proxy/);
+  assert.match(app, /datePickerAdapter=\{type:'date'/);
+  assert.match(app, /adminDatePickerOpen\(datePickerAdapter/);
+  assert.doesNotMatch(app, /data-job-date-proxy/);
+  assert.doesNotMatch(app, /box\.appendChild\(proxy\)/);
   assert.match(app, /for\(let minutes=7\*60;minutes<=21\*60;minutes\+=30\)/);
   assert.match(app, /defaultTime='10:00'/);
   assert.match(app, /data-native-select="true"/);
   assert.match(app, /jobClockIconMarkup/);
   assert.match(css, /\[data-job-time\]\{appearance:none/);
+});
+
+
+
+test("Date/time rows stay compact inside three-column modals without clipping the focus ring", () => {
+  assert.match(css, /grid-template-columns:minmax\(0,145px\) minmax\(0,122px\)/);
+  assert.match(css, /max-width:278px/);
+  assert.match(css, /job-date-entry\{[^}]*max-width:145px/);
+  assert.match(css, /job-time-entry\{[^}]*max-width:122px/);
+  assert.match(css, /padding:3px 3px 3px 0/);
+});
+
+test("Job and workflow calendar clicks do not inject a legacy date input", () => {
+  assert.doesNotMatch(app, /document\.createElement\(['"]input['"]\)[\s\S]{0,220}data-job-date-proxy/);
+  assert.doesNotMatch(app, /data-job-date-proxy/);
+  assert.match(app, /datePickerAdapter\.value=parseAmericanDate\(date\.value\)\|\|nyDateKey\(\)/);
 });
 
 test("Scheduler enters with All Jobs and obsolete reassignment helper is removed", () => {
