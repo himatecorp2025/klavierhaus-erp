@@ -629,7 +629,7 @@ function themeIconSvg(theme) {
 function applyPublicTheme(theme) {
   const value = theme === "light" ? "light" : "dark";
   const root = document.documentElement;
-  root.dataset.theme = value;
+  root.setAttribute("data-theme", value);
   root.style.removeProperty("--black");
   root.style.removeProperty("--ivory");
   root.style.removeProperty("--ivory-soft");
@@ -640,7 +640,12 @@ function applyPublicTheme(theme) {
   });
   document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     const target = value === "light" ? "dark" : "light";
-    button.setAttribute("aria-label", target === "dark" ? "Switch to dark theme" : "Switch to light theme");
+    const hu = String(document.documentElement.lang || "").toLowerCase().startsWith("hu");
+    const label = target === "dark"
+      ? (hu ? "Váltás sötét témára" : "Switch to dark theme")
+      : (hu ? "Váltás világos témára" : "Switch to light theme");
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
     button.setAttribute("data-current-theme", value);
   });
 }
