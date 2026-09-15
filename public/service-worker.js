@@ -7,11 +7,15 @@ self.addEventListener("fetch",event=>{
   const url=new URL(request.url);
   if(request.method!=="GET"||url.pathname.startsWith("/api/")||url.pathname.startsWith("/uploads/")||url.pathname==="/manifest.webmanifest") return;
   event.respondWith((async()=>{
+    const isCriticalShell=url.pathname==="/app.js"||url.pathname==="/index.html"||url.pathname==="/";
     const cached=await caches.match(request);
     const network=fetch(request).then(async response=>{
       if(response.ok){const cache=await caches.open(CACHE_NAME);await cache.put(request,response.clone());}
       return response;
     });
+    if(isCriticalShell){
+      try{return await network;}catch(_error){return cached||(await caches.match("/index.html"))||Response.error();}
+    }
     if(cached){event.waitUntil(network.catch(()=>{}));return cached;}
     try{return await network;}catch(_error){return (await caches.match("/index.html"))||Response.error();}
   })());
