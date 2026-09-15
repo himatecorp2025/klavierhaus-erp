@@ -1013,9 +1013,16 @@ function registerBusinessOperationsRoutes(options) {
     if (rateLimited(`conversation-lookup:${ipKey}`, 5, 10 * 60 * 1000)) return res.status(429).json({ error: "TOO_MANY_REQUESTS" });
     const email = normalizeEmail(req.body?.email);
     if (!validEmail(email)) return res.status(400).json({ error: "VALID_CONVERSATION_EMAIL_REQUIRED" });
-    const rows = db.prepare("SELECT * FROM customer_conversations WHERE lower(trim(email))=? AND datetime(created_at)>=datetime('now', ?) ORDER BY updated_at DESC LIMIT 20").all(email, `-${CUSTOMER_RETENTION_YEARS} years`);
+
+    // Security boundary: an e-mail address alone is not proof that the caller is
+    // entitled to any private conversation token. Never expose decrypted
+    // access tokens, conversation URLs, row counts, or conversation metadata
+    // from this public endpoint. Return the same generic response regardless of
+    // whether matching conversations exist to avoid both account takeover and
+    // e-mail-address enumeration. Existing conversation access continues to use
+    // the possession-based /:token routes.
     res.setHeader("Cache-Control", "no-store");
-    res.json(rows.map((row) => { const accessToken = conversationTokenFromRow(row, conversationKey); return { ...conversationPayload(row, true, "public", accessToken), access_token: accessToken, conversation_url: publicConversationUrl(accessToken) }; }));
+    return res.status(202).json({ ok: true });
   });
 
   app.get("/api/public/customer-conversations/:token", (req, res) => {
