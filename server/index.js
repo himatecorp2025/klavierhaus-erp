@@ -25,6 +25,7 @@ const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./sy
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const { analyzeClientWorkbook, commitClientImportRecords } = require("./client-import");
 const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
+const { ensureCentralPianoReference, importReferenceWorkbook, centralPianoLookup } = require("./piano-reference-engine");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -1797,6 +1798,22 @@ app.get("/api/steinway-reference/lookup", auth, (req,res)=>{
   res.json(result);
 });
 
+app.get("/api/pianos/lookup", auth, (req,res)=>{
+  try{
+    res.json(centralPianoLookup(db,{q:req.query.q||"",serial:req.query.serial||req.query.serial_no||"",brand:req.query.brand||"",model:req.query.model||"",currentYear:2026}));
+  }catch(err){console.error("central piano lookup failed:",err);res.status(500).json({error:"PIANO_LOOKUP_FAILED"});}
+});
+
+const pianoReferenceUpload=createPianoImportUpload();
+app.post("/api/pianos/import-reference",auth,permit("ADMIN"),pianoReferenceUpload.single("file"),(req,res)=>{
+  if(!req.file?.buffer)return res.status(400).json({error:"REFERENCE_EXCEL_REQUIRED"});
+  try{
+    const result=importReferenceWorkbook(db,req.file.buffer);
+    audit(req,"STEINWAY_REFERENCE_IMPORTED","pianos","STEINWAY_REFERENCE",null,result,1,`Serial thresholds: ${result.serial_records}; models: ${result.model_records}`);
+    res.json(result);
+  }catch(err){console.error("Steinway reference import failed:",err);res.status(400).json({error:err.message||"STEINWAY_REFERENCE_IMPORT_FAILED"});}
+});
+
 app.get("/api/pianos", auth, (req,res)=>{
   const rows=db.prepare(`
     SELECT p.*,
@@ -1920,10 +1937,21 @@ app.delete("/api/pianos", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
-  const piano=db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(req.params.id);
-  db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
-  refreshClientHasPiano(piano?.owner_contact_id);
-  res.json({ok:true});
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
+  if(!piano)return res.status(404).json({error:"PIANO_NOT_FOUND"});
+  const tableHasColumn=(table,column)=>{try{return db.prepare(`PRAGMA table_info(${table})`).all().some(row=>row.name===column);}catch(_e){return false;}};
+  const remove=db.transaction(()=>{
+    for(const [table,column,emptyValue] of [["jobs","piano_id",null],["planned_jobs","piano_id",""] ,["journal_entries","piano_id",null],["financial_items","piano_id",null],["inventory_items","linked_piano_id",""]]){
+      if(tableHasColumn(table,column))db.prepare(`UPDATE ${table} SET ${column}=? WHERE ${column}=?`).run(emptyValue,req.params.id);
+    }
+    db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
+    if(piano.owner_contact_id){
+      const count=Number(db.prepare("SELECT COUNT(*) AS c FROM pianos WHERE owner_contact_id=?").get(piano.owner_contact_id).c||0);
+      db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(count>0?1:0,piano.owner_contact_id);
+    }
+    try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details,audit_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid("AUD"),req.user?.id||"",req.user?.name||"",req.user?.role||"","PIANO_HARD_DELETE","pianos",req.params.id,JSON.stringify(piano),null,1,"Superadmin confirmed permanent piano deletion","TECHNICAL");}catch(_e){}
+  });
+  try{remove();res.json({ok:true,deleted_id:req.params.id});}catch(err){console.error("piano delete failed:",err);res.status(500).json({error:"PIANO_DELETE_FAILED"});}
 });
 
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
