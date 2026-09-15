@@ -1371,7 +1371,7 @@ async function loadCalendarEntries(fromDate,toDateExclusive){
 
 async function openCalendarEntry(row){
  if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(row?.calendar_entry_type)){
-  workshopWorkflowPrevious=false;workshopWorkflowSelectedId=String(row.workflow_id||row.id||"");await render("workshop_workflow");return;
+  await openSchedulerWorkflowDrawer(row);return;
  }
  if(row?.calendar_entry_type!=="KLAVIERHAUS_EVENT")return openJobDetails(row);
  const event=await api(`/api/calendar-events/${encodeURIComponent(row.event_id)}`);
@@ -2238,15 +2238,134 @@ function updateCurrentTimeLine(){
  });
 }
 let schedulerDragState=null;
-function schedulerDragPayload(job){return {id:job.id||job.job_id,start_time:job.start_time,end_time:job.end_time,assigned_user_id:job.assigned_user_id||"",assigned_to:job.assigned_to||""};}
-function beginSchedulerDrag(event,job){
- if(job?.calendar_entry_type)return;
- schedulerDragState=schedulerDragPayload(job);
- event.dataTransfer.effectAllowed="move";
- event.dataTransfer.setData("text/plain",JSON.stringify(schedulerDragState));
- document.body.classList.add("scheduler-dragging");
+let schedulerPointerDrag=null;
+let schedulerSuppressClickUntil=0;
+let schedulerWorkflowDrawerState=null;
+function schedulerDragPayload(job){
+ return {
+  id:job.id||job.job_id,
+  workflow_id:job.workflow_id||"",
+  stage_id:job.stage_id||(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(job.calendar_entry_type)?job.id:"")||"",
+  calendar_entry_type:job.calendar_entry_type||"",
+  start_time:job.start_time,
+  end_time:job.end_time,
+  assigned_user_id:job.assigned_user_id||"",
+  assigned_to:job.assigned_to||"",
+  stage_status:job.stage_status||job.status||""
+ };
 }
-function endSchedulerDrag(){schedulerDragState=null;document.body.classList.remove("scheduler-dragging");}
+function schedulerEntryDurationMinutes(payload){
+ const diff=wallClockDifferenceMinutes(payload?.start_time,payload?.end_time);
+ if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload?.calendar_entry_type))return Math.max(SCHEDULE_INTERVAL_MINUTES,diff||60);
+ return Math.max(SCHEDULE_INTERVAL_MINUTES,diff||SCHEDULE_INTERVAL_MINUTES);
+}
+function schedulerDragDateLabel(dateKey){
+ try{
+  const [year,month,day]=String(dateKey||"").split("-").map(Number);
+  const date=new Date(Date.UTC(year,month-1,day,12));
+  return new Intl.DateTimeFormat(currentLang==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",year:"numeric",month:"long",day:"numeric",weekday:"long"}).format(date);
+ }catch(_error){return String(dateKey||"");}
+}
+function schedulerDurationLabel(minutes){
+ const safe=Math.max(0,Math.round(Number(minutes)||0)),hours=Math.floor(safe/60),mins=safe%60;
+ if(currentLang==="hu")return `${hours} óra ${String(mins).padStart(2,"0")} perc`;
+ return `${hours} ${hours===1?"hour":"hours"} ${String(mins).padStart(2,"0")} min`;
+}
+function ensureSchedulerDragHud(){
+ let hud=document.getElementById("schedulerDragHud");
+ if(!hud){hud=document.createElement("div");hud.id="schedulerDragHud";hud.className="scheduler-drag-hud";hud.setAttribute("role","status");hud.setAttribute("aria-live","polite");document.body.appendChild(hud);}
+ return hud;
+}
+function updateSchedulerDragHud(target){
+ const hud=ensureSchedulerDragHud();
+ if(!target){hud.classList.remove("is-visible");return;}
+ const duration=schedulerEntryDurationMinutes(schedulerPointerDrag?.payload);
+ const start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);
+ hud.innerHTML=`<strong>${htmlText(schedulerDragDateLabel(target.date))}</strong><span>${htmlText(start.slice(11,16))} – ${htmlText(end.slice(11,16))}</span><small>${htmlText(schedulerDurationLabel(duration))}</small>`;
+ hud.classList.add("is-visible");
+}
+function schedulerTargetFromPoint(clientX,clientY,dragState=schedulerPointerDrag){
+ const elements=document.elementsFromPoint(clientX,clientY);
+ const workerTarget=elements.map(el=>el.closest?.(".scheduler-worker-drop")).find(Boolean);
+ if(workerTarget)return {workerId:String(workerTarget.dataset.workerId||""),workerTarget};
+ const day=elements.map(el=>el.closest?.(".timeline-day")).find(Boolean);
+ if(!day)return null;
+ const rect=day.getBoundingClientRect(),dayStart=Number(day.dataset.dayStart||420),dayEnd=Number(day.dataset.dayEnd||1320),span=dayEnd-dayStart;
+ const cardTopY=clientY-Number(dragState?.grabOffsetY||0);
+ const raw=dayStart+((cardTopY-rect.top)/Math.max(1,rect.height))*span;
+ const duration=schedulerEntryDurationMinutes(dragState?.payload);
+ const latest=Math.max(dayStart,dayEnd-Math.min(duration,dayEnd-dayStart));
+ const minutes=Math.max(dayStart,Math.min(latest,Math.round(raw/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES));
+ return {date:String(day.dataset.date||""),minutes,day,rect};
+}
+function positionSchedulerDragGhost(state,clientX,clientY){
+ if(!state?.ghost)return;
+ state.ghost.style.transform=`translate3d(${Math.round(clientX-state.startX)}px,${Math.round(clientY-state.startY)}px,0)`;
+}
+function schedulerAutoScroll(clientX,clientY){
+ const scroll=document.querySelector(".timeline-scroll");if(!scroll)return;
+ const rect=scroll.getBoundingClientRect(),edge=58,speed=18;
+ if(clientX<rect.left+edge)scroll.scrollLeft-=speed;else if(clientX>rect.right-edge)scroll.scrollLeft+=speed;
+ if(clientY<rect.top+edge)scroll.scrollTop-=speed;else if(clientY>rect.bottom-edge)scroll.scrollTop+=speed;
+}
+function beginSchedulerPointerDrag(event,job){
+ if(event.button!==undefined&&event.button!==0)return;
+ if(event.target.closest(".timeline-resize-handle"))return;
+ if(!isMovableSchedulerEntry(job))return;
+ const card=event.currentTarget,rect=card.getBoundingClientRect();
+ schedulerPointerDrag={payload:schedulerDragPayload(job),card,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,grabOffsetY:event.clientY-rect.top,started:false,ghost:null,target:null};
+ try{card.setPointerCapture?.(event.pointerId);}catch(_error){}
+ const move=moveEvent=>{
+  const state=schedulerPointerDrag;if(!state||moveEvent.pointerId!==state.pointerId)return;
+  const distance=Math.hypot(moveEvent.clientX-state.startX,moveEvent.clientY-state.startY);
+  if(!state.started&&distance<5)return;
+  if(!state.started){
+   state.started=true;document.body.classList.add("scheduler-dragging");card.classList.add("is-pointer-drag-source");
+   const ghost=card.cloneNode(true);ghost.removeAttribute("onclick");ghost.removeAttribute("onpointerdown");ghost.querySelectorAll("[onpointerdown]").forEach(el=>el.removeAttribute("onpointerdown"));
+   ghost.classList.add("scheduler-drag-ghost");ghost.style.position="fixed";ghost.style.left=`${rect.left}px`;ghost.style.top=`${rect.top}px`;ghost.style.width=`${rect.width}px`;ghost.style.height=`${Math.max(rect.height,56)}px`;ghost.style.margin="0";document.body.appendChild(ghost);state.ghost=ghost;
+  }
+  moveEvent.preventDefault();schedulerAutoScroll(moveEvent.clientX,moveEvent.clientY);positionSchedulerDragGhost(state,moveEvent.clientX,moveEvent.clientY);
+  document.querySelectorAll(".timeline-day.is-drag-target,.scheduler-worker-drop.is-drag-target").forEach(el=>el.classList.remove("is-drag-target"));
+  state.target=schedulerTargetFromPoint(moveEvent.clientX,moveEvent.clientY,state);
+  if(state.target?.day)state.target.day.classList.add("is-drag-target");if(state.target?.workerTarget)state.target.workerTarget.classList.add("is-drag-target");
+  updateSchedulerDragHud(state.target?.date?state.target:null);
+ };
+ const finish=async upEvent=>{
+  const state=schedulerPointerDrag;if(!state||upEvent.pointerId!==state.pointerId)return;
+  window.removeEventListener("pointermove",move,true);window.removeEventListener("pointerup",finish,true);window.removeEventListener("pointercancel",cancel,true);
+  if(state.started){upEvent.preventDefault();schedulerSuppressClickUntil=Date.now()+350;}
+  const target=state.target,payload=state.payload;
+  cleanupSchedulerPointerDrag();
+  if(!state.started||!target)return;
+  if(target.workerId){await commitSchedulerAssigneeMove(payload,target.workerId);return;}
+  const duration=schedulerEntryDurationMinutes(payload),start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);
+  if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload.calendar_entry_type))await commitWorkflowSchedulerMove(payload,start);else await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_pointer_drag");
+ };
+ const cancel=cancelEvent=>{if(!schedulerPointerDrag||cancelEvent.pointerId!==schedulerPointerDrag.pointerId)return;window.removeEventListener("pointermove",move,true);window.removeEventListener("pointerup",finish,true);window.removeEventListener("pointercancel",cancel,true);cleanupSchedulerPointerDrag();};
+ window.addEventListener("pointermove",move,{capture:true,passive:false});window.addEventListener("pointerup",finish,{capture:true,once:false});window.addEventListener("pointercancel",cancel,{capture:true,once:false});
+}
+function cleanupSchedulerPointerDrag(){
+ const state=schedulerPointerDrag;if(state?.ghost)state.ghost.remove();if(state?.card)state.card.classList.remove("is-pointer-drag-source");
+ document.querySelectorAll(".timeline-day.is-drag-target,.scheduler-worker-drop.is-drag-target").forEach(el=>el.classList.remove("is-drag-target"));
+ document.body.classList.remove("scheduler-dragging");updateSchedulerDragHud(null);schedulerPointerDrag=null;schedulerDragState=null;
+}
+function schedulerEventClick(event,row){event.stopPropagation();if(Date.now()<schedulerSuppressClickUntil)return;openCalendarEntry(row);}
+async function commitWorkflowSchedulerMove(payload,start){
+ try{
+  if(!payload.workflow_id||!payload.stage_id)throw new Error(bi("Workflow stage reference is missing.","Hiányzik a workflow-fázis hivatkozása."));
+  await api(`/api/workflows/${encodeURIComponent(payload.workflow_id)}/stages/${encodeURIComponent(payload.stage_id)}`,{method:"PATCH",body:JSON.stringify({due_at:start})});
+  await renderScheduler();return true;
+ }catch(error){showError(error);await renderScheduler();return false;}
+}
+async function commitSchedulerAssigneeMove(payload,userId){
+ if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload.calendar_entry_type)){
+  const worker=workerById(userId);
+  try{await api(`/api/workflows/${encodeURIComponent(payload.workflow_id)}/stages/${encodeURIComponent(payload.stage_id)}`,{method:"PATCH",body:JSON.stringify({assigned_user_id:userId,reassignment_reason:bi("Calendar drag reassignment","Naptári húzással történő átadás")})});await renderScheduler();return true;}catch(error){showError(error);await renderScheduler();return false;}
+ }
+ return commitSchedulerMove(payload.id,payload.start_time,payload.end_time,userId,"calendar_worker_pointer_drag");
+}
+function beginSchedulerDrag(event,job){event.preventDefault();}
+function endSchedulerDrag(){cleanupSchedulerPointerDrag();}
 function schedulerDropMinutes(event,target){
  const rect=target.getBoundingClientRect(),dayStart=Number(target.dataset.dayStart||420),dayEnd=Number(target.dataset.dayEnd||1320),span=dayEnd-dayStart;
  const raw=dayStart+((event.clientY-rect.top)/Math.max(1,rect.height))*span;
@@ -2259,20 +2378,8 @@ async function commitSchedulerMove(jobId,start,end,assignedUserId,source="calend
   await refreshCalendarAfterMutation(saved);return saved;
  }catch(error){showError(error);await renderScheduler();return null;}
 }
-async function handleSchedulerDrop(event,date){
- event.preventDefault();
- const payload=schedulerDragState||(()=>{try{return JSON.parse(event.dataTransfer.getData("text/plain")||"null")}catch(_e){return null}})();
- if(!payload?.id)return endSchedulerDrag();
- const target=event.currentTarget,minutes=schedulerDropMinutes(event,target),duration=Math.max(SCHEDULE_INTERVAL_MINUTES,wallClockDifferenceMinutes(payload.start_time,payload.end_time));
- const start=dateTimeFromDateAndMinutes(date,minutes),end=addWallClockMinutes(start,duration);
- await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_drag");endSchedulerDrag();
-}
-async function handleSchedulerWorkerDrop(event,userId){
- event.preventDefault();event.stopPropagation();
- const payload=schedulerDragState||(()=>{try{return JSON.parse(event.dataTransfer.getData("text/plain")||"null")}catch(_e){return null}})();
- if(!payload?.id)return endSchedulerDrag();
- await commitSchedulerMove(payload.id,payload.start_time,payload.end_time,userId,"calendar_worker_drag");endSchedulerDrag();
-}
+async function handleSchedulerDrop(event,date){event.preventDefault();}
+async function handleSchedulerWorkerDrop(event,userId){event.preventDefault();event.stopPropagation();}
 function beginSchedulerResize(event,job,dayStart,dayEnd){
  event.preventDefault();event.stopPropagation();
  if(job?.calendar_entry_type)return;
@@ -2284,6 +2391,30 @@ function beginSchedulerResize(event,job,dayStart,dayEnd){
 }
 
 function isMovableSchedulerJob(job){return !job?.calendar_entry_type && !['Completed','Partially completed','Failed','Cancelled'].includes(String(job?.status||''));}
+function isMovableSchedulerEntry(job){
+ if(isMovableSchedulerJob(job))return true;
+ if(!["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(job?.calendar_entry_type))return false;
+ if(["Completed","Cancelled"].includes(String(job?.status||"")))return false;
+ return isAdmin()||String(user?.role||"").toUpperCase()==="MANAGER";
+}
+function schedulerWorkflowDrawerMarkup(workflow,stageId=""){
+ return workflowDrawerMarkup(workflow,stageId).replaceAll("closeWorkshopWorkflow()","closeSchedulerWorkflowDrawer()").replaceAll("openWorkshopWorkflow(","openSchedulerWorkflowStage(");
+}
+async function openSchedulerWorkflowDrawer(row){
+ const workflowId=String(row?.workflow_id||"");if(!workflowId)return;
+ try{
+  const workflow=await api(`/api/workflows/${encodeURIComponent(workflowId)}`),stageId=String(row?.stage_id||row?.id||"__workflow__");
+  schedulerWorkflowDrawerState={workflow,stageId};
+  let host=document.getElementById("schedulerWorkflowDrawerHost");if(!host){host=document.createElement("div");host.id="schedulerWorkflowDrawerHost";host.className="scheduler-workflow-drawer-host";document.body.appendChild(host);}
+  host.innerHTML=`<div class="workflow-shell has-workflow-drawer scheduler-workflow-shell">${schedulerWorkflowDrawerMarkup(workflow,stageId)}</div>`;host.classList.add("is-open");sessionActivity?.syncModalState?.();
+ }catch(error){showError(error);}
+}
+function openSchedulerWorkflowStage(workflowId,stageId="__workflow__"){
+ if(!schedulerWorkflowDrawerState?.workflow||String(schedulerWorkflowDrawerState.workflow.id)!==String(workflowId))return;
+ schedulerWorkflowDrawerState.stageId=String(stageId||"__workflow__");const host=document.getElementById("schedulerWorkflowDrawerHost");if(host)host.innerHTML=`<div class="workflow-shell has-workflow-drawer scheduler-workflow-shell">${schedulerWorkflowDrawerMarkup(schedulerWorkflowDrawerState.workflow,schedulerWorkflowDrawerState.stageId)}</div>`;
+}
+function closeSchedulerWorkflowDrawer(){const host=document.getElementById("schedulerWorkflowDrawerHost");if(host){host.classList.remove("is-open");host.innerHTML="";}schedulerWorkflowDrawerState=null;sessionActivity?.syncModalState?.();}
+
 async function renderScheduler(){
  const week=[0,1,2,3,4,5,6].map(i=>addDays(currentWeekStart,i));
  const weekDates=week.map(d=>fmtDate(d));
@@ -2293,19 +2424,19 @@ async function renderScheduler(){
  const dayStart=7*60, dayEnd=22*60, totalMinutes=dayEnd-dayStart;
  let html=`<div class="panel scheduler-panel"><div class="toolbar scheduler-toolbar"><div><h3>${bi("Weekly Scheduler","Heti naptár")}</h3><p class="muted">${weekDates[0]} – ${weekDates[6]} · America/New_York</p><div class="ny-time-box"><span>${bi("Current New York time","Aktuális New York-i idő")}</span><strong id="currentNYClock">${currentNYTimeString()}</strong></div></div><div class="scheduler-actions"><label class="inline-label">${bi("Work type","Munkatípus")}<select onchange="currentSchedulerEntryFilter=this.value;renderScheduler()"><option value="ALL" ${currentSchedulerEntryFilter==="ALL"?"selected":""}>${bi("All jobs","Összes munka")}</option><option value="CALENDAR" ${currentSchedulerEntryFilter==="CALENDAR"?"selected":""}>${bi("Calendar jobs only","Csak naptári jobok")}</option><option value="WORKFLOW" ${currentSchedulerEntryFilter==="WORKFLOW"?"selected":""}>${bi("Workshop Tasks","Workflow munkák")}</option></select></label><label class="inline-label">${tr("workerFilter")}<select class="worker-filter-select" onchange="currentSchedulerWorker=this.value;renderScheduler()">${schedulerFilterOptions(workers)}</select></label><button class="small" onclick="moveWeek(-1)">← ${bi("Previous","Előző")}</button><button class="small" onclick="goThisWeek()">${bi("This week","Aktuális hét")}</button><button class="small" onclick="moveWeek(1)">${bi("Next","Következő")} →</button><button onclick="openJob()">+ ${bi("Add Job","Új munka")}</button></div></div>
  <div class="scheduler-legend"><span class="legend-klavierhaus-event">◆ ${bi("Klavierhaus event","Klavierhaus esemény")}</span><span class="legend-active">◷ ${bi("Active — employee color","Aktív — munkavállalói szín")}</span><span class="legend-partial">◷ ${bi("Part completed, workflow continues","Rész kész, folyamatban")}</span><span class="legend-complete">✓ ${bi("Fully completed","Teljesen lezárt")}</span><span class="legend-overdue">! ${bi("Overdue, not closed","Lejárt, nincs lezárva")}</span><span class="legend-failed">! ${bi("Failed","Sikertelen")}</span></div>
- <div class="scheduler-worker-dropbar" aria-label="${bi("Reassign by dragging","Átadás húzással")}"><span>${bi("Drag a job here to reassign:","Húzd ide a munkát az átadáshoz:")}</span>${workers.map(w=>`<button type="button" class="scheduler-worker-drop" style="--worker-color:${workerColor(w.name,w.calendar_color)}" ondragover="event.preventDefault()" ondrop="handleSchedulerWorkerDrop(event,'${htmlText(w.id)}')">${htmlText(w.name)}</button>`).join("")}</div>
+ <div class="scheduler-worker-dropbar" aria-label="${bi("Reassign by dragging","Átadás húzással")}"><span>${bi("Drag a job here to reassign:","Húzd ide a munkát az átadáshoz:")}</span>${workers.map(w=>`<button type="button" class="scheduler-worker-drop" data-worker-id="${htmlText(w.id)}" style="--worker-color:${workerColor(w.name,w.calendar_color)}">${htmlText(w.name)}</button>`).join("")}</div>
  <div class="timeline-scroll"><div class="timeline-calendar"><div class="timeline-corner">${bi("Time","Idő")}</div>${week.map(d=>`<div class="timeline-day-head"><b>${d.toLocaleDateString(currentLang==="hu"?"hu-HU":"en-US",{weekday:"short",timeZone:"America/New_York"})}</b><span>${fmtDate(d)}</span></div>`).join("")}
  <div class="timeline-times">${Array.from({length:16},(_,i)=>`<span style="top:${(i*60/totalMinutes)*100}%">${String(i+7).padStart(2,"0")}:00</span>`).join("")}</div>`;
  for(const day of week){
    const dayStr=fmtDate(day); const events=visibleJobs.filter(j=>String(j.start_time||"").slice(0,10)===dayStr);
    const placed=calendarLayout(events,dayStart,dayEnd);
-   html+=`<div class="timeline-day" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}" ondragover="event.preventDefault()" ondrop="handleSchedulerDrop(event,'${dayStr}')" onclick="if(event.target===this){const r=this.getBoundingClientRect();const mins=${dayStart}+Math.round(((event.clientY-r.top)/r.height)*${totalMinutes}/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES;openJob('${dayStr}T'+String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'))}">
+   html+=`<div class="timeline-day" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}" onclick="if(event.target===this){const r=this.getBoundingClientRect();const mins=${dayStart}+Math.round(((event.clientY-r.top)/r.height)*${totalMinutes}/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES;openJob('${dayStr}T'+String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'))}">
     <div class="quarter-grid">${Array.from({length:60},(_,i)=>`<i style="top:${(i/60)*100}%" class="${i%4===0?'hour':''}"></i>`).join("")}</div>
     <div class="current-time-line" data-date="${dayStr}" data-day-start="${dayStart}" data-day-end="${dayEnd}"><span></span></div>`;
    for(const item of placed){
      const j=item.event; const top=((item.start-dayStart)/totalMinutes)*100; const height=Math.max(1.67,((item.end-item.start)/totalMinutes)*100);
      const width=100/item.lanes; const left=item.lane*width;
-     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" ${isMovableSchedulerJob(j)?`draggable="true" ondragstart='beginSchedulerDrag(event,${esc(j)})' ondragend="endSchedulerDrag()"`:""} onclick='event.stopPropagation();openCalendarEntry(${esc(j)})'>${calendarEventCardMarkup(j)}${isMovableSchedulerJob(j)?`<span class="timeline-resize-handle" onpointerdown='beginSchedulerResize(event,${esc(j)},${dayStart},${dayEnd})' aria-hidden="true"></span>`:""}</button>`;
+     html+=`<button type="button" class="timeline-event ${calendarEventClass(j)}${calendarIntegrationClass(j)}${calendarEventDensityClass(j)}" style="top:${top}%;height:${height}%;left:calc(${left}% + 2px);width:calc(${width}% - 4px);${calendarEventClass(j)==='WorkerColor'?`--event-color:${workerColor(j.assigned_to,j.assigned_calendar_color)};`:''}" ${isMovableSchedulerEntry(j)?`data-scheduler-movable="true" onpointerdown='beginSchedulerPointerDrag(event,${esc(j)})'`:""} onclick='schedulerEventClick(event,${esc(j)})'>${calendarEventCardMarkup(j)}${isMovableSchedulerJob(j)?`<span class="timeline-resize-handle" onpointerdown='beginSchedulerResize(event,${esc(j)},${dayStart},${dayEnd})' aria-hidden="true"></span>`:""}</button>`;
    }
    html+=`</div>`;
  }
