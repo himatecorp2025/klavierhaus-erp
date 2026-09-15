@@ -295,7 +295,7 @@ function createStripeSandbox(options = {}) {
           priceCents: Number(event.price_cents),
           paymentStatus: "PAID",
           reservationStatus: "FINALIZED",
-          paymentMethod: "STRIPE_TEST",
+          paymentMethod: "Credit Card",
           eventPaymentId: paymentId,
           ticketSequence: sequence
         });
