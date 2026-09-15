@@ -207,14 +207,16 @@ test("individual ticket save refreshes the ticket list without reopening event m
   assert.doesNotMatch(saveSource, /openEventDetails\(eventId\)/);
 });
 
-test("Landing Page Design exposes protected bilingual page, SEO, review, legal-copy and image publishing controls", () => {
+test("Pages & Content is the exclusive protected bilingual page and SEO publishing workspace", () => {
   const designStart = appSource.indexOf("let websiteDesignMeta=null");
   const designEnd = appSource.indexOf("async function renderAuditLog", designStart);
   const designSource = appSource.slice(designStart, designEnd);
   assert.ok(designStart > 0);
-  assert.match(appSource, /v==="website_design"\|\|v==="pages_content"/);
+  assert.match(appSource, /v==="pages_content"/);
+  assert.doesNotMatch(appSource, /v==="website_design"\|\|v==="pages_content"/);
   assert.match(appSource, /function ensureView\(id\)/);
-  assert.match(appSource, /\["website_design","Landing Page Design","Landing Page dizájn","✦"\]/);
+  assert.doesNotMatch(appSource, /\["website_design","[^"]+"/);
+  assert.match(appSource, /\["pages_content","Pages & Content"/);
   assert.match(designSource, /if\(!isAdmin\(\)\)return showError\('PERMISSION_DENIED'\)/);
   assert.match(designSource, /Search appearance \(SEO\)','Keresési megjelenés \(SEO\)/);
   assert.match(designSource, /Review \/ quotation','Vélemény \/ idézet/);
