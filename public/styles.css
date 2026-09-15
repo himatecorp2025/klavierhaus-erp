@@ -1975,24 +1975,24 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
 .workflow-shell .workflow-date-picker:focus-within{border-color:#e3bf5b!important;box-shadow:0 0 0 3px rgba(227,191,91,.18)!important}
 
 /* ===== UI35 datetime, calendar card, and navigation integrity ===== */
-.job-datetime-control{display:grid;grid-template-columns:minmax(0,145px) minmax(0,122px);gap:8px;align-items:center;justify-content:start;width:100%;max-width:278px;min-width:0;box-sizing:border-box;padding:3px 3px 3px 0}
+.job-datetime-control{display:grid;grid-template-columns:minmax(0,145px) minmax(0,120px);gap:8px;align-items:center;justify-content:start;width:100%;max-width:276px;min-width:0;box-sizing:border-box;padding:3px 3px 3px 0}
 .job-date-entry{position:relative;display:block;width:100%;max-width:145px;min-width:0;height:44px;border:1px solid var(--line);border-radius:10px;background:#081525;transition:border-color .16s ease,box-shadow .16s ease}
 .job-date-entry:focus-within{border-color:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 18%,transparent)}
 .job-date-entry [data-job-date]{width:100%;min-width:0;height:42px;padding:0 40px 0 10px!important;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--text);font-variant-numeric:tabular-nums}
 .job-date-picker-button{position:absolute;right:0;top:0;display:grid;place-items:center;width:38px;min-width:38px;height:42px;min-height:42px;padding:0;border:0!important;border-radius:0 9px 9px 0;background:transparent!important;color:#e6e4df;cursor:pointer;box-shadow:none!important}
 .job-date-picker-button:hover,.job-date-picker-button:focus-visible{color:var(--yellow);background:transparent!important;outline:none}
 .job-date-picker-button .admin-date-control-icon,.job-date-picker-button .admin-date-control-icon svg,.job-date-picker-button .admin-date-control-icon path,.job-date-picker-button .admin-date-control-icon rect{color:currentColor;stroke:currentColor}
-.job-time-entry{position:relative;display:flex;align-items:center;width:100%;max-width:122px;min-width:0;height:44px}
+.job-time-entry{position:relative;display:flex;align-items:center;width:100%;max-width:120px;min-width:0;height:44px}
 .job-time-icon{position:absolute;left:9px;top:50%;z-index:2;display:grid;place-items:center;width:18px;height:18px;transform:translateY(-50%);color:#e6e4df;pointer-events:none}
 .job-time-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .job-datetime-control [data-job-time]{appearance:none!important;-webkit-appearance:none!important;-moz-appearance:none!important;width:100%;min-width:0;height:44px;padding:0 8px 0 34px!important;border:1px solid var(--line);border-radius:10px;background:#081525!important;background-image:none!important;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;text-overflow:clip;overflow:visible;transition:border-color .16s ease,box-shadow .16s ease}
 .job-datetime-control [data-job-time]:hover{border-color:color-mix(in srgb,var(--line) 58%,#e6e4df)}
 .job-datetime-control [data-job-time]:focus,.job-datetime-control [data-job-time]:focus-visible{outline:none;border-color:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 18%,transparent)}
 .job-datetime-control.is-disabled{opacity:.58}.job-datetime-control.is-disabled .job-date-picker-button{cursor:not-allowed}
-.workflow-create-phase-row .job-datetime-control,.workflow-phase-fields-grid .job-datetime-control,.workflow-stage-editor-grid .job-datetime-control,.workflow-next-stage-body .job-datetime-control{grid-template-columns:minmax(0,145px) minmax(0,122px);width:100%;max-width:278px}
+.workflow-create-phase-row .job-datetime-control,.workflow-phase-fields-grid .job-datetime-control,.workflow-stage-editor-grid .job-datetime-control,.workflow-next-stage-body .job-datetime-control{grid-template-columns:minmax(0,145px) minmax(0,120px);width:100%;max-width:276px}
 .timeline-event{min-height:72px!important}.timeline-event.WorkflowTask{min-height:80px!important}
 .calendar-type-badge{font-size:15px;line-height:1}.calendar-type-badge>span{display:grid;place-items:center;width:100%;height:100%}
-@media(max-width:700px){.job-datetime-control,.workflow-create-phase-row .job-datetime-control,.workflow-phase-fields-grid .job-datetime-control,.workflow-stage-editor-grid .job-datetime-control,.workflow-next-stage-body .job-datetime-control{grid-template-columns:minmax(0,145px) minmax(0,122px);gap:8px;max-width:278px}}
+@media(max-width:700px){.job-datetime-control,.workflow-create-phase-row .job-datetime-control,.workflow-phase-fields-grid .job-datetime-control,.workflow-stage-editor-grid .job-datetime-control,.workflow-next-stage-body .job-datetime-control{grid-template-columns:minmax(0,145px) minmax(0,120px);gap:8px;max-width:276px}}
 
 /* ===== UI35 datetime workflow geometry refinement ===== */
 .workflow-create-phase-row>label:last-child{grid-column:1/-1}
