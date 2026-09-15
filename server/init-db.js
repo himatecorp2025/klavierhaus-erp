@@ -688,6 +688,40 @@ function runMigrations() {
     )`);
     ensureIndex("idx_employee_daily_rates_user_date", "CREATE INDEX IF NOT EXISTS idx_employee_daily_rates_user_date ON employee_daily_rates(user_id,effective_date DESC)");
 
+
+    db.exec(`CREATE TABLE IF NOT EXISTS partners (
+      id TEXT PRIMARY KEY, company_name TEXT NOT NULL, tax_id TEXT, billing_address TEXT, contact_person TEXT,
+      contact_email TEXT, contact_phone TEXT, default_tax_rate REAL NOT NULL DEFAULT 0.0 CHECK(default_tax_rate >= 0),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')), created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS partner_contractors (
+      id TEXT PRIMARY KEY, partner_id TEXT NOT NULL, user_id TEXT, worker_name TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+      CHECK(user_id IS NOT NULL OR length(trim(COALESCE(worker_name,''))) > 0)
+    );
+    CREATE TABLE IF NOT EXISTS invoices (
+      id TEXT PRIMARY KEY, direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')), invoice_number TEXT NOT NULL UNIQUE,
+      issue_date TEXT NOT NULL, due_date TEXT, partner_id TEXT, client_id TEXT, source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
+      source_id TEXT, summary TEXT, subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0), tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0),
+      tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0), total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0), currency TEXT NOT NULL DEFAULT 'USD',
+      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Cash')),
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), voided_at TEXT, voided_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL, FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS invoice_items (
+      id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, item_description TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0), total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
+      line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+    )`);
+    ensureIndex("idx_partners_status_name", "CREATE INDEX IF NOT EXISTS idx_partners_status_name ON partners(status,company_name)");
+    ensureIndex("idx_partner_contractors_partner", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_partner ON partner_contractors(partner_id)");
+    ensureIndex("idx_partner_contractors_user", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id)");
+    ensureIndex("idx_invoices_direction_issue", "CREATE INDEX IF NOT EXISTS idx_invoices_direction_issue ON invoices(direction,issue_date DESC)");
+    ensureIndex("idx_invoices_source", "CREATE INDEX IF NOT EXISTS idx_invoices_source ON invoices(source_type,source_id)");
+    ensureIndex("idx_invoices_status_due", "CREATE INDEX IF NOT EXISTS idx_invoices_status_due ON invoices(status,due_date)");
+    ensureIndex("idx_invoices_source_direction_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_source_direction_unique ON invoices(direction,source_type,source_id) WHERE source_id IS NOT NULL AND trim(source_id)<>''");
+    ensureIndex("idx_invoice_items_invoice", "CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,id)");
+
     ensureIndex("idx_jobs_daily_rate_capacity", "CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status)");
 
     // Import batches.
