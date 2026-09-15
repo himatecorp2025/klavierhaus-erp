@@ -34,14 +34,15 @@ test('Calendar drag keeps 15-minute geometry snapping, realtime HUD and requestA
   assert.match(css, /\.scheduler-drag-ghost\{[^}]*will-change:transform/);
 });
 
-test('Workflow and job cards have distinct SVG type badges and readable minimum heights', () => {
+test('Workflow and job cards have distinct hammer/gear type badges and readable minimum heights', () => {
   assert.match(app, /function calendarTypeIconMarkup\(/);
   assert.match(app, /is-workflow/);
   assert.match(app, /is-job/);
-  assert.match(app, /<svg viewBox="0 0 24 24"/);
+  assert.match(app, /\u{1F528}/u);
+  assert.match(app, /\u2699\uFE0F|\u2699/u);
   assert.match(css, /\.timeline-event\{min-height:72px!important/);
   assert.match(css, /\.timeline-event\.WorkflowTask\{min-height:80px!important/);
-  assert.match(css, /\.calendar-type-badge svg\{width:13px;height:13px/);
+  assert.match(css, /\.calendar-type-badge\{font-size:15px/);
   assert.match(css, /\.event-status\{[^}]*width:18px;height:18px/);
 });
 
