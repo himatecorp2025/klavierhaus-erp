@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { generateInvoicePdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
+const { generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
 const { generateGuestDataPdf } = require("./guest-list-pdf");
 const { readGuestData } = require("./guest-data");
 const { createTicketService } = require("./ticket-service");
@@ -456,8 +456,118 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
   });
 }
 
+function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK" }) {
+  const paymentMethods = new Set(["Credit Card", "Bank Transfer / ACH", "Zelle", "Check", "Cash"]);
+  function money(value) { const n = Number(value || 0); return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; }
+  function paymentMethod(value) {
+    const raw = clean(value, 80);
+    const map = { "BANK TRANSFER": "Bank Transfer / ACH", "ACH": "Bank Transfer / ACH", "BANK TRANSFER / ACH": "Bank Transfer / ACH", "CREDIT CARD": "Credit Card", "CARD": "Credit Card", "ZELLE": "Zelle", "CHECK": "Check", "CASH": "Cash" };
+    const normalized = map[raw.toUpperCase()] || raw;
+    return paymentMethods.has(normalized) ? normalized : null;
+  }
+  function nextNumber(direction, issueDate) {
+    const year = String(issueDate || new Date().toISOString().slice(0, 10)).slice(0, 4);
+    const prefix = direction === "payable" ? "VND" : "INV";
+    const like = `${prefix}-${year}-%`;
+    const rows = db.prepare("SELECT invoice_number FROM invoices WHERE invoice_number LIKE ? ORDER BY invoice_number DESC LIMIT 1").all(like);
+    const last = rows[0]?.invoice_number || "";
+    const match = last.match(/-(\d{4,})$/);
+    return `${prefix}-${year}-${String(Number(match?.[1] || 0) + 1).padStart(4, "0")}`;
+  }
+  function ensureContractorPartner(job) {
+    if (!job.assigned_user_id) return null;
+    const linked = db.prepare(`SELECT p.* FROM partner_contractors pc JOIN partners p ON p.id=pc.partner_id WHERE pc.user_id=? AND p.status='active' ORDER BY p.created_at LIMIT 1`).get(job.assigned_user_id);
+    if (linked) return linked;
+    const partnerId = newId("PTR");
+    const name = clean(job.assigned_to || job.assigned_user_id, 300) || "Contractor";
+    db.prepare("INSERT INTO partners(id,company_name,contact_person,default_tax_rate,status) VALUES(?,?,?,?, 'active')").run(partnerId, `${name} (Contractor)`, name, 0);
+    db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,?)").run(newId("PC"), partnerId, job.assigned_user_id, name);
+    return db.prepare("SELECT * FROM partners WHERE id=?").get(partnerId);
+  }
+  function createInvoice({ direction, issueDate, dueDate, partnerId = null, clientId = null, sourceType = "manual", sourceId = null, summary = "", taxRate = 0, currency = "USD", paymentMethod: method = null, status = "issued", items = [] }) {
+    if (sourceId) {
+      const existing = db.prepare("SELECT * FROM invoices WHERE direction=? AND source_type=? AND source_id=? LIMIT 1").get(direction, sourceType, sourceId);
+      if (existing) return invoiceDetail(existing.id);
+    }
+    const normalizedItems = (items || []).map((item) => {
+      const quantity = Math.max(0.0001, Number(item.quantity || 1));
+      const unitPrice = Math.max(0, money(item.unit_price));
+      return { description: clean(item.item_description || item.description || "Item", 1000), quantity, unit_price: unitPrice, total_price: money(item.total_price ?? quantity * unitPrice), line_type: ["material", "fee", "custom"].includes(item.line_type) ? item.line_type : "custom" };
+    }).filter((item) => item.total_price >= 0);
+    const subtotal = money(normalizedItems.reduce((sum, item) => sum + item.total_price, 0));
+    const rate = Math.max(0, money(taxRate));
+    const taxAmount = money(subtotal * rate / 100);
+    const total = money(subtotal + taxAmount);
+    const id = newId("BILL");
+    const date = issueDate || new Date().toISOString().slice(0, 10);
+    const number = nextNumber(direction, date);
+    db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,status)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), paymentMethod(method), status);
+    const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type) VALUES(?,?,?,?,?,?,?)");
+    normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type));
+    return invoiceDetail(id);
+  }
+  function invoiceDetail(id) {
+    const invoice = db.prepare(`SELECT i.*,c.name AS client_name,p.company_name AS partner_name FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id WHERE i.id=?`).get(id);
+    if (!invoice) return null;
+    return { ...invoice, counterparty_name: invoice.direction === "payable" ? (invoice.partner_name || "Partner") : (invoice.client_name || "Client"), items: db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id").all(id) };
+  }
+  function createJobInvoices({ job, actor = {}, now = new Date().toISOString(), entries = [] }) {
+    const issueDate = String(now).slice(0, 10);
+    const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
+    const method = entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null;
+    const estimated = money(job.planned_amount || entries.find((entry) => entry.mainType !== "EXPENSE")?.amount || 0);
+    const created = [];
+    if (estimated > 0) created.push(createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: job.client_id || null, sourceType: "job", sourceId: job.id, summary: `Job completed: ${job.title || job.job_key || job.id}`, taxRate: 0, paymentMethod: method, status: "issued", items: [{ item_description: job.title || "Completed service", quantity: 1, unit_price: estimated, line_type: "fee" }] }));
+    if (Number(job.daily_rate_enabled || 0) === 1 && money(job.daily_rate_allocated_amount) > 0) {
+      const partner = ensureContractorPartner(job);
+      created.push(createInvoice({ direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "job", sourceId: job.id, summary: `Daily rate: ${job.assigned_to || job.assigned_user_id || "Contractor"}`, taxRate: partner?.default_tax_rate || 0, status: "issued", items: [{ item_description: `Daily rate — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: money(job.daily_rate_allocated_amount), line_type: "fee" }] }));
+    }
+    return created;
+  }
+  function createWorkflowInvoice({ workflow, materials = [], lines = [], actor = {}, now = new Date().toISOString() }) {
+    const issueDate = String(now).slice(0, 10);
+    const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
+    const items = [];
+    for (const material of materials) {
+      const qty = Math.max(0, Number(material.consumed_quantity || material.requested_quantity || 0));
+      const unit = Math.max(0, money(material.unit_cost));
+      if (qty > 0 && unit >= 0) items.push({ item_description: material.item_name || material.inventory_item_name || "Material", quantity: qty, unit_price: unit, line_type: "material" });
+    }
+    for (const line of lines.filter((row) => row.line_type === "REVENUE")) {
+      const amount = Math.max(0, money(line.amount));
+      if (amount > 0) items.push({ item_description: line.title || line.description || "Workshop fee", quantity: 1, unit_price: amount, line_type: "fee" });
+    }
+    const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, status: "issued", items });
+    for (const material of materials) {
+      const qty = Math.max(0, Number(material.consumed_quantity || material.requested_quantity || 0));
+      const amount = money(qty * Number(material.unit_cost || 0));
+      const sourceId = `WORKFLOW_INVOICE_MATERIAL:${material.id}`;
+      if (amount > 0 && !db.prepare("SELECT 1 FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").get(sourceId)) {
+        db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
+          VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME','',?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop material charge: ${material.item_name || "Material"}`, workflow.title || "", amount, "ACCOUNTS_RECEIVABLE", workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_MATERIAL", sourceId, actor.name || "System");
+      }
+    }
+    return invoice;
+  }
+  function reverseLedger(invoice) {
+    if (!invoice) return;
+    if (invoice.source_type === "job") {
+      if (invoice.direction === "receivable") db.prepare("DELETE FROM financial_items WHERE source_type='JOB_REVENUE' AND source_id=?").run(`JOB_REVENUE:${invoice.source_id}`);
+      else db.prepare("DELETE FROM financial_items WHERE source_type='DAILY_RATE' AND source_id=?").run(`DAILY_RATE:${invoice.source_id}`);
+    } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
+      const revenueLines = db.prepare("SELECT id FROM workflow_financial_lines WHERE workflow_id=? AND line_type='REVENUE'").all(invoice.source_id);
+      for (const line of revenueLines) db.prepare("DELETE FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=?").run(`WORKFLOW_LINE:${line.id}`);
+      const materialIds = db.prepare("SELECT id FROM workflow_materials WHERE workflow_id=?").all(invoice.source_id);
+      for (const material of materialIds) db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").run(`WORKFLOW_INVOICE_MATERIAL:${material.id}`);
+    }
+  }
+  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, reverseLedger, paymentMethod };
+}
+
+
 function registerBusinessOperationsRoutes(options) {
-  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService, ticketService: providedTicketService, customerConversationUpload, notifyUser } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService, ticketService: providedTicketService, customerConversationUpload, notifyUser, invoiceEngine } = options;
   const admin = permit("ADMIN");
   const helpdesk = permit("ADMIN", "MANAGER", "WORKER");
   const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
@@ -476,6 +586,93 @@ function registerBusinessOperationsRoutes(options) {
     if (error?.state) payload.state = error.state;
     res.status(Number(error?.status || (code.includes("NOT_FOUND") ? 404 : code.includes("ALREADY") || code.includes("CONFLICT") ? 409 : 400))).json(payload);
   }
+  if (invoiceEngine) {
+    const invoiceSelect = `SELECT i.*,c.name AS client_name,p.company_name AS partner_name,
+      CASE WHEN i.direction='payable' THEN COALESCE(p.company_name,i.summary,'Partner') ELSE COALESCE(c.name,i.summary,'Client') END AS counterparty_name
+      FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id`;
+    app.get("/api/invoices", auth, admin, (req, res) => {
+      const month = clean(req.query.month, 7), direction = clean(req.query.direction, 20), status = clean(req.query.status, 30);
+      const where = [], params = [];
+      if (/^\d{4}-\d{2}$/.test(month)) { where.push("substr(i.issue_date,1,7)=?"); params.push(month); }
+      if (["receivable","payable"].includes(direction)) { where.push("i.direction=?"); params.push(direction); }
+      if (["draft","issued","paid","void","carried_over"].includes(status)) { where.push("i.status=?"); params.push(status); }
+      const rows = db.prepare(`${invoiceSelect}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY i.issue_date DESC,i.invoice_number DESC`).all(...params);
+      const active = rows.filter((row) => row.status !== "void");
+      const revenue = active.filter((row) => row.direction === "receivable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      const payables = active.filter((row) => row.direction === "payable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      res.json({ invoices: rows, summary: { revenue, payables, net: revenue - payables } });
+    });
+    app.get("/api/invoices/:id", auth, admin, (req, res) => {
+      const row = invoiceEngine.invoiceDetail(req.params.id); if (!row) return res.status(404).json({ error: "INVOICE_NOT_FOUND" }); res.json(row);
+    });
+    app.post("/api/invoices/:id/status", auth, admin, (req, res) => {
+      const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      const status = clean(req.body?.status, 30); if (!["issued","paid","carried_over"].includes(status)) return res.status(400).json({ error: "INVALID_INVOICE_STATUS" });
+      if (before.status === "void") return res.status(409).json({ error: "VOID_INVOICE_IMMUTABLE" });
+      db.prepare("UPDATE invoices SET status=? WHERE id=?").run(status, before.id); const after = invoiceEngine.invoiceDetail(before.id);
+      audit(req, "UPDATE", "invoices", before.id, before, after, 1, `Invoice status changed to ${status}`, "FINANCIAL"); res.json(after);
+    });
+    app.post("/api/invoices/:id/void", auth, admin, (req, res) => {
+      const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      if (before.status === "void") return res.json(before);
+      db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("UPDATE invoices SET status='void',voided_at=CURRENT_TIMESTAMP,voided_by=? WHERE id=?").run(req.user.name || req.user.id, before.id); })();
+      const after = invoiceEngine.invoiceDetail(before.id); audit(req, "VOID", "invoices", before.id, before, after, 1, clean(req.body?.reason, 1000) || "Invoice voided", "FINANCIAL"); res.json(after);
+    });
+    app.delete("/api/invoices/:id", auth, admin, (req, res) => {
+      if (req.user.role !== "SUPERADMIN") return res.status(403).json({ error: "SUPERADMIN_REQUIRED" });
+      const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("DELETE FROM invoices WHERE id=?").run(before.id); })();
+      audit(req, "HARD_DELETE", "invoices", before.id, before, null, 1, clean(req.body?.reason, 1000) || "Invoice permanently deleted by superadmin", "FINANCIAL"); res.json({ ok: true });
+    });
+    app.get("/api/invoices/:id/pdf", auth, admin, (req, res) => {
+      const invoice = invoiceEngine.invoiceDetail(req.params.id); if (!invoice) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
+      const pdf = generateBusinessInvoicePdf({ company, invoice, items: invoice.items, counterpartyName: invoice.counterparty_name, logoPath });
+      res.type("application/pdf").set("Content-Disposition", `attachment; filename="${invoice.invoice_number}.pdf"`).send(pdf);
+    });
+    app.get("/api/invoices/monthly/report.pdf", auth, admin, (req, res) => {
+      const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : new Date().toISOString().slice(0,7);
+      const rows = db.prepare(`${invoiceSelect} WHERE substr(i.issue_date,1,7)=? AND i.status<>'void' ORDER BY i.issue_date,i.invoice_number`).all(month);
+      const paid = rows.filter((row)=>row.status==='paid');
+      const revenue = paid.filter((row)=>row.direction==='receivable').reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      const costs = paid.filter((row)=>row.direction==='payable').reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      const breakdown = db.prepare(`SELECT COALESCE(payment_method,'Unspecified') AS payment_method,SUM(total_amount) AS amount FROM invoices WHERE substr(issue_date,1,7)=? AND status='paid' GROUP BY COALESCE(payment_method,'Unspecified') ORDER BY amount DESC`).all(month);
+      const monthEnd = `${month}-31`;
+      const carried = db.prepare(`${invoiceSelect} WHERE i.status IN ('issued','carried_over') AND COALESCE(i.due_date,'9999-12-31')<=? ORDER BY i.due_date,i.invoice_number`).all(monthEnd);
+      const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
+      const pdf = generateMonthlyInvoiceReportPdf({ company, month, summary:{ revenue, costs, net: revenue-costs }, paymentBreakdown: breakdown, carried, invoices: rows, logoPath });
+      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-monthly-financial-${month}.pdf"`).send(pdf);
+    });
+
+    app.get("/api/partners", auth, admin, (_req, res) => res.json(db.prepare(`SELECT p.*,COUNT(DISTINCT pc.id) AS contractor_count,COUNT(DISTINCT i.id) AS invoice_count FROM partners p LEFT JOIN partner_contractors pc ON pc.partner_id=p.id LEFT JOIN invoices i ON i.partner_id=p.id GROUP BY p.id ORDER BY lower(p.company_name),p.id`).all()));
+    app.get("/api/partners/:id", auth, admin, (req, res) => {
+      const partner = db.prepare("SELECT * FROM partners WHERE id=?").get(req.params.id); if (!partner) return res.status(404).json({error:"PARTNER_NOT_FOUND"});
+      res.json({ ...partner, contractors: db.prepare(`SELECT pc.*,u.name AS user_name FROM partner_contractors pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.partner_id=? ORDER BY COALESCE(u.name,pc.worker_name)`).all(partner.id) });
+    });
+    app.post("/api/partners", auth, admin, (req, res) => {
+      const companyName = clean(req.body?.company_name,300); if (!companyName) return res.status(400).json({error:"PARTNER_COMPANY_NAME_REQUIRED"});
+      const id = newId("PTR"), rate = Math.max(0,Number(req.body?.default_tax_rate||0));
+      db.prepare(`INSERT INTO partners(id,company_name,tax_id,billing_address,contact_person,contact_email,contact_phone,default_tax_rate,status) VALUES(?,?,?,?,?,?,?,?,?)`).run(id,companyName,clean(req.body?.tax_id,120),clean(req.body?.billing_address,1000),clean(req.body?.contact_person,300),normalizeEmail(req.body?.contact_email),clean(req.body?.contact_phone,120),rate,req.body?.status==='inactive'?'inactive':'active');
+      for(const userId of Array.isArray(req.body?.user_ids)?req.body.user_ids:[]) if(db.prepare("SELECT 1 FROM users WHERE id=?").get(userId)) db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,NULL)").run(newId("PC"),id,userId);
+      const after=db.prepare("SELECT * FROM partners WHERE id=?").get(id); audit(req,"CREATE","partners",id,null,after,1,"Partner created","FINANCIAL"); res.status(201).json(after);
+    });
+    app.patch("/api/partners/:id", auth, admin, (req, res) => {
+      const before=db.prepare("SELECT * FROM partners WHERE id=?").get(req.params.id); if(!before)return res.status(404).json({error:"PARTNER_NOT_FOUND"});
+      const next={...before}; for(const key of ["company_name","tax_id","billing_address","contact_person","contact_email","contact_phone","status"]) if(Object.prototype.hasOwnProperty.call(req.body||{},key)) next[key]=key==='contact_email'?normalizeEmail(req.body[key]):clean(req.body[key],1000);
+      if(Object.prototype.hasOwnProperty.call(req.body||{},"default_tax_rate")) next.default_tax_rate=Math.max(0,Number(req.body.default_tax_rate||0));
+      if(!next.company_name)return res.status(400).json({error:"PARTNER_COMPANY_NAME_REQUIRED"}); if(!["active","inactive"].includes(next.status))next.status="active";
+      db.prepare(`UPDATE partners SET company_name=?,tax_id=?,billing_address=?,contact_person=?,contact_email=?,contact_phone=?,default_tax_rate=?,status=? WHERE id=?`).run(next.company_name,next.tax_id,next.billing_address,next.contact_person,next.contact_email,next.contact_phone,next.default_tax_rate,next.status,before.id);
+      if(Array.isArray(req.body?.user_ids)){db.prepare("DELETE FROM partner_contractors WHERE partner_id=?").run(before.id); for(const userId of req.body.user_ids) if(db.prepare("SELECT 1 FROM users WHERE id=?").get(userId)) db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,NULL)").run(newId("PC"),before.id,userId);}
+      const after=db.prepare("SELECT * FROM partners WHERE id=?").get(before.id); audit(req,"UPDATE","partners",before.id,before,after,1,"Partner updated","FINANCIAL"); res.json(after);
+    });
+    app.delete("/api/partners/:id", auth, admin, (req,res)=>{
+      const before=db.prepare("SELECT * FROM partners WHERE id=?").get(req.params.id); if(!before)return res.status(404).json({error:"PARTNER_NOT_FOUND"});
+      if(req.user.role!=="SUPERADMIN"){db.prepare("UPDATE partners SET status='inactive' WHERE id=?").run(before.id);return res.json({ok:true,status:"inactive"});}
+      if(db.prepare("SELECT 1 FROM invoices WHERE partner_id=? LIMIT 1").get(before.id))return res.status(409).json({error:"PARTNER_HAS_INVOICES"});
+      db.prepare("DELETE FROM partners WHERE id=?").run(before.id); audit(req,"HARD_DELETE","partners",before.id,before,null,1,"Partner permanently deleted","FINANCIAL");res.json({ok:true});
+    });
+  }
+
   function notifyAssignedStaff(conversation, message, assignedUserId = conversation.assigned_user_id) {
     if (!assignedUserId) return;
     const titleEn = conversation.category === "REFUND" ? "Customer refund conversation" : "New customer helpdesk case";
@@ -1193,4 +1390,4 @@ function registerBusinessOperationsRoutes(options) {
   });
 }
 
-module.exports = { COMPANY_KEYS, createBusinessDocumentService, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail };
+module.exports = { COMPANY_KEYS, createBusinessDocumentService, createInvoiceEngine, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail };
