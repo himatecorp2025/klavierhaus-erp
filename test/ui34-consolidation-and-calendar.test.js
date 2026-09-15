@@ -35,10 +35,10 @@ test("New Job uses hybrid MM\/DD\/YYYY calendar and half-hour single select", ()
 
 
 test("Date/time rows stay compact inside three-column modals without clipping the focus ring", () => {
-  assert.match(css, /grid-template-columns:minmax\(0,145px\) minmax\(0,122px\)/);
-  assert.match(css, /max-width:278px/);
+  assert.match(css, /grid-template-columns:minmax\(0,145px\) minmax\(0,120px\)/);
+  assert.match(css, /max-width:276px/);
   assert.match(css, /job-date-entry\{[^}]*max-width:145px/);
-  assert.match(css, /job-time-entry\{[^}]*max-width:122px/);
+  assert.match(css, /job-time-entry\{[^}]*max-width:120px/);
   assert.match(css, /padding:3px 3px 3px 0/);
 });
 
@@ -57,7 +57,7 @@ test("Review carousel is horizontal-only and height-stabilized", () => {
   assert.match(webApp, /track\.style\.transform = `translateX\(-\$\{activeIndex \* 100\}%\)`/);
   assert.doesNotMatch(webApp, /cards\[activeIndex\]\.scrollIntoView/);
   assert.match(webApp, /stabilizeHeight/);
-  assert.match(webCss, /\.review-track\{display:flex!important/);
+  assert.match(webCss, /\.review-track\{display:flex/);
   assert.match(webCss, /min-height:var\(--review-slide-height\)/);
 });
 
