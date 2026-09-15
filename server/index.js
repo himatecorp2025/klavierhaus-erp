@@ -83,7 +83,6 @@ const ADMIN_MODULES = Object.freeze([
   { key: "technical", group: "Technical Operation", label_en: "Technical Operation", label_hu: "Technikai működés" }
 ]);
 const ADMIN_MODULE_CARDS = Object.freeze([
-  { key: "website_design", group_key: "website_events", label_en: "Landing Page Design", label_hu: "Landing Page dizájn" },
   { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
   { key: "website_services", group_key: "website_events", label_en: "Services", label_hu: "Szolgáltatások" },
   { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
