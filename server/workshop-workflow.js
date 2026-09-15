@@ -657,7 +657,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     try { const workflow = requireWorkflow(req.params.id); res.json({ lines: financialRows(workflow.id), summary: signedFinanceSummary(financialRows(workflow.id)) }); } catch (e) { res.status(404).json({ error: e.code || e.message }); }
   });
 
-  app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
+  app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id); if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const body = req.body || {}, lineType = clean(body.line_type, 20).toUpperCase(), category = clean(body.category, 30).toUpperCase();
@@ -674,7 +674,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
-  app.patch("/api/workflows/:id/financial-lines/:lineId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
+  app.patch("/api/workflows/:id/financial-lines/:lineId", auth, permit("ADMIN", "MANAGER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
