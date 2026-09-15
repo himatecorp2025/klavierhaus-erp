@@ -509,7 +509,13 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const normalizedItems = (items || []).map((item) => {
       const quantity = Math.max(0.0001, Number(item.quantity || 1));
       const unitPrice = Math.max(0, money(item.unit_price));
-      return { description: clean(item.item_description || item.description || "Item", 1000), quantity, unit_price: unitPrice, total_price: money(item.total_price ?? quantity * unitPrice), line_type: ["material", "fee", "custom"].includes(item.line_type) ? item.line_type : "custom" };
+      const itemMethodRaw = clean(item.payment_method, 120);
+      const itemMethod = itemMethodRaw ? paymentMethod(itemMethodRaw) : null;
+      if (itemMethodRaw && !itemMethod) throw Object.assign(new Error("INVALID_ITEM_PAYMENT_METHOD"), { status: 400 });
+      const itemStatusRaw = clean(item.financial_status, 20).toLowerCase();
+      const itemStatus = itemStatusRaw ? (["paid", "pending"].includes(itemStatusRaw) ? itemStatusRaw : null) : null;
+      if (itemStatusRaw && !itemStatus) throw Object.assign(new Error("INVALID_ITEM_FINANCIAL_STATUS"), { status: 400 });
+      return { description: clean(item.item_description || item.description || "Item", 1000), quantity, unit_price: unitPrice, total_price: money(item.total_price ?? quantity * unitPrice), line_type: ["material", "fee", "custom"].includes(item.line_type) ? item.line_type : "custom", payment_method: itemMethod, financial_status: itemStatus };
     }).filter((item) => item.total_price >= 0);
     const subtotal = money(normalizedItems.reduce((sum, item) => sum + item.total_price, 0));
     const rate = Math.max(0, money(taxRate));
@@ -521,13 +527,13 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const normalizedMethod = paymentMethod(method);
     db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), normalizedMethod, normalizedMethod === "Payment Link" ? clean(paymentLinkUrl, 2000) || null : null, clean(notes, 5000) || null, status);
-    const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type) VALUES(?,?,?,?,?,?,?)");
-    normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type));
+    const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?)");
+    normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type, item.payment_method, item.financial_status));
     return invoiceDetail(id);
   }
   function invoiceDetail(id) {
     const invoice = db.prepare(`SELECT i.*,
-      c.name AS client_name,c.company AS client_company,c.address AS client_address,c.billing_address AS client_billing_address,c.email AS client_email,c.phone AS client_phone,
+      c.name AS client_name,c.company AS client_company,c.address AS client_address,c.billing_address AS client_billing_address,c.tax_id AS client_tax_id,c.email AS client_email,c.phone AS client_phone,
       p.company_name AS partner_name,p.tax_id AS partner_tax_id,p.billing_address AS partner_billing_address,p.contact_person AS partner_contact_person,p.contact_email AS partner_contact_email,p.contact_phone AS partner_contact_phone,p.default_tax_rate AS partner_default_tax_rate
       FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id WHERE i.id=?`).get(id);
     if (!invoice) return null;
@@ -537,7 +543,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       counterparty_type: partnerCounterparty ? "partner" : "client",
       counterparty_name: partnerCounterparty ? (invoice.partner_name || "Partner") : (invoice.client_company || invoice.client_name || "Client"),
       counterparty_address: partnerCounterparty ? (invoice.partner_billing_address || "") : (invoice.client_billing_address || invoice.client_address || ""),
-      counterparty_tax_id: partnerCounterparty ? (invoice.partner_tax_id || "") : "",
+      counterparty_tax_id: partnerCounterparty ? (invoice.partner_tax_id || "") : (invoice.client_tax_id || ""),
       counterparty_contact: partnerCounterparty ? (invoice.partner_contact_person || "") : (invoice.client_name || ""),
       counterparty_email: partnerCounterparty ? (invoice.partner_contact_email || "") : (invoice.client_email || ""),
       counterparty_phone: partnerCounterparty ? (invoice.partner_contact_phone || "") : (invoice.client_phone || ""),
@@ -545,15 +551,31 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     };
   }
   function postManualInvoiceLedger(invoice, actor = {}) {
-    if (!invoice || invoice.source_type !== "manual" || invoice.status !== "paid" || invoice.status === "void") return null;
+    if (!invoice || invoice.source_type !== "manual" || invoice.status === "void") return null;
+    const items = Array.isArray(invoice.items) ? invoice.items : db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id").all(invoice.id);
+    const invoiceStatus = invoice.status === "paid" ? "paid" : "pending";
+    const paidItems = items.filter((item) => (item.financial_status || invoiceStatus) === "paid");
+    const paidSubtotal = money(paidItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0));
+    const paidAmount = money(paidSubtotal + paidSubtotal * Number(invoice.tax_rate || 0) / 100);
+    const methods = [...new Set(paidItems.map((item) => paymentMethod(item.payment_method || invoice.payment_method)).filter(Boolean))];
+    const effectiveMethod = methods.length === 1 ? methods[0] : paymentMethod(invoice.payment_method);
     const existing = db.prepare("SELECT * FROM financial_items WHERE source_type='MANUAL_INVOICE' AND source_id=? LIMIT 1").get(invoice.id);
-    if (existing) return existing;
+    if (!(paidAmount > 0)) {
+      if (existing) db.prepare("DELETE FROM financial_items WHERE id=?").run(existing.id);
+      return null;
+    }
     const mainType = invoice.direction === "payable" ? "EXPENSE" : "INCOME";
     const category = invoice.direction === "payable" ? "OTHER_OPERATING_EXPENSE" : "SERVICE_REVENUE";
-    const method = paymentMethod(invoice.payment_method);
+    const description = `${invoice.notes || invoice.summary || ""}${paidItems.length !== items.length ? ` · ${paidItems.length}/${items.length} paid line(s)` : ""}`.trim();
+    if (existing) {
+      db.prepare(`UPDATE financial_items SET item_date=?,title=?,description=?,amount=?,main_type=?,category=?,payment_method=?,balance_account=?,client_id=?,created_by=? WHERE id=?`).run(
+        invoice.issue_date, `${invoice.invoice_number} · ${invoice.counterparty_name || invoice.summary || "Manual invoice"}`, description, paidAmount, mainType, category, effectiveMethod || "", balanceAccountFromPaymentMethod(effectiveMethod || ""), invoice.client_id || null, actor.name || actor.id || existing.created_by || "System", existing.id
+      );
+      return db.prepare("SELECT * FROM financial_items WHERE id=?").get(existing.id);
+    }
     const id = newId("FIN");
     db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,client_id,source_type,source_id,created_by)
-      VALUES(?,?,?,?,?,?,?,'ONE_TIME',?,?,?,?,?,?)`).run(id, invoice.issue_date, `${invoice.invoice_number} · ${invoice.counterparty_name || invoice.summary || "Manual invoice"}`, invoice.notes || invoice.summary || "", money(invoice.total_amount), mainType, category, method || "", balanceAccountFromPaymentMethod(method || ""), invoice.client_id || null, "MANUAL_INVOICE", invoice.id, actor.name || actor.id || "System");
+      VALUES(?,?,?,?,?,?,?,'ONE_TIME',?,?,?,?,?,?)`).run(id, invoice.issue_date, `${invoice.invoice_number} · ${invoice.counterparty_name || invoice.summary || "Manual invoice"}`, description, paidAmount, mainType, category, effectiveMethod || "", balanceAccountFromPaymentMethod(effectiveMethod || ""), invoice.client_id || null, "MANUAL_INVOICE", invoice.id, actor.name || actor.id || "System");
     return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
   }
   function createJobInvoices({ job, actor = {}, now = new Date().toISOString(), entries = [] }) {
@@ -675,8 +697,8 @@ function registerBusinessOperationsRoutes(options) {
           type: "partner", id: row.id, official_name: row.company_name, display_name: row.company_name, billing_address: row.billing_address || "", tax_id: row.tax_id || "",
           contact_person: row.contact_person || "", contact_email: row.contact_email || "", contact_phone: row.contact_phone || "", default_tax_rate: Number(row.default_tax_rate || 0)
         }));
-      const clients = db.prepare(`SELECT id,name,company,email,phone,address,billing_address FROM contacts WHERE COALESCE(status,'Active')<>'Inactive' ORDER BY lower(COALESCE(company,name)),lower(name),id`).all().map((row) => ({
-          type: "client", id: row.id, official_name: row.company || row.name, display_name: row.company ? `${row.company} · ${row.name}` : row.name, billing_address: row.billing_address || row.address || "", tax_id: "",
+      const clients = db.prepare(`SELECT id,name,company,email,phone,address,billing_address,tax_id FROM contacts WHERE COALESCE(status,'Active')<>'Inactive' ORDER BY lower(COALESCE(company,name)),lower(name),id`).all().map((row) => ({
+          type: "client", id: row.id, official_name: row.company || row.name, display_name: row.company ? `${row.company} · ${row.name}` : row.name, billing_address: row.billing_address || row.address || "", tax_id: row.tax_id || "",
           contact_person: row.name || "", contact_email: row.email || "", contact_phone: row.phone || "", default_tax_rate: 0
         }));
       res.json({ partners, clients, all: [...partners, ...clients] });
@@ -692,6 +714,7 @@ function registerBusinessOperationsRoutes(options) {
         if (!counterpartyId || !["partner", "client"].includes(counterpartyType)) return res.status(400).json({ error: "INVOICE_COUNTERPARTY_REQUIRED" });
         if ((counterpartyType === "partner" && explicitClientId) || (counterpartyType === "client" && explicitPartnerId)) return res.status(400).json({ error: "INVOICE_COUNTERPARTY_CONFLICT" });
         if (direction === "payable" && counterpartyType !== "partner") return res.status(400).json({ error: "PAYABLE_REQUIRES_PARTNER" });
+        if (direction === "receivable" && counterpartyType !== "client") return res.status(400).json({ error: "RECEIVABLE_REQUIRES_CLIENT" });
         const partner = counterpartyType === "partner" ? db.prepare("SELECT * FROM partners WHERE id=? AND status='active'").get(counterpartyId) : null;
         const client = counterpartyType === "client" ? db.prepare("SELECT * FROM contacts WHERE id=?").get(counterpartyId) : null;
         if (counterpartyType === "partner" && !partner) return res.status(404).json({ error: "PARTNER_NOT_FOUND" });
@@ -707,9 +730,19 @@ function registerBusinessOperationsRoutes(options) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: "INVALID_INVOICE_DATE" });
         if (financialStatus === "pending" && dueDate < issueDate) return res.status(400).json({ error: "DUE_DATE_BEFORE_ISSUE_DATE" });
         const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
-        const items = rawItems.map((item) => ({ item_description: clean(item?.item_description || item?.description, 1000), quantity: parseFinancialNumber(item?.quantity), unit_price: parseFinancialNumber(item?.unit_price), line_type: "custom" }));
+        const items = rawItems.map((item) => {
+          const itemMethodRaw = clean(item?.payment_method, 120);
+          const itemMethod = itemMethodRaw ? normalizePaymentMethod(itemMethodRaw, { allowEmpty: false }) : null;
+          const itemStatusRaw = clean(item?.financial_status, 20).toLowerCase();
+          const itemStatus = itemStatusRaw || null;
+          return { item_description: clean(item?.item_description || item?.description, 1000), quantity: parseFinancialNumber(item?.quantity), unit_price: parseFinancialNumber(item?.unit_price), line_type: "custom", payment_method: itemMethod, financial_status: itemStatus };
+        });
         if (!items.length || items.some((item) => !item.item_description || !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unit_price) || item.unit_price < 0)) return res.status(400).json({ error: "INVALID_INVOICE_ITEMS" });
-        const subtotal = roundFinancial(items.reduce((sum, item) => sum + roundFinancial(item.quantity * item.unit_price), 0));
+        if (rawItems.some((item, index) => clean(item?.payment_method, 120) && !items[index].payment_method)) return res.status(400).json({ error: "INVALID_ITEM_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
+        if (items.some((item) => item.financial_status && !["paid", "pending"].includes(item.financial_status))) return res.status(400).json({ error: "INVALID_ITEM_FINANCIAL_STATUS" });
+        const settledItems = items.map((item) => ({ ...item, financial_status: item.financial_status || financialStatus }));
+        const invoiceStatus = settledItems.every((item) => item.financial_status === "paid") ? "paid" : "issued";
+        const subtotal = roundFinancial(settledItems.reduce((sum, item) => sum + roundFinancial(item.quantity * item.unit_price), 0));
         if (!(subtotal > 0)) return res.status(400).json({ error: "INVOICE_TOTAL_REQUIRED" });
         const requestedRate = req.body?.tax_rate === undefined || req.body?.tax_rate === null || req.body?.tax_rate === "" ? parseFinancialNumber(partner?.default_tax_rate || 0) : parseFinancialNumber(req.body.tax_rate);
         if (!Number.isFinite(requestedRate) || requestedRate < 0) return res.status(400).json({ error: "INVALID_TAX_RATE" });
@@ -717,9 +750,9 @@ function registerBusinessOperationsRoutes(options) {
           const invoice = invoiceEngine.createInvoice({
             direction, issueDate, dueDate, partnerId: partner?.id || null, clientId: client?.id || null, sourceType: "manual", sourceId: null,
             summary: clean(req.body?.summary, 2000) || (direction === "receivable" ? "Manual receivable" : "Manual payable"), taxRate: requestedRate, currency: "USD",
-            paymentMethod: method, paymentLinkUrl, notes: clean(req.body?.notes, 5000), status: financialStatus === "paid" ? "paid" : "issued", items
+            paymentMethod: method, paymentLinkUrl, notes: clean(req.body?.notes, 5000), status: invoiceStatus, items: settledItems
           });
-          if (invoice.status === "paid") invoiceEngine.postManualInvoiceLedger(invoice, req.user);
+          invoiceEngine.postManualInvoiceLedger(invoice, req.user);
           return invoiceEngine.invoiceDetail(invoice.id);
         })();
         audit(req, "CREATE", "invoices", created.id, null, created, 1, `Manual ${direction} created`, "FINANCIAL");
@@ -738,7 +771,7 @@ function registerBusinessOperationsRoutes(options) {
         if (before.source_type === "manual" && before.status === "paid" && status !== "paid") invoiceEngine.reverseLedger(before);
         db.prepare("UPDATE invoices SET status=? WHERE id=?").run(status, before.id);
         const updated = invoiceEngine.invoiceDetail(before.id);
-        if (updated.source_type === "manual" && updated.status === "paid") invoiceEngine.postManualInvoiceLedger(updated, req.user);
+        if (updated.source_type === "manual") invoiceEngine.postManualInvoiceLedger(updated, req.user);
         return updated;
       })();
       audit(req, "UPDATE", "invoices", before.id, before, after, 1, `Invoice status changed to ${status}`, "FINANCIAL"); res.json(after);
