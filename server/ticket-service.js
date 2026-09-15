@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const { nextTicketCode } = require("./ticket-code");
 const { parseGuestName } = require("./name-format");
+const { normalizePaymentMethod } = require("./payment-methods");
 
 const TICKET_VARIANTS = new Set([
   "PUBLIC_PAID", "PUBLIC_FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON_SITE"
@@ -108,8 +109,10 @@ function createTicketService({ db }) {
     const insert = db.prepare(`INSERT INTO event_tickets(
       id,event_id,invitation_id,contact_id,source_type,ticket_variant,buyer_name,attendee_name,original_guest_name,salutation,first_names,surnames,suffix,contact_email,public_code,status,price_cents,currency,payment_method,payment_status,reservation_status,on_site_deadline_at,reserved_at,paid_at,finalized_at,event_payment_id,ticket_sequence,created_by_user_id
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const normalizedPaymentMethod = priceCents > 0 ? normalizePaymentMethod(input.paymentMethod, { allowEmpty: false }) : null;
+    if (priceCents > 0 && !normalizedPaymentMethod) throw Object.assign(new Error("INVALID_PAYMENT_METHOD"), { status: 400 });
     insert.run(id, event.id, input.invitationId || null, input.contactId || null, sourceType, variant, clean(input.buyerName || input.guestName || parsed.display_name, 200), parsed.display_name, parsed.original_name,
-      parsed.salutation, parsed.first_names, parsed.surnames, parsed.suffix, contactEmail, generated.code, "VALID", priceCents, clean(input.currency || event.currency || "USD", 3).toUpperCase(), clean(input.paymentMethod, 60) || null,
+      parsed.salutation, parsed.first_names, parsed.surnames, parsed.suffix, contactEmail, generated.code, "VALID", priceCents, clean(input.currency || event.currency || "USD", 3).toUpperCase(), normalizedPaymentMethod,
       paymentStatus, reservationStatus, onSiteDeadline, now, isPaid ? now : null, reservationStatus === "FINALIZED" ? now : null, input.eventPaymentId || null, generated.sequence, input.userId || null);
     db.prepare(`INSERT OR IGNORE INTO event_attendance_entries(id,event_id,ticket_id,status)
       VALUES(?,?,?,'NOT_ARRIVED')`).run(`ATTE-${id}`, event.id, id);
@@ -117,7 +120,7 @@ function createTicketService({ db }) {
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(id);
   }
 
-  function markPaid(ticketId, { paymentMethod = "ON_SITE", eventPaymentId = null } = {}) {
+  function markPaid(ticketId, { paymentMethod = "Cash", eventPaymentId = null } = {}) {
     const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
     if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
     if (["VOID", "REFUNDED"].includes(ticket.status)) throw Object.assign(new Error("TICKET_NOT_ACTIVE"), { status: 409 });
@@ -125,9 +128,11 @@ function createTicketService({ db }) {
       expireOnSiteReservations(new Date());
       throw Object.assign(new Error("ON_SITE_RESERVATION_EXPIRED"), { status: 409 });
     }
+    const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod, { allowEmpty: false });
+    if (!normalizedPaymentMethod) throw Object.assign(new Error("INVALID_PAYMENT_METHOD"), { status: 400 });
     const now = new Date().toISOString();
     db.prepare(`UPDATE event_tickets SET payment_method=?,payment_status='PAID',reservation_status='FINALIZED',paid_at=COALESCE(paid_at,?),finalized_at=COALESCE(finalized_at,?),event_payment_id=COALESCE(?,event_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .run(clean(paymentMethod, 60), now, now, eventPaymentId, ticketId);
+      .run(normalizedPaymentMethod, now, now, eventPaymentId, ticketId);
     return db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
   }
 
