@@ -1,5 +1,4 @@
 :root{--bg:#07101d;--panel:#0d1b2e;--panel2:#13243b;--text:#f4f7fb;--muted:#9fb0c7;--line:#27405f;--blue:#4aa3ff;--green:#2ecc71;--yellow:#f5c542;--red:#ff5b5b;--orange:#ff9f43;--purple:#b084f5;--calendar-partial:#f59e0b;--calendar-complete:#22c55e;--calendar-overdue:#ef4444;--calendar-failed:#6b7280}
-:root[data-theme="light"]{--bg:#f4f1ea;--panel:#fffdf7;--panel2:#ebe5d8;--text:#1f2937;--muted:#64748b;--line:#d6d3cb;--blue:#2563eb;--green:#15803d;--yellow:#ca8a04;--red:#dc2626;--orange:#ea580c;--purple:#7c3aed}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif;font-size:16px}.hidden{display:none!important}
 .login-page{min-height:100vh;display:grid;place-items:center;padding:24px}.login-card{width:min(460px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 18px 60px rgba(0,0,0,.35)}.login-card input,.login-card button{width:100%;margin:8px 0 14px}
 .brand-badge{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,var(--blue),var(--purple));font-weight:800}.app-shell{display:flex;min-height:100vh}.sidebar{width:280px;background:#081525;border-right:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:18px}.brand{display:flex;gap:12px;align-items:center}.brand h2{margin:0}.nav{display:flex;flex-direction:column;gap:8px}.nav-btn,.logout-btn,button{border:0;border-radius:10px;padding:11px 14px;background:var(--panel2);color:var(--text);cursor:pointer;font-weight:700}.nav-btn{text-align:left}.nav-btn.active,.nav-btn:hover,button:hover{background:var(--blue);color:#05111e}.logout-btn{margin-top:0;background:#221522}
@@ -151,26 +150,6 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 @media(max-width:900px){.scheduler-toolbar{flex-direction:column}.scheduler-actions{width:100%;justify-content:flex-start}.worker-filter-select{width:100%;min-width:0}.ny-time-box{width:100%;justify-content:space-between}}
 
 /* Warm light theme / Meleg világos mód */
-:root[data-theme="light"] body{background:var(--bg);color:var(--text)}
-:root[data-theme="light"] .sidebar{background:#eee8dc}
-:root[data-theme="light"] .panel,
-:root[data-theme="light"] .kpi,
-:root[data-theme="light"] .cf-box,
-:root[data-theme="light"] .cf-card,
-:root[data-theme="light"] .modal-box,
-:root[data-theme="light"] .login-card{background:var(--panel);color:var(--text);box-shadow:0 14px 40px rgba(60,45,20,.12)}
-:root[data-theme="light"] input,
-:root[data-theme="light"] select,
-:root[data-theme="light"] textarea,
-:root[data-theme="light"] .work-card,
-:root[data-theme="light"] .client-search,
-:root[data-theme="light"] .finance-filters,
-:root[data-theme="light"] .planned-column,
-:root[data-theme="light"] .ny-time-box{background:#fbf7ef;color:var(--text)}
-:root[data-theme="light"] th,
-:root[data-theme="light"] .cal-head{background:#e9dfcf;color:var(--text)}
-:root[data-theme="light"] .cal-cell,
-:root[data-theme="light"] .cal-time{background:#faf5ec;color:var(--muted)}
 .theme-switcher{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px}
 .theme-btn{min-width:42px;padding:7px 9px;border-radius:999px;background:transparent;font-size:18px;line-height:1}
 .theme-btn.active,.theme-btn:hover{background:var(--blue);color:#05111e}
@@ -183,8 +162,6 @@ body:not(.sidebar-collapsed) .sidebar-toggle{left:298px}
 #contactPianoSection{grid-column:1/-1;margin-top:12px}
 #contactPianoSection.hidden{display:none!important}
 .inline-piano-form{margin-top:12px}
-:root[data-theme="light"] .logout-btn{background:#221522!important;color:#ffffff!important}
-:root[data-theme="light"] .logout-btn:hover{background:#4b2348!important;color:#ffffff!important}
 @media(max-width:720px){.client-search-grid{grid-template-columns:1fr}.customer-status-icon{font-size:19px;min-width:30px}}
 
 .permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:16px}.permission-card{border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--panel-2)}.permission-row{display:flex;gap:10px;align-items:center;padding:8px 0}.permission-row input{width:auto}.settings-note{color:var(--muted)}
@@ -295,7 +272,6 @@ html{overscroll-behavior:none}body{min-height:100dvh}.mobile-bottom-nav,.mobile-
 .scheduler-legend{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;font-size:.78rem}.scheduler-legend span{padding:5px 9px;border-radius:999px;font-weight:800}.legend-active{background:linear-gradient(90deg,#2563eb,#7c3aed,#0891b2);color:#fff}.legend-partial{background:var(--calendar-partial);color:#241400}.legend-complete{background:var(--calendar-complete);color:#052e16}.legend-overdue{background:var(--calendar-overdue);color:#fff}.legend-failed{background:var(--calendar-failed);color:#fff}
 .workflow-history{display:grid;gap:12px}.workflow-step{display:grid;grid-template-columns:38px 1fr;gap:10px;padding:12px;border-radius:12px;border-left:5px solid #7dd3fc;background:rgba(148,163,184,.08)}.workflow-step.PartiallyCompleted{border-color:var(--calendar-partial)}.workflow-step.Completed{border-color:var(--calendar-complete)}.workflow-step.Overdue{border-color:var(--calendar-overdue)}.workflow-step.Failed{border-color:var(--calendar-failed)}.workflow-step-index{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(148,163,184,.2);font-weight:800}.workflow-step h4,.workflow-step p{margin:0 0 5px}
 @media(max-width:900px){.timeline-scroll{margin-inline:-10px;border-radius:0}.timeline-calendar{grid-template-columns:58px repeat(7,minmax(132px,1fr));min-width:982px;grid-template-rows:52px 960px}.scheduler-toolbar{align-items:flex-start}.scheduler-actions{width:100%}.worker-filter-select{max-width:210px}.timeline-event{padding:4px 22px 4px 4px}}
-@media(prefers-color-scheme:light){.current-time-line,.current-time-line:before{background:#dc2626}.current-time-line span{background:#dc2626;color:#fff}}
 
 /* Unified scrollbars for every modal and nested admin scroll surface. */
 :root{--admin-scrollbar-track:#081525;--admin-scrollbar-thumb:#2d9ca8;--admin-scrollbar-thumb-hover:#56c5c2}
@@ -547,11 +523,6 @@ button[onclick="installWebsiteSamples()"]{display:none!important}
 .custom-select-check{color:var(--green);font-size:18px;font-weight:900;flex:0 0 auto}
 .custom-select-empty{padding:14px;color:var(--muted);font-size:16px;text-align:center}
 @keyframes customSelectDrop{from{opacity:0;transform:translateY(-5px) scale(.985)}to{opacity:1;transform:none}}
-:root[data-theme="light"] .custom-select-trigger{background:#fbf7ef;color:var(--text)}
-:root[data-theme="light"] .custom-select-trigger:hover,
-:root[data-theme="light"] .custom-select-trigger:focus-visible,
-:root[data-theme="light"] .custom-select-trigger.open{background:#f1eadf}
-:root[data-theme="light"] .custom-select-menu{background:#fffdf7;box-shadow:0 18px 45px rgba(49,40,27,.22)}
 .inline-label .custom-select-shell{min-width:240px}
 .finance-filters .custom-select-shell,.piano-filter-grid .custom-select-shell,.client-search-grid .custom-select-shell{width:100%}
 @media(max-width:900px){
@@ -612,7 +583,6 @@ button[onclick="installWebsiteSamples()"]{display:none!important}
 .activation-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.78rem;font-weight:800;white-space:nowrap}
 .activation-status.pending{background:rgba(245,158,11,.16);color:#fbbf24;border:1px solid rgba(245,158,11,.34)}
 .activation-status.verified{background:rgba(16,185,129,.14);color:#34d399;border:1px solid rgba(16,185,129,.3)}
-:root[data-theme="light"] .activation-status.pending{color:#92400e}:root[data-theme="light"] .activation-status.verified{color:#065f46}
 
 
 /* Mandatory notification activation gate */
@@ -1656,7 +1626,6 @@ body[data-current-view="workshop_workflow"] .main{padding-top:10px}
 .admin-date-control-icon{display:grid;place-items:center;flex:0 0 19px;width:19px;height:19px;color:currentColor}
 .admin-date-control-icon .admin-date-control-icon{display:block;width:19px;height:19px}
 .admin-date-control-icon rect,.admin-date-control-icon path{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-:root[data-theme="light"] .admin-date-control-trigger{background:#fffdf7;color:var(--text)}
 .admin-date-picker-popover{position:fixed;z-index:1000;max-width:calc(100vw - 24px);color:#edf3f6}
 .admin-date-picker-popover-card{width:100%;overflow:hidden;border:1px solid #4b6c88;border-radius:14px;background:#0b2036;box-shadow:0 24px 70px rgba(0,0,0,.55)}
 .admin-date-picker-header{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;align-items:center;gap:8px;padding:15px 16px;border-bottom:1px solid #294863;background:linear-gradient(135deg,#102b45,#0b1e33)}
