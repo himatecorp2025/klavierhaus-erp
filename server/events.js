@@ -16,6 +16,41 @@ const REFUND_STATUSES = new Set(["REQUESTED", "APPROVED", "REJECTED", "PROCESSED
 const REFUND_REASON_CODES = new Set(["CUSTOMER_REQUEST", "SCHEDULE_CONFLICT", "EVENT_CANCELLED", "RESCHEDULED", "OTHER"]);
 const NY_TIME_ZONE = "America/New_York";
 const REFUND_WINDOW_MS = 48 * 60 * 60 * 1000;
+const PUBLIC_EVENT_RATE_BUCKETS = new Map();
+function publicEventFingerprint(req) {
+  const ip = String(req.ip || req.socket?.remoteAddress || "unknown");
+  const explicitDevice = cleanText(req.get?.("x-device-id") || "", 200);
+  const userAgent = cleanText(req.get?.("user-agent") || "unknown", 400);
+  const language = cleanText(req.get?.("accept-language") || "", 120);
+  const device = explicitDevice || crypto.createHash("sha256").update(`${userAgent}|${language}`).digest("hex").slice(0, 24);
+  return { ip, device };
+}
+function consumePublicEventRate(req, scope, { ipLimit, deviceLimit, windowMs }) {
+  const now = Date.now();
+  const { ip, device } = publicEventFingerprint(req);
+  const keys = [[`${scope}:ip:${ip}`, ipLimit], [`${scope}:device:${device}`, deviceLimit]];
+  let blocked = false, retryAfter = 0;
+  for (const [key, limit] of keys) {
+    let bucket = PUBLIC_EVENT_RATE_BUCKETS.get(key);
+    if (!bucket || now - bucket.startedAt >= windowMs) bucket = { startedAt: now, count: 0 };
+    retryAfter = Math.max(retryAfter, Math.max(1, Math.ceil((windowMs - (now - bucket.startedAt)) / 1000)));
+    if (bucket.count >= limit) blocked = true;
+    else bucket.count += 1;
+    PUBLIC_EVENT_RATE_BUCKETS.set(key, bucket);
+  }
+  if (PUBLIC_EVENT_RATE_BUCKETS.size > 5000) {
+    const cutoff = now - 2 * windowMs;
+    for (const [key, bucket] of PUBLIC_EVENT_RATE_BUCKETS) if (bucket.startedAt < cutoff) PUBLIC_EVENT_RATE_BUCKETS.delete(key);
+  }
+  return { blocked, retryAfter };
+}
+function enforcePublicEventRate(req, res, scope, options) {
+  const result = consumePublicEventRate(req, scope, options);
+  if (!result.blocked) return false;
+  res.setHeader("Retry-After", String(result.retryAfter));
+  res.status(429).json({ error: "TOO_MANY_REQUESTS" });
+  return true;
+}
 
 function cleanText(value, max = 5000) {
   return String(value ?? "").trim().slice(0, max);
@@ -472,6 +507,7 @@ function registerEventRoutes(options) {
   });
 
   app.post("/api/public/events/:slug/checkout", async (req, res) => {
+    if (enforcePublicEventRate(req, res, "event-checkout", { ipLimit: 8, deviceLimit: 6, windowMs: 10 * 60 * 1000 })) return;
     const language = req.body?.language === "hu" ? "hu" : "en";
     const column = language === "hu" ? "slug_hu" : "slug_en";
     const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
@@ -488,6 +524,7 @@ function registerEventRoutes(options) {
   });
 
   app.post("/api/public/events/:slug/reservations", async (req, res) => {
+    if (enforcePublicEventRate(req, res, "event-reservation", { ipLimit: 12, deviceLimit: 8, windowMs: 10 * 60 * 1000 })) return;
     const language = req.body?.language === "hu" ? "hu" : "en";
     const column = language === "hu" ? "slug_hu" : "slug_en";
     const event = db.prepare(`${service.selectEventSql} WHERE e.${column}=?`).get(req.params.slug);
