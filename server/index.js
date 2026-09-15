@@ -770,19 +770,40 @@ function resolvePiano(pianoId, pianoName, clientId=null){
   if(pianoId){const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);if(row)return row;}
   if(pianoName){
     const normalized=String(pianoName||"").trim().toLowerCase();
-    const rows=clientId?db.prepare("SELECT * FROM pianos WHERE owner_contact_id=?").all(clientId):db.prepare("SELECT * FROM pianos").all();
+    const rows=clientId?db.prepare(`SELECT DISTINCT p.* FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id WHERE p.owner_contact_id=? OR cp.client_id=?`).all(clientId,clientId):db.prepare("SELECT * FROM pianos").all();
     return rows.find(p=>String(p.display_name||`${p.brand||""} ${p.model||""}`.trim()).trim().toLowerCase()===normalized)||null;
   }
   return null;
+}
+function clientPianoLinked(clientId,pianoId){
+  if(!clientId||!pianoId)return false;
+  return Boolean(db.prepare("SELECT 1 FROM client_pianos WHERE client_id=? AND piano_id=? LIMIT 1").get(clientId,pianoId));
+}
+function linkClientPiano(clientId,pianoId){
+  if(!clientId||!pianoId)return;
+  db.prepare("DELETE FROM client_pianos WHERE piano_id=? AND client_id<>?").run(pianoId,clientId);
+  db.prepare("INSERT OR IGNORE INTO client_pianos(id,client_id,piano_id) VALUES(?,?,?)").run(rid("CP"),clientId,pianoId);
+}
+function syncClientContactFromJob(clientId,body={}){
+  if(!clientId)return;
+  const updates=[],values=[];
+  if(Object.prototype.hasOwnProperty.call(body,"client_phone")){updates.push("phone=?");values.push(String(body.client_phone??"").trim());}
+  if(Object.prototype.hasOwnProperty.call(body,"service_address")){updates.push("address=?");values.push(String(body.service_address??"").trim());}
+  if(!updates.length)return;
+  values.push(clientId);
+  db.prepare(`UPDATE contacts SET ${updates.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...values);
 }
 function normalizeJobRelationships(body, existing={}){
   const allowAdHocClient=Boolean(body.allow_ad_hoc_client===true||body.allow_ad_hoc_client===1||String(body.allow_ad_hoc_client||'').toLowerCase()==='true');
   const client=resolveClient(body.client_id!==undefined?body.client_id:existing.client_id, body.client_name!==undefined?body.client_name:existing.client_name);
   if(!client&&!allowAdHocClient) return {error:"CLIENT_NOT_FOUND"};
   if(!client&&allowAdHocClient)return {client:null,piano:null,adHocClient:true};
-  const piano=resolvePiano(body.piano_id!==undefined?body.piano_id:existing.piano_id, body.piano_name!==undefined?body.piano_name:existing.piano_name, client?.id||null);
-  if(!piano&&!allowAdHocClient) return {error:"PIANO_NOT_FOUND"};
-  if(client&&piano?.owner_contact_id && String(piano.owner_contact_id)!==String(client.id)) return {error:"PIANO_CLIENT_MISMATCH"};
+  const requestedPianoId=body.piano_id!==undefined?body.piano_id:existing.piano_id;
+  const requestedPianoName=body.piano_name!==undefined?body.piano_name:existing.piano_name;
+  const piano=resolvePiano(requestedPianoId,requestedPianoName,client?.id||null);
+  const hasRequestedPiano=Boolean(String(requestedPianoId||"").trim()||String(requestedPianoName||"").trim());
+  if(!piano&&hasRequestedPiano&&!allowAdHocClient) return {error:"PIANO_NOT_FOUND"};
+  if(client&&piano&&piano.owner_contact_id&&String(piano.owner_contact_id)!==String(client.id)&&!clientPianoLinked(client.id,piano.id)) return {error:"PIANO_CLIENT_MISMATCH"};
   return {client,piano,adHocClient:!client&&allowAdHocClient};
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
@@ -1772,6 +1793,7 @@ app.post('/api/imports/pianos/:batchId/commit',auth,permit('ADMIN'),(req,res)=>{
       const id=rid('P');
       const display=String(rec.description||rec.originalDescription||'Unknown piano').trim();
       insert.run(id,'','','',null,ownership,ownership,display,ownerId,String(rec.location||'').trim(),0,String(rec.status||'Active'),'',String(rec.externalReference||'').trim(),source,batchId,String(rec.originalDescription||rec.description||'').trim(),ownerResolution);
+      if(ownerId)linkClientPiano(ownerId,id);
       exactRefs.set(`${source}::${rec.externalReference}`,{id,owner_contact_id:ownerId,original_description:rec.originalDescription,display_name:display});
       if(ownerId){ownerDesc.set(`${ownerId}::${normalizePianoDescription(rec.description)}`,{id});touched.add(ownerId);}
       importedPianos++;
@@ -1862,7 +1884,7 @@ function pianoOwnerResolution(ownerContactId,ownershipType){
 }
 function refreshClientHasPiano(clientId){
   if(!clientId)return;
-  const count=db.prepare("SELECT COUNT(*) AS c FROM pianos WHERE owner_contact_id=?").get(clientId).c;
+  const count=db.prepare("SELECT COUNT(*) AS c FROM client_pianos WHERE client_id=?").get(clientId).c;
   db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(count>0?1:0,clientId);
 }
 function normalizedPianoSerial(value){return String(value||"").trim().toLowerCase();}
@@ -1887,6 +1909,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  if(ownerContactId) linkClientPiano(ownerContactId,id);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
@@ -1911,6 +1934,8 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
     const ownershipType=ownerContactId?"Customer owned":requestedOwnership;
     const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
     db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution=?,ownership=?,ownership_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(ownerContactId,resolution,ownershipType,ownershipType,req.params.id);
+    db.prepare("DELETE FROM client_pianos WHERE piano_id=?").run(req.params.id);
+    if(ownerContactId) linkClientPiano(ownerContactId,req.params.id);
     refreshClientHasPiano(before.owner_contact_id);
     refreshClientHasPiano(ownerContactId);
   }
@@ -1931,6 +1956,7 @@ app.delete("/api/pianos", auth, requireSuperadmin, (req,res)=>{
     db.prepare("UPDATE financial_items SET piano_id=NULL WHERE piano_id IS NOT NULL AND piano_id<>''").run();
     db.prepare("UPDATE inventory_items SET linked_piano_id='' WHERE linked_piano_id IS NOT NULL AND linked_piano_id<>''").run();
 
+    db.prepare("DELETE FROM client_pianos").run();
     db.prepare("DELETE FROM pianos").run();
     db.prepare("DELETE FROM import_batches WHERE UPPER(import_source) LIKE '%PIANO%'").run();
     db.prepare("DELETE FROM audit_log WHERE module='pianos' OR action GLOB 'PIANO_*' OR (module='imports' AND (action GLOB 'PIANO_*' OR LOWER(details) LIKE '%piano%'))").run();
@@ -1970,7 +1996,7 @@ createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","c
 app.get("/api/client-profile/:id", auth, (req,res)=>{
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
-  const pianos=db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY created_at DESC").all(req.params.id);
+  const pianos=db.prepare(`SELECT DISTINCT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.created_at DESC`).all(req.params.id);
   const jobs=db.prepare(jobsSelectSql("WHERE j.client_id=? OR j.client_name=? ORDER BY j.start_time DESC LIMIT 50")).all(req.params.id, client.name);
   res.json({client,pianos,jobs,lastVisit:jobs[0]?.start_time || client.last_contact || "",lastJob:jobs[0]?.title || ""});
 });
@@ -1997,7 +2023,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   if(!assigned) return res.status(400).json({error:"A valid responsible user is required / Érvényes felelős munkatárs szükséges"});
   const relationships=normalizeJobRelationships(req.body);
   if(relationships.error) return res.status(400).json({error:relationships.error});
-  if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||"").trim();}
+  if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;if(req.body.client_phone===undefined)req.body.client_phone=relationships.client.phone||"";if(req.body.service_address===undefined)req.body.service_address=relationships.client.address||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||"").trim();}
   if(relationships.piano){req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();}else if(relationships.adHocClient){req.body.piano_id=null;}
   if(!isValidTimeRange(req.body.start_time,req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
   if(!isFiveMinuteTime(req.body.start_time)||!isFiveMinuteTime(req.body.end_time)) return res.status(400).json({error:"INVALID_TIME_STEP"});
@@ -2006,20 +2032,28 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const id=req.body.id || rid("J");
   const dailyRateEnabled=Boolean(req.body.daily_rate_enabled===true||req.body.daily_rate_enabled===1||String(req.body.daily_rate_enabled||'')==='1'||String(req.body.daily_rate_enabled||'').toLowerCase()==='true');
   const dailyRateDate=String(req.body.start_time).slice(0,10);
-  try{jobDomain.validateDailyRateAllocation({userId:assigned.id,dateStr:dailyRateDate,jobId:id,enabled:dailyRateEnabled,amount:req.body.daily_rate_allocated_amount});}
+  let dailyRateDecision;
+  try{dailyRateDecision=jobDomain.validateDailyRateAllocation({userId:assigned.id,dateStr:dailyRateDate,jobId:id,enabled:dailyRateEnabled});}
   catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
+  const extraCompensation=Math.round(Number(req.body.technician_extra_compensation||0)*100)/100;
+  if(!Number.isFinite(extraCompensation)||extraCompensation<0)return res.status(400).json({error:"INVALID_TECHNICIAN_EXTRA_COMPENSATION"});
   const data={...req.body,assigned_user_id:assigned.id,assigned_to:assigned.name,created_by_user_id:req.user.id,created_by:req.user.name};
   data.planned_minutes=timeRangeMinutes(data.start_time,data.end_time);data.planned_hours=data.planned_minutes/60;
   data.workflow_root_id=data.workflow_root_id||id;
   data.workflow_step_no=Number(data.workflow_step_no||1);
   data.workflow_status=data.workflow_status||"ACTIVE";
   data.daily_rate_enabled=dailyRateEnabled?1:0;
-  data.daily_rate_allocated_amount=dailyRateEnabled?Math.round(Number(req.body.daily_rate_allocated_amount||0)*100)/100:0;
+  data.daily_rate_allocated_amount=dailyRateEnabled?Number(dailyRateDecision?.suggested_allocation||0):0;
   data.daily_rate_date=dailyRateEnabled?dailyRateDate:null;
-  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id","daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"]
+  data.technician_extra_compensation=extraCompensation;
+  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id","daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date","technician_extra_compensation"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
-  db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
-  const created=db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
+  const created=db.transaction(()=>{
+    db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
+    if(data.client_id)syncClientContactFromJob(data.client_id,data);
+    if(dailyRateEnabled)jobDomain.rebalanceDailyRateAllocations({userId:assigned.id,dateStr:dailyRateDate});
+    return db.prepare(jobsSelectSql("WHERE j.id=?")).get(id);
+  })();
   workAudit(req,'CREATE',id,null,created,1,`retroactive=${new Date(created.start_time).getTime()<Date.now()}`);
   notifyAssigned(created,req.user,'JOB_ASSIGNED');
   res.json(created);
@@ -2036,7 +2070,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
     "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id",
-    "daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"
+    "daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date","technician_extra_compensation"
   ];
   const workerRequestAllowed=new Set(["title","priority","start_time","end_time","travel_minutes","service_address","instructions","notes"]);
   if(!privilegedEditor){
@@ -2053,7 +2087,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   if(req.body.client_id!==undefined||req.body.client_name!==undefined||req.body.piano_id!==undefined||req.body.piano_name!==undefined){
     const relationships=normalizeJobRelationships(req.body,job);
     if(relationships.error) return res.status(400).json({error:relationships.error});
-    if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;req.body.client_phone=req.body.client_phone||relationships.client.phone||job.client_phone||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||job.client_name||"").trim();}
+    if(relationships.client){req.body.client_id=relationships.client.id;req.body.client_name=relationships.client.name;if(req.body.client_phone===undefined)req.body.client_phone=relationships.client.phone||job.client_phone||"";if(req.body.service_address===undefined)req.body.service_address=relationships.client.address||job.service_address||"";}else{req.body.client_id=null;req.body.client_name=String(req.body.client_name||job.client_name||"").trim();}
     if(relationships.piano){req.body.piano_id=relationships.piano.id;req.body.piano_name=req.body.piano_name||relationships.piano.display_name||`${relationships.piano.brand||""} ${relationships.piano.model||""}`.trim();}else if(relationships.adHocClient){req.body.piano_id=null;}
   }
   let effectiveAssigned={id:job.assigned_user_id||null,name:job.assigned_to||""};
@@ -2073,14 +2107,16 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     req.body.planned_hours=req.body.planned_minutes/60;
   }
   const effectiveDailyEnabled=req.body.daily_rate_enabled!==undefined?Boolean(req.body.daily_rate_enabled===true||req.body.daily_rate_enabled===1||String(req.body.daily_rate_enabled||'')==='1'||String(req.body.daily_rate_enabled||'').toLowerCase()==='true'):Number(job.daily_rate_enabled||0)===1;
-  const effectiveDailyAmount=req.body.daily_rate_allocated_amount!==undefined?Number(req.body.daily_rate_allocated_amount||0):Number(job.daily_rate_allocated_amount||0);
   const effectiveDailyDate=String(effectiveStart||'').slice(0,10);
-  try{jobDomain.validateDailyRateAllocation({userId:effectiveAssigned.id,dateStr:effectiveDailyDate,jobId:job.id,enabled:effectiveDailyEnabled,amount:effectiveDailyAmount});}
+  let dailyRateDecision;
+  try{dailyRateDecision=jobDomain.validateDailyRateAllocation({userId:effectiveAssigned.id,dateStr:effectiveDailyDate,jobId:job.id,enabled:effectiveDailyEnabled});}
   catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
   if(req.body.daily_rate_enabled!==undefined) req.body.daily_rate_enabled=effectiveDailyEnabled?1:0;
-  if(effectiveDailyEnabled){req.body.daily_rate_allocated_amount=Math.round(effectiveDailyAmount*100)/100;req.body.daily_rate_date=effectiveDailyDate;}
+  if(effectiveDailyEnabled){req.body.daily_rate_allocated_amount=Number(dailyRateDecision?.suggested_allocation||0);req.body.daily_rate_date=effectiveDailyDate;}
   else if(req.body.daily_rate_enabled!==undefined){req.body.daily_rate_allocated_amount=0;req.body.daily_rate_date=null;}
   else if(timeChanged && Number(job.daily_rate_enabled||0)===1){req.body.daily_rate_date=effectiveDailyDate;}
+  if(["Cancelled","Failed"].includes(String(req.body.status||""))){req.body.daily_rate_allocated_amount=0;}
+  if(req.body.technician_extra_compensation!==undefined){const extra=Math.round(Number(req.body.technician_extra_compensation||0)*100)/100;if(!Number.isFinite(extra)||extra<0)return res.status(400).json({error:"INVALID_TECHNICIAN_EXTRA_COMPENSATION"});req.body.technician_extra_compensation=extra;}
   const schedulingChanged=req.body.start_time!==undefined || req.body.end_time!==undefined || req.body.assigned_user_id!==undefined || req.body.assigned_to!==undefined;
   if(schedulingChanged){
     const conflicts=findScheduleConflicts(effectiveAssigned.id,effectiveAssigned.name,effectiveStart,effectiveEnd,job.id);
@@ -2103,7 +2139,13 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     db.prepare(`UPDATE jobs SET ${setParts.join(",")} WHERE id=?`).run(...vals);
   }
 
-  const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  let updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
+  if(updated.client_id)syncClientContactFromJob(updated.client_id,req.body);
+  const oldDailyDate=String(job.daily_rate_date||job.start_time||'').slice(0,10);
+  const newDailyDate=String(updated.daily_rate_date||updated.start_time||'').slice(0,10);
+  if(Number(job.daily_rate_enabled||0)===1&&job.assigned_user_id&&oldDailyDate)jobDomain.rebalanceDailyRateAllocations({userId:job.assigned_user_id,dateStr:oldDailyDate});
+  if(Number(updated.daily_rate_enabled||0)===1&&updated.assigned_user_id&&newDailyDate)jobDomain.rebalanceDailyRateAllocations({userId:updated.assigned_user_id,dateStr:newDailyDate});
+  updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
   workAudit(req,'UPDATE',job.id,job,updated,1,`retroactive=${new Date(updated.start_time).getTime()<Date.now()}; closed_before=${['Completed','Partially completed','Failed'].includes(String(job.status||''))}`);
   const assigneeChanged=String(job.assigned_user_id||'')!==String(updated.assigned_user_id||'');
   if(assigneeChanged) notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
@@ -2159,13 +2201,15 @@ app.put("/api/jobs/:id/reassign", auth, (req,res)=>{
   if(!isValidTimeRange(job.start_time,job.end_time)) return res.status(400).json({error:"INVALID_TIME_RANGE"});
   const conflicts=findScheduleConflicts(assigned.id,assigned.name,job.start_time,job.end_time,job.id);
   if(conflicts.length) return rejectScheduleConflict(req,res,assigned,conflicts);
-  if(Number(job.daily_rate_enabled||0)===1){
-    try{jobDomain.validateDailyRateAllocation({userId:assigned.id,dateStr:String(job.start_time||'').slice(0,10),jobId:job.id,enabled:true,amount:job.daily_rate_allocated_amount});}
-    catch(error){return res.status(error.status||400).json({error:error.code||error.message,...(error.details||{})});}
+  const dailyDate=String(job.daily_rate_date||job.start_time||'').slice(0,10);
+  db.prepare(`UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?,
+    daily_rate_allocated_amount=CASE WHEN COALESCE(daily_rate_enabled,0)=1 THEN 0 ELSE daily_rate_allocated_amount END,
+    daily_rate_date=CASE WHEN COALESCE(daily_rate_enabled,0)=1 THEN ? ELSE daily_rate_date END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",dailyDate,job.id);
+  if(Number(job.daily_rate_enabled||0)===1&&dailyDate){
+    if(job.assigned_user_id)jobDomain.rebalanceDailyRateAllocations({userId:job.assigned_user_id,dateStr:dailyDate});
+    jobDomain.rebalanceDailyRateAllocations({userId:assigned.id,dateStr:dailyDate});
   }
-
-  db.prepare("UPDATE jobs SET assigned_user_id=?, assigned_to=?, last_reassigned_by_user_id=?, last_reassigned_by=?, reassignment_note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-    .run(assigned.id,assigned.name,req.user.id,req.user.name,req.body.reassignment_note||"",job.id);
 
   const updated=db.prepare(jobsSelectSql("WHERE j.id=?")).get(job.id);
   workAudit(req,'REASSIGN',job.id,job,updated,1,`from=${job.assigned_to||''}; to=${updated.assigned_to||''}`);
@@ -2187,7 +2231,11 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const job=getJobByAnyId(req.params.id, req.body||{});
   if(!job) return res.status(404).json({error:"Job not found"});
   const logs=db.prepare("SELECT id FROM job_logs WHERE job_id=?").all(job.id);
-  const childJobs=db.prepare("SELECT id FROM jobs WHERE parent_job_id=?").all(job.id);
+  const childJobs=db.prepare("SELECT id,assigned_user_id,daily_rate_enabled,daily_rate_date,start_time FROM jobs WHERE parent_job_id=?").all(job.id);
+  const dailyRateBuckets=[job,...childJobs]
+    .filter(row=>Number(row.daily_rate_enabled||0)===1&&row.assigned_user_id)
+    .map(row=>({userId:row.assigned_user_id,dateStr:String(row.daily_rate_date||row.start_time||'').slice(0,10)}))
+    .filter(bucket=>bucket.dateStr);
   googleCalendar.ignoreDeletedJob(job.id);
   childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
   db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
@@ -2195,6 +2243,8 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
+  const seenDailyBuckets=new Set();
+  for(const bucket of dailyRateBuckets){const key=`${bucket.userId}|${bucket.dateStr}`;if(seenDailyBuckets.has(key))continue;seenDailyBuckets.add(key);jobDomain.rebalanceDailyRateAllocations(bucket);}
   if(job.assigned_user_id && String(job.assigned_user_id)!==String(req.user.id)) createNotification({recipientUserId:job.assigned_user_id,senderUserId:req.user.id,type:'JOB_DELETED',titleEn:'An assigned job was deleted',titleHu:'Töröltek egy hozzád rendelt munkát',bodyEn:jobDescription(job),bodyHu:jobDescription(job),metadata:{deleted_job_id:job.id}});
   res.json({ok:true,deleted_job_id:job.id,deleted_logs:logs.length});
 });
@@ -2316,7 +2366,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
 });
 
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
-  res.json(db.prepare("SELECT * FROM pianos WHERE owner_contact_id=? ORDER BY display_name, brand, model").all(req.params.id));
+  res.json(db.prepare(`SELECT DISTINCT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.display_name,p.brand,p.model`).all(req.params.id));
 });
 
 app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -2326,8 +2376,10 @@ app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"
   if(!pianoId) return res.status(400).json({error:"piano_id is required"});
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);
   if(!piano) return res.status(404).json({error:"Piano not found"});
+  const previousOwner=piano.owner_contact_id||null;
   db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id,piano.id);
-  db.prepare("UPDATE contacts SET has_piano=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id);
+  linkClientPiano(client.id,piano.id);
+  refreshClientHasPiano(previousOwner);refreshClientHasPiano(client.id);
   res.json(db.prepare("SELECT * FROM pianos WHERE id=?").get(piano.id));
 });
 
@@ -2346,15 +2398,24 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand,model,req.body.serial_no||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
+  linkClientPiano(client.id,id);
+  refreshClientHasPiano(client.id);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
 });
 
 
 app.put("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  const ids = Array.isArray(req.body.piano_ids) ? req.body.piano_ids : [];
-  db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(req.params.id);
-  const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?"); ids.forEach(id=>upd.run(req.params.id,id));
+  const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
+  if(!client)return res.status(404).json({error:"Client not found"});
+  const ids = Array.isArray(req.body.piano_ids) ? [...new Set(req.body.piano_ids.map(id=>String(id||'').trim()).filter(Boolean))] : [];
+  const previous=db.prepare("SELECT piano_id FROM client_pianos WHERE client_id=?").all(client.id).map(row=>row.piano_id);
+  db.prepare("DELETE FROM client_pianos WHERE client_id=?").run(client.id);
+  db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(client.id);
+  const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?");
+  for(const pianoId of ids){const exists=db.prepare("SELECT id,owner_contact_id FROM pianos WHERE id=?").get(pianoId);if(!exists)continue;if(exists.owner_contact_id&&String(exists.owner_contact_id)!==String(client.id))refreshClientHasPiano(exists.owner_contact_id);upd.run(client.id,pianoId);linkClientPiano(client.id,pianoId);}
+  refreshClientHasPiano(client.id);
+  previous.forEach(pianoId=>{if(!ids.includes(pianoId)){const owner=db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(pianoId)?.owner_contact_id;if(owner)refreshClientHasPiano(owner);}});
   res.json({ok:true,piano_ids:ids});
 });
 app.get("/api/closed-jobs", auth, (req,res)=>{
