@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   phone TEXT,
   address TEXT,
   billing_address TEXT,
+  tax_id TEXT,
   external_reference TEXT,
   import_source TEXT,
   import_batch_id TEXT,
@@ -1338,6 +1339,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0),
   total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
   line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')),
+  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+  financial_status TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending')),
   FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,id);
