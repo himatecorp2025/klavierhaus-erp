@@ -896,7 +896,9 @@ function loginUserPayload(row){
   };
 }
 function createAuthenticatedSession(row){
-  const loginUser=loginUserPayload(row);
+  const current=db.prepare("SELECT * FROM users WHERE id=? AND status='Active'").get(row?.id);
+  if(!current)throw new Error('AUTH_USER_NOT_ACTIVE');
+  const loginUser=loginUserPayload({...current,session_version:Number(current.session_version||0)});
   return {token:jwt.sign(loginUser,JWT_SECRET,{expiresIn:'30d'}),user:loginUser};
 }
 function createActivationToken(row){
