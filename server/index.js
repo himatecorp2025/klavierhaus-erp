@@ -24,8 +24,7 @@ const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const { analyzeClientWorkbook, commitClientImportRecords } = require("./client-import");
-const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
-const { ensureCentralPianoReference, importReferenceWorkbook, centralPianoLookup } = require("./piano-reference-engine");
+const { ensureCentralPianoReference, centralPianoLookup, registerPianoReferenceRoutes } = require("./piano-reference-engine");
 const {
   createDocumentUpload,
   createBrandingUpload,
@@ -1793,26 +1792,7 @@ app.get("/api/contacts/:id", auth, (req,res)=>{
   res.json(row);
 });
 
-app.get("/api/steinway-reference/lookup", auth, (req,res)=>{
-  const result=lookupSteinwayReference({db,brand:req.query.brand||"",model:req.query.model||"",serial_no:req.query.serial_no||req.query.serial||""});
-  res.json(result);
-});
-
-app.get("/api/pianos/lookup", auth, (req,res)=>{
-  try{
-    res.json(centralPianoLookup(db,{q:req.query.q||"",serial:req.query.serial||req.query.serial_no||"",brand:req.query.brand||"",model:req.query.model||"",currentYear:2026}));
-  }catch(err){console.error("central piano lookup failed:",err);res.status(500).json({error:"PIANO_LOOKUP_FAILED"});}
-});
-
-const pianoReferenceUpload=createPianoImportUpload();
-app.post("/api/pianos/import-reference",auth,permit("ADMIN"),pianoReferenceUpload.single("file"),(req,res)=>{
-  if(!req.file?.buffer)return res.status(400).json({error:"REFERENCE_EXCEL_REQUIRED"});
-  try{
-    const result=importReferenceWorkbook(db,req.file.buffer);
-    audit(req,"STEINWAY_REFERENCE_IMPORTED","pianos","STEINWAY_REFERENCE",null,result,1,`Serial thresholds: ${result.serial_records}; models: ${result.model_records}`);
-    res.json(result);
-  }catch(err){console.error("Steinway reference import failed:",err);res.status(400).json({error:err.message||"STEINWAY_REFERENCE_IMPORT_FAILED"});}
-});
+registerPianoReferenceRoutes({app,db,auth,permit,audit,createPianoImportUpload});
 
 app.get("/api/pianos", auth, (req,res)=>{
   const rows=db.prepare(`
@@ -1860,14 +1840,14 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
   const estimated=Number(req.body.estimated_value||0);
   const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
-  const steinway=lookupSteinwayReference({db,brand,model,serial_no:req.body.serial_no||""});
-  const buildYear=req.body.build_year||steinway.build_year||null;
-  const sizeCm=req.body.size_cm||steinway.size_cm||null;
-  const sizeIn=req.body.size_in||steinway.size_in||null;
-  const sizeDisplay=req.body.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null)||steinway.size_display||null;
+  const reference=centralPianoLookup(db,{serial:req.body.serial_no||"",brand,model,currentYear:2026});
+  const buildYear=req.body.build_year||reference.build_year||null;
+  const sizeCm=req.body.size_cm||reference.size_cm||null;
+  const sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null;
+  const sizeDisplay=req.body.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+    .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
   res.json(piano);
@@ -1877,18 +1857,11 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   const before=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!before)return res.status(404).json({error:"Piano not found"});
   const candidate={...before,...req.body};
-  if(isSteinwayBrand(candidate.brand)){
-    const steinway=lookupSteinwayReference({db,brand:candidate.brand,model:candidate.model,serial_no:candidate.serial_no});
-    if(req.body.build_year===undefined && !candidate.build_year && steinway.build_year) req.body.build_year=steinway.build_year;
-    if(req.body.size_cm===undefined && !candidate.size_cm && steinway.size_cm) req.body.size_cm=steinway.size_cm;
-    if(req.body.size_in===undefined && !candidate.size_in && steinway.size_in) req.body.size_in=steinway.size_in;
-    if(req.body.size_display===undefined && !candidate.size_display && steinway.size_display) req.body.size_display=steinway.size_display;
-  }
-  if(req.body.size_display===undefined && (req.body.size_cm!==undefined || req.body.size_in!==undefined)){
-    const cm=String(req.body.size_cm!==undefined?req.body.size_cm:candidate.size_cm||"").trim();
-    const inch=String(req.body.size_in!==undefined?req.body.size_in:candidate.size_in||"").trim();
-    req.body.size_display=[cm?`${cm} cm`:"",inch?`(${inch})`:""].filter(Boolean).join(" ")||null;
-  }
+  const reference=centralPianoLookup(db,{serial:candidate.serial_no||"",brand:candidate.brand||"",model:candidate.model||"",currentYear:2026});
+  if(req.body.build_year===undefined && !candidate.build_year && reference.build_year) req.body.build_year=reference.build_year;
+  if(req.body.size_cm===undefined && !candidate.size_cm && reference.size_cm) req.body.size_cm=reference.size_cm;
+  if(req.body.size_in===undefined && !candidate.size_in && reference.size_inch) req.body.size_in=reference.size_inch;
+  if(req.body.size_display===undefined && !candidate.size_display && reference.size_display) req.body.size_display=reference.size_display;
   const allowed=["brand","model","serial_no","year","build_year","size_cm","size_in","size_display","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
@@ -1939,19 +1912,17 @@ app.delete("/api/pianos", auth, requireSuperadmin, (req,res)=>{
 app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
   if(!piano)return res.status(404).json({error:"PIANO_NOT_FOUND"});
-  const tableHasColumn=(table,column)=>{try{return db.prepare(`PRAGMA table_info(${table})`).all().some(row=>row.name===column);}catch(_e){return false;}};
+  const hasColumn=(table,column)=>{try{return db.prepare(`PRAGMA table_info(${table})`).all().some(row=>row.name===column);}catch(_error){return false;}};
   const remove=db.transaction(()=>{
     for(const [table,column,emptyValue] of [["jobs","piano_id",null],["planned_jobs","piano_id",""] ,["journal_entries","piano_id",null],["financial_items","piano_id",null],["inventory_items","linked_piano_id",""]]){
-      if(tableHasColumn(table,column))db.prepare(`UPDATE ${table} SET ${column}=? WHERE ${column}=?`).run(emptyValue,req.params.id);
+      if(hasColumn(table,column))db.prepare(`UPDATE ${table} SET ${column}=? WHERE ${column}=?`).run(emptyValue,req.params.id);
     }
     db.prepare("DELETE FROM pianos WHERE id=?").run(req.params.id);
-    if(piano.owner_contact_id){
-      const count=Number(db.prepare("SELECT COUNT(*) AS c FROM pianos WHERE owner_contact_id=?").get(piano.owner_contact_id).c||0);
-      db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(count>0?1:0,piano.owner_contact_id);
-    }
-    try{db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details,audit_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid("AUD"),req.user?.id||"",req.user?.name||"",req.user?.role||"","PIANO_HARD_DELETE","pianos",req.params.id,JSON.stringify(piano),null,1,"Superadmin confirmed permanent piano deletion","TECHNICAL");}catch(_e){}
+    refreshClientHasPiano(piano.owner_contact_id);
+    try{audit(req,"PIANO_HARD_DELETE","pianos",req.params.id,piano,null,1,"Superadmin confirmed permanent piano deletion","TECHNICAL");}catch(_error){}
   });
-  try{remove();res.json({ok:true,deleted_id:req.params.id});}catch(err){console.error("piano delete failed:",err);res.status(500).json({error:"PIANO_DELETE_FAILED"});}
+  try{remove();res.json({ok:true,deleted_id:req.params.id});}
+  catch(error){console.error("piano delete failed:",error);res.status(500).json({error:"PIANO_DELETE_FAILED"});}
 });
 
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
@@ -2318,16 +2289,13 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
   const id=req.body.id || rid("P");
-  const brand=req.body.brand || "";
-  const model=req.body.model || "";
+  const reference=centralPianoLookup(db,{serial:req.body.serial_no||"",brand:req.body.brand||"",model:req.body.model||"",currentYear:2026});
+  const brand=req.body.brand || reference.brand || "";
+  const model=req.body.model || reference.model || "";
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
   const ownershipType=req.body.ownership_type || "Customer owned";
   const estimated=Number(req.body.estimated_value||0);
-  const steinway=lookupSteinwayReference({db,brand,model,serial_no:req.body.serial_no||""});
-  const buildYear=req.body.build_year||steinway.build_year||null;
-  const sizeCm=req.body.size_cm||steinway.size_cm||null;
-  const sizeIn=req.body.size_in||steinway.size_in||null;
-  const sizeDisplay=req.body.size_display||steinway.size_display||null;
+  const buildYear=req.body.build_year||reference.build_year||null,sizeCm=req.body.size_cm||reference.size_cm||null,sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null,sizeDisplay=req.body.size_display||reference.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand,model,req.body.serial_no||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
