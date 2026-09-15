@@ -2272,3 +2272,35 @@ html[data-theme="light"] .site-footer :is(.eyebrow, a:hover, button:hover) {
     min-height: 48px;
   }
 }
+
+/* Round integrity: consent, reviews and salon-event visual states belong to the theme layer. */
+.consent-banner {
+  color: var(--ivory);
+  border: 1px solid rgba(183, 149, 71, 0.34);
+  background: #121418;
+  box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.34);
+}
+.consent-banner .eyebrow { color: var(--gold); }
+.consent-banner h2 { color: var(--ivory); }
+.consent-banner p { color: var(--muted); }
+.consent-banner .text-link { color: var(--cream); }
+.review-showcase { color: var(--ivory); }
+.review-showcase .review-card { border-color: var(--line); background: var(--panel); }
+.review-showcase .review-card blockquote,
+.review-showcase .review-card p { color: var(--cream); }
+.review-showcase .review-card cite { color: var(--gold); }
+html[data-theme="light"] .consent-banner {
+  color: #292B2A;
+  border-color: #E5E0D6;
+  background: #FCFBF7;
+  box-shadow: 0 1.4rem 4rem rgba(37, 30, 18, 0.12);
+}
+html[data-theme="light"] .consent-banner h2 { color: #171817; }
+html[data-theme="light"] .consent-banner p { color: #555550; }
+html[data-theme="light"] .consent-banner .eyebrow,
+html[data-theme="light"] .consent-banner .text-link { color: #80642F; }
+html[data-theme="light"] .review-showcase { color: #292B2A; }
+html[data-theme="light"] .review-showcase .review-card { border-color: #E5E0D6; background: #FCFBF7; }
+html[data-theme="light"] .review-showcase .review-card blockquote,
+html[data-theme="light"] .review-showcase .review-card p { color: #171817; }
+html[data-theme="light"] .review-showcase .review-card cite { color: #80642F; }
