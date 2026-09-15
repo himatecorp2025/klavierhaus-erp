@@ -152,10 +152,10 @@ function createEventClient(options = {}) {
     service(slug, language) {
       return request(`/api/public/website-services/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
-    createCheckout(slug, language, quantity, attendeeNames) {
+    createCheckout(slug, language, quantity, attendeeNames, paymentMethod, contactEmail) {
       return request(`/api/public/events/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
-        body: JSON.stringify({ language: language === "hu" ? "hu" : "en", quantity, attendee_names: attendeeNames })
+        body: JSON.stringify({ language: language === "hu" ? "hu" : "en", quantity, attendee_names: attendeeNames, payment_method: paymentMethod, contact_email: contactEmail })
       });
     },
     reserve(slug, language, reservation) {
