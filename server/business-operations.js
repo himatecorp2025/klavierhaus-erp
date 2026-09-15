@@ -562,16 +562,21 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const method = paymentMethod(entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null);
     const estimated = money(job.planned_amount || entries.find((entry) => entry.mainType !== "EXPENSE")?.amount || 0);
     const dailyRateAmount = Number(job.daily_rate_enabled || 0) === 1 ? money(job.daily_rate_allocated_amount) : 0;
-    if ((estimated > 0 || dailyRateAmount > 0) && !method) {
+    const extraCompensation = money(job.technician_extra_compensation || 0);
+    const contractorTotal = money(dailyRateAmount + extraCompensation);
+    if ((estimated > 0 || contractorTotal > 0) && !method) {
       const problem = new Error("PAYMENT_METHOD_REQUIRED");
       problem.status = 400;
       throw problem;
     }
     const created = [];
     if (estimated > 0) created.push(createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: job.client_id || null, sourceType: "job", sourceId: job.id, summary: `Job completed: ${job.title || job.job_key || job.id}`, taxRate: 0, paymentMethod: method, status: "issued", items: [{ item_description: job.title || "Completed service", quantity: 1, unit_price: estimated, line_type: "fee" }] }));
-    if (dailyRateAmount > 0) {
+    if (contractorTotal > 0) {
       const partner = ensureContractorPartner(job);
-      created.push(createInvoice({ direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "job", sourceId: job.id, summary: `Daily rate: ${job.assigned_to || job.assigned_user_id || "Contractor"}`, taxRate: partner?.default_tax_rate || 0, paymentMethod: method, status: "issued", items: [{ item_description: `Daily rate — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: dailyRateAmount, line_type: "fee" }] }));
+      const contractorItems = [];
+      if (dailyRateAmount > 0) contractorItems.push({ item_description: `Daily rate — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: dailyRateAmount, line_type: "fee" });
+      if (extraCompensation > 0) contractorItems.push({ item_description: `Field-service compensation — ${job.title || job.job_key || job.id}`, quantity: 1, unit_price: extraCompensation, line_type: "fee" });
+      created.push(createInvoice({ direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "job", sourceId: job.id, summary: `Technician compensation: ${job.assigned_to || job.assigned_user_id || "Contractor"}`, taxRate: partner?.default_tax_rate || 0, paymentMethod: method, status: "issued", items: contractorItems }));
     }
     return created;
   }
@@ -610,7 +615,10 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     if (!invoice) return;
     if (invoice.source_type === "job") {
       if (invoice.direction === "receivable") db.prepare("DELETE FROM financial_items WHERE source_type='JOB_REVENUE' AND source_id=?").run(`JOB_REVENUE:${invoice.source_id}`);
-      else db.prepare("DELETE FROM financial_items WHERE source_type='DAILY_RATE' AND source_id=?").run(`DAILY_RATE:${invoice.source_id}`);
+      else {
+        db.prepare("DELETE FROM financial_items WHERE source_type='DAILY_RATE' AND source_id=?").run(`DAILY_RATE:${invoice.source_id}`);
+        db.prepare("DELETE FROM financial_items WHERE source_type='TECHNICIAN_EXTRA_COMPENSATION' AND source_id=?").run(`TECHNICIAN_EXTRA_COMPENSATION:${invoice.source_id}`);
+      }
     } else if (invoice.source_type === "manual") {
       db.prepare("DELETE FROM financial_items WHERE source_type='MANUAL_INVOICE' AND source_id=?").run(invoice.id);
     } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
