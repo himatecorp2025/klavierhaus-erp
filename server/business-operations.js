@@ -469,20 +469,22 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const year = String(issueDate || new Date().toISOString().slice(0, 10)).slice(0, 4);
     const prefix = direction === "payable" ? "VND" : "INV";
     const like = `${prefix}-${year}-%`;
-    const rows = db.prepare("SELECT invoice_number FROM invoices WHERE invoice_number LIKE ? ORDER BY invoice_number DESC LIMIT 1").all(like);
-    const last = rows[0]?.invoice_number || "";
-    const match = last.match(/-(\d{4,})$/);
-    return `${prefix}-${year}-${String(Number(match?.[1] || 0) + 1).padStart(4, "0")}`;
+    const rows = db.prepare("SELECT invoice_number FROM invoices WHERE invoice_number LIKE ?").all(like);
+    let highest = 0;
+    for (const row of rows) {
+      const match = String(row.invoice_number || "").match(/-(\d{4,})$/);
+      const sequence = Number(match?.[1] || 0);
+      if (Number.isSafeInteger(sequence) && sequence > highest) highest = sequence;
+    }
+    return `${prefix}-${year}-${String(highest + 1).padStart(4, "0")}`;
   }
   function ensureContractorPartner(job) {
     if (!job.assigned_user_id) return null;
-    const linked = db.prepare(`SELECT p.* FROM partner_contractors pc JOIN partners p ON p.id=pc.partner_id WHERE pc.user_id=? AND p.status='active' ORDER BY p.created_at LIMIT 1`).get(job.assigned_user_id);
-    if (linked) return linked;
-    const partnerId = newId("PTR");
-    const name = clean(job.assigned_to || job.assigned_user_id, 300) || "Contractor";
-    db.prepare("INSERT INTO partners(id,company_name,contact_person,default_tax_rate,status) VALUES(?,?,?,?, 'active')").run(partnerId, `${name} (Contractor)`, name, 0);
-    db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,?)").run(newId("PC"), partnerId, job.assigned_user_id, name);
-    return db.prepare("SELECT * FROM partners WHERE id=?").get(partnerId);
+    const linked = db.prepare(`SELECT p.* FROM partner_contractors pc JOIN partners p ON p.id=pc.partner_id WHERE pc.user_id=? AND p.status='active' ORDER BY p.created_at,p.id`).all(job.assigned_user_id);
+    if (linked.length === 1) return linked[0];
+    const problem = new Error(linked.length ? "DAILY_RATE_PARTNER_AMBIGUOUS" : "DAILY_RATE_PARTNER_REQUIRED");
+    problem.status = 409;
+    throw problem;
   }
   function createInvoice({ direction, issueDate, dueDate, partnerId = null, clientId = null, sourceType = "manual", sourceId = null, summary = "", taxRate = 0, currency = "USD", paymentMethod: method = null, status = "issued", items = [] }) {
     if (sourceId) {
@@ -530,17 +532,17 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const items = [];
     for (const material of materials) {
-      const qty = Math.max(0, Number(material.consumed_quantity || material.requested_quantity || 0));
+      const qty = Math.max(0, Number(material.consumed_quantity || 0));
       const unit = Math.max(0, money(material.unit_cost));
       if (qty > 0 && unit >= 0) items.push({ item_description: material.item_name || material.inventory_item_name || "Material", quantity: qty, unit_price: unit, line_type: "material" });
     }
-    for (const line of lines.filter((row) => row.line_type === "REVENUE")) {
+    for (const line of lines.filter((row) => row.line_type === "REVENUE" && String(row.billing_status || "CHARGEABLE") === "CHARGEABLE")) {
       const amount = Math.max(0, money(line.amount));
       if (amount > 0) items.push({ item_description: line.title || line.description || "Workshop fee", quantity: 1, unit_price: amount, line_type: "fee" });
     }
     const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, status: "issued", items });
     for (const material of materials) {
-      const qty = Math.max(0, Number(material.consumed_quantity || material.requested_quantity || 0));
+      const qty = Math.max(0, Number(material.consumed_quantity || 0));
       const amount = money(qty * Number(material.unit_cost || 0));
       const sourceId = `WORKFLOW_INVOICE_MATERIAL:${material.id}`;
       if (amount > 0 && !db.prepare("SELECT 1 FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").get(sourceId)) {
@@ -569,6 +571,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
 function registerBusinessOperationsRoutes(options) {
   const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService, ticketService: providedTicketService, customerConversationUpload, notifyUser, invoiceEngine } = options;
   const admin = permit("ADMIN");
+  const financeReader = permit("ADMIN", "MANAGER");
   const helpdesk = permit("ADMIN", "MANAGER", "WORKER");
   const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
   const ticketService = providedTicketService || createTicketService({ db });
@@ -590,7 +593,7 @@ function registerBusinessOperationsRoutes(options) {
     const invoiceSelect = `SELECT i.*,c.name AS client_name,p.company_name AS partner_name,
       CASE WHEN i.direction='payable' THEN COALESCE(p.company_name,i.summary,'Partner') ELSE COALESCE(c.name,i.summary,'Client') END AS counterparty_name
       FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id`;
-    app.get("/api/invoices", auth, admin, (req, res) => {
+    app.get("/api/invoices", auth, financeReader, (req, res) => {
       const month = clean(req.query.month, 7), direction = clean(req.query.direction, 20), status = clean(req.query.status, 30);
       const where = [], params = [];
       if (/^\d{4}-\d{2}$/.test(month)) { where.push("substr(i.issue_date,1,7)=?"); params.push(month); }
@@ -602,7 +605,7 @@ function registerBusinessOperationsRoutes(options) {
       const payables = active.filter((row) => row.direction === "payable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
       res.json({ invoices: rows, summary: { revenue, payables, net: revenue - payables } });
     });
-    app.get("/api/invoices/:id", auth, admin, (req, res) => {
+    app.get("/api/invoices/:id", auth, financeReader, (req, res) => {
       const row = invoiceEngine.invoiceDetail(req.params.id); if (!row) return res.status(404).json({ error: "INVOICE_NOT_FOUND" }); res.json(row);
     });
     app.post("/api/invoices/:id/status", auth, admin, (req, res) => {
@@ -624,19 +627,21 @@ function registerBusinessOperationsRoutes(options) {
       db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("DELETE FROM invoices WHERE id=?").run(before.id); })();
       audit(req, "HARD_DELETE", "invoices", before.id, before, null, 1, clean(req.body?.reason, 1000) || "Invoice permanently deleted by superadmin", "FINANCIAL"); res.json({ ok: true });
     });
-    app.get("/api/invoices/:id/pdf", auth, admin, (req, res) => {
+    app.get("/api/invoices/:id/pdf", auth, financeReader, (req, res) => {
       const invoice = invoiceEngine.invoiceDetail(req.params.id); if (!invoice) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
       const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
       const pdf = generateBusinessInvoicePdf({ company, invoice, items: invoice.items, counterpartyName: invoice.counterparty_name, logoPath });
       res.type("application/pdf").set("Content-Disposition", `attachment; filename="${invoice.invoice_number}.pdf"`).send(pdf);
     });
-    app.get("/api/invoices/monthly/report.pdf", auth, admin, (req, res) => {
+    app.get("/api/invoices/monthly/report.pdf", auth, financeReader, (req, res) => {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : new Date().toISOString().slice(0,7);
       const rows = db.prepare(`${invoiceSelect} WHERE substr(i.issue_date,1,7)=? AND i.status<>'void' ORDER BY i.issue_date,i.invoice_number`).all(month);
       const paid = rows.filter((row)=>row.status==='paid');
       const revenue = paid.filter((row)=>row.direction==='receivable').reduce((sum,row)=>sum+Number(row.total_amount||0),0);
       const costs = paid.filter((row)=>row.direction==='payable').reduce((sum,row)=>sum+Number(row.total_amount||0),0);
-      const breakdown = db.prepare(`SELECT COALESCE(payment_method,'Unspecified') AS payment_method,SUM(total_amount) AS amount FROM invoices WHERE substr(issue_date,1,7)=? AND status='paid' GROUP BY COALESCE(payment_method,'Unspecified') ORDER BY amount DESC`).all(month);
+      const paidBreakdownRows = db.prepare(`SELECT payment_method,SUM(total_amount) AS amount FROM invoices WHERE substr(issue_date,1,7)=? AND status='paid' AND payment_method IS NOT NULL GROUP BY payment_method`).all(month);
+      const paidByMethod = new Map(paidBreakdownRows.map((row) => [row.payment_method, Number(row.amount || 0)]));
+      const breakdown = ["Credit Card", "Bank Transfer / ACH", "Zelle", "Check", "Cash"].map((method) => ({ payment_method: method, amount: paidByMethod.get(method) || 0 }));
       const monthEnd = `${month}-31`;
       const carried = db.prepare(`${invoiceSelect} WHERE i.status IN ('issued','carried_over') AND COALESCE(i.due_date,'9999-12-31')<=? ORDER BY i.due_date,i.invoice_number`).all(monthEnd);
       const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
