@@ -639,12 +639,44 @@ function monthlyReportPage({ company = {}, month = "", summary = {}, paymentBrea
   return lines.join("");
 }
 
+function monthlyCarriedPage({ company = {}, month = "", rows = [], page = 1, pages = 1, metrics, logoResources }) {
+  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const total = rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+  const lines = [
+    `${DARK} rg 0 0 612 792 re f\n`,
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 744, 26, 26, logoResource),
+    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 54, 744, 21, CREAM),
+    textCommand(`CARRIED-OVER / OVERDUE INVOICES · ${month}`, 54, 716, 10, GOLD),
+    textCommand(`Page ${page}/${pages}`, 500, 716, 8, MUTED),
+    textCommand(`ITEMS ON THIS PAGE: ${rows.length} · ${money(total, "USD")}`, 54, 678, 9, GOLD),
+    textCommand("DUE / NUMBER", 54, 646, 8, GOLD),
+    textCommand("COUNTERPARTY / SUMMARY", 190, 646, 8, GOLD),
+    textCommand("STATUS", 422, 646, 8, GOLD),
+    textCommand("AMOUNT", 510, 646, 8, GOLD)
+  ];
+  let y = 620;
+  for (const row of rows) {
+    lines.push(textCommand(`${row.due_date || "—"} ${row.invoice_number || ""}`, 54, y, 8, CREAM));
+    lines.push(textCommand(truncate(row.counterparty_name || row.summary || "—", 210, 8, metrics), 190, y, 8, CREAM));
+    lines.push(textCommand(String(row.status || "").toUpperCase(), 422, y, 8, CREAM));
+    lines.push(textCommand(Number(row.total_amount || 0).toFixed(2), 510, y, 8, CREAM));
+    y -= 18;
+  }
+  return lines.join("");
+}
+
 function generateMonthlyInvoiceReportPdf({ company = {}, month = "", summary = {}, paymentBreakdown = [], carried = [], invoices = [], fontPath, logoPath }) {
-  const chunks = [];
-  for (let i = 0; i < invoices.length; i += 22) chunks.push(invoices.slice(i, i + 22));
-  if (!chunks.length) chunks.push([]);
-  const labels = [company.trade_name, company.legal_name, month, ...invoices.flatMap((row) => [row.invoice_number, row.counterparty_name, row.summary]), ...carried.map((row) => row.invoice_number)];
-  return createPdf({ pages: chunks.map((rows, index) => (metrics, logoResources) => monthlyReportPage({ company, month, summary, paymentBreakdown, carried, rows, page: index + 1, pages: chunks.length, metrics, logoResources })), size: LETTER, labels, title: `Klavierhaus Monthly Financial Report ${month}`, fontPath, logoPath });
+  const invoiceChunks = [];
+  for (let i = 0; i < invoices.length; i += 22) invoiceChunks.push(invoices.slice(i, i + 22));
+  if (!invoiceChunks.length) invoiceChunks.push([]);
+  const carriedChunks = [];
+  for (let i = 0; i < carried.length; i += 28) carriedChunks.push(carried.slice(i, i + 28));
+  const totalPages = invoiceChunks.length + carriedChunks.length;
+  const pages = [];
+  invoiceChunks.forEach((rows, index) => pages.push((metrics, logoResources) => monthlyReportPage({ company, month, summary, paymentBreakdown, carried, rows, page: index + 1, pages: totalPages, metrics, logoResources })));
+  carriedChunks.forEach((rows, index) => pages.push((metrics, logoResources) => monthlyCarriedPage({ company, month, rows, page: invoiceChunks.length + index + 1, pages: totalPages, metrics, logoResources })));
+  const labels = [company.trade_name, company.legal_name, month, ...invoices.flatMap((row) => [row.invoice_number, row.counterparty_name, row.summary]), ...carried.flatMap((row) => [row.invoice_number, row.counterparty_name, row.summary, row.status])];
+  return createPdf({ pages, size: LETTER, labels, title: `Klavierhaus Monthly Financial Report ${month}`, fontPath, logoPath });
 }
 
 module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
