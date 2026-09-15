@@ -829,10 +829,8 @@ function canCloseJob(user, job){
   return isAssignedToUser(job,user);
 }
 function canEditJob(user, job){
-  if(isSuperadminUser(user) || user.role === "ADMIN") return true;
-  if(isAssignedToUser(job,user)) return true;
-  if(user.role === "MANAGER" && ((job.created_by_user_id&&job.created_by_user_id===user.id)||(!job.created_by_user_id&&job.created_by===user.name))) return true;
-  return false;
+  if(isSuperadminUser(user) || user.role === "ADMIN" || user.role === "MANAGER") return true;
+  return user.role === "WORKER" && isAssignedToUser(job,user);
 }
 function canReassignJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
@@ -1462,12 +1460,12 @@ function incomeStatementPayload(month){
   };
 }
 
-app.get("/api/income-statement/monthly", auth, (req,res)=>{
+app.get("/api/income-statement/monthly", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   try{ res.json(incomeStatementPayload(req.query.month || today().slice(0,7))); }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
-app.get("/api/income-statement", auth, (req,res)=>{
+app.get("/api/income-statement", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   try{ res.json(incomeStatementPayload(today().slice(0,7))); }
   catch(e){ res.status(400).json({error:e.message}); }
 });
@@ -1988,17 +1986,23 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
   const jobId = req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId, req.body);
   if(!job) return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});
+  if(!canEditJob(req.user,job)) return res.status(403).json({error:"JOB_EDIT_FORBIDDEN"});
 
-  // Operational scheduling rule:
-  // everyone may change the responsible person and operational details.
-  // Operatív szabály: mindenki átadhatja / visszaveheti / továbbadhatja a munkát.
-  const allowed=[
+  const privilegedEditor=isSuperadminUser(req.user)||req.user.role==="ADMIN"||req.user.role==="MANAGER";
+  const privilegedAllowed=[
     "title","job_type","client_id","client_name","client_phone",
     "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
     "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id",
     "daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"
   ];
+  const workerRequestAllowed=new Set(["title","priority","start_time","end_time","travel_minutes","service_address","instructions","notes"]);
+  if(!privilegedEditor){
+    const forbidden=Object.keys(req.body||{}).filter((key)=>privilegedAllowed.includes(key)&&!workerRequestAllowed.has(key));
+    if(forbidden.length) return res.status(403).json({error:"JOB_FIELD_EDIT_FORBIDDEN",fields:forbidden});
+  }
+  // planned_hours/planned_minutes are server-derived from permitted start/end edits.
+  const allowed=privilegedEditor?privilegedAllowed:[...workerRequestAllowed,"planned_hours","planned_minutes"];
 
   if(req.body.job_type==="Part-work" && (!req.body.instructions || !String(req.body.instructions).trim())){
     return res.status(400).json({error:"Remaining tasks are required for part-work / Részmunka esetén a hátralévő feladatok megadása kötelező"});
