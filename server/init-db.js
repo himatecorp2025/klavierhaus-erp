@@ -165,6 +165,7 @@ function migrationRequiresBackup() {
   const usersMissingCalendarColor = tableExists("users") && !tableColumns("users").has("calendar_color");
   const usersMissingGoogleCalendarEmail = tableExists("users") && !tableColumns("users").has("google_calendar_email");
   const usersMissingContactEmail = tableExists("users") && !tableColumns("users").has("contact_email");
+  const contactsTaxIdMissing = tableExists("contacts") && !tableColumns("contacts").has("tax_id");
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id","financial_status","financial_ledger_id","closed_at"].some((column) => !tableColumns("jobs").has(column));
@@ -184,7 +185,8 @@ function migrationRequiresBackup() {
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
   const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal"));
-  return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
+  const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
+  return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || invoiceItemSettlementMissing || contactsTaxIdMissing || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -704,6 +706,7 @@ function runMigrations() {
     // Contacts and customer import.
     ensureColumn("contacts", "address", "TEXT");
     ensureColumn("contacts", "billing_address", "TEXT");
+    ensureColumn("contacts", "tax_id", "TEXT");
     ensureColumn("contacts", "external_reference", "TEXT");
     ensureColumn("contacts", "import_source", "TEXT");
     ensureColumn("contacts", "import_batch_id", "TEXT");
@@ -808,10 +811,14 @@ function runMigrations() {
     CREATE TABLE IF NOT EXISTS invoice_items (
       id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, item_description TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
       unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0), total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
-      line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')),
+      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+      financial_status TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     )`);
     ensureColumn("invoices", "payment_link_url", "TEXT");
     ensureColumn("invoices", "notes", "TEXT");
+    ensureColumn("invoice_items", "payment_method", "TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash'))");
+    ensureColumn("invoice_items", "financial_status", "TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending'))");
     ensureIndex("idx_partners_status_name", "CREATE INDEX IF NOT EXISTS idx_partners_status_name ON partners(status,company_name)");
     ensureIndex("idx_partner_contractors_partner", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_partner ON partner_contractors(partner_id)");
     ensureIndex("idx_partner_contractors_user", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id)");
