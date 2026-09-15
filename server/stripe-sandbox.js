@@ -131,7 +131,7 @@ function createStripeSandbox(options = {}) {
     return current ? Number(current.remaining || 0) : Math.max(0, Number(event.capacity_total || 0) - eventTicketCount(event.id) - activeHoldCount(event.id, now));
   }
 
-  async function createCheckout({ event, language = "en", quantity = 1, attendeeNames = [] }) {
+  async function createCheckout({ event, language = "en", quantity = 1, attendeeNames = [], purchaserEmail = "" }) {
     requireConfigured();
     expireStaleHolds();
     const count = Number(quantity);
@@ -204,6 +204,7 @@ function createStripeSandbox(options = {}) {
         metadata: { hold_id: holdId, event_id: event.id, test_mode: "true" },
         payment_intent_data: { metadata: { hold_id: holdId, event_id: event.id, test_mode: "true" } },
         customer_creation: "always",
+        ...(validEmail(purchaserEmail) ? { customer_email: normalizeEmail(purchaserEmail) } : {}),
         name_collection: { individual: { enabled: true, optional: false } },
         locale: language === "hu" ? "hu" : "en",
         submit_type: "book",
