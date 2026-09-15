@@ -1,0 +1,48 @@
+"use strict";
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const path=require("node:path");
+const root=path.resolve(__dirname,"..");
+const read=rel=>fs.readFileSync(path.join(root,rel),"utf8");
+const index=read("server/index.js");
+const schema=read("server/schema.sql");
+const initDb=read("server/init-db.js");
+const business=read("server/business-operations.js");
+const workflow=read("server/workshop-workflow.js");
+const events=read("server/events.js");
+const pianoEngine=read("server/piano-reference-engine.js");
+const steinway=read("server/steinway-reference.js");
+const websiteCatalog=read("server/website-catalog.js");
+const app=read("public/app.js");
+const styles=read("public/styles.css");
+const sw=read("public/service-worker.js");
+const websiteApp=read("website/public/app.js");
+const websiteStyles=read("website/public/styles.css");
+const websiteDesign=read("website/public/design-v3.css");
+const websiteServer=read("website/server/index.js");
+function routeBlock(source,needle,nextNeedle){const start=source.indexOf(needle);assert.ok(start>=0,`Missing ${needle}`);const end=nextNeedle?source.indexOf(nextNeedle,start+needle.length):-1;return source.slice(start,end>start?end:Math.min(source.length,start+6000));}
+
+test("FIX-01 public customer lookup never returns conversation bearer tokens",()=>{const block=routeBlock(business,'app.post("/api/public/customer-conversations/lookup"','app.get("/api/public/customer-conversations/:token"');assert.doesNotMatch(block,/res\.(?:json|status\([^)]*\)\.json)\([^;]*(?:access_token|conversation_url)|conversationTokenFromRow\(|decrypt\(/i);assert.match(block,/status\(202\)\.json\(\{ ok: true \}\)/);});
+test("FIX-02 Steinway model registry is canonical",()=>{assert.match(schema,/CREATE TABLE IF NOT EXISTS steinway_model_reference/);for(const src of [pianoEngine,steinway,websiteCatalog])assert.doesNotMatch(src,/steinway_models_registry/);assert.match(pianoEngine,/steinway_model_reference/);});
+test("FIX-03 income statement routes require ADMIN or MANAGER",()=>{assert.match(index,/app\.get\("\/api\/income-statement\/monthly", auth, permit\("ADMIN","MANAGER"\)/);assert.match(index,/app\.get\("\/api\/income-statement", auth, permit\("ADMIN","MANAGER"\)/);});
+test("FIX-04 job update enforces assignee ownership and worker field restrictions",()=>{const block=routeBlock(index,'app.put("/api/jobs/:id"','app.patch("/api/jobs/:id/schedule"');assert.match(block,/canEditJob\(req\.user,job\)/);assert.match(block,/workerRequestAllowed/);assert.match(block,/JOB_FIELD_EDIT_FORBIDDEN/);});
+test("FIX-05 workflow financial mutations exclude WORKER",()=>{assert.match(workflow,/app\.post\("\/api\/workflows\/:id\/financial-lines", auth, permit\("ADMIN", "MANAGER"\)/);assert.match(workflow,/app\.patch\("\/api\/workflows\/:id\/financial-lines\/:lineId", auth, permit\("ADMIN", "MANAGER"\)/);});
+test("FIX-06 public website has zero light-theme activation",()=>{const all=`${websiteApp}\n${websiteStyles}\n${websiteDesign}\n${websiteServer}`;assert.doesNotMatch(all,/data-theme[^\n>]*light|theme_preference|solarTheme|applyPublicTheme|data-theme-toggle|theme-toggle|☀|☾/i);assert.ok((websiteServer.match(/theme-color" content="#080807"/g)||[]).length>=3);});
+test("FIX-07 login has IP/account throttling and async bcrypt",()=>{assert.match(index,/LOGIN_IP_LIMIT/);assert.match(index,/LOGIN_ACCOUNT_LIMIT/);assert.match(index,/LOGIN_TEMPORARILY_UNAVAILABLE/);assert.match(index,/bcryptCompareAsync/);assert.doesNotMatch(routeBlock(index,'app.post("/api/login"','app.post(\'/api/account-activation/verify\''),/compareSync\(/);});
+test("FIX-08 piano serial is unique in schema and rejected in backend",()=>{assert.match(schema,/CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_serial_no_unique/);assert.match(initDb,/idx_pianos_serial_no_unique/);assert.match(index,/PIANO_SERIAL_ALREADY_EXISTS/);assert.match(index,/rejectDuplicatePianoSerial/);});
+test("FIX-09 logout revokes JWT sessions with session_version",()=>{assert.match(schema,/session_version INTEGER NOT NULL DEFAULT 0/);assert.match(initDb,/ensureColumn\("users", "session_version"/);assert.match(index,/SESSION_REVOKED/);assert.match(index,/session_version=COALESCE\(session_version,0\)\+1/);});
+test("FIX-10 public event checkout and reservations are IP/device throttled",()=>{assert.match(events,/event-checkout/);assert.match(events,/event-reservation/);assert.match(events,/x-device-id/);assert.match(events,/TOO_MANY_REQUESTS/);});
+
+test("UI12-01 workflow date picker keeps DOM/SVG contract",()=>{assert.match(app,/<span class="workflow-date-picker-icon" aria-hidden="true"><\/span><span class="workflow-date-value">/);assert.match(app,/workflowToolbarIcon\("date"\)/);});
+test("UI12-02 manual scheduler preserves unchanged exact legacy times",()=>{assert.match(app,/preservesExistingExactTime/);assert.match(app,/const timesUnchanged=Boolean/);assert.match(app,/const dateTimeStep=preservesExistingExactTime\?"any":String\(SCHEDULE_INTERVAL_MINUTES\*60\)/);});
+test("UI12-03 missing-client and missing-piano flow preserves draft",()=>{assert.match(app,/captureJobDraftFromForm/);assert.match(app,/createNestedClientStateMachine/);assert.match(app,/onCancelled:\(draftState\)=>/);assert.match(app,/Your job data will be preserved/);});
+test("UI12-04 cinematic hero remains dark-only",()=>{assert.match(websiteStyles,/\.hero-shade/);assert.doesNotMatch(`${websiteStyles}\n${websiteDesign}`,/data-theme[^\n]*light/i);});
+test("UI12-05 icon contracts use SVG and no theme emoji survives",()=>{assert.match(websiteServer,/function renderPublicArrow\(direction = "external"\)/);assert.match(websiteServer,/button-arrow-icon/);assert.doesNotMatch(`${websiteApp}\n${websiteServer}`,/☀|☾|🌞|🌙/);});
+test("UI12-06 mobile controls have 48px touch hardening",()=>{assert.match(styles,/UI12 contract hardening/);assert.match(styles,/min-width:48px;min-height:48px/);});
+test("UI12-07 modals and drawers use 100dvh containment",()=>{assert.match(styles,/100dvh/);assert.match(styles,/max-height:calc\(100dvh - 16px\)/);});
+test("UI12-08 critical PWA shell is network-first",()=>{assert.match(sw,/const isCriticalShell=/);const critical=sw.indexOf('if(isCriticalShell)');const cached=sw.indexOf('if(cached)');assert.ok(critical>=0&&cached>critical);assert.match(sw,/try\{return await network;\}catch/);});
+test("UI12-09 tables are protected by horizontal scroll wrappers",()=>{assert.match(styles,/\.table-wrap,\.contacts-table-wrap,\.pianos-table-wrap,\.finance-table-wrap/);assert.match(styles,/overflow-x:auto/);});
+test("UI12-10 calendar auto-refresh exposes stale-data warning",()=>{assert.match(app,/Calendar auto-refresh failed/);assert.match(app,/calendarRefreshWarning/);assert.match(app,/Displayed data may be stale/);});
+test("UI12-11 cookie banner stays visually contained",()=>{assert.match(`${websiteStyles}\n${websiteDesign}`,/\.consent-banner\{/);assert.match(`${websiteStyles}\n${websiteDesign}`,/overflow:hidden/);});
+test("UI12-12 light mode has zero tolerance",()=>{const all=`${websiteApp}\n${websiteStyles}\n${websiteDesign}\n${websiteServer}`;assert.doesNotMatch(all,/html\[data-theme=["']light["']\]|theme_preference|solarTheme|data-theme-toggle|theme-toggle/i);});
