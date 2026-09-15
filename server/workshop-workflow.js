@@ -59,7 +59,7 @@ function purgeAllWorkflowData({ db, audit }) {
   return { workflowCount, stageCount };
 }
 
-function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadmin, rid, nowISO, upload, notifyUser, jobDomain }) {
+function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadmin, rid, nowISO, upload, notifyUser, jobDomain, invoiceEngine }) {
   const domain = jobDomain || createJobDomain({ db, rid });
   const isSuper = (user) => Boolean(user && (user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1));
   const isAdmin = (user) => isSuper(user) || user?.role === "ADMIN";
@@ -757,6 +757,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           return { closedId };
         }
       });
+      if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now: closedAt });
       const refreshedLines=financialRows(workflow.id);
       for(const line of refreshedLines){
         if(line.posted_financial_item_id) continue;
