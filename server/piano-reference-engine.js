@@ -437,18 +437,6 @@ function ensureCentralPianoReference(db) {
   ensureColumn(db, "pianos", "size_in", "TEXT");
   ensureColumn(db, "pianos", "size_display", "TEXT");
 
-  // One-time compatibility migration from the obsolete split-brain table.
-  // After migration the shadow table is removed and never recreated.
-  const legacyModelTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='steinway_models_registry'").get();
-  if (legacyModelTable) {
-    const legacyRows = db.prepare("SELECT model,size_cm,size_inch FROM steinway_models_registry").all();
-    const migrateModel = db.prepare("INSERT OR REPLACE INTO steinway_model_reference(model_key,size_cm,size_in,size_display) VALUES(?,?,?,?)");
-    db.transaction(() => {
-      legacyRows.forEach((row) => migrateModel.run(row.model, row.size_cm, row.size_inch, `${row.size_cm} cm (${row.size_inch})`));
-      db.exec("DROP TABLE steinway_models_registry");
-    })();
-  }
-
   const serialCount = Number(db.prepare("SELECT COUNT(*) AS c FROM steinway_serial_registry").get().c || 0);
   const modelCount = Number(db.prepare("SELECT COUNT(*) AS c FROM steinway_model_reference").get().c || 0);
   if (serialCount === 0 || modelCount === 0) {
