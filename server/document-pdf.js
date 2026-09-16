@@ -736,4 +736,140 @@ function generateMonthlyInvoiceReportPdf({ company = {}, month = "", summary = {
   return createPdf({ pages, size: LETTER, labels, title: `Klavierhaus Monthly Financial Report ${month}`, fontPath, logoPath });
 }
 
-module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
+
+function statementGeneratedLabel(value = new Date().toISOString()) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return safeText(value);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute} ${values.timeZoneName || "ET"}`;
+}
+
+function statementHeader({ company = {}, title, subtitle, generatedAt, closed = false, period = "", logoResources }) {
+  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
+  const companyName = safeText(company.trade_name || company.legal_name || "Klavierhaus");
+  const address = safeText([company.address_line1, company.city, company.state, company.postal_code].filter(Boolean).join(", "));
+  return [
+    `${DARK} rg 0 0 612 792 re f\n`,
+    logoCommand(Boolean(logoResources?.[logoResource]), 54, 742, 28, 28, logoResource),
+    textCommand(companyName, 54, 744, 21, CREAM),
+    textCommand(title, 54, 714, 11, GOLD),
+    textCommand(subtitle, 54, 696, 8, MUTED),
+    address ? textCommand(address, 54, 682, 8, MUTED) : "",
+    textCommand(`${closed ? "Closed statement" : "Real-time statement"} · ${period || ""}`, 390, 714, 8, GOLD),
+    textCommand(`Generated on: ${statementGeneratedLabel(generatedAt)}`, 390, 696, 8, MUTED),
+    `${GOLD} RG .8 w 54 666 504 0 re\n`
+  ];
+}
+
+function statementLine(lines, label, value, y, { total = false, negative = false } = {}) {
+  if (total) lines.push(`${GOLD} RG .65 w 54 ${number(y + 13)} 504 0 re\n`);
+  lines.push(textCommand(safeText(label), 64, y, total ? 10 : 9, total ? GOLD : CREAM));
+  const amount = money(value, "USD");
+  lines.push(textCommand(amount, 455, y, total ? 11 : 9, negative ? "0.96 0.36 0.36" : (total ? GOLD : CREAM)));
+}
+
+function balanceSheetStatementPage({ company, payload, generatedAt, closed, period, metrics, logoResources }) {
+  const data = payload?.balanceSheet || payload || {};
+  const audit = payload?.balanceAudit || {};
+  const lines = statementHeader({ company, title: "US GAAP BALANCE SHEET", subtitle: "Assets = Liabilities + Equity", generatedAt, closed, period, logoResources });
+  let y = 635;
+  lines.push(textCommand("ASSETS", 54, y, 11, GOLD)); y -= 26;
+  statementLine(lines, "Cash & Bank Accounts", data.cashBankAccounts || 0, y); y -= 22;
+  statementLine(lines, "Accounts Receivable (AR)", data.accountsReceivable || 0, y); y -= 22;
+  statementLine(lines, "Equipment / Inventory / Prepaid & Other Assets", data.manualAssets || 0, y); y -= 28;
+  statementLine(lines, "TOTAL ASSETS", data.totalAssets || 0, y, { total: true }); y -= 48;
+  lines.push(textCommand("LIABILITIES", 54, y, 11, GOLD)); y -= 26;
+  statementLine(lines, "Accounts Payable (AP)", data.accountsPayable || 0, y); y -= 22;
+  statementLine(lines, "Sales Tax Payable", data.salesTaxPayable || 0, y); y -= 22;
+  statementLine(lines, "Deferred Revenue / Contract Liability", data.deferredRevenue || 0, y); y -= 22;
+  statementLine(lines, "Loans / Notes Payable & Other Liabilities", data.manualLiabilities || 0, y); y -= 28;
+  statementLine(lines, "TOTAL LIABILITIES", data.totalLiabilities || 0, y, { total: true }); y -= 48;
+  lines.push(textCommand("EQUITY", 54, y, 11, GOLD)); y -= 26;
+  statementLine(lines, "Opening Retained Earnings / Equity", data.ownersOpeningEquity || 0, y); y -= 22;
+  statementLine(lines, "Retained Earnings / Current Net Income", data.currentPeriodNetIncome || 0, y); y -= 22;
+  statementLine(lines, "Other Equity", data.manualEquity || 0, y); y -= 28;
+  statementLine(lines, "TOTAL EQUITY", data.totalEquity || 0, y, { total: true }); y -= 34;
+  statementLine(lines, "TOTAL LIABILITIES & EQUITY", data.totalLiabilitiesEquity || 0, y, { total: true }); y -= 42;
+  const difference = Number(audit.difference ?? ((data.totalAssets || 0) - (data.totalLiabilitiesEquity || 0)));
+  lines.push(textCommand(Math.abs(difference) < 0.01 ? "BALANCED · Difference $0.00" : `OUT OF BALANCE · Difference ${money(difference, "USD")}`, 54, Math.max(54, y), 10, Math.abs(difference) < 0.01 ? GOLD : "0.96 0.36 0.36"));
+  return lines.join("");
+}
+
+function incomeStatementAccountRows(lines, rows, y, { maxRows = 10, otherLabel = "Other Accounts" } = {}) {
+  const visible = rows.slice(0, maxRows);
+  for (const row of visible) {
+    statementLine(lines, row.name_en || row.code || "Account", row.balance || 0, y, { negative: Number(row.balance || 0) < 0 });
+    y -= 20;
+  }
+  if (rows.length > maxRows) {
+    const other = rows.slice(maxRows).reduce((sum, row) => roundPdfMoney(sum + Number(row.balance || 0)), 0);
+    statementLine(lines, otherLabel, other, y, { negative: other < 0 });
+    y -= 20;
+  }
+  return y;
+}
+
+function roundPdfMoney(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) / 100 : 0;
+}
+
+function incomeStatementRevenuePage({ company, payload, generatedAt, closed, period, logoResources }) {
+  const totals = payload?.totals || {};
+  const operating = Array.isArray(payload?.operatingRevenueAccounts) ? payload.operatingRevenueAccounts : [];
+  const passive = Array.isArray(payload?.passiveIncomeAccounts) ? payload.passiveIncomeAccounts : [];
+  const lines = statementHeader({ company, title: "US GAAP INCOME STATEMENT", subtitle: "Revenue presentation · Page 1 of 2", generatedAt, closed, period, logoResources });
+  let y = 635;
+  lines.push(textCommand("OPERATING REVENUE", 54, y, 11, GOLD)); y -= 24;
+  if (!operating.length) { lines.push(textCommand("No activity", 64, y, 8, MUTED)); y -= 20; }
+  y = incomeStatementAccountRows(lines, operating, y, { maxRows: 10, otherLabel: "Other Operating Revenue" });
+  statementLine(lines, "TOTAL OPERATING REVENUE", totals.operatingRevenue || 0, y, { total: true, negative: Number(totals.operatingRevenue || 0) < 0 }); y -= 42;
+  lines.push(textCommand("PASSIVE & NON-OPERATING INCOME", 54, y, 11, GOLD)); y -= 24;
+  if (!passive.length) { lines.push(textCommand("No activity", 64, y, 8, MUTED)); y -= 20; }
+  y = incomeStatementAccountRows(lines, passive, y, { maxRows: 10, otherLabel: "Other Passive & Non-Operating Income" });
+  statementLine(lines, "TOTAL PASSIVE & NON-OPERATING INCOME", totals.passiveNonOperatingIncome || totals.passiveIncome || 0, y, { total: true, negative: Number(totals.passiveNonOperatingIncome || totals.passiveIncome || 0) < 0 });
+  return lines.join("");
+}
+
+function incomeStatementExpenseCashPage({ company, payload, generatedAt, closed, period, logoResources }) {
+  const totals = payload?.totals || {};
+  const cashFlow = payload?.cashFlow || {};
+  const expenses = Array.isArray(payload?.expenseAccounts) ? payload.expenseAccounts : [];
+  const lines = statementHeader({ company, title: "US GAAP INCOME STATEMENT", subtitle: "Expenses, net income & cash roll-forward · Page 2 of 2", generatedAt, closed, period, logoResources });
+  let y = 635;
+  lines.push(textCommand("EXPENSES", 54, y, 11, GOLD)); y -= 24;
+  if (!expenses.length) { lines.push(textCommand("No activity", 64, y, 8, MUTED)); y -= 20; }
+  y = incomeStatementAccountRows(lines, expenses, y, { maxRows: 12, otherLabel: "Other Expenses" });
+  statementLine(lines, "TOTAL EXPENSES", totals.expenses || 0, y, { total: true, negative: Number(totals.expenses || 0) < 0 }); y -= 42;
+  statementLine(lines, "NET INCOME", totals.profit || 0, y, { total: true, negative: Number(totals.profit || 0) < 0 }); y -= 52;
+  lines.push(textCommand("CASH FLOW ROLL-FORWARD", 54, y, 11, GOLD)); y -= 26;
+  statementLine(lines, "Beginning Balance", cashFlow.beginningBalance || 0, y); y -= 22;
+  statementLine(lines, "Net Cash Flow", cashFlow.netCashFlow || 0, y, { negative: Number(cashFlow.netCashFlow || 0) < 0 }); y -= 22;
+  statementLine(lines, "Ending Balance", cashFlow.endingBalance || totals.cashBank || 0, y, { total: true, negative: Number(cashFlow.endingBalance || totals.cashBank || 0) < 0 });
+  return lines.join("");
+}
+
+function generateFinancialStatementPdf({ statement = "income-statement", company = {}, payload = {}, generatedAt = new Date().toISOString(), closed = false, period = "", fontPath, logoPath }) {
+  const balance = statement === "balance-sheet";
+  const labels = [company.trade_name, company.legal_name, period, statementGeneratedLabel(generatedAt), ...(payload?.operatingRevenueAccounts || []).flatMap((row) => [row.name_en, row.name_hu]), ...(payload?.passiveIncomeAccounts || []).flatMap((row) => [row.name_en, row.name_hu]), ...(payload?.expenseAccounts || []).flatMap((row) => [row.name_en, row.name_hu])];
+  const pages = balance
+    ? [(metrics, logoResources) => balanceSheetStatementPage({ company, payload, generatedAt, closed, period, metrics, logoResources })]
+    : [
+        (metrics, logoResources) => incomeStatementRevenuePage({ company, payload, generatedAt, closed, period, metrics, logoResources }),
+        (metrics, logoResources) => incomeStatementExpenseCashPage({ company, payload, generatedAt, closed, period, metrics, logoResources })
+      ];
+  return createPdf({
+    pages,
+    size: LETTER,
+    labels,
+    title: `Klavierhaus ${balance ? "Balance Sheet" : "Income Statement"} ${period || ""}`,
+    fontPath,
+    logoPath
+  });
+}
+
+module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
