@@ -378,7 +378,7 @@ function createEventService({ db, activeHoldCount = () => 0, ticketCapacity = nu
 }
 
 function registerEventRoutes(options) {
-  const { app, db, auth, permit, audit, transactionalEmail, onTicketsIssued, eventImageUpload, eventImageDir, stripeSandbox, invoiceEngine } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, onTicketsIssued, eventImageUpload, eventImageDir, stripeSandbox, invoiceEngine, documentService } = options;
   const websiteBaseUrl = String(options.websiteBaseUrl || "https://klavierhaus-home.onrender.com").replace(/\/$/, "");
   const erpBaseUrl = String(options.erpBaseUrl || "https://klavierhaus-erp.onrender.com").replace(/\/$/, "");
   const ticketService = options.ticketService || createTicketService({ db });
@@ -427,19 +427,27 @@ function registerEventRoutes(options) {
     return true;
   }
 
-  function recordNonStripeTicketRefund(ticket, event, userName = "SYSTEM") {
-    const amount = Number(ticket?.price_cents || 0) / 100;
+  function recordNonStripeTicketRefund(ticket, event, reason, user = {}) {
+    const amount = Math.round(((Number(ticket?.price_cents || 0) / 100) + Number.EPSILON) * 100) / 100;
     if (!(amount > 0)) return null;
-    const method = normalizePaymentMethod(ticket?.payment_method, { allowEmpty: false });
-    if (!method) throw Object.assign(new Error("INVALID_PAYMENT_METHOD"), { status: 400 });
-    const existing = db.prepare("SELECT * FROM financial_items WHERE source_type='event_manual_ticket_refund' AND source_id=? LIMIT 1").get(ticket.id);
-    if (existing) return existing;
-    const id = newId("FIN");
-    db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,source_type,source_id,created_by)
-      VALUES(?,?,?,?,?,'EXPENSE','EVENT_REFUND','ONE_TIME',?,'1010','event_manual_ticket_refund',?,?)`).run(
-      id, new Date().toISOString().slice(0, 10), `Event ticket refund · ${event?.title_en || event?.title_hu || ticket.event_id}`, `Non-Stripe ticket refund ${ticket.id}`, amount, method, ticket.id, userName
-    );
-    return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
+    if (!invoiceEngine) throw Object.assign(new Error("INVOICE_ENGINE_REQUIRED"), { status: 500 });
+    let invoice = ticket?.invoice_id ? invoiceEngine.invoiceDetail(ticket.invoice_id) : null;
+    if (!invoice && documentService?.ensureTicketInvoice) invoice = documentService.ensureTicketInvoice(ticket, event, { status: "paid" });
+    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`ticket:${ticket.id}`);
+    if (!invoice) throw Object.assign(new Error("TICKET_INVOICE_REQUIRED_FOR_REFUND"), { status: 409 });
+    return invoiceEngine.createCreditMemo({
+      invoiceId: invoice.id,
+      eventId: event?.id || ticket.event_id || null,
+      memoType: "EVENT_REFUND",
+      sourceType: "EVENT_MANUAL_TICKET_REFUND",
+      sourceId: ticket.id,
+      memoDate: new Date().toLocaleDateString("en-CA", { timeZone: NY_TIME_ZONE }),
+      reason: cleanText(reason || `Non-Stripe ticket refund ${ticket.id}`, 2000),
+      totalAmount: amount,
+      cashEffect: true,
+      accountingEffect: true,
+      actor: user
+    });
   }
 
   app.get("/api/public/events", (req, res) => {
@@ -861,7 +869,13 @@ function registerEventRoutes(options) {
     const before = service.eventById(req.params.id);
     if (!ensureMutable(before, res)) return;
     if (new Date(before.end_at).getTime() > Date.now()) return res.status(409).json({ error: "EVENT_HAS_NOT_ENDED" });
-    db.prepare("UPDATE events SET status='COMPLETED',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, before.id);
+    db.transaction(() => {
+      db.prepare("UPDATE events SET status='COMPLETED',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, before.id);
+      if (invoiceEngine?.recognizeEventRevenue) {
+        const recognitionDate = new Date(before.end_at || Date.now()).toLocaleDateString("en-CA", { timeZone: NY_TIME_ZONE });
+        invoiceEngine.recognizeEventRevenue({ eventId: before.id, recognitionDate, actor: req.user });
+      }
+    })();
     const after = service.eventById(before.id);
     audit(req, "COMPLETE", "events", before.id, before, after, 1, "Event marked completed");
     res.json(service.eventResponse(after));
@@ -1077,7 +1091,7 @@ function registerEventRoutes(options) {
         const event = service.eventById(ticket.event_id);
         db.transaction(() => {
           db.prepare("UPDATE event_tickets SET status='REFUNDED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('VALID','USED')").run(ticket.id);
-          recordNonStripeTicketRefund(ticket, event, req.user.name || req.user.id);
+          recordNonStripeTicketRefund(ticket, event, resolutionNote || request.reason || reviewNote, req.user);
           db.prepare("UPDATE event_refund_requests SET status='PROCESSED',review_note=?,resolution_note=?,reviewed_at=CURRENT_TIMESTAMP,approved_at=CURRENT_TIMESTAMP,executed_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP,resolved_by_user_id=?,execution_status='COMPLETED',updated_at=CURRENT_TIMESTAMP WHERE id=?")
             .run(reviewNote, resolutionNote, req.user.id, request.id);
         })();
