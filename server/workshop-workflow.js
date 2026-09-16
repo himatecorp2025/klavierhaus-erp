@@ -13,27 +13,13 @@ const DEFAULT_STAGES = [
 
 const STATUS = new Set(["WAITING", "IN_PROGRESS", "COMPLETED", "BLOCKED", "NOT_REQUIRED", "ABORTED"]);
 const PRELIMINARY = new Set(["DONE", "NOT_DONE", "NOT_REQUIRED"]);
-const MATERIAL_SOURCES = new Set(["CENTRAL_INVENTORY", "OWN_STOCK", "EXTERNAL_PURCHASE", "CLIENT_SUPPLIED", "NO_MATERIAL_COST"]);
-const MATERIAL_STATUS = new Set(["REQUESTED", "RESERVED", "CONSUMED", "RELEASED"]);
-const FINANCE_TYPES = new Set(["REVENUE", "COST"]);
-const FINANCE_CATEGORIES = new Set(["LABOR", "MATERIAL", "TRANSPORT", "PURCHASE", "CONTRACTOR", "OTHER"]);
 
-
-function releaseWorkflowReservations(db, workflowId) {
-  const rows = db.prepare(`SELECT id,inventory_item_id,requested_quantity,consumed_quantity,status FROM workflow_materials WHERE workflow_id=?`).all(workflowId);
-  rows.filter((item) => item.inventory_item_id && item.status !== "CONSUMED").forEach((item) => {
-    const release = Math.max(0, Number(item.requested_quantity || 0) - Number(item.consumed_quantity || 0));
-    db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(release, release, item.inventory_item_id);
-  });
-  return rows.length;
-}
 
 function hardDeleteWorkflowData({ db, workflowId, audit }) {
   const workflow = db.prepare("SELECT * FROM workshop_workflows WHERE id=?").get(workflowId);
   if (!workflow) return null;
   const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages WHERE workflow_id=?").get(workflowId).count;
   const tx = db.transaction(() => {
-    releaseWorkflowReservations(db, workflowId);
     db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
     db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
     db.prepare("DELETE FROM workflow_stages WHERE workflow_id=?").run(workflowId);
@@ -47,9 +33,7 @@ function hardDeleteWorkflowData({ db, workflowId, audit }) {
 function purgeAllWorkflowData({ db, audit }) {
   const workflowCount = db.prepare("SELECT COUNT(*) AS count FROM workshop_workflows").get().count;
   const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages").get().count;
-  const workflowIds = db.prepare("SELECT id FROM workshop_workflows").all().map((row) => row.id);
   const tx = db.transaction(() => {
-    workflowIds.forEach((workflowId) => releaseWorkflowReservations(db, workflowId));
     db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
     db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
     db.prepare("DELETE FROM workflow_stages").run();
@@ -135,13 +119,6 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       WHERE f.workflow_id=? ORDER BY f.created_at,f.id`).all(workflowId);
   }
 
-  function materialRows(workflowId) {
-    return db.prepare(`SELECT m.*,i.item_name AS inventory_item_name,i.quantity AS inventory_quantity,
-      i.reserved_quantity AS inventory_reserved_quantity,s.name_snapshot_en,s.name_snapshot_hu
-      FROM workflow_materials m LEFT JOIN inventory_items i ON i.id=m.inventory_item_id
-      LEFT JOIN workflow_stages s ON s.id=m.stage_id WHERE m.workflow_id=? ORDER BY m.created_at,m.id`).all(workflowId);
-  }
-
   function signedFinanceSummary(lines) {
     const revenue = lines.filter((row) => row.line_type === "REVENUE").reduce((sum, row) => sum + numeric(row.amount), 0);
     const costs = lines.filter((row) => row.line_type === "COST").reduce((sum, row) => sum + numeric(row.amount), 0);
@@ -152,7 +129,6 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     if (!row) return null;
     const stages = includeChildren ? stageRows(row.id) : [];
     const lines = includeChildren ? financialRows(row.id) : [];
-    const materials = includeChildren ? materialRows(row.id) : [];
     const summary = signedFinanceSummary(lines);
     return {
       ...row,
@@ -160,7 +136,6 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       workflow_owner_name: row.created_by_name || userById(row.created_by_user_id)?.name || null,
       stages,
       financial_lines: lines,
-      materials,
       finance_summary: summary,
       is_overdue: row.current_status === "ACTIVE" && row.final_due_at < localDateTimeFromISO(nowISO()),
       final_due_at_ny: row.final_due_at
@@ -579,81 +554,6 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
-  function materialMutation(workflow, existing, body, actor) {
-    const source = clean(body.source_type || existing?.source_type, 40).toUpperCase();
-    if (!MATERIAL_SOURCES.has(source)) throw error("INVALID_MATERIAL_SOURCE");
-    const itemName = clean(body.item_name ?? existing?.item_name, 240);
-    const requested = Math.max(0, numeric(body.requested_quantity ?? existing?.requested_quantity));
-    if (!itemName || requested <= 0) throw error("MATERIAL_NAME_AND_QUANTITY_REQUIRED");
-    const inventoryId = validId(body.inventory_item_id ?? existing?.inventory_item_id);
-    const inventory = source === "CENTRAL_INVENTORY" ? db.prepare("SELECT * FROM inventory_items WHERE id=? AND deleted_at IS NULL").get(inventoryId) : null;
-    if (source === "CENTRAL_INVENTORY" && !inventory) throw error("INVENTORY_ITEM_NOT_FOUND");
-    if (inventory && requested > numeric(inventory.quantity) - numeric(inventory.reserved_quantity)) throw error("INVENTORY_QUANTITY_UNAVAILABLE");
-    const stage = body.stage_id || existing?.stage_id ? stageById(validId(body.stage_id || existing.stage_id)) : null;
-    if (stage && stage.workflow_id !== workflow.id) throw error("WORKFLOW_STAGE_NOT_FOUND");
-    return { source, itemName, requested, inventoryId: inventory?.id || null, unit: clean(body.unit ?? existing?.unit, 40), unitCost: Math.max(0, numeric(body.unit_cost ?? existing?.unit_cost)), notes: clean(body.notes ?? existing?.notes), stageId: stage?.id || null, documentPath: clean(body.document_path ?? existing?.document_path, 500), actor };
-  }
-
-  app.get("/api/workflows/:id/materials", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
-    try { requireWorkflow(req.params.id); res.json(materialRows(req.params.id)); } catch (e) { res.status(404).json({ error: e.code || e.message }); }
-  });
-
-  app.post("/api/workflows/:id/materials", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
-    try {
-      const workflow = requireWorkflow(req.params.id); if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
-      const material = materialMutation(workflow, null, req.body || {}, req.user);
-      const id = rid("WFM");
-      db.transaction(() => {
-        db.prepare(`INSERT INTO workflow_materials(id,workflow_id,stage_id,source_type,inventory_item_id,item_name,requested_quantity,consumed_quantity,unit,unit_cost,status,notes,document_path,created_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-          .run(id, workflow.id, material.stageId, material.source, material.inventoryId, material.itemName, material.requested, 0, material.unit, material.unitCost, material.source === "CENTRAL_INVENTORY" ? "RESERVED" : "REQUESTED", material.notes, material.documentPath || null, req.user.id);
-        if (material.inventoryId) db.prepare("UPDATE inventory_items SET reserved_quantity=COALESCE(reserved_quantity,0)+?,status='Reserved',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(material.requested, material.inventoryId);
-      })();
-      directAudit(req, "WORKFLOW_MATERIAL_ADDED", id, null, material, "Workflow material added");
-      res.status(201).json(materialRows(workflow.id).find((row) => row.id === id));
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
-  });
-
-  app.patch("/api/workflows/:id/materials/:materialId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
-    try {
-      const workflow = requireWorkflow(req.params.id), existing = db.prepare("SELECT * FROM workflow_materials WHERE id=? AND workflow_id=?").get(req.params.materialId, workflow.id);
-      if (!existing) throw error("WORKFLOW_MATERIAL_NOT_FOUND");
-      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
-      const material = materialMutation(workflow, existing, req.body || {}, req.user);
-      const nextStatus = clean(req.body?.status || existing.status, 20).toUpperCase();
-      if (!MATERIAL_STATUS.has(nextStatus)) throw error("INVALID_MATERIAL_STATUS");
-      const oldInventory = existing.inventory_item_id ? db.prepare("SELECT * FROM inventory_items WHERE id=?").get(existing.inventory_item_id) : null;
-      db.transaction(() => {
-        if (oldInventory && (nextStatus === "RELEASED" || nextStatus === "CONSUMED" || material.inventoryId !== oldInventory.id)) {
-          db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Math.max(0, numeric(existing.requested_quantity) - numeric(existing.consumed_quantity)), Math.max(0, numeric(existing.requested_quantity) - numeric(existing.consumed_quantity)), oldInventory.id);
-        }
-        let consumed = numeric(existing.consumed_quantity);
-        if (nextStatus === "CONSUMED" && oldInventory) {
-          const remaining = Math.max(0, numeric(existing.requested_quantity) - consumed);
-          const inventoryNow = db.prepare("SELECT quantity FROM inventory_items WHERE id=?").get(oldInventory.id);
-          if (!inventoryNow || numeric(inventoryNow.quantity) < remaining) throw error("INVENTORY_QUANTITY_UNAVAILABLE");
-          consumed = material.requested;
-          db.prepare("UPDATE inventory_items SET quantity=MAX(0,quantity-?),status=CASE WHEN quantity-?<=0 THEN 'In Use' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(remaining, remaining, oldInventory.id);
-        }
-        if (material.inventoryId && material.inventoryId !== oldInventory?.id && nextStatus === "RESERVED") db.prepare("UPDATE inventory_items SET reserved_quantity=COALESCE(reserved_quantity,0)+?,status='Reserved',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(material.requested, material.inventoryId);
-        db.prepare(`UPDATE workflow_materials SET stage_id=?,source_type=?,inventory_item_id=?,item_name=?,requested_quantity=?,consumed_quantity=?,unit=?,unit_cost=?,status=?,notes=?,document_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(material.stageId, material.source, material.inventoryId, material.itemName, material.requested, consumed, material.unit, material.unitCost, nextStatus, material.notes, material.documentPath || null, existing.id);
-      })();
-      directAudit(req, "WORKFLOW_MATERIAL_UPDATED", existing.id, existing, db.prepare("SELECT * FROM workflow_materials WHERE id=?").get(existing.id), "Workflow material updated");
-      res.json(materialRows(workflow.id).find((row) => row.id === existing.id));
-    } catch (e) { res.status(e.code === "WORKFLOW_MATERIAL_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
-  });
-
-  app.delete("/api/workflows/:id/materials/:materialId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
-    try {
-      const workflow = requireWorkflow(req.params.id), material = db.prepare("SELECT * FROM workflow_materials WHERE id=? AND workflow_id=?").get(req.params.materialId, workflow.id);
-      if (!material) throw error("WORKFLOW_MATERIAL_NOT_FOUND");
-      if (material.inventory_item_id && material.status !== "CONSUMED") db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Math.max(0, numeric(material.requested_quantity) - numeric(material.consumed_quantity)), Math.max(0, numeric(material.requested_quantity) - numeric(material.consumed_quantity)), material.inventory_item_id);
-      db.prepare("DELETE FROM workflow_materials WHERE id=?").run(material.id);
-      directAudit(req, "WORKFLOW_MATERIAL_DELETED", material.id, material, null, "Workflow material deleted");
-      res.json({ ok: true });
-    } catch (e) { res.status(e.code === "WORKFLOW_MATERIAL_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
-  });
-
   app.get("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try { const workflow = requireWorkflow(req.params.id); res.json({ lines: financialRows(workflow.id), summary: signedFinanceSummary(financialRows(workflow.id)) }); } catch (e) { res.status(404).json({ error: e.code || e.message }); }
   });
@@ -755,7 +655,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
             if (existing && String(line.posted_financial_item_id || "") !== String(existing.id)) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(existing.id, line.id);
           }
           db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines, materials: materialRows(workflow.id) }));
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
           if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now, paymentMethod });
           return { closedId };
@@ -779,12 +679,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (workflow.financial_status === "CLOSED") throw error("FINANCIALLY_CLOSED_WORKFLOW_REQUIRES_SUPERADMIN");
       const now = nowISO();
       db.transaction(() => {
-        const materials = materialRows(workflow.id);
-        materials.filter((item) => item.inventory_item_id && item.status !== "CONSUMED").forEach((item) => db.prepare("UPDATE inventory_items SET reserved_quantity=MAX(0,COALESCE(reserved_quantity,0)-?),status=CASE WHEN COALESCE(reserved_quantity,0)-?<=0 THEN 'In Stock' ELSE 'Reserved' END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Math.max(0, numeric(item.requested_quantity) - numeric(item.consumed_quantity)), Math.max(0, numeric(item.requested_quantity) - numeric(item.consumed_quantity)), item.inventory_item_id));
         db.prepare("UPDATE workflow_stages SET status='ABORTED',block_reason=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND status NOT IN ('COMPLETED','NOT_REQUIRED')").run(reason, workflow.id);
         db.prepare("UPDATE workshop_workflows SET current_status='ABORTED',aborted_at=?,aborted_by_user_id=?,abort_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(now, req.user.id, reason, workflow.id);
         if(workflow.job_id) db.prepare("UPDATE jobs SET status='Cancelled',workflow_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.job_id);
-        db.prepare("INSERT INTO workflow_audit_events(id,workflow_id,action,reason,actor_user_id,snapshot_json) VALUES(?,?,?,?,?,?)").run(rid("WAE"), workflow.id, "SECONDARY_DELETE", reason, req.user.id, JSON.stringify({ workflow, materials }));
+        db.prepare("INSERT INTO workflow_audit_events(id,workflow_id,action,reason,actor_user_id,snapshot_json) VALUES(?,?,?,?,?,?)").run(rid("WAE"), workflow.id, "SECONDARY_DELETE", reason, req.user.id, JSON.stringify({ workflow }));
         directAudit(req, "WORKFLOW_SECONDARY_DELETE", workflow.id, workflow, { current_status: "ABORTED" }, reason);
       })();
       res.json(decorateWorkflow(workflowById(workflow.id), true));
