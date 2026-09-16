@@ -27,7 +27,7 @@ const {
   nextNewYorkMonthClose
 } = require("./business-operations");
 const { normalizePaymentMethod } = require("./payment-methods");
-const { buildAccountingSnapshot, isInvoiceDerivedFinancialItem, roundMoney } = require("./accounting-domain");
+const { buildAccountingSnapshot, expandFinancialItemsAsOf, isInvoiceDerivedFinancialItem, roundMoney } = require("./accounting-domain");
 const { generateFinancialStatementPdf } = require("./document-pdf");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
@@ -1383,8 +1383,108 @@ app.get("/api/employee-daily-rates/:userId/capacity", auth, permit("ADMIN","MANA
   res.json({user_id:employee.id,date,...summary});
 });
 
+const FINANCIAL_HISTORY_START = "2026-08";
+
+function financialPeriodIsClosed(period){
+  if(!/^\d{4}-\d{2}$/.test(String(period||""))) return false;
+  try{return Boolean(db.prepare("SELECT 1 FROM financial_statement_snapshots WHERE period=? LIMIT 1").get(period));}catch(_error){return false;}
+}
+function financialDateIsClosed(dateKey){
+  const value=String(dateKey||"");
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && financialPeriodIsClosed(value.slice(0,7));
+}
+function financialItemAuditStamp(value=new Date()){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).formatToParts(value);
+  const part=(type)=>parts.find(row=>row.type===type)?.value||"00";
+  return {iso:value.toISOString(),local:`${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}[America/New_York]`};
+}
+function financialItemRecord(id){
+  return db.prepare(`SELECT fi.*,CASE WHEN fv.financial_item_id IS NULL THEN 'ACTIVE' ELSE 'VOID' END AS status,
+    fv.effective_date AS void_effective_date,fv.reason AS void_reason,fv.voided_at,fv.voided_at_local,fv.reversal_item_id AS void_reversal_item_id
+    FROM financial_items fi LEFT JOIN financial_item_voids fv ON fv.financial_item_id=fi.id WHERE fi.id=?`).get(id);
+}
+function financialItemRows(sql,params=[]){
+  return db.prepare(sql).all(...params).map(row=>financialItemRecord(row.id));
+}
+function normalizeFinancialItemMutation(source,body={}){
+  const next={...source};
+  const assign=(key)=>{if(body[key]!==undefined)next[key]=body[key];};
+  ["item_date","title","description","main_type","category","recurrence","balance_account","job_id","client_id","piano_id"].forEach(assign);
+  if(body.amount!==undefined)next.amount=roundMoney(Number(body.amount));
+  if(body.payment_method!==undefined){
+    const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;
+    if(body.payment_method&&!normalized)throw Object.assign(new Error("INVALID_PAYMENT_METHOD"),{status:400});
+    next.payment_method=normalized||"";
+  }
+  next.item_date=String(next.item_date||"").trim();
+  next.title=String(next.title||"").trim();
+  next.description=String(next.description||"");
+  next.main_type=String(next.main_type||"").toUpperCase();
+  next.category=String(next.category||"");
+  next.recurrence=String(next.recurrence||"ONE_TIME").toUpperCase();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(next.item_date))throw Object.assign(new Error("INVALID_FINANCIAL_ITEM_DATE"),{status:400});
+  if(!next.title)throw Object.assign(new Error("FINANCIAL_ITEM_TITLE_REQUIRED"),{status:400});
+  if(!["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(next.main_type))throw Object.assign(new Error("INVALID_FINANCIAL_ITEM_TYPE"),{status:400});
+  if(!["ONE_TIME","MONTHLY"].includes(next.recurrence))throw Object.assign(new Error("INVALID_FINANCIAL_ITEM_RECURRENCE"),{status:400});
+  if(!Number.isFinite(Number(next.amount))||Number(next.amount)<0)throw Object.assign(new Error("INVALID_FINANCIAL_ITEM_AMOUNT"),{status:400});
+  next.amount=roundMoney(next.amount);
+  return next;
+}
+function insertFinancialItemRow(row,{id=null,itemDate=null,amount=null,recurrence=null,sourceType=undefined,sourceId=undefined,createdBy=null,title=null,description=null}={}){
+  const record={...row};
+  record.id=id||rid("FI");
+  record.item_date=itemDate||record.item_date||nyToday();
+  record.amount=amount===null||amount===undefined?roundMoney(record.amount):roundMoney(amount);
+  record.recurrence=recurrence||record.recurrence||"ONE_TIME";
+  record.source_type=sourceType===undefined?record.source_type:sourceType;
+  record.source_id=sourceId===undefined?record.source_id:sourceId;
+  record.created_by=createdBy||record.created_by||"System";
+  record.title=title||record.title||"Financial item";
+  record.description=description===null||description===undefined?(record.description||""):description;
+  db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(record.id,record.item_date,record.title,record.description,record.amount,record.main_type,record.category||"",record.recurrence,record.payment_method||"",record.balance_account||"",record.job_id||null,record.client_id||null,record.piano_id||null,record.source_type||null,record.source_id||null,record.created_by);
+  return financialItemRecord(record.id);
+}
+function recordFinancialItemAdjustment({itemId,type,reason,user,before,after,reversalItemId=null,replacementItemId=null,stamp=null}){
+  const normalizedReason=String(reason||"").trim();
+  if(normalizedReason.length<5)throw Object.assign(new Error("ADJUSTMENT_REASON_REQUIRED"),{status:400,minimum_length:5});
+  const when=stamp||financialItemAuditStamp();
+  const id=rid("FIADJ");
+  db.prepare(`INSERT INTO financial_item_adjustments(id,financial_item_id,adjustment_type,reason,adjusted_by_user_id,adjusted_by_name,adjusted_at,adjusted_at_local,previous_values,new_values,reversal_item_id,replacement_item_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,itemId,type,normalizedReason,user?.id||null,user?.name||user?.email||user?.id||"SYSTEM",when.iso,when.local,JSON.stringify(before||null),JSON.stringify(after||null),reversalItemId,replacementItemId);
+  return db.prepare("SELECT * FROM financial_item_adjustments WHERE id=?").get(id);
+}
+function voidFinancialItem({existing,reason,user,replacement=null,adjustmentType="VOID"}){
+  const normalizedReason=String(reason||"").trim();
+  if(normalizedReason.length<5)throw Object.assign(new Error("ADJUSTMENT_REASON_REQUIRED"),{status:400,minimum_length:5});
+  if(existing.status==="VOID")return {item:existing,reversal:null,replacement:null,alreadyVoid:true};
+  const stamp=financialItemAuditStamp();
+  const effectiveDate=nyToday();
+  return db.transaction(()=>{
+    const auditId=rid("FIADJ");
+    const reversal=insertFinancialItemRow(existing,{
+      id:rid("FI"),itemDate:effectiveDate,amount:-roundMoney(existing.amount||0),recurrence:"ONE_TIME",
+      sourceType:"FINANCIAL_ITEM_ADJUSTMENT",sourceId:`REVERSAL:${auditId}`,createdBy:user?.name||user?.email||user?.id||"SYSTEM",
+      title:`Reversal: ${existing.title}`,description:`${normalizedReason}${existing.description?` · Original: ${existing.description}`:""}`
+    });
+    db.prepare(`INSERT INTO financial_item_voids(financial_item_id,effective_date,reason,voided_by_user_id,voided_by_name,voided_at,voided_at_local,reversal_item_id)
+      VALUES(?,?,?,?,?,?,?,?)`).run(existing.id,effectiveDate,normalizedReason,user?.id||null,user?.name||user?.email||user?.id||"SYSTEM",stamp.iso,stamp.local,reversal.id);
+    let replacementRow=null;
+    if(replacement){
+      replacementRow=insertFinancialItemRow(replacement,{
+        id:rid("FI"),itemDate:effectiveDate,sourceType:"FINANCIAL_ITEM_ADJUSTMENT",sourceId:`REPLACEMENT:${auditId}`,createdBy:user?.name||user?.email||user?.id||"SYSTEM",
+        title:replacement.title,description:replacement.description
+      });
+    }
+    const voided=financialItemRecord(existing.id);
+    db.prepare(`INSERT INTO financial_item_adjustments(id,financial_item_id,adjustment_type,reason,adjusted_by_user_id,adjusted_by_name,adjusted_at,adjusted_at_local,previous_values,new_values,reversal_item_id,replacement_item_id)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(auditId,existing.id,adjustmentType,normalizedReason,user?.id||null,user?.name||user?.email||user?.id||"SYSTEM",stamp.iso,stamp.local,JSON.stringify(existing),JSON.stringify(replacementRow||voided),reversal.id,replacementRow?.id||null);
+    return {item:voided,reversal,replacement:replacementRow,alreadyVoid:false};
+  })();
+}
+
 app.get("/api/finance/entries", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  const rows=db.prepare("SELECT * FROM financial_items ORDER BY item_date DESC, created_at DESC").all();
+  const rows=financialItemRows("SELECT id FROM financial_items ORDER BY item_date DESC, created_at DESC");
   res.json(rows.map(r=>({...r,lines:[]})));
 });
 
@@ -1394,8 +1494,8 @@ app.get("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const {month, main_type, recurrence, category}=req.query;
   if(month && /^\d{4}-\d{2}$/.test(month)){
     const start=`${month}-01`;
-    const next=new Date(`${start}T00:00:00`);
-    next.setMonth(next.getMonth()+1);
+    const next=new Date(`${start}T00:00:00Z`);
+    next.setUTCMonth(next.getUTCMonth()+1);
     const end=next.toISOString().slice(0,10);
     where.push("((recurrence='MONTHLY' AND item_date < ?) OR (recurrence!='MONTHLY' AND item_date >= ? AND item_date < ?))");
     params.push(end,start,end);
@@ -1403,51 +1503,69 @@ app.get("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   if(main_type){ where.push("main_type=?"); params.push(main_type); }
   if(recurrence){ where.push("recurrence=?"); params.push(recurrence); }
   if(category){ where.push("category=?"); params.push(category); }
-  const sql=`SELECT * FROM financial_items ${where.length?"WHERE "+where.join(" AND "):""} ORDER BY item_date DESC, created_at DESC`;
-  res.json(db.prepare(sql).all(...params));
+  const sql=`SELECT id FROM financial_items ${where.length?"WHERE "+where.join(" AND "):""} ORDER BY item_date DESC, created_at DESC`;
+  res.json(financialItemRows(sql,params));
+});
+
+app.get("/api/financial-items/:id/adjustments", auth, permit("ADMIN","MANAGER"), (req,res)=>{
+  const item=financialItemRecord(req.params.id);
+  if(!item)return res.status(404).json({error:"FINANCIAL_ITEM_NOT_FOUND"});
+  res.json(db.prepare("SELECT * FROM financial_item_adjustments WHERE financial_item_id=? ORDER BY adjusted_at DESC,id DESC").all(item.id));
 });
 
 app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  const id=req.body.id || rid("FI");
-  const item_date=req.body.item_date || today();
-  const title=(req.body.title||"").trim();
-  const amount=roundMoney(Number(req.body.amount||0));
-  const main_type=req.body.main_type;
-  const recurrence=req.body.recurrence || "ONE_TIME";
-  if(!title) return res.status(400).json({error:"Title is required / Megnevezés kötelező"});
-  if(!["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
-  if(!["ONE_TIME","MONTHLY"].includes(recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
-  if(Number.isNaN(amount) || amount<0) return res.status(400).json({error:"Amount must be a positive number / Az összeg nem lehet negatív"});
-  const normalizedPaymentMethod=req.body.payment_method?normalizePaymentMethod(req.body.payment_method,{allowEmpty:false}):null;
-  if(req.body.payment_method && !normalizedPaymentMethod) return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});
-  db.prepare(`INSERT INTO financial_items(
-    id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,item_date,title,req.body.description||"",amount,main_type,req.body.category||"",recurrence,normalizedPaymentMethod||"",req.body.balance_account||"",req.body.job_id||null,req.body.client_id||null,req.body.piano_id||null,req.body.source_type||null,req.body.source_id||null,req.user.name
-  );
-  res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(id));
+  try{
+    const base={id:req.body.id||rid("FI"),item_date:req.body.item_date||nyToday(),title:req.body.title,description:req.body.description||"",amount:req.body.amount,main_type:req.body.main_type,category:req.body.category||"",recurrence:req.body.recurrence||"ONE_TIME",payment_method:req.body.payment_method||"",balance_account:req.body.balance_account||"",job_id:req.body.job_id||null,client_id:req.body.client_id||null,piano_id:req.body.piano_id||null,source_type:null,source_id:null,created_by:req.user.name};
+    const next=normalizeFinancialItemMutation(base,req.body||{});
+    if(financialDateIsClosed(next.item_date))return res.status(409).json({error:"CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT",period:next.item_date.slice(0,7)});
+    const created=insertFinancialItemRow(next,{id:base.id,createdBy:req.user.name||req.user.id});
+    audit(req,"CREATE","financial_items",created.id,null,created,1,"Financial item created","FINANCIAL");
+    res.json(created);
+  }catch(error){res.status(error.status||400).json({error:error.message,minimum_length:error.minimum_length||undefined});}
 });
 
 app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  const existing=db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id);
-  if(!existing) return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
-  const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id","source_type","source_id"];
-  const body={...req.body};
-  if(body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
-  if(body.amount!==undefined) body.amount=roundMoney(Number(body.amount||0));
-  if(body.main_type!==undefined && !["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(body.main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
-  if(body.recurrence!==undefined && !["ONE_TIME","MONTHLY"].includes(body.recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
-  const cols=allowed.filter(c=>body[c]!==undefined);
-  if(cols.length) db.prepare(`UPDATE financial_items SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]),req.params.id);
-  res.json(db.prepare("SELECT * FROM financial_items WHERE id=?").get(req.params.id));
+  try{
+    const existing=financialItemRecord(req.params.id);
+    if(!existing)return res.status(404).json({error:"Financial item not found / Pénzügyi tétel nem található"});
+    if(existing.status==="VOID")return res.status(409).json({error:"VOID_FINANCIAL_ITEM_IMMUTABLE"});
+    if(String(existing.source_type||"")==="FINANCIAL_ITEM_ADJUSTMENT")return res.status(409).json({error:"FINANCIAL_ADJUSTMENT_ENTRY_IMMUTABLE"});
+    const reason=String(req.body?.reason||"").trim();
+    if(reason.length<5)return res.status(400).json({error:"ADJUSTMENT_REASON_REQUIRED",minimum_length:5});
+    const next=normalizeFinancialItemMutation(existing,req.body||{});
+    if(financialDateIsClosed(next.item_date)&&!financialDateIsClosed(existing.item_date))return res.status(409).json({error:"CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT",period:next.item_date.slice(0,7)});
+    if(financialDateIsClosed(existing.item_date)){
+      const adjusted=voidFinancialItem({existing,reason,user:req.user,replacement:next,adjustmentType:"CLOSED_PERIOD_ADJUSTMENT"});
+      audit(req,"ADJUST_CURRENT_PERIOD","financial_items",existing.id,existing,adjusted.replacement,1,reason,"FINANCIAL");
+      return res.json({...adjusted.replacement,current_period_adjustment:true,adjusted_from:existing.id,reversal_item_id:adjusted.reversal?.id||null});
+    }
+    const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id"];
+    const cols=allowed.filter(key=>next[key]!==existing[key]);
+    const stamp=financialItemAuditStamp();
+    const after=db.transaction(()=>{
+      if(cols.length)db.prepare(`UPDATE financial_items SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>next[c]),existing.id);
+      const updated=financialItemRecord(existing.id);
+      recordFinancialItemAdjustment({itemId:existing.id,type:"UPDATE",reason,user:req.user,before:existing,after:updated,stamp});
+      return updated;
+    })();
+    audit(req,"ADJUST","financial_items",existing.id,existing,after,1,reason,"FINANCIAL");
+    res.json(after);
+  }catch(error){res.status(error.status||400).json({error:error.message,minimum_length:error.minimum_length||undefined});}
 });
 
 app.delete("/api/financial-items/:id", auth, requireSuperadmin, (req,res)=>{
-  db.prepare("DELETE FROM financial_items WHERE id=?").run(req.params.id);
-  res.json({ok:true});
+  try{
+    const existing=financialItemRecord(req.params.id);
+    if(!existing)return res.status(404).json({error:"FINANCIAL_ITEM_NOT_FOUND"});
+    if(String(existing.source_type||"")==="FINANCIAL_ITEM_ADJUSTMENT")return res.status(409).json({error:"FINANCIAL_ADJUSTMENT_ENTRY_IMMUTABLE"});
+    const reason=String(req.body?.reason||"").trim();
+    if(reason.length<5)return res.status(400).json({error:"ADJUSTMENT_REASON_REQUIRED",minimum_length:5});
+    const result=voidFinancialItem({existing,reason,user:req.user,adjustmentType:"VOID"});
+    audit(req,"VOID_INSTEAD_OF_DELETE","financial_items",existing.id,existing,result.item,1,reason,"FINANCIAL");
+    res.json({ok:true,converted_to_void:true,item:result.item,reversal_item:result.reversal});
+  }catch(error){res.status(error.status||400).json({error:error.message,minimum_length:error.minimum_length||undefined});}
 });
 
-const FINANCIAL_HISTORY_START = "2026-08";
 const PASSIVE_NON_OPERATING_INCOME = Object.freeze({
   PIANO_RENTAL_LEASE: ["Piano Rental & Lease", "Zongorabérlet és lízing"],
   HALL_SALON_RENTAL: ["Hall & Salon Rental", "Terem- és szalonbérlet"],
@@ -1478,12 +1596,7 @@ function activeMonthCutoff(month, forceFullMonth=false){
 }
 function financialItemsForMonth(month){
   const {monthStart,monthEnd}=monthBounds(month);
-  const rows=db.prepare(`
-    SELECT * FROM financial_items
-    WHERE (recurrence='MONTHLY' AND item_date < ?)
-       OR (recurrence!='MONTHLY' AND item_date >= ? AND item_date < ?)
-    ORDER BY item_date, created_at
-  `).all(monthEnd,monthStart,monthEnd);
+  const rows=expandedFinancialItemsAsOf(monthEnd).filter(item=>String(item.item_date||"")>=monthStart&&String(item.item_date||"")<monthEnd);
   return {monthStart,monthEnd,rows};
 }
 function openingBalanceRecord(cutoffDate=null){
@@ -1507,6 +1620,10 @@ function openingBalanceSummary(record){
   const difference=roundMoney(assets-liabilitiesEquity);
   return {assets,liabilitiesEquity,difference,balanced:Math.abs(difference)<0.01,customAssets,customLiabilities,customEquity};
 }
+function openingBalanceLocked(){
+  return financialPeriodIsClosed(FINANCIAL_HISTORY_START);
+}
+
 function normalizedOpeningBalanceBody(body={}){
   const effective_date=String(body.effective_date||"").trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(effective_date)) throw Object.assign(new Error("INVALID_OPENING_BALANCE_DATE"),{status:400});
@@ -1535,10 +1652,11 @@ function normalizedOpeningBalanceBody(body={}){
 
 app.get("/api/opening-balance", auth, permit("ADMIN","MANAGER"), (_req,res)=>{
   const record=openingBalanceRecord();
-  res.json({openingBalance:record,summary:openingBalanceSummary(record)});
+  res.json({openingBalance:record,summary:openingBalanceSummary(record),locked:openingBalanceLocked(),locked_after_period:FINANCIAL_HISTORY_START});
 });
 app.put("/api/opening-balance", auth, permit("ADMIN"), (req,res)=>{
   try{
+    if(openingBalanceLocked())return res.status(409).json({error:"OPENING_BALANCE_LOCKED",locked_after_period:FINANCIAL_HISTORY_START,message:"Opening balance is permanently locked after the first official financial period closes."});
     const next=normalizedOpeningBalanceBody(req.body||{});
     const before=openingBalanceRecord();
     db.transaction(()=>{
@@ -1556,14 +1674,39 @@ app.put("/api/opening-balance", auth, permit("ADMIN"), (req,res)=>{
   }catch(error){res.status(error.status||400).json({error:error.message,summary:error.summary||null});}
 });
 
+function expandedFinancialItemsAsOf(cutoffExclusive){
+  const base=db.prepare(`SELECT fi.*,fv.effective_date AS void_effective_date
+    FROM financial_items fi LEFT JOIN financial_item_voids fv ON fv.financial_item_id=fi.id
+    WHERE fi.item_date<? ORDER BY fi.item_date,fi.created_at,fi.id`).all(cutoffExclusive);
+  return expandFinancialItemsAsOf(base,cutoffExclusive);
+}
 function accountingSnapshotAsOf(cutoffExclusive){
   const asOfInvoices=db.prepare("SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number").all(cutoffExclusive);
   const asOfCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
     WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(cutoffExclusive);
-  const asOfFinancial=db.prepare("SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at").all(cutoffExclusive);
+  const asOfFinancial=expandedFinancialItemsAsOf(cutoffExclusive);
   const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
   const opening=openingBalanceRecord(cutoffExclusive);
   return buildAccountingSnapshot({asOfInvoices,asOfDirectItems:asOfDirect,asOfCreditMemos,asOfDateExclusive:cutoffExclusive,openingBalance:opening});
+}
+function previousFinancialMonthKey(month){
+  const date=new Date(`${month}-01T00:00:00Z`);
+  if(!Number.isFinite(date.getTime()))return null;
+  date.setUTCMonth(date.getUTCMonth()-1);
+  return date.toISOString().slice(0,7);
+}
+function closedSnapshotEndingCash(period){
+  if(!period)return null;
+  const row=db.prepare("SELECT balance_sheet_json,income_statement_json FROM financial_statement_snapshots WHERE period=?").get(period);
+  if(!row)return null;
+  for(const raw of [row.income_statement_json,row.balance_sheet_json]){
+    try{
+      const payload=JSON.parse(raw||"{}");
+      const candidate=payload?.cashFlow?.endingBalance ?? payload?.balanceSheet?.cashBankAccounts ?? payload?.totals?.cashBank;
+      if(Number.isFinite(Number(candidate)))return roundMoney(Number(candidate));
+    }catch(_error){}
+  }
+  return null;
 }
 
 function incomeStatementPayload(month,{forceFullMonth=false}={}){
@@ -1581,13 +1724,14 @@ function incomeStatementPayload(month,{forceFullMonth=false}={}){
     WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.revenue_effect_date>=? AND cm.revenue_effect_date<? ORDER BY cm.revenue_effect_date,cm.created_at,cm.id`).all(monthStart,dataEnd);
   const asOfCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
     WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(dataEnd);
-  const monthFinancial=db.prepare(`SELECT * FROM financial_items WHERE ((recurrence='MONTHLY' AND item_date<?) OR (recurrence!='MONTHLY' AND item_date>=? AND item_date<?)) ORDER BY item_date,created_at`).all(dataEnd,monthStart,dataEnd);
-  const asOfFinancial=db.prepare(`SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at`).all(dataEnd);
+  const asOfFinancial=expandedFinancialItemsAsOf(dataEnd);
+  const monthFinancial=asOfFinancial.filter(item=>String(item.item_date||"")>=monthStart&&String(item.item_date||"")<dataEnd);
   const monthDirect=monthFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
   const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
   const opening=openingBalanceRecord(dataEnd);
   const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect,monthCreditMemos,asOfCreditMemos,asOfDateExclusive:dataEnd,openingBalance:opening});
-  const beginningSnapshot=accountingSnapshotAsOf(monthStart);
+  const previousClosedEndingCash=closedSnapshotEndingCash(previousFinancialMonthKey(month));
+  const beginningSnapshot=previousClosedEndingCash===null?accountingSnapshotAsOf(monthStart):null;
 
   const accountMap=new Map();
   const addPnl=(code,name_en,name_hu,category,amount,statement_section=category)=>{
@@ -1644,7 +1788,7 @@ function incomeStatementPayload(month,{forceFullMonth=false}={}){
   const expenseDirect=monthDirect.filter(x=>x.main_type==='EXPENSE');
   const recurringExpenses=roundMoney(expenseDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>roundMoney(s+Number(x.amount||0)),0));
   const revenue=snapshot.pnl.revenue,expenses=snapshot.pnl.expenses;
-  const beginningBalance=roundMoney(beginningSnapshot.balance.cashBankAccounts||0);
+  const beginningBalance=previousClosedEndingCash===null?roundMoney(beginningSnapshot?.balance?.cashBankAccounts||0):roundMoney(previousClosedEndingCash);
   const endingBalance=roundMoney(balance.cashBankAccounts||0);
   const netCashFlow=roundMoney(endingBalance-beginningBalance);
   return {
@@ -1652,8 +1796,8 @@ function incomeStatementPayload(month,{forceFullMonth=false}={}){
     accountingLogic:{source:'invoices_credit_memos_opening_balances_plus_noninvoice_financial_items',generalLedger:'accrual_general_ledger_tax_deferred_revenue',equation:'Assets = Liabilities + Equity'},
     counts:{openJobs,closedJobs:closedJobs.length,financialItems:monthDirect.length,invoices:monthInvoices.length,creditMemos:monthCreditMemos.length},
     totals:{passiveIncome:passiveNonOperatingIncome,passiveNonOperatingIncome,operatingRevenue,oneTimeIncome:roundMoney(revenue-passiveNonOperatingIncome),revenue,grossInvoiceRevenue:snapshot.pnl.grossInvoiceRevenue,contraRevenue:snapshot.pnl.contraRevenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.totalLiabilities,equity:balance.totalEquity,sources:balance.totalLiabilitiesEquity,netWorth:balance.totalEquity,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity},
-    cashFlow:{beginningBalance,netCashFlow,endingBalance},
-    openingBalance:opening?{...opening,summary:openingBalanceSummary(opening)}:null,
+    cashFlow:{beginningBalance,netCashFlow,endingBalance,beginningSource:previousClosedEndingCash===null?'LIVE_LEDGER':'PREVIOUS_CLOSED_SNAPSHOT'},
+    openingBalance:opening?{...opening,summary:openingBalanceSummary(opening),locked:openingBalanceLocked()}:null,
     balanceAudit:{balanced:balance.balanced,difference:balance.difference,absolute_difference:Math.abs(balance.difference)},
     balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,totalLiabilities:balance.totalLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity,totalEquity:balance.totalEquity,totalLiabilitiesEquity:balance.totalLiabilitiesEquity,openingBalance:balance.openingBalance},
     operatingRevenueAccounts,passiveIncomeAccounts,expenseAccounts,trialBalance,
@@ -2491,7 +2635,7 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
     .filter(bucket=>bucket.dateStr);
   googleCalendar.ignoreDeletedJob(job.id);
   childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
+  db.prepare("DELETE FROM financial_items WHERE (job_id=? AND source_type IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','closed_job','job_close_revenue')) OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
   db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
@@ -2730,7 +2874,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
 app.delete("/api/closed-jobs/:id", auth, requireSuperadmin, (req,res)=>{
   const log=db.prepare("SELECT * FROM job_logs WHERE id=?").get(req.params.id);
   if(!log) return res.status(404).json({error:"Closed job log not found"});
-  db.prepare("DELETE FROM financial_items WHERE job_id=? OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(log.job_id, log.job_id, `JOB_CLOSE:${log.job_id}`, `JOB_REVENUE:${log.job_id}`);
+  db.prepare("DELETE FROM financial_items WHERE (job_id=? AND source_type IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','closed_job','job_close_revenue')) OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(log.job_id, log.job_id, `JOB_CLOSE:${log.job_id}`, `JOB_REVENUE:${log.job_id}`);
   db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(log.job_id);
   db.prepare("DELETE FROM job_logs WHERE id=?").run(log.id);
   const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(log.job_id);
@@ -2844,13 +2988,19 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   const immutableFinancialCount=exists("invoices")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoices").get()?.c||0):0;
   const immutableAdjustmentCount=exists("invoice_adjustments")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_adjustments").get()?.c||0):0;
   const immutableCreditMemoCount=exists("invoice_credit_memos")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_credit_memos").get()?.c||0):0;
-  if(immutableFinancialCount||immutableAdjustmentCount||immutableCreditMemoCount){
+  const immutableFinancialItemAdjustmentCount=exists("financial_item_adjustments")?Number(db.prepare("SELECT COUNT(*) AS c FROM financial_item_adjustments").get()?.c||0):0;
+  const immutableFinancialItemVoidCount=exists("financial_item_voids")?Number(db.prepare("SELECT COUNT(*) AS c FROM financial_item_voids").get()?.c||0):0;
+  const immutableDirectFinancialItemCount=exists("financial_items")?Number(db.prepare(`SELECT COUNT(*) AS c FROM financial_items WHERE COALESCE(source_type,'') NOT IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','MANUAL_INVOICE','WORKFLOW_INVOICE_REVENUE','WORKFLOW_INVOICE_MATERIAL','event_payment_refund','event_manual_ticket_refund','event_manual_ticket','event_payment','closed_job','job_close_revenue')`).get()?.c||0):0;
+  if(immutableFinancialCount||immutableAdjustmentCount||immutableCreditMemoCount||immutableFinancialItemAdjustmentCount||immutableFinancialItemVoidCount||immutableDirectFinancialItemCount){
     return res.status(409).json({
       error:"IMMUTABLE_FINANCIAL_RECORDS",
       message:"System reset is blocked while issued financial records exist. Financial documents must remain preserved and may only be voided with an audit reason.",
       invoices:immutableFinancialCount,
       adjustments:immutableAdjustmentCount,
-      credit_memos:immutableCreditMemoCount
+      credit_memos:immutableCreditMemoCount,
+      financial_item_adjustments:immutableFinancialItemAdjustmentCount,
+      financial_item_voids:immutableFinancialItemVoidCount,
+      direct_financial_items:immutableDirectFinancialItemCount
     });
   }
 
