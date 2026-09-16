@@ -1497,6 +1497,56 @@ CREATE TABLE IF NOT EXISTS financial_items (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS opening_balance_sets (
+  id TEXT PRIMARY KEY,
+  effective_date TEXT NOT NULL,
+  opening_cash_bank REAL NOT NULL DEFAULT 0,
+  opening_accounts_receivable REAL NOT NULL DEFAULT 0,
+  opening_accounts_payable REAL NOT NULL DEFAULT 0,
+  opening_retained_earnings_equity REAL NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  created_by_name TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_by_user_id TEXT,
+  updated_by_name TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS opening_balance_items (
+  id TEXT PRIMARY KEY,
+  opening_balance_id TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  item_type TEXT NOT NULL CHECK(item_type IN ('ASSET','LIABILITY','EQUITY')),
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(opening_balance_id) REFERENCES opening_balance_sets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_opening_balance_items_set ON opening_balance_items(opening_balance_id,sort_order,id);
+
+CREATE TABLE IF NOT EXISTS financial_statement_snapshots (
+  period TEXT PRIMARY KEY,
+  period_end TEXT NOT NULL,
+  closed_at TEXT NOT NULL,
+  closed_at_local TEXT NOT NULL,
+  balance_sheet_json TEXT NOT NULL,
+  income_statement_json TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT 'SYSTEM',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_statement_snapshots_immutable_update
+BEFORE UPDATE ON financial_statement_snapshots
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_STATEMENT_SNAPSHOT');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_statement_snapshots_immutable_delete
+BEFORE DELETE ON financial_statement_snapshots
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_STATEMENT_SNAPSHOT');
+END;
+
 CREATE TABLE IF NOT EXISTS inventory_items (
   id TEXT PRIMARY KEY,
   inventory_id TEXT,
