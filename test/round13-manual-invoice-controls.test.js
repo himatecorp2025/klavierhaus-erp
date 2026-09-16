@@ -65,7 +65,7 @@ test("client tax id and item-level settlement persist through schema and backend
   assert.match(ops, /RECEIVABLE_REQUIRES_CLIENT/);
   assert.match(ops, /INVALID_ITEM_PAYMENT_METHOD/);
   assert.match(ops, /INVALID_ITEM_FINANCIAL_STATUS/);
-  assert.match(ops, /INSERT INTO invoice_items\(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,payment_method,financial_status\)/);
+  assert.match(ops, /INSERT INTO invoice_items\(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,sort_order,payment_method,financial_status\)/);
 });
 
 test("partial settlement ledger books only paid lines and reconciles on status changes", () => {
