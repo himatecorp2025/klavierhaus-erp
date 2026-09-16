@@ -87,48 +87,49 @@ const ADMIN_MODULES = Object.freeze([
 const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "finance", group_key: "finance_invoicing", label_en: "Finance", label_hu: "Pénzügy" },
   { key: "income_statement", group_key: "finance_invoicing", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
-  { key: "knowledge_base", group_key: "finance_invoicing", label_en: "Invoices & Documents", label_hu: "Számlák és dokumentumok" },
-  { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
-  { key: "website_services", group_key: "website_events", label_en: "Services", label_hu: "Szolgáltatások" },
-  { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
-  { key: "website_artists", group_key: "website_events", label_en: "Artists", label_hu: "Művészek" },
-  { key: "media_library", group_key: "website_events", label_en: "Media Library", label_hu: "Médiatár" },
-  { key: "events", group_key: "website_events", label_en: "Events", label_hu: "Események" },
-  { key: "event_tickets", group_key: "website_events", label_en: "Tickets & Reservations", label_hu: "Jegyek és foglalások" },
-  { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
-  { key: "event_guest_list", group_key: "website_events", label_en: "Guest Data", label_hu: "Vendégadatok" },
-  { key: "digital_attendance", group_key: "website_events", label_en: "Digital Attendance", label_hu: "Digitális jelenlétiív" },
-  { key: "website_contacts", group_key: "website_events", label_en: "Contacts", label_hu: "Kapcsolatfelvételek" },
-  { key: "customer_inbox", group_key: "website_events", label_en: "Customer Inbox", label_hu: "Ügyfélüzenetek" },
-  { key: "publish_preview", group_key: "website_events", label_en: "Publish & Preview", label_hu: "Publikálás és előnézet" },
+  { key: "invoice_documents", group_key: "finance_invoicing", label_en: "Invoices Documents", label_hu: "Számladokumentumok" },
+  { key: "knowledge_base", group_key: "finance_invoicing", label_en: "Invoices & Documents / Document Archive", label_hu: "Számlák és dokumentumok / Dokumentumtár" },
+  { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
+  { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
+  { key: "pianos", group_key: "technical", label_en: "Client Piano", label_hu: "Ügyfélzongorák" },
+  { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
+  { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
+  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
+  { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
+  { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
+  { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
+  { key: "scheduler", group_key: "technical", label_en: "Scheduler", label_hu: "Naptár" },
+  { key: "website_services", group_key: "technical", label_en: "Services", label_hu: "Szolgáltatások" },
+  { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" },
+  { key: "system_integrations", group_key: "technical", label_en: "System Activation & Integrations", label_hu: "Rendszeraktiválás és integrációk" },
+  { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
+  { key: "workshop_workflow", group_key: "technical", label_en: "Workshop Workflow", label_hu: "Műhely workflow" },
   { key: "marketing_overview", group_key: "marketing", label_en: "Marketing Overview", label_hu: "Marketing áttekintő" },
+  { key: "customer_inbox", group_key: "marketing", label_en: "Customer Inbox", label_hu: "Ügyfélüzenetek" },
   { key: "website_reviews", group_key: "marketing", label_en: "Reviews", label_hu: "Vélemények" },
   { key: "campaigns_utm", group_key: "marketing", label_en: "Campaigns & UTM", label_hu: "Kampányok és UTM-kódok" },
   { key: "leads", group_key: "marketing", label_en: "Leads", label_hu: "Érdeklődők" },
   { key: "tracking_cookies", group_key: "marketing", label_en: "Tracking & Cookies", label_hu: "Követési és cookie-beállítások" },
   { key: "seo_keywords", group_key: "marketing", label_en: "SEO & Keywords", label_hu: "SEO és kulcsszavak" },
   { key: "heatmap", group_key: "marketing", label_en: "Consent Heatmap", label_hu: "Hozzájárulásos hőtérkép" },
-  { key: "scheduler", group_key: "technical", label_en: "Scheduler", label_hu: "Naptár" },
-  { key: "workshop_workflow", group_key: "technical", label_en: "Workshop Workflow", label_hu: "Műhely workflow" },
-  { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
-  { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
-  { key: "pianos", group_key: "technical", label_en: "Client Pianos", label_hu: "Ügyfélzongorák" },
-  { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
-  { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
-  { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
-  { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
-  { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
-  { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
-  { key: "settings", group_key: "technical", label_en: "Settings", label_hu: "Beállítások" },
-  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
-  { key: "system_integrations", group_key: "technical", label_en: "System Activation & Integrations", label_hu: "Rendszeraktiválás és integrációk" }
+  { key: "website_artists", group_key: "website_events", label_en: "Artists", label_hu: "Művészek" },
+  { key: "website_contacts", group_key: "website_events", label_en: "Contacts", label_hu: "Kapcsolatfelvételek" },
+  { key: "digital_attendance", group_key: "website_events", label_en: "Digital Attendance", label_hu: "Digitális jelenlétiív" },
+  { key: "events", group_key: "website_events", label_en: "Events", label_hu: "Események" },
+  { key: "event_guest_list", group_key: "website_events", label_en: "Guest Data", label_hu: "Vendégadatok" },
+  { key: "event_invitations", group_key: "website_events", label_en: "Invitations", label_hu: "Meghívások" },
+  { key: "media_library", group_key: "website_events", label_en: "Media Library", label_hu: "Médiatár" },
+  { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
+  { key: "publish_preview", group_key: "website_events", label_en: "Publish & Preview", label_hu: "Publikálás és előnézet" },
+  { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
+  { key: "event_tickets", group_key: "website_events", label_en: "Ticket Reservation", label_hu: "Jegyfoglalás" }
 ]);
 
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-    MANAGER:[...commonView,'finance.view','income_statement.view'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+    MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
     WORKER:[...commonView]
   };
   const insert=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
@@ -362,6 +363,37 @@ app.use('/api',(req,res,next)=>{
 });
 
 function rid(prefix){ return `${prefix}-${Date.now()}-${Math.floor(Math.random()*9999)}`; }
+
+function ensure1099PartnerForUser(userId, { force = false } = {}) {
+  const user = db.prepare("SELECT id,name,email,contact_email,phone,address,role,status,hidden_user FROM users WHERE id=?").get(userId);
+  if (!user || Number(user.hidden_user || 0) === 1) return null;
+  const requiresPartner = force || user.role === "WORKER";
+  if (!requiresPartner) return null;
+  const linked = db.prepare(`SELECT p.* FROM partner_contractors pc JOIN partners p ON p.id=pc.partner_id WHERE pc.user_id=? ORDER BY CASE WHEN p.status='active' THEN 0 ELSE 1 END,p.created_at,p.id`).all(user.id);
+  if (linked.length) {
+    const chosen = linked[0];
+    if (chosen.status !== "active") db.prepare("UPDATE partners SET status='active' WHERE id=?").run(chosen.id);
+    return db.prepare("SELECT * FROM partners WHERE id=?").get(chosen.id);
+  }
+  const partnerId = rid("PTN");
+  const contractorId = rid("PC");
+  const companyName = `${String(user.name || user.email || user.id).trim()} - 1099 Contractor`;
+  db.prepare(`INSERT INTO partners(id,company_name,tax_id,billing_address,contact_person,contact_email,contact_phone,default_tax_rate,status) VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(partnerId, companyName, "", String(user.address || ""), String(user.name || ""), String(user.contact_email || user.email || ""), String(user.phone || ""), 0, "active");
+  db.prepare("INSERT INTO partner_contractors(id,partner_id,user_id,worker_name) VALUES(?,?,?,NULL)").run(contractorId, partnerId, user.id);
+  return db.prepare("SELECT * FROM partners WHERE id=?").get(partnerId);
+}
+
+function ensureExisting1099PartnerAssignments() {
+  try {
+    const workers = db.prepare("SELECT id FROM users WHERE role='WORKER' AND status='Active' AND COALESCE(hidden_user,0)=0").all();
+    const tx = db.transaction(() => workers.forEach((row) => ensure1099PartnerForUser(row.id, { force: true })));
+    tx();
+  } catch (error) {
+    console.warn("1099 partner assignment bootstrap skipped:", error.message);
+  }
+}
+ensureExisting1099PartnerAssignments();
 function normalizeUserEmail(value){ return String(value||'').trim().toLowerCase(); }
 function isValidUserEmail(value){ return /^[^\s@]+@[^\s@]+$/.test(String(value||'')); }
 function normalizeContactEmail(value){ return String(value||'').trim().toLowerCase(); }
@@ -1306,6 +1338,7 @@ app.put("/api/employee-daily-rates/:userId", auth, permit("ADMIN"), (req,res)=>{
   const currency=String(req.body.currency||'USD').trim().toUpperCase().slice(0,3)||'USD';
   if(!Number.isFinite(rate)||rate<0) return res.status(400).json({error:"INVALID_DAILY_RATE"});
   if(!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) return res.status(400).json({error:"INVALID_DATE"});
+  try{ensure1099PartnerForUser(employee.id,{force:true});}catch(error){return res.status(500).json({error:"TECHNICIAN_PARTNER_ASSIGNMENT_FAILED",details:error.message});}
   db.prepare(`INSERT INTO employee_daily_rates(user_id,rate,currency,effective_date,created_by) VALUES(?,?,?,?,?)
     ON CONFLICT(user_id,effective_date) DO UPDATE SET rate=excluded.rate,currency=excluded.currency,created_at=CURRENT_TIMESTAMP,created_by=excluded.created_by`)
     .run(employee.id,Math.round(rate*100)/100,currency,effectiveDate,req.user.id);
@@ -1512,6 +1545,7 @@ app.post("/api/users", auth, requirePermission("users.create"), async(req,res)=>
     db.prepare("INSERT INTO users(id,name,email,contact_email,password_hash,role,status,phone,address,calendar_color,google_calendar_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .run(id,name,email,contactEmail,hash,role,"Active",req.body.phone||"",req.body.address||"",colorValidation.color,googleCalendarEmail||null,0,0);
     db.prepare("INSERT OR IGNORE INTO notification_preferences(user_id,push_enabled,job_assigned,job_transferred,job_updated,job_deleted,one_hour_reminder,direct_message) VALUES(?,1,1,1,1,1,1,1)").run(id);
+    if(role==="WORKER") ensure1099PartnerForUser(id,{force:true});
     issuance=accountActivation.issue(id);
   });
   try{createUser();}catch(_error){return res.status(500).json({error:'USER_CREATE_FAILED'});}
@@ -1575,6 +1609,7 @@ app.put("/api/users/:id", auth, async(req,res)=>{
   let activationIssuance=null;
   const contactEmailChanged=changes.contact_email!==undefined && String(changes.contact_email||'')!==String(target.contact_email||'');
   const targetActivation=accountActivation.state(target.id);
+  const effectiveRole=String(changes.role!==undefined?changes.role:target.role);
   const updateUserTx=db.transaction(()=>{
     if(cols.length) db.prepare(`UPDATE users SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>values[c]),req.params.id);
     if(passwordChangeRequested){
@@ -1589,8 +1624,9 @@ app.put("/api/users/:id", auth, async(req,res)=>{
       db.prepare("UPDATE planned_jobs SET preferred_assigned_to=? WHERE preferred_assigned_user_id=?").run(changes.name,target.id);
       db.prepare("UPDATE planned_jobs SET created_by=? WHERE created_by_user_id=?").run(changes.name,target.id);
     }
+    if(effectiveRole==="WORKER") ensure1099PartnerForUser(target.id,{force:true});
   });
-  try{updateUserTx();}catch(error){return res.status(500).json({error:error.message==='PASSWORD_UPDATE_FAILED'?error.message:"USER_UPDATE_FAILED"});}
+  try{updateUserTx();}catch(error){return res.status(500).json({error:error.message==='PASSWORD_UPDATE_FAILED'?error.message:(effectiveRole==="WORKER"?"TECHNICIAN_PARTNER_ASSIGNMENT_FAILED":"USER_UPDATE_FAILED"),details:effectiveRole==="WORKER"?error.message:undefined});}
   const u=db.prepare(`SELECT u.id,u.name,u.email,u.contact_email,u.google_calendar_email,u.role,u.status,u.phone,u.address,u.calendar_color,
     CASE WHEN aa.user_id IS NULL THEN 'VERIFIED' ELSE aa.status END AS activation_status,
     COALESCE(aa.last_delivery_status,'LEGACY_ACCOUNT') AS activation_delivery_status
@@ -2494,7 +2530,7 @@ app.post('/api/settings/branding/reset-logo',auth,permit('ADMIN'),(req,res)=>{co
 app.post('/api/settings/branding/reset-background',auth,permit('ADMIN'),(req,res)=>{const before=getBranding();setSetting('login_background_url','',req.user.name||'');bumpBrandingVersion(req.user.name||'');const after=getBranding();audit(req,'UPDATE','branding','login_background',before,after);res.json(after);});
 app.get('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
   const roles=db.prepare("SELECT DISTINCT role FROM users WHERE COALESCE(hidden_user,0)=0 AND role IN ('ADMIN','MANAGER','WORKER') UNION SELECT DISTINCT role FROM role_permissions WHERE role IN ('ADMIN','MANAGER','WORKER') ORDER BY role").all().map(x=>x.role);
-  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','inventory.view','users.view','customer_inbox.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'];
+  const permissions=['scheduler.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','finance.view','income_statement.view','invoice_documents.view','inventory.view','users.view','customer_inbox.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'];
   const rows=db.prepare('SELECT role,permission,enabled FROM role_permissions').all();
   res.json({roles,permissions,rows});
 });
@@ -2580,8 +2616,8 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-        MANAGER:[...commonView,'finance.view','income_statement.view'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+        MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
         WORKER:[...commonView]
       };
       const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
