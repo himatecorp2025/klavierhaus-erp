@@ -19,9 +19,16 @@ const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
-const { createBusinessDocumentService, createInvoiceEngine, registerBusinessOperationsRoutes } = require("./business-operations");
+const {
+  createBusinessDocumentService,
+  createInvoiceEngine,
+  registerBusinessOperationsRoutes,
+  nextNewYorkMonthBoundary,
+  nextNewYorkMonthClose
+} = require("./business-operations");
 const { normalizePaymentMethod } = require("./payment-methods");
 const { buildAccountingSnapshot, isInvoiceDerivedFinancialItem, roundMoney } = require("./accounting-domain");
+const { generateFinancialStatementPdf } = require("./document-pdf");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
@@ -96,7 +103,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
   { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
   { key: "knowledge_base", group_key: "technical", label_en: "Company Documents Archive", label_hu: "Céges dokumentumtár" },
-  { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
+  { key: "company_data", group_key: "technical", label_en: "Corporate Data", label_hu: "Cégadatok" },
   { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
   { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
   { key: "planned_jobs", group_key: "technical", label_en: "Planned Jobs", label_hu: "Tervezett munkák" },
@@ -789,6 +796,7 @@ registerBusinessOperationsRoutes({
   jobDomain,
   invoiceEngine
 });
+scheduleFinancialStatementClose();
 registerWorkshopWorkflowRoutes({
   app,
   db,
@@ -1439,11 +1447,37 @@ app.delete("/api/financial-items/:id", auth, requireSuperadmin, (req,res)=>{
   res.json({ok:true});
 });
 
+const FINANCIAL_HISTORY_START = "2026-08";
+const PASSIVE_NON_OPERATING_INCOME = Object.freeze({
+  PIANO_RENTAL_LEASE: ["Piano Rental & Lease", "Zongorabérlet és lízing"],
+  HALL_SALON_RENTAL: ["Hall & Salon Rental", "Terem- és szalonbérlet"],
+  PRACTICE_REHEARSAL_FEES: ["Practice & Rehearsal Fees", "Gyakorlási és próbadíjak"],
+  INTEREST_INCOME: ["Interest Income", "Kamatbevétel"],
+  ROYALTY_CONTRACT_INCOME: ["Royalty & Contract Income", "Jogdíj és szerződéses bevétel"],
+  PASSIVE_REVENUE: ["Passive Revenue", "Passzív bevétel"],
+  OTHER_INCOME: ["Other Non-Operating Income", "Egyéb működésen kívüli bevétel"]
+});
+
+function monthBounds(month){
+  if(!/^\d{4}-\d{2}$/.test(String(month||""))) throw new Error("Month must be YYYY-MM");
+  const monthStart=`${month}-01`;
+  const nextMonth=new Date(`${monthStart}T00:00:00Z`);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
+  return {monthStart,monthEnd:nextMonth.toISOString().slice(0,10)};
+}
+function addIsoDays(dateKey, days){
+  const date=new Date(`${dateKey}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate()+Number(days||0));
+  return date.toISOString().slice(0,10);
+}
+function activeMonthCutoff(month, forceFullMonth=false){
+  const {monthEnd}=monthBounds(month);
+  if(forceFullMonth) return monthEnd;
+  const todayKey=nyToday();
+  return month===todayKey.slice(0,7) ? addIsoDays(todayKey,1) : monthEnd;
+}
 function financialItemsForMonth(month){
-  const monthStart = `${month}-01`;
-  const nextMonth = new Date(`${monthStart}T00:00:00`);
-  nextMonth.setMonth(nextMonth.getMonth()+1);
-  const monthEnd = nextMonth.toISOString().slice(0,10);
+  const {monthStart,monthEnd}=monthBounds(month);
   const rows=db.prepare(`
     SELECT * FROM financial_items
     WHERE (recurrence='MONTHLY' AND item_date < ?)
@@ -1452,36 +1486,114 @@ function financialItemsForMonth(month){
   `).all(monthEnd,monthStart,monthEnd);
   return {monthStart,monthEnd,rows};
 }
+function openingBalanceRecord(cutoffDate=null){
+  const row=db.prepare("SELECT * FROM opening_balance_sets WHERE id='COMPANY_OPENING_BALANCE'").get();
+  if(!row) return null;
+  if(cutoffDate && String(row.effective_date||"")>String(cutoffDate)) return null;
+  const items=db.prepare("SELECT * FROM opening_balance_items WHERE opening_balance_id=? ORDER BY sort_order,id").all(row.id);
+  return {...row,items};
+}
+function openingBalanceSummary(record){
+  if(!record) return {assets:0,liabilitiesEquity:0,difference:0,balanced:true};
+  let customAssets=0,customLiabilities=0,customEquity=0;
+  for(const item of record.items||[]){
+    const amount=roundMoney(item.amount||0),type=String(item.item_type||"").toUpperCase();
+    if(type==='ASSET')customAssets=roundMoney(customAssets+amount);
+    else if(type==='LIABILITY')customLiabilities=roundMoney(customLiabilities+amount);
+    else if(type==='EQUITY')customEquity=roundMoney(customEquity+amount);
+  }
+  const assets=roundMoney(Number(record.opening_cash_bank||0)+Number(record.opening_accounts_receivable||0)+customAssets);
+  const liabilitiesEquity=roundMoney(Number(record.opening_accounts_payable||0)+Number(record.opening_retained_earnings_equity||0)+customLiabilities+customEquity);
+  const difference=roundMoney(assets-liabilitiesEquity);
+  return {assets,liabilitiesEquity,difference,balanced:Math.abs(difference)<0.01,customAssets,customLiabilities,customEquity};
+}
+function normalizedOpeningBalanceBody(body={}){
+  const effective_date=String(body.effective_date||"").trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(effective_date)) throw Object.assign(new Error("INVALID_OPENING_BALANCE_DATE"),{status:400});
+  const nonnegative=(value,field)=>{const n=roundMoney(Number(value));if(!Number.isFinite(Number(value))||n<0)throw Object.assign(new Error(`INVALID_${field}`),{status:400});return n;};
+  const signed=(value,field)=>{const n=roundMoney(Number(value));if(!Number.isFinite(Number(value)))throw Object.assign(new Error(`INVALID_${field}`),{status:400});return n;};
+  const items=(Array.isArray(body.items)?body.items:[]).slice(0,100).map((item,index)=>{
+    const item_name=String(item?.item_name||item?.name||"").trim().slice(0,180);
+    const item_type=String(item?.item_type||item?.type||"").toUpperCase();
+    const amount=nonnegative(item?.amount||0,"OPENING_ITEM_AMOUNT");
+    if(!item_name) throw Object.assign(new Error("OPENING_ITEM_NAME_REQUIRED"),{status:400});
+    if(!["ASSET","LIABILITY","EQUITY"].includes(item_type)) throw Object.assign(new Error("INVALID_OPENING_ITEM_TYPE"),{status:400});
+    return {id:String(item?.id||rid("OBI")),item_name,item_type,amount,sort_order:index};
+  });
+  const record={
+    id:'COMPANY_OPENING_BALANCE',effective_date,
+    opening_cash_bank:nonnegative(body.opening_cash_bank,"OPENING_CASH_BANK"),
+    opening_accounts_receivable:nonnegative(body.opening_accounts_receivable,"OPENING_ACCOUNTS_RECEIVABLE"),
+    opening_accounts_payable:nonnegative(body.opening_accounts_payable,"OPENING_ACCOUNTS_PAYABLE"),
+    opening_retained_earnings_equity:signed(body.opening_retained_earnings_equity,"OPENING_RETAINED_EARNINGS_EQUITY"),
+    items
+  };
+  const summary=openingBalanceSummary(record);
+  if(!summary.balanced){const error=Object.assign(new Error("OPENING_BALANCE_OUT_OF_BALANCE"),{status:400,summary});throw error;}
+  return {...record,summary};
+}
 
-function incomeStatementPayload(month){
-  if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Month must be YYYY-MM");
-  const monthStart = `${month}-01`;
-  const nextMonth = new Date(`${monthStart}T00:00:00Z`);
-  nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
-  const monthEnd = nextMonth.toISOString().slice(0,10);
-  const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,monthEnd);
+app.get("/api/opening-balance", auth, permit("ADMIN","MANAGER"), (_req,res)=>{
+  const record=openingBalanceRecord();
+  res.json({openingBalance:record,summary:openingBalanceSummary(record)});
+});
+app.put("/api/opening-balance", auth, permit("ADMIN"), (req,res)=>{
+  try{
+    const next=normalizedOpeningBalanceBody(req.body||{});
+    const before=openingBalanceRecord();
+    db.transaction(()=>{
+      db.prepare(`INSERT INTO opening_balance_sets(id,effective_date,opening_cash_bank,opening_accounts_receivable,opening_accounts_payable,opening_retained_earnings_equity,created_by_user_id,created_by_name,updated_by_user_id,updated_by_name,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET effective_date=excluded.effective_date,opening_cash_bank=excluded.opening_cash_bank,opening_accounts_receivable=excluded.opening_accounts_receivable,opening_accounts_payable=excluded.opening_accounts_payable,opening_retained_earnings_equity=excluded.opening_retained_earnings_equity,updated_by_user_id=excluded.updated_by_user_id,updated_by_name=excluded.updated_by_name,updated_at=CURRENT_TIMESTAMP`)
+        .run(next.id,next.effective_date,next.opening_cash_bank,next.opening_accounts_receivable,next.opening_accounts_payable,next.opening_retained_earnings_equity,req.user.id,req.user.name,req.user.id,req.user.name);
+      db.prepare("DELETE FROM opening_balance_items WHERE opening_balance_id=?").run(next.id);
+      const insert=db.prepare("INSERT INTO opening_balance_items(id,opening_balance_id,item_name,item_type,amount,sort_order) VALUES(?,?,?,?,?,?)");
+      for(const item of next.items)insert.run(item.id,next.id,item.item_name,item.item_type,item.amount,item.sort_order);
+    })();
+    const after=openingBalanceRecord();
+    audit(req,before?"UPDATE":"CREATE","opening_balance",next.id,before,after,1,"Opening balance set updated","FINANCIAL");
+    res.json({openingBalance:after,summary:openingBalanceSummary(after)});
+  }catch(error){res.status(error.status||400).json({error:error.message,summary:error.summary||null});}
+});
+
+function accountingSnapshotAsOf(cutoffExclusive){
+  const asOfInvoices=db.prepare("SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number").all(cutoffExclusive);
+  const asOfCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
+    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(cutoffExclusive);
+  const asOfFinancial=db.prepare("SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at").all(cutoffExclusive);
+  const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
+  const opening=openingBalanceRecord(cutoffExclusive);
+  return buildAccountingSnapshot({asOfInvoices,asOfDirectItems:asOfDirect,asOfCreditMemos,asOfDateExclusive:cutoffExclusive,openingBalance:opening});
+}
+
+function incomeStatementPayload(month,{forceFullMonth=false}={}){
+  const {monthStart,monthEnd}=monthBounds(month);
+  const dataEnd=activeMonthCutoff(month,forceFullMonth);
+  const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,dataEnd);
   const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
 
   const monthInvoices=db.prepare(`SELECT * FROM invoices
     WHERE (source_type='event' AND revenue_recognition_status='RECOGNIZED' AND revenue_recognition_date>=? AND revenue_recognition_date<?)
        OR (source_type<>'event' AND issue_date>=? AND issue_date<?)
-    ORDER BY COALESCE(revenue_recognition_date,issue_date),invoice_number`).all(monthStart,monthEnd,monthStart,monthEnd);
-  const asOfInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number`).all(monthEnd);
+    ORDER BY COALESCE(revenue_recognition_date,issue_date),invoice_number`).all(monthStart,dataEnd,monthStart,dataEnd);
+  const asOfInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number`).all(dataEnd);
   const monthCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
-    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.revenue_effect_date>=? AND cm.revenue_effect_date<? ORDER BY cm.revenue_effect_date,cm.created_at,cm.id`).all(monthStart,monthEnd);
+    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.revenue_effect_date>=? AND cm.revenue_effect_date<? ORDER BY cm.revenue_effect_date,cm.created_at,cm.id`).all(monthStart,dataEnd);
   const asOfCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
-    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(monthEnd);
-  const monthFinancial=db.prepare(`SELECT * FROM financial_items WHERE ((recurrence='MONTHLY' AND item_date<?) OR (recurrence!='MONTHLY' AND item_date>=? AND item_date<?)) ORDER BY item_date,created_at`).all(monthEnd,monthStart,monthEnd);
-  const asOfFinancial=db.prepare(`SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at`).all(monthEnd);
+    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(dataEnd);
+  const monthFinancial=db.prepare(`SELECT * FROM financial_items WHERE ((recurrence='MONTHLY' AND item_date<?) OR (recurrence!='MONTHLY' AND item_date>=? AND item_date<?)) ORDER BY item_date,created_at`).all(dataEnd,monthStart,dataEnd);
+  const asOfFinancial=db.prepare(`SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at`).all(dataEnd);
   const monthDirect=monthFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
   const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
-  const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect,monthCreditMemos,asOfCreditMemos});
+  const opening=openingBalanceRecord(dataEnd);
+  const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect,monthCreditMemos,asOfCreditMemos,asOfDateExclusive:dataEnd,openingBalance:opening});
+  const beginningSnapshot=accountingSnapshotAsOf(monthStart);
 
   const accountMap=new Map();
-  const addPnl=(code,name_en,name_hu,category,amount)=>{
+  const addPnl=(code,name_en,name_hu,category,amount,statement_section=category)=>{
     const value=roundMoney(amount);
     if(Math.abs(value)<0.005) return;
-    const current=accountMap.get(code)||{code,name_en,name_hu,category,debit_total:0,credit_total:0,balance:0};
+    const current=accountMap.get(code)||{code,name_en,name_hu,category,statement_section,debit_total:0,credit_total:0,balance:0};
     current.balance=roundMoney(current.balance+value);
     if(category==='REVENUE'){
       if(value>=0) current.credit_total=roundMoney(current.credit_total+value);
@@ -1493,21 +1605,31 @@ function incomeStatementPayload(month){
   const eventInvoiceRevenue=roundMoney(monthInvoices.filter(row=>row.status!=='void'&&row.direction==='receivable'&&row.source_type==='event'&&row.revenue_recognition_status==='RECOGNIZED').reduce((sum,row)=>roundMoney(sum+Number(row.subtotal||0)),0));
   const eventContraRevenue=roundMoney(monthCreditMemos.filter(row=>row.invoice_source_type==='event'&&row.memo_type==='EVENT_REFUND').reduce((sum,row)=>roundMoney(sum+Number(row.subtotal_amount||0)),0));
   const serviceInvoiceRevenue=roundMoney(snapshot.pnl.grossInvoiceRevenue-eventInvoiceRevenue);
-  addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',serviceInvoiceRevenue);
-  addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue);
-  addPnl('TICKET_REFUND_CONTRA_REVENUE','Ticket Refunds — Contra Revenue','Jegy-visszatérítés — bevételcsökkentés','REVENUE',-eventContraRevenue);
+  addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',serviceInvoiceRevenue,'OPERATING_REVENUE');
+  addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue,'OPERATING_REVENUE');
+  addPnl('TICKET_REFUND_CONTRA_REVENUE','Ticket Refunds — Contra Revenue','Jegy-visszatérítés — bevételcsökkentés','REVENUE',-eventContraRevenue,'OPERATING_REVENUE');
   const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
   const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
   const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
-  addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor Expense','Alvállalkozói közvetlen költség','EXPENSE',subcontractorExpense);
-  addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense);
+  addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor Expense','Alvállalkozói közvetlen költség','EXPENSE',subcontractorExpense,'EXPENSE');
+  addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense,'EXPENSE');
   for(const item of monthDirect){
-    if(item.main_type==='INCOME') addPnl(item.category||'OTHER_INCOME',item.category||'Other Income',item.category||'Egyéb bevétel','REVENUE',item.amount);
-    if(item.main_type==='EXPENSE') addPnl(item.category||'OTHER_EXPENSE',item.category||'Other Expense',item.category||'Egyéb kiadás','EXPENSE',item.amount);
+    if(item.main_type==='INCOME'){
+      const category=item.category||'OTHER_INCOME';
+      const passive=PASSIVE_NON_OPERATING_INCOME[category];
+      addPnl(category,passive?.[0]||category,passive?.[1]||category,'REVENUE',item.amount,passive?'PASSIVE_NON_OPERATING_INCOME':'OPERATING_REVENUE');
+    }
+    if(item.main_type==='EXPENSE') addPnl(item.category||'OTHER_EXPENSE',item.category||'Other Expense',item.category||'Egyéb kiadás','EXPENSE',item.amount,'EXPENSE');
   }
   const balance=snapshot.balance;
+  const pnlAccounts=Array.from(accountMap.values());
+  const operatingRevenueAccounts=pnlAccounts.filter(row=>row.statement_section==='OPERATING_REVENUE');
+  const passiveIncomeAccounts=pnlAccounts.filter(row=>row.statement_section==='PASSIVE_NON_OPERATING_INCOME');
+  const expenseAccounts=pnlAccounts.filter(row=>row.statement_section==='EXPENSE');
+  const operatingRevenue=roundMoney(operatingRevenueAccounts.reduce((sum,row)=>roundMoney(sum+row.balance),0));
+  const passiveNonOperatingIncome=roundMoney(passiveIncomeAccounts.reduce((sum,row)=>roundMoney(sum+row.balance),0));
   const trialBalance=[
-    ...Array.from(accountMap.values()),
+    ...pnlAccounts,
     {code:'CASH_BANK',name_en:'Cash & Bank Accounts',name_hu:'Készpénz és bankszámlák',category:'ASSET',debit_total:Math.max(0,balance.cashBankAccounts),credit_total:Math.max(0,-balance.cashBankAccounts),balance:balance.cashBankAccounts},
     {code:'AR',name_en:'Accounts Receivable',name_hu:'Vevőkövetelések',category:'ASSET',debit_total:Math.max(0,balance.accountsReceivable),credit_total:Math.max(0,-balance.accountsReceivable),balance:balance.accountsReceivable},
     {code:'MANUAL_ASSETS',name_en:'Equipment / Inventory / Prepaid & Other Assets',name_hu:'Berendezés / készlet / aktív időbeli elhatárolás és egyéb eszközök',category:'ASSET',debit_total:Math.max(0,balance.manualAssets),credit_total:Math.max(0,-balance.manualAssets),balance:balance.manualAssets},
@@ -1519,31 +1641,112 @@ function incomeStatementPayload(month){
     {code:'RETAINED_CURRENT_NET_INCOME',name_en:'Retained Earnings / Current Net Income',name_hu:'Eredménytartalék / aktuális nettó eredmény',category:'EQUITY',debit_total:Math.max(0,-balance.currentPeriodNetIncome),credit_total:Math.max(0,balance.currentPeriodNetIncome),balance:balance.currentPeriodNetIncome},
     {code:'MANUAL_EQUITY',name_en:'Other Manual Equity',name_hu:'Egyéb manuális saját tőke',category:'EQUITY',debit_total:Math.max(0,-balance.manualEquity),credit_total:Math.max(0,balance.manualEquity),balance:balance.manualEquity}
   ];
-  const incomeDirect=monthDirect.filter(x=>x.main_type==='INCOME');
   const expenseDirect=monthDirect.filter(x=>x.main_type==='EXPENSE');
-  const passiveIncome=roundMoney(incomeDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>roundMoney(s+Number(x.amount||0)),0));
   const recurringExpenses=roundMoney(expenseDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>roundMoney(s+Number(x.amount||0)),0));
-  const revenue=snapshot.pnl.revenue, expenses=snapshot.pnl.expenses;
+  const revenue=snapshot.pnl.revenue,expenses=snapshot.pnl.expenses;
+  const beginningBalance=roundMoney(beginningSnapshot.balance.cashBankAccounts||0);
+  const endingBalance=roundMoney(balance.cashBankAccounts||0);
+  const netCashFlow=roundMoney(endingBalance-beginningBalance);
   return {
-    month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
-    accountingLogic:{source:'invoices_credit_memos_plus_noninvoice_financial_items',generalLedger:'accrual_general_ledger_tax_deferred_revenue',equation:'Assets = Liabilities + Equity'},
+    month,monthStart,monthEndExclusive:monthEnd,asOfDateExclusive:dataEnd,generatedAt:new Date().toISOString(),
+    accountingLogic:{source:'invoices_credit_memos_opening_balances_plus_noninvoice_financial_items',generalLedger:'accrual_general_ledger_tax_deferred_revenue',equation:'Assets = Liabilities + Equity'},
     counts:{openJobs,closedJobs:closedJobs.length,financialItems:monthDirect.length,invoices:monthInvoices.length,creditMemos:monthCreditMemos.length},
-    totals:{passiveIncome,oneTimeIncome:roundMoney(revenue-passiveIncome),revenue,grossInvoiceRevenue:snapshot.pnl.grossInvoiceRevenue,contraRevenue:snapshot.pnl.contraRevenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.totalLiabilities,equity:balance.totalEquity,sources:balance.totalLiabilitiesEquity,netWorth:balance.totalEquity,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity},
+    totals:{passiveIncome:passiveNonOperatingIncome,passiveNonOperatingIncome,operatingRevenue,oneTimeIncome:roundMoney(revenue-passiveNonOperatingIncome),revenue,grossInvoiceRevenue:snapshot.pnl.grossInvoiceRevenue,contraRevenue:snapshot.pnl.contraRevenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.totalLiabilities,equity:balance.totalEquity,sources:balance.totalLiabilitiesEquity,netWorth:balance.totalEquity,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity},
+    cashFlow:{beginningBalance,netCashFlow,endingBalance},
+    openingBalance:opening?{...opening,summary:openingBalanceSummary(opening)}:null,
     balanceAudit:{balanced:balance.balanced,difference:balance.difference,absolute_difference:Math.abs(balance.difference)},
-    balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,totalLiabilities:balance.totalLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity,totalEquity:balance.totalEquity,totalLiabilitiesEquity:balance.totalLiabilitiesEquity},
-    trialBalance,
-    items:monthDirect,
-    invoices:monthInvoices,
-    creditMemos:monthCreditMemos
+    balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,totalLiabilities:balance.totalLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity,totalEquity:balance.totalEquity,totalLiabilitiesEquity:balance.totalLiabilitiesEquity,openingBalance:balance.openingBalance},
+    operatingRevenueAccounts,passiveIncomeAccounts,expenseAccounts,trialBalance,
+    items:monthDirect,invoices:monthInvoices,creditMemos:monthCreditMemos
   };
 }
+
+function statementClosedAtLocal(period){
+  const {monthEnd}=monthBounds(period);
+  const periodEnd=addIsoDays(monthEnd,-1);
+  return `${periodEnd}T23:59:59[America/New_York]`;
+}
+function financialStatementCloseInstant(period){
+  const probe=new Date(`${period}-15T12:00:00Z`);
+  if(!Number.isFinite(probe.getTime())) throw new Error('INVALID_FINANCIAL_PERIOD');
+  return nextNewYorkMonthClose(probe);
+}
+function snapshotFinancialStatementPeriod(period,closedAt=null){
+  if(period<FINANCIAL_HISTORY_START) return null;
+  const current=nyToday().slice(0,7);
+  if(period>=current) return null;
+  const existing=db.prepare("SELECT * FROM financial_statement_snapshots WHERE period=?").get(period);
+  if(existing) return existing;
+  const officialClose=closedAt instanceof Date&&Number.isFinite(closedAt.getTime())?closedAt:financialStatementCloseInstant(period);
+  const payload=incomeStatementPayload(period,{forceFullMonth:true});
+  const {monthEnd}=monthBounds(period),periodEnd=addIsoDays(monthEnd,-1);
+  db.prepare(`INSERT INTO financial_statement_snapshots(period,period_end,closed_at,closed_at_local,balance_sheet_json,income_statement_json,created_by)
+    VALUES(?,?,?,?,?,?,?)`).run(period,periodEnd,officialClose.toISOString(),statementClosedAtLocal(period),JSON.stringify({month:period,generatedAt:officialClose.toISOString(),balanceSheet:payload.balanceSheet,balanceAudit:payload.balanceAudit,openingBalance:payload.openingBalance,cashFlow:payload.cashFlow}),JSON.stringify({...payload,generatedAt:officialClose.toISOString()}),'SYSTEM');
+  return db.prepare("SELECT * FROM financial_statement_snapshots WHERE period=?").get(period);
+}
+function ensureClosedFinancialStatementSnapshots(now=new Date()){
+  const current=nyToday().slice(0,7);
+  let cursor=FINANCIAL_HISTORY_START;
+  let guard=0;
+  while(cursor<current && guard<240){snapshotFinancialStatementPeriod(cursor);const {monthEnd}=monthBounds(cursor);cursor=monthEnd.slice(0,7);guard+=1;}
+}
+const MAX_FINANCIAL_STATEMENT_CLOSE_TIMER_MS=6*60*60*1000;
+function newYorkMonthKey(value=new Date()){
+  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric",month:"2-digit"}).formatToParts(value);
+  const year=parts.find(part=>part.type==="year")?.value;
+  const month=parts.find(part=>part.type==="month")?.value;
+  return `${year}-${month}`;
+}
+function scheduleFinancialStatementClose(){
+  ensureClosedFinancialStatementSnapshots(new Date());
+  const scheduleNext=(base=new Date())=>{
+    const closeAt=nextNewYorkMonthClose(base);
+    const boundary=nextNewYorkMonthBoundary(base);
+    const closedPeriod=newYorkMonthKey(closeAt);
+    const commitAt=new Date(boundary.getTime()+1000);
+    const waitUntilBoundary=()=>{
+      const remaining=commitAt.getTime()-Date.now();
+      if(remaining<=0){
+        try{snapshotFinancialStatementPeriod(closedPeriod,closeAt);}catch(error){console.warn('financial statement close failed:',error.message);}
+        scheduleNext(new Date(commitAt.getTime()+1000));
+        return;
+      }
+      const timer=setTimeout(waitUntilBoundary,Math.min(remaining,MAX_FINANCIAL_STATEMENT_CLOSE_TIMER_MS));
+      if(typeof timer.unref==='function')timer.unref();
+    };
+    waitUntilBoundary();
+  };
+  scheduleNext();
+}
+function financialStatementCompanyData(){
+  try{return businessDocuments.companyData();}catch(_error){return {trade_name:'Klavierhaus',legal_name:'Klavierhaus',city:'New York',state:'NY',country:'United States',invoice_currency:'USD'};}
+}
+function sendFinancialStatementPdf(res,statement,payload,{closed=false,period=null}={}){
+  const company=financialStatementCompanyData();
+  const generatedAt=closed?(payload.generatedAt||new Date().toISOString()):new Date().toISOString();
+  const pdf=generateFinancialStatementPdf({statement,company,payload,generatedAt,closed,period:period||payload.month});
+  const label=statement==='balance-sheet'?'balance-sheet':'income-statement';
+  const suffix=closed?`${period}-closed`:`${payload.month}-realtime`;
+  res.type('application/pdf').set('Content-Disposition',`attachment; filename="klavierhaus-${label}-${suffix}.pdf"`).send(pdf);
+}
+
+app.get('/api/financial-statements/periods',auth,permit('ADMIN','MANAGER'),(_req,res)=>{
+  try{ensureClosedFinancialStatementSnapshots(new Date());const rows=db.prepare("SELECT period,period_end,closed_at,closed_at_local,created_at FROM financial_statement_snapshots WHERE period>=? ORDER BY period DESC").all(FINANCIAL_HISTORY_START);res.json(rows);}catch(error){res.status(500).json({error:error.message});}
+});
+app.get('/api/financial-statements/:statement/realtime.pdf',auth,permit('ADMIN','MANAGER'),(req,res)=>{
+  try{if(!['balance-sheet','income-statement'].includes(req.params.statement))return res.status(404).json({error:'STATEMENT_NOT_FOUND'});const payload=incomeStatementPayload(nyToday().slice(0,7));sendFinancialStatementPdf(res,req.params.statement,payload,{closed:false});}catch(error){res.status(400).json({error:error.message});}
+});
+app.get('/api/financial-statements/:statement/:period.pdf',auth,permit('ADMIN','MANAGER'),(req,res)=>{
+  try{if(!['balance-sheet','income-statement'].includes(req.params.statement))return res.status(404).json({error:'STATEMENT_NOT_FOUND'});if(!/^\d{4}-\d{2}$/.test(req.params.period)||req.params.period<FINANCIAL_HISTORY_START)return res.status(400).json({error:'INVALID_FINANCIAL_PERIOD'});const row=snapshotFinancialStatementPeriod(req.params.period,new Date());if(!row)return res.status(409).json({error:'FINANCIAL_PERIOD_NOT_CLOSED'});const payload=req.params.statement==='balance-sheet'?JSON.parse(row.balance_sheet_json):JSON.parse(row.income_statement_json);sendFinancialStatementPdf(res,req.params.statement,payload,{closed:true,period:req.params.period});}catch(error){res.status(400).json({error:error.message});}
+});
+
 app.get("/api/income-statement/monthly", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  try{ res.json(incomeStatementPayload(req.query.month || today().slice(0,7))); }
+  try{ res.json(incomeStatementPayload(req.query.month || nyToday().slice(0,7))); }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
 app.get("/api/income-statement", auth, permit("ADMIN","MANAGER"), (req,res)=>{
-  try{ res.json(incomeStatementPayload(today().slice(0,7))); }
+  try{ res.json(incomeStatementPayload(nyToday().slice(0,7))); }
   catch(e){ res.status(400).json({error:e.message}); }
 });
 
