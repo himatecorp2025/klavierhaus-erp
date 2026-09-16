@@ -240,6 +240,9 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
   invoice_number TEXT,
   priority TEXT DEFAULT 'Medium',
   workflow_id TEXT,
+  effective_date TEXT,
+  original_filename TEXT,
+  mime_type TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
@@ -437,6 +440,7 @@ CREATE TABLE IF NOT EXISTS event_tickets (
   document_back_path TEXT,
   document_full_path TEXT,
   event_payment_id TEXT,
+  invoice_id TEXT,
   ticket_sequence INTEGER,
   checked_in_at TEXT,
   checked_in_by_user_id TEXT,
@@ -545,6 +549,7 @@ CREATE TABLE IF NOT EXISTS event_payments (
   stripe_payment_intent_id TEXT NOT NULL UNIQUE,
   stripe_refund_id TEXT UNIQUE,
   stripe_fee_cents INTEGER,
+  invoice_id TEXT,
   test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
   paid_at TEXT,
   refunded_at TEXT,
@@ -1310,7 +1315,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   due_date TEXT,
   partner_id TEXT,
   client_id TEXT,
-  source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
+  source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual','event')),
   source_id TEXT,
   summary TEXT,
   subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0),
@@ -1322,8 +1327,11 @@ CREATE TABLE IF NOT EXISTS invoices (
   payment_link_url TEXT,
   notes TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+  paid_at TEXT,
   voided_at TEXT,
   voided_by TEXT,
+  archived_at TEXT,
+  archived_period TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
@@ -1357,6 +1365,20 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id);
+
+CREATE TABLE IF NOT EXISTS invoice_adjustments (
+  id TEXT PRIMARY KEY,
+  invoice_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  adjusted_by_user_id TEXT,
+  adjusted_by_name TEXT NOT NULL,
+  adjusted_at TEXT NOT NULL,
+  adjusted_at_local TEXT NOT NULL,
+  previous_values TEXT NOT NULL,
+  new_values TEXT NOT NULL,
+  FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_adjustments_invoice_time ON invoice_adjustments(invoice_id,adjusted_at DESC);
 
 CREATE TABLE IF NOT EXISTS financial_items (
   id TEXT PRIMARY KEY,
