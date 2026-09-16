@@ -774,6 +774,8 @@ function runMigrations() {
     ensureColumn("jobs", "daily_rate_allocated_amount", "REAL NOT NULL DEFAULT 0");
     ensureColumn("jobs", "daily_rate_date", "TEXT");
     ensureColumn("jobs", "technician_extra_compensation", "REAL NOT NULL DEFAULT 0");
+    ensureColumn("jobs", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
+    ensureColumn("jobs", "invoice_id", "TEXT");
 
     db.exec(`CREATE TABLE IF NOT EXISTS employee_daily_rates (
       user_id TEXT NOT NULL,
@@ -808,10 +810,15 @@ function runMigrations() {
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), voided_at TEXT, voided_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL, FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS invoice_sequences (
+      direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')), sequence_year TEXT NOT NULL,
+      last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0), updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(direction,sequence_year)
+    );
     CREATE TABLE IF NOT EXISTS invoice_items (
       id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, item_description TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
       unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0), total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
-      line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')),
+      line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')), sort_order INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
       payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
       financial_status TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     )`);
@@ -819,6 +826,20 @@ function runMigrations() {
     ensureColumn("invoices", "notes", "TEXT");
     ensureColumn("invoice_items", "payment_method", "TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash'))");
     ensureColumn("invoice_items", "financial_status", "TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending'))");
+    ensureColumn("invoice_items", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+    db.exec(`CREATE TABLE IF NOT EXISTS invoice_sequences (
+      direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')), sequence_year TEXT NOT NULL,
+      last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0), updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(direction,sequence_year)
+    )`);
+    const sequenceUpsert = db.prepare(`INSERT INTO invoice_sequences(direction,sequence_year,last_number,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(direction,sequence_year) DO UPDATE SET last_number=MAX(invoice_sequences.last_number,excluded.last_number),updated_at=CURRENT_TIMESTAMP`);
+    for (const invoice of db.prepare("SELECT direction,invoice_number,issue_date FROM invoices").all()) {
+      const year = String(invoice.issue_date || "").slice(0,4);
+      const match = String(invoice.invoice_number || "").match(/-(\d{4,})$/);
+      const number = Number(match?.[1] || 0);
+      if (/^\d{4}$/.test(year) && Number.isSafeInteger(number) && number > 0) sequenceUpsert.run(invoice.direction,year,number);
+    }
     ensureIndex("idx_partners_status_name", "CREATE INDEX IF NOT EXISTS idx_partners_status_name ON partners(status,company_name)");
     ensureIndex("idx_partner_contractors_partner", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_partner ON partner_contractors(partner_id)");
     ensureIndex("idx_partner_contractors_user", "CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id)");
@@ -826,7 +847,9 @@ function runMigrations() {
     ensureIndex("idx_invoices_source", "CREATE INDEX IF NOT EXISTS idx_invoices_source ON invoices(source_type,source_id)");
     ensureIndex("idx_invoices_status_due", "CREATE INDEX IF NOT EXISTS idx_invoices_status_due ON invoices(status,due_date)");
     ensureIndex("idx_invoices_source_direction_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_source_direction_unique ON invoices(direction,source_type,source_id) WHERE source_id IS NOT NULL AND trim(source_id)<>''");
-    ensureIndex("idx_invoice_items_invoice", "CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,id)");
+    ensureIndex("idx_jobs_invoice_id", "CREATE INDEX IF NOT EXISTS idx_jobs_invoice_id ON jobs(invoice_id)");
+    ensureIndex("idx_invoice_items_invoice", "CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id)");
+    db.prepare(`UPDATE jobs SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1),invoice_status='Invoiced',invoice_number=(SELECT i.invoice_number FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void')`).run();
 
     ensureIndex("idx_jobs_daily_rate_capacity", "CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status)");
 
@@ -844,6 +867,10 @@ function runMigrations() {
     if (tableExists("workshop_workflows")) {
       ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
       ensureColumn("workshop_workflows", "job_id", "TEXT");
+      ensureColumn("workshop_workflows", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
+      ensureColumn("workshop_workflows", "invoice_id", "TEXT");
+      ensureIndex("idx_workflows_invoice_id", "CREATE INDEX IF NOT EXISTS idx_workflows_invoice_id ON workshop_workflows(invoice_id)");
+      db.prepare(`UPDATE workshop_workflows SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void')`).run();
     }
     if (tableExists("workshop_workflows") && tableExists("jobs")) {
       const legacyWorkflows=db.prepare("SELECT w.*,c.name AS client_name,p.display_name AS piano_display,p.brand AS piano_brand,p.model AS piano_model,u.name AS creator_name FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=COALESCE(w.transport_responsible_user_id,w.created_by_user_id) WHERE w.job_id IS NULL OR trim(w.job_id)='' ORDER BY w.created_at,w.id").all();
