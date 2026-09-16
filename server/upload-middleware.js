@@ -136,6 +136,25 @@ const CUSTOMER_ATTACHMENT_MIMES = new Set([
   "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ]);
 
+
+function createCompanyDocumentUpload(uploadDir){
+  const target=path.join(uploadDir,"company-documents");
+  fs.mkdirSync(target,{recursive:true});
+  const allowedExt=new Set([".pdf",".doc",".docx",".xls",".xlsx",".jpg",".jpeg",".png",".webp"]);
+  return multer({
+    storage:multer.diskStorage({
+      destination:(_req,_file,cb)=>cb(null,target),
+      filename:(_req,file,cb)=>cb(null,`company-doc-${Date.now()}-${crypto.randomBytes(10).toString("hex")}${path.extname(file.originalname||"").toLowerCase()}`)
+    }),
+    limits:{fileSize:50*1024*1024,files:1},
+    fileFilter:(_req,file,cb)=>{
+      const ext=path.extname(file.originalname||"").toLowerCase();
+      const ok=allowedExt.has(ext);
+      cb(ok?null:new Error("INVALID_COMPANY_DOCUMENT_TYPE"),ok);
+    }
+  });
+}
+
 function createCustomerConversationUpload(uploadDir){
   const target = path.join(uploadDir, "customer-conversations");
   fs.mkdirSync(target, { recursive: true });
@@ -173,6 +192,7 @@ module.exports={
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  createCompanyDocumentUpload,
   createCustomerConversationUpload,
   inspectImageFile,
   uploadErrorHandler
