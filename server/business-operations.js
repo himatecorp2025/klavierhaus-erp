@@ -483,15 +483,10 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
   function nextNumber(direction, issueDate) {
     const year = String(issueDate || new Date().toISOString().slice(0, 10)).slice(0, 4);
     const prefix = direction === "payable" ? "VND" : "INV";
-    const like = `${prefix}-${year}-%`;
-    const rows = db.prepare("SELECT invoice_number FROM invoices WHERE invoice_number LIKE ?").all(like);
-    let highest = 0;
-    for (const row of rows) {
-      const match = String(row.invoice_number || "").match(/-(\d{4,})$/);
-      const sequence = Number(match?.[1] || 0);
-      if (Number.isSafeInteger(sequence) && sequence > highest) highest = sequence;
-    }
-    return `${prefix}-${year}-${String(highest + 1).padStart(4, "0")}`;
+    const sequence = db.prepare(`INSERT INTO invoice_sequences(direction,sequence_year,last_number,updated_at) VALUES(?,?,1,CURRENT_TIMESTAMP)
+      ON CONFLICT(direction,sequence_year) DO UPDATE SET last_number=invoice_sequences.last_number+1,updated_at=CURRENT_TIMESTAMP
+      RETURNING last_number`).get(direction, year);
+    return `${prefix}-${year}-${String(Number(sequence?.last_number || 1)).padStart(4, "0")}`;
   }
   function ensureContractorPartner(job) {
     if (!job.assigned_user_id) return null;
@@ -504,9 +499,9 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
   function createInvoice({ direction, issueDate, dueDate, partnerId = null, clientId = null, sourceType = "manual", sourceId = null, summary = "", taxRate = 0, currency = "USD", paymentMethod: method = null, paymentLinkUrl = null, notes = "", status = "issued", items = [] }) {
     if (sourceId) {
       const existing = db.prepare("SELECT * FROM invoices WHERE direction=? AND source_type=? AND source_id=? LIMIT 1").get(direction, sourceType, sourceId);
-      if (existing) return invoiceDetail(existing.id);
+      if (existing) { const detail = invoiceDetail(existing.id); linkInvoiceSource(detail); return detail; }
     }
-    const normalizedItems = (items || []).map((item) => {
+    const normalizedItems = (items || []).map((item, index) => {
       const quantity = Math.max(0.0001, Number(item.quantity || 1));
       const unitPrice = Math.max(0, money(item.unit_price));
       const itemMethodRaw = clean(item.payment_method, 120);
@@ -515,7 +510,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       const itemStatusRaw = clean(item.financial_status, 20).toLowerCase();
       const itemStatus = itemStatusRaw ? (["paid", "pending"].includes(itemStatusRaw) ? itemStatusRaw : null) : null;
       if (itemStatusRaw && !itemStatus) throw Object.assign(new Error("INVALID_ITEM_FINANCIAL_STATUS"), { status: 400 });
-      return { description: clean(item.item_description || item.description || "Item", 1000), quantity, unit_price: unitPrice, total_price: money(item.total_price ?? quantity * unitPrice), line_type: ["material", "fee", "custom"].includes(item.line_type) ? item.line_type : "custom", payment_method: itemMethod, financial_status: itemStatus };
+      return { description: clean(item.item_description || item.description || "Item", 1000), quantity, unit_price: unitPrice, total_price: money(item.total_price ?? quantity * unitPrice), line_type: ["material", "fee", "custom"].includes(item.line_type) ? item.line_type : "custom", sort_order: index, payment_method: itemMethod, financial_status: itemStatus };
     }).filter((item) => item.total_price >= 0);
     const subtotal = money(normalizedItems.reduce((sum, item) => sum + item.total_price, 0));
     const rate = Math.max(0, money(taxRate));
@@ -527,8 +522,10 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const normalizedMethod = paymentMethod(method);
     db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), normalizedMethod, normalizedMethod === "Payment Link" ? clean(paymentLinkUrl, 2000) || null : null, clean(notes, 5000) || null, status);
-    const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?)");
-    normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type, item.payment_method, item.financial_status));
+    const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,sort_order,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type, item.sort_order, item.payment_method, item.financial_status));
+    const created = invoiceDetail(id);
+    linkInvoiceSource(created);
     return invoiceDetail(id);
   }
   function invoiceDetail(id) {
@@ -547,12 +544,33 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       counterparty_contact: partnerCounterparty ? (invoice.partner_contact_person || "") : (invoice.client_name || ""),
       counterparty_email: partnerCounterparty ? (invoice.partner_contact_email || "") : (invoice.client_email || ""),
       counterparty_phone: partnerCounterparty ? (invoice.partner_contact_phone || "") : (invoice.client_phone || ""),
-      items: db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id").all(id)
+      items: db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(id)
     };
   }
+  function linkInvoiceSource(invoice) {
+    if (!invoice || invoice.direction !== "receivable" || !invoice.source_id) return;
+    if (invoice.source_type === "job") {
+      db.prepare(`UPDATE jobs SET billing_status='Billed',invoice_id=?,invoice_status='Invoiced',invoice_number=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(invoice.id, invoice.invoice_number, invoice.source_id);
+    } else if (invoice.source_type === "workflow") {
+      db.prepare(`UPDATE workshop_workflows SET billing_status='Billed',invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(invoice.id, invoice.source_id);
+    }
+  }
+  function resetInvoiceSource(invoice) {
+    if (!invoice || !invoice.source_id) return;
+    if (invoice.source_type === "job" && invoice.direction === "receivable") {
+      db.prepare(`UPDATE jobs SET billing_status='Unbilled',invoice_id=NULL,invoice_status='Not invoiced',invoice_number=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(invoice.source_id);
+    } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
+      db.prepare(`UPDATE workshop_workflows SET billing_status='Unbilled',invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(invoice.source_id);
+    }
+  }
+
   function postManualInvoiceLedger(invoice, actor = {}) {
     if (!invoice || invoice.source_type !== "manual" || invoice.status === "void") return null;
-    const items = Array.isArray(invoice.items) ? invoice.items : db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id").all(invoice.id);
+    const items = Array.isArray(invoice.items) ? invoice.items : db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(invoice.id);
     const invoiceStatus = invoice.status === "paid" ? "paid" : "pending";
     const paidItems = items.filter((item) => (item.financial_status || invoiceStatus) === "paid");
     const paidSubtotal = money(paidItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0));
@@ -602,7 +620,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     }
     return created;
   }
-  function createWorkflowInvoice({ workflow, materials = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null }) {
+  function createWorkflowInvoice({ workflow, stages = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null }) {
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const method = paymentMethod(requestedPaymentMethod);
@@ -611,24 +629,21 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       problem.status = 400;
       throw problem;
     }
-    const items = [];
-    for (const material of materials) {
-      const qty = Math.max(0, Number(material.consumed_quantity || 0));
-      const unit = Math.max(0, money(material.unit_cost));
-      if (qty > 0 && unit >= 0) items.push({ item_description: material.item_name || material.inventory_item_name || "Material", quantity: qty, unit_price: unit, line_type: "material" });
-    }
-    for (const line of lines.filter((row) => row.line_type === "REVENUE" && String(row.billing_status || "CHARGEABLE") === "CHARGEABLE")) {
-      const amount = Math.max(0, money(line.amount));
-      if (amount > 0) items.push({ item_description: line.title || line.description || "Workshop fee", quantity: 1, unit_price: amount, line_type: "fee" });
-    }
+    const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id))
+      .filter((stage) => stage.status !== "NOT_REQUIRED");
+    const costLines = (lines || []).filter((row) => row.line_type === "COST");
+    const items = phaseRows.map((stage) => {
+      const phaseSubtotal = money(costLines.filter((line) => String(line.stage_id || "") === String(stage.id)).reduce((sum, line) => sum + Number(line.amount || 0), 0));
+      const phaseName = stage.name_snapshot_en || stage.card_title || stage.stage_code || `Phase ${Number(stage.stage_order || 0) + 1}`;
+      return { item_description: `Phase ${Number(stage.stage_order || 0) + 1}: ${phaseName}`, quantity: 1, unit_price: phaseSubtotal, line_type: "fee" };
+    });
     const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "issued", items });
-    for (const material of materials) {
-      const qty = Math.max(0, Number(material.consumed_quantity || 0));
-      const amount = money(qty * Number(material.unit_cost || 0));
-      const sourceId = `WORKFLOW_INVOICE_MATERIAL:${material.id}`;
-      if (amount > 0 && !db.prepare("SELECT 1 FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").get(sourceId)) {
+    const sourceId = `WORKFLOW_INVOICE_REVENUE:${workflow.id}`;
+    if (Number(invoice.subtotal || 0) > 0) {
+      const existing = db.prepare("SELECT id FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=? LIMIT 1").get(sourceId);
+      if (!existing) {
         db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
-          VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME',?,?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop material charge: ${material.item_name || "Material"}`, workflow.title || "", amount, method, balanceAccountFromPaymentMethod(method), workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_MATERIAL", sourceId, actor.name || "System");
+          VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME',?,?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop invoice revenue: ${invoice.invoice_number}`, workflow.title || "", Number(invoice.subtotal || 0), method, balanceAccountFromPaymentMethod(method), workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_REVENUE", sourceId, actor.name || actor.id || "System");
       }
     }
     return invoice;
@@ -644,13 +659,14 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     } else if (invoice.source_type === "manual") {
       db.prepare("DELETE FROM financial_items WHERE source_type='MANUAL_INVOICE' AND source_id=?").run(invoice.id);
     } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
-      const revenueLines = db.prepare("SELECT id FROM workflow_financial_lines WHERE workflow_id=? AND line_type='REVENUE'").all(invoice.source_id);
-      for (const line of revenueLines) db.prepare("DELETE FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=?").run(`WORKFLOW_LINE:${line.id}`);
+      // Phase-cost ledger rows are underlying workshop expenses, not invoice duplicates.
+      // Invoice-only deletion reverses generated revenue while preserving the completed work's real costs.
+      db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=?").run(`WORKFLOW_INVOICE_REVENUE:${invoice.source_id}`);
       const materialIds = db.prepare("SELECT id FROM workflow_materials WHERE workflow_id=?").all(invoice.source_id);
       for (const material of materialIds) db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").run(`WORKFLOW_INVOICE_MATERIAL:${material.id}`);
     }
   }
-  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, postManualInvoiceLedger, reverseLedger, paymentMethod };
+  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
 }
 
 
@@ -762,6 +778,11 @@ function registerBusinessOperationsRoutes(options) {
       } catch (error) { sendError(res, error); }
     });
 
+    app.get("/api/invoices/unbilled-sources", auth, financeReader, (_req, res) => {
+      const jobs = db.prepare(`SELECT id,title,client_name,start_time,planned_amount,payment_method FROM jobs WHERE status='Completed' AND COALESCE(billing_status,'Unbilled')='Unbilled' ORDER BY COALESCE(completed_at,start_time) DESC,id`).all().map((row) => ({ ...row, source_type: "job" }));
+      const workflows = db.prepare(`SELECT id,title,client_id,final_due_at FROM workshop_workflows WHERE current_status='COMPLETED' AND COALESCE(billing_status,'Unbilled')='Unbilled' ORDER BY COALESCE(financial_closed_at,updated_at) DESC,id`).all().map((row) => ({ ...row, source_type: "workflow" }));
+      res.json({ jobs, workflows, all: [...jobs, ...workflows] });
+    });
     app.get("/api/invoices/:id", auth, financeReader, (req, res) => {
       const row = invoiceEngine.invoiceDetail(req.params.id); if (!row) return res.status(404).json({ error: "INVOICE_NOT_FOUND" }); res.json(row);
     });
@@ -787,9 +808,59 @@ function registerBusinessOperationsRoutes(options) {
     app.delete("/api/invoices/:id", auth, admin, (req, res) => {
       if (req.user.role !== "SUPERADMIN") return res.status(403).json({ error: "SUPERADMIN_REQUIRED" });
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
-      db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("DELETE FROM invoices WHERE id=?").run(before.id); })();
+      db.transaction(() => { invoiceEngine.reverseLedger(before); invoiceEngine.resetInvoiceSource(before); db.prepare("DELETE FROM invoices WHERE id=?").run(before.id); })();
       audit(req, "HARD_DELETE", "invoices", before.id, before, null, 1, clean(req.body?.reason, 1000) || "Invoice permanently deleted by superadmin", "FINANCIAL"); res.json({ ok: true });
     });
+    app.post("/api/invoices/rebill-source", auth, admin, (req, res) => {
+      try {
+        const sourceType = clean(req.body?.source_type, 20);
+        const sourceId = clean(req.body?.source_id, 160);
+        const method = normalizePaymentMethod(req.body?.payment_method, { allowEmpty: false });
+        if (!method) return res.status(400).json({ error: "INVALID_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
+        let created = [];
+        db.transaction(() => {
+          if (sourceType === "job") {
+            const job = db.prepare("SELECT * FROM jobs WHERE id=? AND status='Completed'").get(sourceId);
+            if (!job) throw Object.assign(new Error("UNBILLED_JOB_NOT_FOUND"), { status: 404 });
+            if (String(job.billing_status || "Unbilled") !== "Unbilled") throw Object.assign(new Error("SOURCE_ALREADY_BILLED"), { status: 409 });
+            created = invoiceEngine.createJobInvoices({ job: { ...job, payment_method: method }, actor: req.user, now: new Date().toISOString(), entries: [] });
+          } else if (sourceType === "workflow") {
+            const workflow = db.prepare("SELECT * FROM workshop_workflows WHERE id=? AND current_status='COMPLETED'").get(sourceId);
+            if (!workflow) throw Object.assign(new Error("UNBILLED_WORKFLOW_NOT_FOUND"), { status: 404 });
+            if (String(workflow.billing_status || "Unbilled") !== "Unbilled") throw Object.assign(new Error("SOURCE_ALREADY_BILLED"), { status: 409 });
+            const stages = db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(sourceId);
+            const lines = db.prepare("SELECT * FROM workflow_financial_lines WHERE workflow_id=? ORDER BY created_at,id").all(sourceId);
+            created = [invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now: new Date().toISOString(), paymentMethod: method })];
+          } else {
+            throw Object.assign(new Error("INVALID_INVOICE_SOURCE_TYPE"), { status: 400 });
+          }
+        })();
+        audit(req, "REBILL", "invoices", sourceId, null, { source_type: sourceType, invoices: created.map((row) => row.invoice_number) }, created.length, "Unbilled source re-invoiced", "FINANCIAL");
+        res.status(201).json({ ok: true, invoices: created });
+      } catch (error) { sendError(res, error); }
+    });
+
+    app.post("/api/invoices/purge-all", auth, admin, (req, res) => {
+      if (req.user.role !== "SUPERADMIN") return res.status(403).json({ error: "SUPERADMIN_REQUIRED" });
+      const confirmation = clean(req.body?.confirmation, 120);
+      if (confirmation !== "DELETE ALL INVOICES") return res.status(400).json({ error: "PURGE_CONFIRMATION_REQUIRED" });
+      const before = db.prepare("SELECT * FROM invoices ORDER BY created_at,id").all();
+      const affectedJobs = new Set();
+      const affectedWorkflows = new Set();
+      db.transaction(() => {
+        for (const invoice of before) {
+          const detail = invoiceEngine.invoiceDetail(invoice.id);
+          invoiceEngine.reverseLedger(detail || invoice);
+          invoiceEngine.resetInvoiceSource(detail || invoice);
+          if (invoice.source_type === "job" && invoice.source_id) affectedJobs.add(invoice.source_id);
+          if (invoice.source_type === "workflow" && invoice.direction === "receivable" && invoice.source_id) affectedWorkflows.add(invoice.source_id);
+        }
+        db.prepare("DELETE FROM invoices").run();
+      })();
+      audit(req, "PURGE_ALL", "invoices", "ALL", { count: before.length }, null, before.length, "All invoices and bills permanently deleted; source work reset to Unbilled", "FINANCIAL");
+      res.json({ ok: true, deleted_invoices: before.length, reset_jobs: affectedJobs.size, reset_workflows: affectedWorkflows.size });
+    });
+
     app.get("/api/invoices/:id/pdf", auth, financeReader, (req, res) => {
       const invoice = invoiceEngine.invoiceDetail(req.params.id); if (!invoice) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
       const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
