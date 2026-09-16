@@ -555,25 +555,14 @@ function registerEventRoutes(options) {
         return res.status(201).json({ ...result, payment_method: paymentMethod });
       }
 
-      if (!invoiceEngine) return res.status(503).json({ error: "INVOICE_ENGINE_UNAVAILABLE" });
+      if (!invoiceEngine || !documentService?.ensureTicketInvoice) return res.status(503).json({ error: "INVOICE_ENGINE_UNAVAILABLE" });
       const result = db.transaction(() => {
         if (Number(ticketService.capacity(event.id)?.remaining || 0) < quantity) throw Object.assign(new Error("EVENT_SOLD_OUT"), { status: 409 });
         const tickets = names.map((attendeeName) => ticketService.createTicket({
           eventId: event.id, sourceType: "PURCHASE", ticketVariant: "PUBLIC_PAID", buyerName: names[0], attendeeName, contactEmail,
           priceCents: Number(event.price_cents || 0), currency: event.currency || "USD", paymentMethod, paymentStatus: "PENDING", reservationStatus: "RESERVED"
         }));
-        const issueDate = new Date().toISOString().slice(0,10);
-        const eventDate = String(event.start_at || "").slice(0,10);
-        const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate >= issueDate ? eventDate : issueDate;
-        const invoices = tickets.map((ticket) => {
-          const invoice = invoiceEngine.createInvoice({
-            direction:"receivable", issueDate, dueDate, sourceType:"event", sourceId:`ticket:${ticket.id}`,
-            summary:`Event ticket: ${event.title_en || event.title_hu || event.id}`, taxRate:0, paymentMethod, status:"issued",
-            items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${ticket.attendee_name}`, quantity:1, unit_price:Number(ticket.price_cents || 0)/100, line_type:"fee" }]
-          });
-          db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,ticket.id);
-          return invoice;
-        });
+        const invoices = tickets.map((ticket) => documentService.ensureTicketInvoice(ticket, event, { status: "issued" }));
         return { tickets, invoices };
       })();
       return res.status(201).json({ status: "PENDING", payment_method: paymentMethod, reservation_status: "RESERVED", ticket_ids: result.tickets.map((ticket) => ticket.id), invoice_ids: result.invoices.map((invoice) => invoice.id), invoice_numbers: result.invoices.map((invoice) => invoice.invoice_number) });
