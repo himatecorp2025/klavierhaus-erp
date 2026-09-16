@@ -662,8 +662,6 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       // Phase-cost ledger rows are underlying workshop expenses, not invoice duplicates.
       // Invoice-only deletion reverses generated revenue while preserving the completed work's real costs.
       db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=?").run(`WORKFLOW_INVOICE_REVENUE:${invoice.source_id}`);
-      const materialIds = db.prepare("SELECT id FROM workflow_materials WHERE workflow_id=?").all(invoice.source_id);
-      for (const material of materialIds) db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_MATERIAL' AND source_id=?").run(`WORKFLOW_INVOICE_MATERIAL:${material.id}`);
     }
   }
   return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
