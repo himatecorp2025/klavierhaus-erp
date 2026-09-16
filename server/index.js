@@ -21,6 +21,7 @@ const { createStripeSandbox } = require("./stripe-sandbox");
 const { createTicketService } = require("./ticket-service");
 const { createBusinessDocumentService, createInvoiceEngine, registerBusinessOperationsRoutes } = require("./business-operations");
 const { normalizePaymentMethod } = require("./payment-methods");
+const { buildAccountingSnapshot, isInvoiceDerivedFinancialItem, roundMoney } = require("./accounting-domain");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
@@ -78,11 +79,15 @@ const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:proce
 
 const VISIBLE_USER_ROLES=["ADMIN","MANAGER","WORKER"];
 const ADMIN_MODULES = Object.freeze([
-  { key: "website_events", group: "Website & Events", label_en: "Website & Events", label_hu: "Weboldal és események" },
+  { key: "finance_invoicing", group: "Finance & Invoicing", label_en: "Finance & Invoicing", label_hu: "Pénzügy és számlázás" },
+  { key: "technical", group: "Technical Operation", label_en: "Technical Operation", label_hu: "Technikai működés" },
   { key: "marketing", group: "Marketing", label_en: "Marketing", label_hu: "Marketing" },
-  { key: "technical", group: "Technical Operation", label_en: "Technical Operation", label_hu: "Technikai működés" }
+  { key: "website_events", group: "Website & Events", label_en: "Website & Events", label_hu: "Weboldal és események" }
 ]);
 const ADMIN_MODULE_CARDS = Object.freeze([
+  { key: "finance", group_key: "finance_invoicing", label_en: "Finance", label_hu: "Pénzügy" },
+  { key: "income_statement", group_key: "finance_invoicing", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
+  { key: "invoice_documents", group_key: "finance_invoicing", label_en: "Invoices Documents", label_hu: "Számladokumentumok" },
   { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
   { key: "website_services", group_key: "website_events", label_en: "Services", label_hu: "Szolgáltatások" },
   { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
@@ -109,10 +114,9 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
   { key: "pianos", group_key: "technical", label_en: "Client Pianos", label_hu: "Ügyfélzongorák" },
   { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
+  { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
   { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
-  { key: "knowledge_base", group_key: "technical", label_en: "Invoices & Documents", label_hu: "Számlák és dokumentumok" },
-  { key: "finance", group_key: "technical", label_en: "Finance", label_hu: "Pénzügy" },
-  { key: "income_statement", group_key: "technical", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
+  { key: "knowledge_base", group_key: "technical", label_en: "Document Archive", label_hu: "Dokumentumtár" },
   { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
@@ -124,8 +128,8 @@ const ADMIN_MODULE_CARDS = Object.freeze([
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-    MANAGER:[...commonView,'finance.view','income_statement.view'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+    MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
     WORKER:[...commonView]
   };
   const insert=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
@@ -138,7 +142,7 @@ fs.mkdirSync(BACKUP_DIR,{recursive:true});
 const DB_PATH=process.env.DB_PATH || path.join(__dirname,'db','klavierhaus_v6.sqlite');
 function audit(req, action, module, recordId, oldValue=null, newValue=null, success=1, details='', auditType='TECHNICAL'){
   try{
-    if(isSuperadminUser(req?.user)) return;
+    if(isSuperadminUser(req?.user) && auditType!=='FINANCIAL') return;
     db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details,audit_type)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(rid('AUD'),req?.user?.id||'',req?.user?.name||'',req?.user?.role||'',action,module||'',recordId||'',oldValue?JSON.stringify(oldValue):null,newValue?JSON.stringify(newValue):null,success,details||'',auditType);
   }catch(e){console.warn('audit log failed:',e.message)}
@@ -1401,114 +1405,64 @@ function financialItemsForMonth(month){
 
 function incomeStatementPayload(month){
   if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Month must be YYYY-MM");
-  const {monthStart,monthEnd,rows}=financialItemsForMonth(month);
+  const monthStart = `${month}-01`;
+  const nextMonth = new Date(`${monthStart}T00:00:00Z`);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
+  const monthEnd = nextMonth.toISOString().slice(0,10);
   const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,monthEnd);
   const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
 
-  const incomeItems=rows.filter(x=>x.main_type==='INCOME');
-  const expenseItems=rows.filter(x=>x.main_type==='EXPENSE');
-  const passiveIncome=incomeItems.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
-  const oneTimeIncome=incomeItems.filter(x=>x.recurrence!=='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
-  const revenue=passiveIncome+oneTimeIncome;
-  const recurringExpenses=expenseItems.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
-  const oneTimeExpenses=expenseItems.filter(x=>x.recurrence!=='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0);
-  const expenses=recurringExpenses+oneTimeExpenses;
+  const monthInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date>=? AND issue_date<? ORDER BY issue_date,invoice_number`).all(monthStart,monthEnd);
+  const asOfInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number`).all(monthEnd);
+  const monthFinancial=db.prepare(`SELECT * FROM financial_items WHERE ((recurrence='MONTHLY' AND item_date<?) OR (recurrence!='MONTHLY' AND item_date>=? AND item_date<?)) ORDER BY item_date,created_at`).all(monthEnd,monthStart,monthEnd);
+  const asOfFinancial=db.prepare(`SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at`).all(monthEnd);
+  const monthDirect=monthFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
+  const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
+  const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect});
 
-  const accounts={};
-  function account(code,name_en,name_hu,category){
-    if(!accounts[code]) accounts[code]={code,name_en,name_hu,category,debit_total:0,credit_total:0,balance:0};
-    return accounts[code];
-  }
-  const categoryNames={
-    SERVICE_REVENUE:["Service Revenue","Szolgáltatási bevétel","REVENUE"],
-    PIANO_SALE:["Piano Sale Revenue","Zongoraeladás bevétele","REVENUE"],
-    PASSIVE_REVENUE:["Recurring Revenue","Ismétlődő bevétel","REVENUE"],
-    OTHER_INCOME:["Other Income","Egyéb bevétel","REVENUE"],
-    MATERIALS:["Materials Expense","Anyagköltség","EXPENSE"],
-    CONTRACTOR:["Contractor Labor","Alvállalkozói munkadíj","EXPENSE"],
-    LABOR_EXPENSE:["Employee Daily Rate","Munkavállalói napidíj","EXPENSE"],
-    TRANSPORT:["Transportation","Szállítás","EXPENSE"],
-    RENT:["Rent","Bérleti díj","EXPENSE"],
-    INSURANCE:["Insurance","Biztosítás","EXPENSE"],
-    TAX:["Taxes","Adók","EXPENSE"],
-    OTHER_EXPENSE:["Other Expense","Egyéb kiadás","EXPENSE"],
-    CASH:["Cash","Készpénz","ASSET"],
-    BANK:["Bank Account","Bankszámla","ASSET"],
-    CHECKS:["Undeposited Checks","Befizetés előtti csekkek","ASSET"],
-    AR:["Accounts Receivable","Vevőkövetelés","ASSET"],
-    INVENTORY:["Inventory","Készlet","ASSET"],
-    COMPANY_PIANOS:["Company Pianos","Céges zongorák","ASSET"],
-    TOOLS:["Tools and Equipment","Szerszámok és berendezések","ASSET"],
-    OTHER_ASSET:["Other Assets","Egyéb eszközök","ASSET"],
-    LOAN:["Loans Payable","Hitelek","LIABILITY"],
-    BANK_LOAN:["Bank Loan","Bankkölcsön","LIABILITY"],
-    INSURANCE_LIABILITY:["Insurance Liabilities","Biztosítási kötelezettségek","LIABILITY"],
-    OTHER_LONG_TERM_SOURCE:["Other Long-Term Sources","Egyéb hosszú lejáratú források","LIABILITY"],
-    AP:["Accounts Payable","Szállítói tartozás","LIABILITY"],
-    CHECK_PAYABLE:["Check Payables","Csekkes tartozás","LIABILITY"],
-    RENT_PAYABLE:["Rent","Bérleti díj","LIABILITY"],
-    UTILITIES_PAYABLE:["Utilities","Rezsi","LIABILITY"],
-    SHORT_TERM_OPERATING:["Short-Term Operating Expenses","Rövid lejáratú működési kiadások","LIABILITY"],
-    OTHER_SHORT_TERM_SOURCE:["Other Short-Term Sources","Egyéb rövid lejáratú források","LIABILITY"],
-    OWNER_EQUITY:["Owner Equity","Saját tőke","EQUITY"],
-    OTHER_SOURCE:["Other Sources","Egyéb forrás","EQUITY"]
+  const accountMap=new Map();
+  const addPnl=(code,name_en,name_hu,category,amount)=>{
+    const value=roundMoney(amount);
+    if(Math.abs(value)<0.005) return;
+    const current=accountMap.get(code)||{code,name_en,name_hu,category,debit_total:0,credit_total:0,balance:0};
+    current.balance=roundMoney(current.balance+Math.abs(value));
+    if(category==='REVENUE') current.credit_total=roundMoney(current.credit_total+Math.abs(value));
+    else current.debit_total=roundMoney(current.debit_total+Math.abs(value));
+    accountMap.set(code,current);
   };
-  const accountOrder={
-    REVENUE:0,EXPENSE:100,ASSET:200,LIABILITY:300,EQUITY:400,
-    SERVICE_REVENUE:1,PIANO_SALE:2,PASSIVE_REVENUE:3,OTHER_INCOME:20,
-    TAX:101,MATERIALS:102,CONTRACTOR:103,LABOR_EXPENSE:104,TRANSPORT:105,RENT:106,INSURANCE:107,OTHER_EXPENSE:130,
-    CASH:201,BANK:202,CHECKS:203,AR:204,INVENTORY:205,COMPANY_PIANOS:206,TOOLS:207,OTHER_ASSET:230,
-    LOAN:301,BANK_LOAN:302,INSURANCE_LIABILITY:303,OTHER_LONG_TERM_SOURCE:304,AP:321,CHECK_PAYABLE:322,RENT_PAYABLE:323,UTILITIES_PAYABLE:324,SHORT_TERM_OPERATING:325,OTHER_SHORT_TERM_SOURCE:340,
-    OWNER_EQUITY:401,OTHER_SOURCE:420
-  };
-  function addBalance(code, amount, preferredCategory){
-    const n=categoryNames[code] || [code,code,preferredCategory||"ASSET"];
-    const categoryOverride = preferredCategory && !categoryNames[code] ? preferredCategory : n[2];
-    const a=account(code,n[0],n[1],categoryOverride);
-    a.balance += Math.abs(Number(amount||0));
-    if(Number(amount||0)>=0) a.debit_total += Math.abs(Number(amount||0)); else a.credit_total += Math.abs(Number(amount||0));
+  addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',snapshot.pnl.invoiceRevenue);
+  const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
+  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>sum+Number(row.total_amount||0),0));
+  const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
+  addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor Expense','Alvállalkozói közvetlen költség','EXPENSE',subcontractorExpense);
+  addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense);
+  for(const item of monthDirect){
+    if(item.main_type==='INCOME') addPnl(item.category||'OTHER_INCOME',item.category||'Other Income',item.category||'Egyéb bevétel','REVENUE',item.amount);
+    if(item.main_type==='EXPENSE') addPnl(item.category||'OTHER_EXPENSE',item.category||'Other Expense',item.category||'Egyéb kiadás','EXPENSE',item.amount);
   }
-  function expenseSourceAccount(item){
-    const code=String(item.balance_account||"").trim();
-    const meta=categoryNames[code];
-    if(meta && (meta[2]==="LIABILITY" || meta[2]==="EQUITY")) return code;
-    const cat=String(item.category||"").trim();
-    if(cat==="RENT") return "RENT_PAYABLE";
-    if(cat==="INSURANCE") return "INSURANCE_LIABILITY";
-    if(cat==="TAX" || cat==="MATERIALS" || cat==="CONTRACTOR" || cat==="TRANSPORT") return "SHORT_TERM_OPERATING";
-    return "OTHER_SHORT_TERM_SOURCE";
-  }
-  rows.forEach(x=>{
-    const amount=Number(x.amount||0);
-    if(x.main_type==='INCOME'){
-      addBalance(x.category || (x.recurrence==='MONTHLY'?'PASSIVE_REVENUE':'SERVICE_REVENUE'), amount, 'REVENUE');
-      if(x.balance_account) addBalance(x.balance_account, amount, 'ASSET');
-    } else if(x.main_type==='EXPENSE'){
-      addBalance(x.category || 'OTHER_EXPENSE', amount, 'EXPENSE');
-      addBalance(expenseSourceAccount(x), amount, 'LIABILITY');
-    } else if(x.main_type==='ASSET'){
-      addBalance(x.category || x.balance_account || 'OTHER_ASSET', amount, 'ASSET');
-    } else if(x.main_type==='LIABILITY'){
-      addBalance(x.category || 'OTHER_SOURCE', amount, 'LIABILITY');
-    } else if(x.main_type==='EQUITY'){
-      addBalance(x.category || 'OWNER_EQUITY', amount, 'EQUITY');
-    }
-  });
-  const trialBalance=Object.values(accounts).sort((a,b)=>(accountOrder[a.code]??999)-(accountOrder[b.code]??999));
-  const assets=trialBalance.filter(a=>a.category==='ASSET').reduce((s,a)=>s+Number(a.balance||0),0);
-  const liabilities=trialBalance.filter(a=>a.category==='LIABILITY').reduce((s,a)=>s+Number(a.balance||0),0);
-  const equity=trialBalance.filter(a=>a.category==='EQUITY').reduce((s,a)=>s+Number(a.balance||0),0);
-  const sources=liabilities+equity;
-  const balanceDifference=assets-sources;
-  const balanceAudit={balanced:Math.abs(balanceDifference)<0.01,difference:balanceDifference,absolute_difference:Math.abs(balanceDifference)};
+  const balance=snapshot.balance;
+  const trialBalance=[
+    ...Array.from(accountMap.values()),
+    {code:'CASH_BANK',name_en:'Cash & Bank Accounts',name_hu:'Készpénz és bankszámlák',category:'ASSET',debit_total:Math.max(0,balance.cashBankAccounts),credit_total:Math.max(0,-balance.cashBankAccounts),balance:balance.cashBankAccounts},
+    {code:'AR',name_en:'Accounts Receivable',name_hu:'Vevőkövetelések',category:'ASSET',debit_total:Math.max(0,balance.accountsReceivable),credit_total:0,balance:balance.accountsReceivable},
+    {code:'AP',name_en:'Accounts Payable',name_hu:'Szállítói kötelezettségek',category:'LIABILITY',debit_total:0,credit_total:Math.max(0,balance.accountsPayable),balance:balance.accountsPayable},
+    {code:'CURRENT_PERIOD_NET_INCOME',name_en:'Retained Earnings / Current Period Net Income',name_hu:'Eredménytartalék / Tárgyidőszaki nettó eredmény',category:'EQUITY',debit_total:Math.max(0,-balance.currentPeriodNetIncome),credit_total:Math.max(0,balance.currentPeriodNetIncome),balance:balance.currentPeriodNetIncome}
+  ];
+  const incomeDirect=monthDirect.filter(x=>x.main_type==='INCOME');
+  const expenseDirect=monthDirect.filter(x=>x.main_type==='EXPENSE');
+  const passiveIncome=roundMoney(incomeDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0));
+  const recurringExpenses=roundMoney(expenseDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0));
+  const revenue=snapshot.pnl.revenue, expenses=snapshot.pnl.expenses;
   return {
     month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
-    accountingLogic:{source:"financial_items",generalLedger:"simple_internal_finance_register"},
-    counts:{openJobs,closedJobs:closedJobs.length,financialItems:rows.length},
-    totals:{passiveIncome,oneTimeIncome,revenue,recurringExpenses,oneTimeExpenses,expenses,profit:revenue-expenses,assets,liabilities,equity,sources,netWorth:assets-sources},
-    balanceAudit,
+    accountingLogic:{source:'invoices_plus_noninvoice_financial_items',generalLedger:'accrual_invoice_state_model',equation:'Assets = Liabilities + Equity'},
+    counts:{openJobs,closedJobs:closedJobs.length,financialItems:monthDirect.length,invoices:monthInvoices.length},
+    totals:{passiveIncome,oneTimeIncome:roundMoney(revenue-passiveIncome),revenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.accountsPayable,equity:balance.currentPeriodNetIncome,sources:balance.totalLiabilitiesEquity,netWorth:balance.currentPeriodNetIncome,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,accountsPayable:balance.accountsPayable,currentPeriodNetIncome:balance.currentPeriodNetIncome},
+    balanceAudit:{balanced:balance.balanced,difference:balance.difference,absolute_difference:Math.abs(balance.difference)},
+    balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,currentPeriodNetIncome:balance.currentPeriodNetIncome,totalLiabilitiesEquity:balance.totalLiabilitiesEquity},
     trialBalance,
-    items:rows
+    items:monthDirect,
+    invoices:monthInvoices
   };
 }
 
@@ -2589,49 +2543,18 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     // Delete every business, import, audit, backup and configurable record.
     // Only the currently authenticated hidden superadmin account survives.
     [
-      "calendar_sync_log",
-      "calendar_oauth_states",
-      "external_calendar_events",
-      "calendar_integrations",
-      "system_integration_delete_tokens",
-      "system_integration_backups",
-      "system_integration_health",
-      "system_integration_secrets",
-      "event_checkins",
-      "event_attendance_exports",
-      "event_attendance_actions",
-      "event_attendance_entries",
-      "event_attendance_sessions",
-      "event_refund_requests",
-      "event_tickets",
-      "event_invitations",
-      "event_closures",
-      "customer_messages",
-      "customer_conversations",
-      "communication_deliveries",
-      "events",
-      "event_categories",
-      "journal_lines",
-      "journal_entries",
-      "accounts",
-      "financial_items",
-      "job_logs",
-      "knowledge_base",
-      "jobs",
-      "planned_jobs",
-      "inventory_checks",
-      "inventory_items",
-      "pianos",
-      "contacts",
-      "import_batches",
-      "audit_log",
-      "backup_log",
-      "role_permissions",
-      "app_settings",
-      "notifications",
-      "push_subscriptions",
-      "notification_devices",
-      "notification_preferences"
+      "calendar_sync_log","calendar_oauth_states","external_calendar_events","calendar_integrations",
+      "system_integration_delete_tokens","system_integration_test_tokens","system_integration_backups","system_integration_health","system_integration_secrets",
+      "website_integration_oauth_states","website_integration_settings","website_preview_tokens","website_content_versions","website_tracking_events","website_contact_leads","website_media","website_artists","website_services","website_showroom_pianos","website_reviews","website_content_pages","landing_sections","marketing_campaigns",
+      "event_attendance_exports","event_attendance_actions","event_attendance_entries","event_attendance_sessions","event_checkins","event_ticket_documents","event_refund_requests","event_checkout_holds","stripe_webhook_events","event_payments","event_tickets","event_invitations","event_repeat_requests","event_closures","events","event_categories",
+      "customer_message_attachments","customer_messages","customer_conversation_events","customer_conversations","communication_deliveries",
+      "workflow_audit_events","workflow_closed_jobs","workflow_documents","workflow_financial_lines","workflow_materials","workflow_stage_transfers","workflow_stages","workshop_workflows",
+      "invoice_items","invoices","invoice_sequences","partner_contractors","partners",
+      "journal_lines","journal_entries","financial_items","accounts",
+      "job_logs","knowledge_base","jobs","planned_jobs","employee_daily_rates",
+      "inventory_checks","inventory_items","client_pianos","pianos","contacts","import_batches",
+      "audit_log","backup_log","role_permissions","app_settings","notifications","push_subscriptions","push_activation_tests","notification_devices","notification_preferences",
+      "account_activations","activation_email_events","activation_email_log"
     ].forEach(clear);
 
     if(exists("users")){
@@ -2658,8 +2581,8 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-        MANAGER:[...commonView,'finance.view','income_statement.view'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+        MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
         WORKER:[...commonView]
       };
       const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
