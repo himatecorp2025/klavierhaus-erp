@@ -30,6 +30,63 @@ function sumMoney(values) {
   return total;
 }
 
+function monthKey(value) {
+  const text = String(value || "");
+  return /^\d{4}-\d{2}/.test(text) ? text.slice(0, 7) : null;
+}
+
+function nextMonthKey(value) {
+  const key = monthKey(value);
+  if (!key) return null;
+  const date = new Date(`${key}-01T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return date.toISOString().slice(0, 7);
+}
+
+function expandFinancialItemsAsOf(items, cutoffExclusive) {
+  const cutoff = String(cutoffExclusive || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) return [];
+  const expanded = [];
+  for (const item of items || []) {
+    const itemDate = String(item?.item_date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(itemDate) || itemDate >= cutoff) continue;
+    const recurrence = String(item?.recurrence || "ONE_TIME").toUpperCase();
+    if (recurrence !== "MONTHLY") { expanded.push(item); continue; }
+    const startMonth = monthKey(itemDate);
+    const voidDate = String(item?.void_effective_date || "");
+    const voidMonth = /^\d{4}-\d{2}-\d{2}$/.test(voidDate) ? monthKey(voidDate) : null;
+    let cursor = startMonth;
+    let guard = 0;
+    while (cursor && guard < 2400) {
+      const occurrenceDate = cursor === startMonth ? itemDate : `${cursor}-01`;
+      if (occurrenceDate >= cutoff) break;
+      if (voidMonth && cursor > voidMonth) break;
+      expanded.push({
+        ...item,
+        item_date: occurrenceDate,
+        recurrence_source_id: item.id,
+        recurrence_occurrence_month: cursor,
+        is_recurring_occurrence: 1
+      });
+      cursor = nextMonthKey(cursor);
+      guard += 1;
+    }
+  }
+  return expanded;
+}
+
+function workflowBillablePhaseSubtotal(lines) {
+  let total = 0;
+  for (const line of lines || []) {
+    if (line?.line_type && String(line.line_type).toUpperCase() !== "COST") continue;
+    const status = String(line?.billing_status || "CHARGEABLE").toUpperCase();
+    const amount = roundMoney(line?.amount || 0);
+    if (status === "CHARGEABLE") total = roundMoney(total + amount);
+    else if (status === "CREDIT") total = roundMoney(total - amount);
+  }
+  return total;
+}
+
 function isInvoiceDerivedFinancialItem(item) {
   return INVOICE_DERIVED_SOURCE_TYPES.has(String(item?.source_type || ""));
 }
@@ -295,6 +352,8 @@ module.exports = Object.freeze({
   INVOICE_DERIVED_SOURCE_TYPES,
   roundMoney,
   sumMoney,
+  expandFinancialItemsAsOf,
+  workflowBillablePhaseSubtotal,
   isInvoiceDerivedFinancialItem,
   buildAccountingSnapshot,
   normalizeOpeningBalance
