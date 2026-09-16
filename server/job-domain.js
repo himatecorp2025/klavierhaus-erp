@@ -212,11 +212,11 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
       if (complete && Number(job.daily_rate_enabled || 0) === 1 && normalizeMoney(job.daily_rate_allocated_amount) > 0) {
         const dailyExpense = postFinancialItemOnce({
           itemDate: job.daily_rate_date || String(job.start_time || now).slice(0, 10),
-          title: `Employee daily rate expense / Munkavállalói napidíj: ${job.assigned_to || job.assigned_user_id || job.id}`,
+          title: `Subcontractor daily rate / Alvállalkozói napidíj: ${job.assigned_to || job.assigned_user_id || job.id}`,
           description: `Job / Munka: ${job.title || job.job_key || job.id}`,
           amount: job.daily_rate_allocated_amount,
           mainType: "EXPENSE",
-          category: "LABOR_EXPENSE",
+          category: "SUBCONTRACTOR_EXPENSE",
           paymentMethod: "",
           jobId: job.id,
           clientId: job.client_id,
@@ -235,7 +235,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
           description: `Job / Munka: ${job.title || job.job_key || job.id}`,
           amount: extraCompensation,
           mainType: "EXPENSE",
-          category: "FIELD_SERVICE_COMPENSATION",
+          category: "SUBCONTRACTOR_EXPENSE",
           paymentMethod: "",
           jobId: job.id,
           clientId: job.client_id,
