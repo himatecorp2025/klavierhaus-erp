@@ -93,6 +93,36 @@ function addEquity(result, category, amount) {
   else result.manualEquity = roundMoney(result.manualEquity + amount);
 }
 
+function normalizeOpeningBalance(openingBalance) {
+  const source = openingBalance && typeof openingBalance === "object" ? openingBalance : null;
+  const result = {
+    effectiveDate: source?.effective_date || source?.effectiveDate || null,
+    cashBank: roundMoney(source?.opening_cash_bank ?? source?.cashBank ?? 0),
+    accountsReceivable: roundMoney(source?.opening_accounts_receivable ?? source?.accountsReceivable ?? 0),
+    accountsPayable: roundMoney(source?.opening_accounts_payable ?? source?.accountsPayable ?? 0),
+    retainedEarningsEquity: roundMoney(source?.opening_retained_earnings_equity ?? source?.retainedEarningsEquity ?? 0),
+    customAssets: 0,
+    customLiabilities: 0,
+    customEquity: 0,
+    items: []
+  };
+  for (const item of source?.items || []) {
+    const itemType = String(item?.item_type || item?.itemType || "").toUpperCase();
+    if (!["ASSET", "LIABILITY", "EQUITY"].includes(itemType)) continue;
+    const amount = roundMoney(item?.amount || 0);
+    const normalized = { id: item?.id || null, item_name: String(item?.item_name || item?.itemName || "").trim(), item_type: itemType, amount };
+    result.items.push(normalized);
+    if (itemType === "ASSET") result.customAssets = roundMoney(result.customAssets + amount);
+    else if (itemType === "LIABILITY") result.customLiabilities = roundMoney(result.customLiabilities + amount);
+    else result.customEquity = roundMoney(result.customEquity + amount);
+  }
+  result.totalAssets = roundMoney(result.cashBank + result.accountsReceivable + result.customAssets);
+  result.totalLiabilitiesEquity = roundMoney(result.accountsPayable + result.retainedEarningsEquity + result.customLiabilities + result.customEquity);
+  result.difference = roundMoney(result.totalAssets - result.totalLiabilitiesEquity);
+  result.balanced = Math.abs(result.difference) < 0.01;
+  return result;
+}
+
 function summarizeManualBalanceItems(items) {
   const result = {
     cashDelta: 0,
@@ -152,7 +182,8 @@ function buildAccountingSnapshot({
   asOfDirectItems = [],
   monthCreditMemos = [],
   asOfCreditMemos = [],
-  asOfDateExclusive = null
+  asOfDateExclusive = null,
+  openingBalance = null
 } = {}) {
   const monthActiveInvoices = activeInvoices(monthInvoices);
   const asOfActiveInvoices = activeInvoices(asOfInvoices);
@@ -208,14 +239,21 @@ function buildAccountingSnapshot({
   const directCumulativeExpenses = sumMoney(cleanAsOfDirect.filter((row) => row.main_type === "EXPENSE").map((row) => row.amount));
   const directCumulativeNet = roundMoney(directCumulativeRevenue - directCumulativeExpenses);
   const manual = summarizeManualBalanceItems(cleanAsOfDirect);
+  const opening = normalizeOpeningBalance(openingBalance);
 
   const salesTaxPayable = roundMoney(salesTaxGross - refundedSalesTax - manual.salesTaxRemitted);
   const deferredRevenue = roundMoney(deferredRevenueGross - deferredRevenueCredits);
   const currentPeriodNetIncome = roundMoney(recognizedCumulativeRevenue - cumulativeContraRevenue - cumulativeInvoiceExpenses + directCumulativeNet);
-  const cashBankAccounts = roundMoney(paidReceivables - paidPayables - refundForPaidReceivables + directCumulativeNet + manual.cashDelta);
-  const totalAssets = roundMoney(cashBankAccounts + accountsReceivable + manual.manualAssets);
-  const totalLiabilities = roundMoney(accountsPayable + salesTaxPayable + deferredRevenue + manual.manualLiabilities);
-  const totalEquity = roundMoney(manual.ownersOpeningEquity + currentPeriodNetIncome + manual.manualEquity);
+  const cashBankAccounts = roundMoney(opening.cashBank + paidReceivables - paidPayables - refundForPaidReceivables + directCumulativeNet + manual.cashDelta);
+  const accountsReceivableWithOpening = roundMoney(opening.accountsReceivable + accountsReceivable);
+  const accountsPayableWithOpening = roundMoney(opening.accountsPayable + accountsPayable);
+  const manualAssets = roundMoney(opening.customAssets + manual.manualAssets);
+  const manualLiabilities = roundMoney(opening.customLiabilities + manual.manualLiabilities);
+  const ownersOpeningEquity = roundMoney(opening.retainedEarningsEquity + manual.ownersOpeningEquity);
+  const manualEquity = roundMoney(opening.customEquity + manual.manualEquity);
+  const totalAssets = roundMoney(cashBankAccounts + accountsReceivableWithOpening + manualAssets);
+  const totalLiabilities = roundMoney(accountsPayableWithOpening + salesTaxPayable + deferredRevenue + manualLiabilities);
+  const totalEquity = roundMoney(ownersOpeningEquity + currentPeriodNetIncome + manualEquity);
   const totalLiabilitiesEquity = roundMoney(totalLiabilities + totalEquity);
   const difference = roundMoney(totalAssets - totalLiabilitiesEquity);
 
@@ -233,21 +271,22 @@ function buildAccountingSnapshot({
     },
     balance: {
       cashBankAccounts,
-      accountsReceivable,
-      manualAssets: manual.manualAssets,
+      accountsReceivable: accountsReceivableWithOpening,
+      manualAssets,
       totalAssets,
-      accountsPayable,
+      accountsPayable: accountsPayableWithOpening,
       salesTaxPayable,
       deferredRevenue,
-      manualLiabilities: manual.manualLiabilities,
+      manualLiabilities,
       totalLiabilities,
-      ownersOpeningEquity: manual.ownersOpeningEquity,
+      ownersOpeningEquity,
       currentPeriodNetIncome,
-      manualEquity: manual.manualEquity,
+      manualEquity,
       totalEquity,
       totalLiabilitiesEquity,
       difference,
-      balanced: Math.abs(difference) < 0.01
+      balanced: Math.abs(difference) < 0.01,
+      openingBalance: opening
     }
   };
 }
@@ -257,5 +296,6 @@ module.exports = Object.freeze({
   roundMoney,
   sumMoney,
   isInvoiceDerivedFinancialItem,
-  buildAccountingSnapshot
+  buildAccountingSnapshot,
+  normalizeOpeningBalance
 });
