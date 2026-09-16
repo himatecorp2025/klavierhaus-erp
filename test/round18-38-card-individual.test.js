@@ -8,10 +8,10 @@ const index=fs.readFileSync(path.join(root,'server/index.js'),'utf8');
 const serverBundle=fs.readdirSync(path.join(root,'server')).filter(x=>x.endsWith('.js')).map(x=>fs.readFileSync(path.join(root,'server',x),'utf8')).join('\n');
 
 const cards=[
- ['finance','Finance','finance_invoicing','renderFinance','/api/income-statement'],
+ ['finance','Balance Sheet','finance_invoicing','renderFinance','/api/income-statement'],
  ['income_statement','Income Statement','finance_invoicing','renderIncomeStatement','/api/income-statement'],
  ['invoice_documents','Invoices Documents','finance_invoicing','renderInvoiceDocuments','/api/invoices'],
- ['knowledge_base','Invoices & Documents / Document Archive','finance_invoicing','knowledge_base:{api:','createResourceRoutes("knowledge_base"'],
+ ['knowledge_base','Company Documents Archive','technical','renderCompanyDocumentsArchive','/api/company-documents'],
  ['audit_log','Audit Log','technical','renderAuditLog','/api/audit-log'],
  ['backups','Backups','technical','renderBackupsView','/api/backups'],
  ['pianos','Client Piano','technical','renderPianos','/api/pianos'],
@@ -27,7 +27,7 @@ const cards=[
  ['system_integrations','System Activation & Integrations','technical','renderSystemIntegrations','/api/system-integrations'],
  ['users','Users','technical','renderUsers','/api/users'],
  ['workshop_workflow','Workshop Workflow','technical','renderWorkshopWorkflow','/api/workflows'],
- ['marketing_overview','Marketing Overview','marketing','renderMarketingOverview','/api/marketing/overview'],
+ ['marketing_overview','Campaign Overview','marketing','renderMarketingOverview','/api/marketing/overview'],
  ['customer_inbox','Customer Inbox','marketing','renderCustomerInbox','/api/customer-conversations'],
  ['website_reviews','Reviews','marketing','renderWebsiteReviews','/api/website-reviews'],
  ['campaigns_utm','Campaigns & UTM','marketing','renderMarketingCampaigns','/api/marketing/campaigns'],
