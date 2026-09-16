@@ -77,6 +77,7 @@ const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavi
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 hydrateRuntimeSecrets(db, process.env);
+const FINANCIAL_HISTORY_START = "2026-08";
 const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
@@ -1382,8 +1383,6 @@ app.get("/api/employee-daily-rates/:userId/capacity", auth, permit("ADMIN","MANA
   const summary=jobDomain.dailyRateAllocationSummary({userId:employee.id,dateStr:date,excludeJobId:jobId});
   res.json({user_id:employee.id,date,...summary});
 });
-
-const FINANCIAL_HISTORY_START = "2026-08";
 
 function financialPeriodIsClosed(period){
   if(!/^\d{4}-\d{2}$/.test(String(period||""))) return false;
