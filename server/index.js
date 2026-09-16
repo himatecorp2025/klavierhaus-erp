@@ -87,7 +87,7 @@ const ADMIN_MODULES = Object.freeze([
 const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "finance", group_key: "finance_invoicing", label_en: "Finance", label_hu: "Pénzügy" },
   { key: "income_statement", group_key: "finance_invoicing", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
-  { key: "invoice_documents", group_key: "finance_invoicing", label_en: "Invoices Documents", label_hu: "Számladokumentumok" },
+  { key: "knowledge_base", group_key: "finance_invoicing", label_en: "Invoices & Documents", label_hu: "Számlák és dokumentumok" },
   { key: "pages_content", group_key: "website_events", label_en: "Pages & Content", label_hu: "Oldalak és tartalmak" },
   { key: "website_services", group_key: "website_events", label_en: "Services", label_hu: "Szolgáltatások" },
   { key: "showroom_pianos", group_key: "website_events", label_en: "Showroom Pianos", label_hu: "Bemutatott zongorák" },
@@ -116,7 +116,6 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
   { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
   { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
-  { key: "knowledge_base", group_key: "technical", label_en: "Document Archive", label_hu: "Dokumentumtár" },
   { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
@@ -128,8 +127,8 @@ const ADMIN_MODULE_CARDS = Object.freeze([
 function seedDefaultPermissions(){
   const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
   const defaults={
-    ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-    MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
+    ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+    MANAGER:[...commonView,'finance.view','income_statement.view'],
     WORKER:[...commonView]
   };
   const insert=db.prepare('INSERT OR IGNORE INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,?)');
@@ -2581,8 +2580,8 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     if(exists("role_permissions")){
       const commonView=['scheduler.view','workshop_workflow.view','planned_jobs.view','contacts.view','pianos.view','closed_jobs.view','knowledge_base.view','inventory.view','users.view','customer_inbox.view'];
       const defaults={
-        ADMIN:[...commonView,'finance.view','income_statement.view','invoice_documents.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
-        MANAGER:[...commonView,'finance.view','income_statement.view','invoice_documents.view'],
+        ADMIN:[...commonView,'finance.view','income_statement.view','users.create','users.roles','permissions.manage','audit.view','events.view','events.manage','events.refunds','system_integrations.view','system_integrations.edit','system_integrations.test'],
+        MANAGER:[...commonView,'finance.view','income_statement.view'],
         WORKER:[...commonView]
       };
       const insertPermission=db.prepare("INSERT INTO role_permissions(role,permission,enabled,updated_by) VALUES(?,?,1,'SYSTEM')");
