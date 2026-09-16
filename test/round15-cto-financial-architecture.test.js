@@ -131,13 +131,13 @@ test("admin navigation is exactly four primary groups with finance separated and
 
   const finance = block(nav, '{id:"finance_invoicing"', ' {id:"technical"');
   const financeViews = [...finance.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(financeViews, ["finance", "income_statement", "invoice_documents", "knowledge_base"]);
+  assert.deepEqual(financeViews, ["finance", "income_statement", "invoice_documents"]);
   const technical = block(nav, '{id:"technical"', ' {id:"marketing"');
   const techViews = [...technical.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(techViews, ["audit_log","backups","pianos","contacts","closed_jobs","company_data","inventory","partners","planned_jobs","scheduler","website_services","settings","system_integrations","users","workshop_workflow"]);
+  assert.deepEqual(techViews, ["audit_log","backups","pianos","contacts","closed_jobs","knowledge_base","company_data","inventory","partners","planned_jobs","scheduler","website_services","settings","system_integrations","users","workshop_workflow"]);
   assert.ok(!technical.includes('["finance"'));
   assert.ok(!technical.includes('["income_statement"'));
-  assert.ok(!technical.includes('["knowledge_base"'));
+  assert.ok(technical.includes('["knowledge_base","Company Documents Archive"'));
 
   const marketing = block(nav, '{id:"marketing"', ' {id:"website_events"');
   const marketingViews = [...marketing.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
