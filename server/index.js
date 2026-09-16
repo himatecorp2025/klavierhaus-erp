@@ -43,6 +43,7 @@ const {
   createPianoImportUpload,
   createCompanyDocumentUpload,
   createCustomerConversationUpload,
+  createWorkflowInspectionUpload,
   uploadErrorHandler
 } = require("./upload-middleware");
 let webpush=null;
@@ -72,6 +73,7 @@ fs.mkdirSync(EVENT_IMAGE_DIR,{recursive:true});
 const WEBSITE_IMAGE_DIR=path.join(UPLOAD_DIR,"website");
 fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
 const companyDocumentUpload=createCompanyDocumentUpload(UPLOAD_DIR);
+const workflowInspectionUpload=createWorkflowInspectionUpload(UPLOAD_DIR);
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
@@ -806,6 +808,8 @@ registerWorkshopWorkflowRoutes({
   rid,
   nowISO,
   upload,
+  inspectionUpload:workflowInspectionUpload,
+  uploadDir:UPLOAD_DIR,
   notifyUser: createNotification,
   jobDomain,
   invoiceEngine
@@ -868,7 +872,7 @@ function normalizeJobRelationships(body, existing={}){
 }
 function isAssignedToUser(job,user){return !!job&&!!user&&((job.assigned_user_id&&String(job.assigned_user_id)===String(user.id))||(!job.assigned_user_id&&String(job.assigned_to||"")===String(user.name||"")));}
 function jobsSelectSql(where=""){
-  return `SELECT j.*, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by,
+  return `SELECT j.*, COALESCE(j.workshop_workflow_id,j.workflow_id) AS linked_workshop_workflow_id, COALESCE(au.name,j.assigned_to) AS assigned_to, au.calendar_color AS assigned_calendar_color, COALESCE(cu.name,j.created_by) AS created_by, COALESCE(ru.name,j.last_reassigned_by) AS last_reassigned_by,
     ece.provider AS calendar_source,ece.review_status AS calendar_review_status,ece.conflict_flag AS calendar_conflict_flag,
     ece.creator_email AS calendar_creator_email,ece.source_updated_at AS calendar_source_updated_at,ece.external_event_id AS calendar_external_event_id,
     ece.reviewed_at AS calendar_reviewed_at
@@ -2268,7 +2272,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const id=req.body.id || rid("P");
   const brand=req.body.brand || "";
   const model=req.body.model || "";
-  const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.original_description || req.body.piano_name || "Unknown piano";
+  const display=`${brand} ${model}`.trim() || req.body.display_name || req.body.original_description || req.body.piano_name || "Unknown piano";
   const ownerContactId=req.body.owner_contact_id||null;
   const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
   const estimated=Number(req.body.estimated_value||0);
@@ -2278,9 +2282,9 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const sizeCm=req.body.size_cm||reference.size_cm||null;
   const sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null;
   const sizeDisplay=req.body.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.finish||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
   if(ownerContactId) linkClientPiano(ownerContactId,id);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
@@ -2297,7 +2301,8 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   if(req.body.size_cm===undefined && !candidate.size_cm && reference.size_cm) req.body.size_cm=reference.size_cm;
   if(req.body.size_in===undefined && !candidate.size_in && reference.size_inch) req.body.size_in=reference.size_inch;
   if(req.body.size_display===undefined && !candidate.size_display && reference.size_display) req.body.size_display=reference.size_display;
-  const allowed=["brand","model","serial_no","year","build_year","size_cm","size_in","size_display","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
+  const allowed=["brand","model","serial_no","finish","year","build_year","size_cm","size_in","size_display","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
+  if((req.body.brand!==undefined||req.body.model!==undefined)&&req.body.display_name===undefined){req.body.display_name=`${String(req.body.brand!==undefined?req.body.brand:before.brand||"").trim()} ${String(req.body.model!==undefined?req.body.model:before.model||"").trim()}`.trim();}
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
   if(req.body.owner_contact_id!==undefined || req.body.ownership_type!==undefined){
@@ -2441,7 +2446,7 @@ app.post("/api/jobs", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   data.daily_rate_allocated_amount=dailyRateEnabled?Number(dailyRateDecision?.suggested_allocation||0):0;
   data.daily_rate_date=dailyRateEnabled?dailyRateDate:null;
   data.technician_extra_compensation=extraCompensation;
-  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","planned_job_id","daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date","technician_extra_compensation"]
+  const cols=["id","job_key","parent_job_id","workflow_root_id","workflow_step_no","workflow_status","title","job_type","client_id","client_name","client_phone","piano_id","piano_name","assigned_user_id","assigned_to","created_by_user_id","created_by","priority","status","start_time","end_time","timezone","planned_amount","pricing_basis","planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","workshop_workflow_id","planned_job_id","daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date","technician_extra_compensation"]
     .filter(c=>c==="id" || c==="job_key" || data[c]!==undefined);
   const created=db.transaction(()=>{
     db.prepare(`INSERT INTO jobs(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:(c==="job_key"?(data.job_key||stableJobKey()):data[c])));
@@ -2464,7 +2469,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
     "title","job_type","client_id","client_name","client_phone",
     "piano_id","piano_name","assigned_user_id","assigned_to","priority","status",
     "start_time","end_time","planned_amount","pricing_basis",
-    "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id",
+    "planned_hours","planned_minutes","travel_minutes","service_address","instructions","notes","workflow_id","workshop_workflow_id",
     "daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date","technician_extra_compensation"
   ];
   const workerRequestAllowed=new Set(["title","priority","start_time","end_time","travel_minutes","service_address","instructions","notes"]);
@@ -2676,6 +2681,11 @@ app.post("/api/jobs/:id/close", auth, (req,res)=>{
 
   const closeType=String(req.body.close_type||"");
   if(!["Partial","Full","Failed"].includes(closeType)){return res.status(400).json({error:"Close type must be Partial, Full or Failed"});}
+  const linkedWorkshopWorkflowId=String(job.workshop_workflow_id||job.workflow_id||"").trim();
+  if(closeType==="Full"&&linkedWorkshopWorkflowId){
+    const linkedWorkflow=db.prepare("SELECT id,current_status FROM workshop_workflows WHERE id=?").get(linkedWorkshopWorkflowId);
+    if(linkedWorkflow&&String(linkedWorkflow.current_status||"")!=="COMPLETED") return res.status(409).json({error:"LINKED_WORKSHOP_WORKFLOW_NOT_COMPLETED",workflow_id:linkedWorkflow.id});
+  }
   const billed=Number(req.body.billed_amount);
   if(Number.isNaN(billed)){return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
   const desc=String(req.body.close_description||"").trim();
@@ -2757,6 +2767,29 @@ app.post("/api/jobs/:id/close", auth, (req,res)=>{
   }
 });
 
+app.post("/api/workflow/inline-client-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const body=req.body||{},name=String(body.name||"").trim(),email=String(body.email||"").trim(),phone=String(body.phone||"").trim();
+  if(!name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
+  const hasPiano=body.has_piano===true||body.has_piano===1||String(body.has_piano||"").toLowerCase()==="true";
+  if(hasPiano&&(!String(body.make||body.brand||"").trim()||!String(body.model||"").trim()||!String(body.serial_number||body.serial_no||"").trim())) return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
+  try{
+    const result=db.transaction(()=>{
+      const clientId=nextContactId();
+      db.prepare("INSERT INTO contacts(id,name,email,phone,has_piano,status) VALUES(?,?,?,?,?,'Active')").run(clientId,name,email,phone,hasPiano?1:0);
+      let piano=null;
+      if(hasPiano){
+        const serial=String(body.serial_number||body.serial_no||"").trim();
+        const duplicate=existingPianoBySerial(serial);if(duplicate){const e=new Error("PIANO_SERIAL_ALREADY_EXISTS");e.code="PIANO_SERIAL_ALREADY_EXISTS";throw e;}
+        const id=rid("P"),brand=String(body.make||body.brand||"").trim(),model=String(body.model||"").trim(),finish=String(body.finish||"").trim(),display=`${brand} ${model}`.trim();
+        db.prepare("INSERT INTO pianos(id,brand,model,serial_no,finish,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,owner_resolution) VALUES(?,?,?,?,?,'Customer owned','Customer owned',?,?,'',0,'Active','','MATCHED_CLIENT')").run(id,brand,model,serial,finish,display,clientId);
+        linkClientPiano(clientId,id);piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+      }
+      return {client:db.prepare("SELECT * FROM contacts WHERE id=?").get(clientId),piano};
+    })();
+    res.status(201).json(result);
+  }catch(error){res.status(error.code==="PIANO_SERIAL_ALREADY_EXISTS"?409:400).json({error:error.code||error.message});}
+});
+
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
   res.json(db.prepare(`SELECT DISTINCT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.display_name,p.brand,p.model`).all(req.params.id));
 });
@@ -2787,9 +2820,9 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   const ownershipType=req.body.ownership_type || "Customer owned";
   const estimated=Number(req.body.estimated_value||0);
   const buildYear=req.body.build_year||reference.build_year||null,sizeCm=req.body.size_cm||reference.size_cm||null,sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null,sizeDisplay=req.body.size_display||reference.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",req.body.finish||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
   linkClientPiano(client.id,id);
   refreshClientHasPiano(client.id);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
