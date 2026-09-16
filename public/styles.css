@@ -2268,3 +2268,23 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .balance-sheet-official-grid .balance-sheet-column{align-content:start}
 .balance-sheet-official-grid .balance-sheet-total{margin-top:6px;padding-top:14px;border-top:1px solid rgba(230,228,223,.28);font-size:1.02rem}
 .balance-sheet-official-grid .balance-sheet-total strong{letter-spacing:.035em}
+
+/* Finance statement closing + opening balance controls */
+.financial-statement-archive{margin-top:18px}
+.financial-statement-archive table td,.financial-statement-archive table th{vertical-align:middle}
+.opening-balance-form{display:grid;gap:16px}
+.opening-balance-custom-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.opening-balance-custom-head h4{margin:0}
+.opening-balance-custom-items{display:grid;gap:9px}
+.opening-balance-custom-row{display:grid;grid-template-columns:minmax(180px,1.6fr) minmax(130px,.8fr) minmax(120px,.7fr) auto;gap:8px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;background:#081525}
+.opening-balance-custom-row button{min-width:44px}
+.opening-balance-integrity{display:grid;gap:5px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#081525}
+.opening-balance-integrity.is-balanced{border-color:rgba(46,204,113,.6)}
+.opening-balance-integrity.is-unbalanced{border-color:rgba(255,91,91,.7)}
+.opening-balance-integrity.is-balanced strong{color:var(--green)}
+.opening-balance-integrity.is-unbalanced strong{color:var(--red)}
+.cash-roll-forward{margin-top:18px}
+.cash-roll-forward-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cash-roll-forward-grid .cf-line{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:1px solid var(--line);border-radius:12px;padding:14px;background:#081525}
+.cash-roll-forward-grid .cf-line b{font-size:1.2rem}
+@media(max-width:760px){.opening-balance-custom-row{grid-template-columns:1fr}.opening-balance-custom-row button{width:100%}.cash-roll-forward-grid{grid-template-columns:1fr}}
