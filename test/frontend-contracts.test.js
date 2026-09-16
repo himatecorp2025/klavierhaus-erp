@@ -409,9 +409,10 @@ test("administrator navigation has four primary areas with Finance & Invoicing f
   assert.match(appSource, /id:"technical"[\s\S]*label:\["Technical Operation","Technikai működés"\]/);
   assert.match(appSource, /id:"marketing"[\s\S]*label:\["Marketing","Marketing"\]/);
   assert.match(appSource, /id:"website_events"[\s\S]*label:\["Website & Events","Weboldal és események"\]/);
-  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["invoice_documents","Invoices Documents"/);
-  assert.match(appSource, /technical[\s\S]*\["pianos","Client Piano"[\s\S]*\["contacts","Clients"[\s\S]*\["inventory","Inventory"[\s\S]*\["partners","Partners"[\s\S]*\["scheduler","Scheduler"[\s\S]*\["workshop_workflow","Workshop Workflow"/);
-  assert.match(appSource, /website_events[\s\S]*\["event_guest_list","Guest Data"[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["event_tickets","Ticket Reservation"/);
+  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["knowledge_base","Invoices & Documents"/);
+  assert.match(appSource, /technical[\s\S]*\["workshop_workflow","Workshop Workflow"[\s\S]*\["scheduler","Scheduler"[\s\S]*\["planned_jobs","Planned Jobs"[\s\S]*\["system_integrations","System Activation & Integrations"/);
+  assert.match(appSource, /website_events[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["website_services","Services"[\s\S]*\["publish_preview","Publish & Preview"/);
+  assert.doesNotMatch(appSource, /\["invoice_documents","Invoices Documents"/);
   assert.match(appSource, /function adminGroupButtonMarkup/);
   assert.match(appSource, /async function renderAdminGroupLanding/);
   assert.match(appSource, /data-admin-card-search/);
