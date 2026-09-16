@@ -661,9 +661,8 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id); if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
-      const body = req.body || {}, lineType = clean(body.line_type, 20).toUpperCase(), category = clean(body.category, 30).toUpperCase();
-      if (!FINANCE_TYPES.has(lineType) || !FINANCE_CATEGORIES.has(category)) throw error("INVALID_WORKFLOW_FINANCIAL_LINE");
-      const title = clean(body.title, 240), amount = Math.max(0, numeric(body.amount));
+      const body = req.body || {}, lineType = "COST", category = "OTHER";
+      const title = clean(body.title || body.description, 240), amount = Math.max(0, numeric(body.amount ?? body.unit_price));
       if (!title) throw error("FINANCIAL_LINE_TITLE_REQUIRED");
       const stage = body.stage_id ? requireStage(validId(body.stage_id), workflow.id) : null;
       const billingStatus = String(body.billing_status || "CHARGEABLE").toUpperCase();
@@ -735,13 +734,13 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         closeType: "Full",
         complete: true,
         now: closedAt,
-        financialEntries: lines.map((line) => ({
+        financialEntries: lines.filter((line) => line.line_type === "COST").map((line) => ({
           itemDate: closedAt.slice(0, 10),
           title: line.title,
           description: line.description || "",
           amount: Math.max(0, numeric(line.amount)),
-          mainType: line.line_type === "REVENUE" ? "INCOME" : "EXPENSE",
-          category: line.category,
+          mainType: "EXPENSE",
+          category: "OTHER_EXPENSE",
           jobId: workflow.job_id,
           clientId: workflow.client_id,
           pianoId: workflow.piano_id,
@@ -758,7 +757,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines, materials: materialRows(workflow.id) }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
-          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, materials: materialRows(workflow.id), lines, actor: req.user, now, paymentMethod });
+          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now, paymentMethod });
           return { closedId };
         }
       });
