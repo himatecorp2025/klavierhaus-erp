@@ -101,7 +101,7 @@ test("workflow responsibility cards use the approved status priority and phase-o
   assert.match(styles, /has-workflow-drawer/);
   assert.match(appSource, /workflow-toolbar-clock/);
   assert.match(appSource, /Pianos","Zongorák/);
-  assert.match(appSource, /flatMap\(group=>group\.rows\)/);
+  assert.match(appSource, /const visibleRows=workshopWorkflowRows\.filter\(workflowMatchesBoardFilters\)/);
   assert.doesNotMatch(appSource, /class="workflow-piano-group-head"/);
   assert.doesNotMatch(appSource, /class="workflow-row-meta"/);
   assert.match(styles, /\.workflow-drawer-scroll::-webkit-scrollbar-thumb/);
@@ -409,10 +409,10 @@ test("administrator navigation has four primary areas with Finance & Invoicing f
   assert.match(appSource, /id:"technical"[\s\S]*label:\["Technical Operation","Technikai működés"\]/);
   assert.match(appSource, /id:"marketing"[\s\S]*label:\["Marketing","Marketing"\]/);
   assert.match(appSource, /id:"website_events"[\s\S]*label:\["Website & Events","Weboldal és események"\]/);
-  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["knowledge_base","Invoices & Documents"/);
-  assert.match(appSource, /technical[\s\S]*\["workshop_workflow","Workshop Workflow"[\s\S]*\["scheduler","Scheduler"[\s\S]*\["planned_jobs","Planned Jobs"[\s\S]*\["system_integrations","System Activation & Integrations"/);
-  assert.match(appSource, /website_events[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["website_services","Services"[\s\S]*\["publish_preview","Publish & Preview"/);
-  assert.doesNotMatch(appSource, /\["invoice_documents","Invoices Documents"/);
+  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["invoice_documents","Invoices Documents"[\s\S]*\["knowledge_base","Invoices & Documents \/ Document Archive"/);
+  assert.match(appSource, /technical[\s\S]*\["audit_log","Audit Log"[\s\S]*\["backups","Backups"[\s\S]*\["website_services","Services"[\s\S]*\["system_integrations","System Activation & Integrations"[\s\S]*\["workshop_workflow","Workshop Workflow"/);
+  assert.match(appSource, /marketing[\s\S]*\["customer_inbox","Customer Inbox"/);
+  assert.match(appSource, /website_events[\s\S]*\["website_artists","Artists"[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["publish_preview","Publish & Preview"[\s\S]*\["event_tickets","Ticket Reservation"/);
   assert.match(appSource, /function adminGroupButtonMarkup/);
   assert.match(appSource, /async function renderAdminGroupLanding/);
   assert.match(appSource, /data-admin-card-search/);
