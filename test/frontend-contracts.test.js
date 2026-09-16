@@ -404,10 +404,14 @@ test("startup never installs sample content and event deletion requires an audit
   assert.match(appSource, /body:JSON\.stringify\(\{reason:String\(reason\)\.trim\(\)\}\)/);
 });
 
-test("administrator navigation has three primary areas and card-first workspaces", () => {
-  assert.match(appSource, /id:"website_events",icon:"◈",label:\["Website & Events","Weboldal és események"\]/);
-  assert.match(appSource, /id:"marketing",icon:"✦",label:\["Marketing","Marketing"\]/);
-  assert.match(appSource, /id:"technical",icon:"⚙",label:\["Technical Operations","Technikai működés"\]/);
+test("administrator navigation has four primary areas with Finance & Invoicing first", () => {
+  assert.match(appSource, /id:"finance_invoicing"[\s\S]*label:\["Finance & Invoicing","Pénzügy és számlázás"\]/);
+  assert.match(appSource, /id:"technical"[\s\S]*label:\["Technical Operation","Technikai működés"\]/);
+  assert.match(appSource, /id:"marketing"[\s\S]*label:\["Marketing","Marketing"\]/);
+  assert.match(appSource, /id:"website_events"[\s\S]*label:\["Website & Events","Weboldal és események"\]/);
+  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["invoice_documents","Invoices Documents"/);
+  assert.match(appSource, /technical[\s\S]*\["pianos","Client Piano"[\s\S]*\["contacts","Clients"[\s\S]*\["inventory","Inventory"[\s\S]*\["partners","Partners"[\s\S]*\["scheduler","Scheduler"[\s\S]*\["workshop_workflow","Workshop Workflow"/);
+  assert.match(appSource, /website_events[\s\S]*\["event_guest_list","Guest Data"[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["event_tickets","Ticket Reservation"/);
   assert.match(appSource, /function adminGroupButtonMarkup/);
   assert.match(appSource, /async function renderAdminGroupLanding/);
   assert.match(appSource, /data-admin-card-search/);
