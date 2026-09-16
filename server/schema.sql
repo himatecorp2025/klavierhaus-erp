@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS pianos (
   brand TEXT,
   model TEXT,
   serial_no TEXT,
+  finish TEXT,
   year INTEGER,
   build_year INTEGER,
   size_cm TEXT,
@@ -184,6 +185,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   instructions TEXT,
   notes TEXT,
   workflow_id TEXT,
+  workshop_workflow_id TEXT,
   planned_job_id TEXT,
   close_type TEXT,
   billed_amount REAL DEFAULT 0,
@@ -205,7 +207,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(parent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
-  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
+  FOREIGN KEY(workshop_workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status);
@@ -1785,6 +1788,17 @@ CREATE TABLE IF NOT EXISTS workshop_workflows (
   job_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
+  notes TEXT,
+  due_time TEXT,
+  intake_inspection_status TEXT NOT NULL DEFAULT 'PENDING' CHECK(intake_inspection_status IN ('PENDING','FLAWLESS','PRE_EXISTING_DAMAGE')),
+  intake_pdf_path TEXT,
+  intake_photos TEXT NOT NULL DEFAULT '[]',
+  intake_inspected_by TEXT,
+  intake_inspected_at TEXT,
+  dispatch_inspection_status TEXT NOT NULL DEFAULT 'PENDING' CHECK(dispatch_inspection_status IN ('PENDING','APPROVED','ISSUE_FOUND')),
+  dispatch_pdf_path TEXT,
+  dispatch_inspected_by TEXT,
+  dispatch_inspected_at TEXT,
   current_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(current_status IN ('ACTIVE','COMPLETED','ABORTED')),
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','CLOSED')),
   final_due_at TEXT NOT NULL,
@@ -1829,6 +1843,7 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   assigned_to TEXT,
   due_at TEXT,
   details TEXT,
+  notes TEXT,
   block_reason TEXT,
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','CLOSED')),
   financial_closed_at TEXT,
@@ -1940,6 +1955,26 @@ CREATE TABLE IF NOT EXISTS workflow_closed_jobs (
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
+
+
+CREATE TABLE IF NOT EXISTS piano_inspection_history (
+  id TEXT PRIMARY KEY,
+  piano_id TEXT NOT NULL,
+  workflow_id TEXT,
+  inspection_type TEXT NOT NULL CHECK(inspection_type IN ('INTAKE','DISPATCH','DAMAGE_PHOTO')),
+  inspection_status TEXT,
+  file_path TEXT NOT NULL,
+  original_filename TEXT,
+  mime_type TEXT,
+  inspected_by TEXT,
+  inspected_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,
+  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_piano ON piano_inspection_history(piano_id,inspected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_workflow ON piano_inspection_history(workflow_id,inspection_type);
+CREATE INDEX IF NOT EXISTS idx_jobs_workshop_workflow ON jobs(workshop_workflow_id);
 
 CREATE TABLE IF NOT EXISTS workflow_audit_events (
   id TEXT PRIMARY KEY,
