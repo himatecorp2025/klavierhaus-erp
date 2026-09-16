@@ -34,6 +34,7 @@ const {
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  createCompanyDocumentUpload,
   createCustomerConversationUpload,
   uploadErrorHandler
 } = require("./upload-middleware");
@@ -63,6 +64,7 @@ const EVENT_IMAGE_DIR=path.join(UPLOAD_DIR,"events");
 fs.mkdirSync(EVENT_IMAGE_DIR,{recursive:true});
 const WEBSITE_IMAGE_DIR=path.join(UPLOAD_DIR,"website");
 fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
+const companyDocumentUpload=createCompanyDocumentUpload(UPLOAD_DIR);
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
@@ -71,7 +73,7 @@ hydrateRuntimeSecrets(db, process.env);
 const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
-const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env});
+const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env,invoiceEngineProvider:()=>invoiceEngine});
 const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
@@ -85,15 +87,15 @@ const ADMIN_MODULES = Object.freeze([
   { key: "website_events", group: "Website & Events", label_en: "Website & Events", label_hu: "Weboldal és események" }
 ]);
 const ADMIN_MODULE_CARDS = Object.freeze([
-  { key: "finance", group_key: "finance_invoicing", label_en: "Finance", label_hu: "Pénzügy" },
+  { key: "finance", group_key: "finance_invoicing", label_en: "Balance Sheet", label_hu: "Mérleg" },
   { key: "income_statement", group_key: "finance_invoicing", label_en: "Income Statement", label_hu: "Eredménykimutatás" },
   { key: "invoice_documents", group_key: "finance_invoicing", label_en: "Invoices Documents", label_hu: "Számladokumentumok" },
-  { key: "knowledge_base", group_key: "finance_invoicing", label_en: "Invoices & Documents / Document Archive", label_hu: "Számlák és dokumentumok / Dokumentumtár" },
   { key: "audit_log", group_key: "technical", label_en: "Audit Log", label_hu: "Módosítási napló" },
   { key: "backups", group_key: "technical", label_en: "Backups", label_hu: "Biztonsági mentések" },
   { key: "pianos", group_key: "technical", label_en: "Client Piano", label_hu: "Ügyfélzongorák" },
   { key: "contacts", group_key: "technical", label_en: "Clients", label_hu: "Ügyfelek" },
   { key: "closed_jobs", group_key: "technical", label_en: "Closed Jobs", label_hu: "Lezárt munkák" },
+  { key: "knowledge_base", group_key: "technical", label_en: "Company Documents Archive", label_hu: "Céges dokumentumtár" },
   { key: "company_data", group_key: "technical", label_en: "Company Data", label_hu: "Cégadatok" },
   { key: "inventory", group_key: "technical", label_en: "Inventory", label_hu: "Leltár" },
   { key: "partners", group_key: "technical", label_en: "Partners", label_hu: "Partnerek" },
@@ -104,7 +106,7 @@ const ADMIN_MODULE_CARDS = Object.freeze([
   { key: "system_integrations", group_key: "technical", label_en: "System Activation & Integrations", label_hu: "Rendszeraktiválás és integrációk" },
   { key: "users", group_key: "technical", label_en: "Users", label_hu: "Felhasználók" },
   { key: "workshop_workflow", group_key: "technical", label_en: "Workshop Workflow", label_hu: "Műhely workflow" },
-  { key: "marketing_overview", group_key: "marketing", label_en: "Marketing Overview", label_hu: "Marketing áttekintő" },
+  { key: "marketing_overview", group_key: "marketing", label_en: "Campaign Overview", label_hu: "Kampányáttekintő" },
   { key: "customer_inbox", group_key: "marketing", label_en: "Customer Inbox", label_hu: "Ügyfélüzenetek" },
   { key: "website_reviews", group_key: "marketing", label_en: "Reviews", label_hu: "Vélemények" },
   { key: "campaigns_utm", group_key: "marketing", label_en: "Campaigns & UTM", label_hu: "Kampányok és UTM-kódok" },
@@ -540,6 +542,20 @@ function inventoryRowsActive(){
 }
 
 const invoiceEngine=createInvoiceEngine({db,balanceAccountFromPaymentMethod});
+function reconcileCentralEventInvoices(){
+  const payments=db.prepare("SELECT * FROM event_payments WHERE status='PAID' AND amount_total>0 ORDER BY created_at,id").all();
+  for(const payment of payments){
+    const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
+    const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
+    if(event&&tickets.length)businessDocuments.ensurePaymentInvoice(payment,event,tickets);
+  }
+  const standaloneTickets=db.prepare(`SELECT * FROM event_tickets WHERE event_payment_id IS NULL AND price_cents>0 AND payment_status IN ('PENDING','PAID') ORDER BY created_at,id`).all();
+  for(const ticket of standaloneTickets){
+    const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
+    if(event)businessDocuments.ensureTicketInvoice(ticket,event,{status:ticket.payment_status==='PAID'?'paid':'issued'});
+  }
+}
+try{reconcileCentralEventInvoices();}catch(error){console.error("Event invoice reconciliation failed:",error);}
 const jobDomain=createJobDomain({db,rid,balanceAccountFromPaymentMethod,invoiceEngine});
 function createFinancialItemForClosedJob(job, logId, billed, payment, userName){
   return jobDomain.postClosedJobRevenue(job,{logId,billedAmount:billed,paymentMethod:payment,createdBy:userName||"System"});
@@ -719,7 +735,8 @@ registerEventRoutes({
   ticketService,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
-  stripeSandbox
+  stripeSandbox,
+  invoiceEngine
 });
 registerWebsiteContentRoutes({
   app,
@@ -1462,7 +1479,10 @@ function incomeStatementPayload(month){
     else current.debit_total=roundMoney(current.debit_total+Math.abs(value));
     accountMap.set(code,current);
   };
-  addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',snapshot.pnl.invoiceRevenue);
+  const eventInvoiceRevenue=roundMoney(monthInvoices.filter(row=>row.status!=='void'&&row.direction==='receivable'&&row.source_type==='event').reduce((sum,row)=>sum+Number(row.total_amount||0),0));
+  const serviceInvoiceRevenue=roundMoney(snapshot.pnl.invoiceRevenue-eventInvoiceRevenue);
+  addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',serviceInvoiceRevenue);
+  addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue);
   const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
   const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>sum+Number(row.total_amount||0),0));
   const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
@@ -1979,6 +1999,29 @@ app.delete("/api/pianos/:id", auth, requireSuperadmin, (req,res)=>{
   catch(error){console.error("piano delete failed:",error);res.status(500).json({error:"PIANO_DELETE_FAILED"});}
 });
 
+app.get("/api/company-documents", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const search=String(req.query.search||"").trim().toLowerCase();
+  const category=String(req.query.category||"").trim();
+  const where=["content_type='Company Document'"];const params=[];
+  if(category){where.push("category=?");params.push(category);}
+  if(search){where.push("(lower(title) LIKE ? OR lower(COALESCE(owner,'')) LIKE ? OR lower(COALESCE(original_filename,'')) LIKE ?)");const q=`%${search}%`;params.push(q,q,q);}
+  const rows=db.prepare(`SELECT id,title,category,effective_date,original_filename,mime_type,stored_path,owner,created_at,updated_at FROM knowledge_base WHERE ${where.join(" AND ")} ORDER BY COALESCE(effective_date,created_at) DESC,created_at DESC,id DESC`).all(...params);
+  res.json(rows);
+});
+app.post("/api/company-documents", auth, permit("ADMIN","MANAGER","WORKER"), companyDocumentUpload.single("file"), (req,res)=>{
+  const removeFile=()=>{try{if(req.file?.path&&fs.existsSync(req.file.path))fs.unlinkSync(req.file.path);}catch(_error){}};
+  const title=String(req.body?.title||"").trim();const effectiveDate=String(req.body?.effective_date||"").trim();const category=String(req.body?.category||"").trim();
+  const allowedCategories=new Set(["Contract","Permit","Technical Documentation","Other Company Document"]);
+  if(!title){removeFile();return res.status(400).json({error:"DOCUMENT_TITLE_REQUIRED"});}
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)){removeFile();return res.status(400).json({error:"DOCUMENT_EFFECTIVE_DATE_REQUIRED"});}
+  if(!allowedCategories.has(category)){removeFile();return res.status(400).json({error:"INVALID_DOCUMENT_CATEGORY"});}
+  if(!req.file){return res.status(400).json({error:"DOCUMENT_FILE_REQUIRED"});}
+  const id=rid("DOC");const storedPath=`/uploads/company-documents/${path.basename(req.file.path)}`;
+  db.prepare(`INSERT INTO knowledge_base(id,title,category,content_type,body,stored_path,owner,effective_date,original_filename,mime_type) VALUES(?,?,?,'Company Document','',?,?,?,?,?)`).run(id,title,category,storedPath,req.user.name||req.user.email||req.user.id,effectiveDate,req.file.originalname||"",req.file.mimetype||"");
+  const row=db.prepare("SELECT id,title,category,effective_date,original_filename,mime_type,stored_path,owner,created_at,updated_at FROM knowledge_base WHERE id=?").get(id);
+  audit(req,"CREATE","knowledge_base",id,null,row,1,"Company document uploaded","TECHNICAL");res.status(201).json(row);
+});
+
 createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","category","content_type","body","stored_path","owner","amount","payment_method","invoice_number","priority"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/client-profile/:id", auth, (req,res)=>{
@@ -2245,15 +2288,13 @@ app.get("/api/jobs/:id/workflow", auth, (req,res)=>{
   res.json({workflow_root_id:rootId,steps});
 });
 
-app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
-  const removeUploadedFile=()=>{if(req.file){try{fs.unlinkSync(req.file.path)}catch(_error){}}};
-  if(req.file && !validMagic(req.file.path)){ removeUploadedFile(); return res.status(400).json({error:"INVALID_FILE_TYPE"}); }
+app.post("/api/jobs/:id/close", auth, (req,res)=>{
   const jobId=req.params.id || req.body.id || req.body.job_id || req.body.job_key;
   const job=getJobByAnyId(jobId,req.body);
-  if(!job){removeUploadedFile();return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});}
-  if(!canCloseJob(req.user,job)){removeUploadedFile();return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});}
+  if(!job){return res.status(404).json({error:`Job not found. id/job_key: ${String(jobId||"").trim()}`});}
+  if(!canCloseJob(req.user,job)){return res.status(403).json({error:`You cannot close this job because it is currently assigned to ${job.assigned_to}. / Nem zárhatod le ezt a munkát, mert jelenleg ${job.assigned_to} a felelős.`});}
   if(String(job.status||'')==='Completed' && String(job.financial_status||'')==='POSTED'){
-    removeUploadedFile();
+    
     return res.json({ok:true,idempotent:true,job});
   }
 
@@ -2261,36 +2302,35 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
   const rootJob=db.prepare("SELECT status,workflow_status,finalized_at FROM jobs WHERE id=?").get(rootId);
   const existingCloseLog=db.prepare("SELECT id FROM job_logs WHERE job_id=? AND log_type IN ('Partial','Full','Failed') LIMIT 1").get(job.id);
   if(existingCloseLog || job.finalized_at || ['Partially completed','Failed'].includes(String(job.status||''))){
-    removeUploadedFile();
+    
     return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
   }
   if(rootJob && rootId!==job.id && (rootJob.finalized_at || String(rootJob.workflow_status||'')==='COMPLETED')){
-    removeUploadedFile();
+    
     return res.status(409).json({error:"WORKFLOW_ALREADY_FINALIZED"});
   }
 
   const closeType=String(req.body.close_type||"");
-  if(!["Partial","Full","Failed"].includes(closeType)){removeUploadedFile();return res.status(400).json({error:"Close type must be Partial, Full or Failed"});}
+  if(!["Partial","Full","Failed"].includes(closeType)){return res.status(400).json({error:"Close type must be Partial, Full or Failed"});}
   const billed=Number(req.body.billed_amount);
-  if(Number.isNaN(billed)){removeUploadedFile();return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
+  if(Number.isNaN(billed)){return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
   const desc=String(req.body.close_description||"").trim();
-  if(!desc){removeUploadedFile();return res.status(400).json({error:"Close description is required"});}
+  if(!desc){return res.status(400).json({error:"Close description is required"});}
   const payment=billed>0?normalizePaymentMethod(req.body.payment_method,{allowEmpty:false}):null;
-  if(billed>0&&!payment){removeUploadedFile();return res.status(400).json({error:"A valid payment method is required when billed amount is greater than zero / Érvényes fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
-  if(billed>0&&!req.file){removeUploadedFile();return res.status(400).json({error:"Invoice/check file is required when billed amount is greater than zero"});}
-  const storedPath=req.file?"/uploads/"+path.basename(req.file.path):null;
+  if(billed>0&&!payment){return res.status(400).json({error:"A valid payment method is required when billed amount is greater than zero / Érvényes fizetési mód kötelező, ha az összeg nagyobb mint 0"});}
+  const storedPath=null;
   let partialNextAssigned=null;
   if(closeType==="Partial"){
     const required=["next_title","next_assigned_user_id","next_start_time","next_end_time"];
     for(const field of required){
-      if(!req.body[field]){removeUploadedFile();return res.status(400).json({error:"PARTIAL_CLOSE_NEXT_JOB_REQUIRED",field});}
+      if(!req.body[field]){return res.status(400).json({error:"PARTIAL_CLOSE_NEXT_JOB_REQUIRED",field});}
     }
     partialNextAssigned=resolveActiveUser(req.body.next_assigned_user_id,req.body.next_assigned_to);
-    if(!partialNextAssigned){removeUploadedFile();return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});}
-    if(!isValidTimeRange(req.body.next_start_time,req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_RANGE"});}
-    if(!isScheduleTime(req.body.next_start_time)||!isScheduleTime(req.body.next_end_time)){removeUploadedFile();return res.status(400).json({error:"INVALID_TIME_STEP",interval_minutes:SCHEDULE_INTERVAL_MINUTES});}
+    if(!partialNextAssigned){return res.status(400).json({error:"A valid next responsible user is required / Érvényes következő felelős szükséges"});}
+    if(!isValidTimeRange(req.body.next_start_time,req.body.next_end_time)){return res.status(400).json({error:"INVALID_TIME_RANGE"});}
+    if(!isScheduleTime(req.body.next_start_time)||!isScheduleTime(req.body.next_end_time)){return res.status(400).json({error:"INVALID_TIME_STEP",interval_minutes:SCHEDULE_INTERVAL_MINUTES});}
     const conflicts=findScheduleConflicts(partialNextAssigned.id,partialNextAssigned.name,req.body.next_start_time,req.body.next_end_time);
-    if(conflicts.length){removeUploadedFile();return rejectScheduleConflict(req,res,partialNextAssigned,conflicts);}
+    if(conflicts.length){return rejectScheduleConflict(req,res,partialNextAssigned,conflicts);}
   }
 
   try{
@@ -2339,7 +2379,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
         itemDate:String(now).slice(0,10),
         title:`Closed job revenue / Lezárt munka bevétele: ${domainJob.title||domainJob.job_key||domainJob.id}`,
         description:[domainJob.client_name?`Client / Ügyfél: ${domainJob.client_name}`:"",domainJob.piano_name?`Piano / Zongora: ${domainJob.piano_name}`:"",mutation?.logId?`Job log / Lezárási napló: ${mutation.logId}`:""].filter(Boolean).join("\n"),
-        amount:closeType==='Full'?(Number(domainJob.planned_amount||0)>0?Number(domainJob.planned_amount):billed):billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
+        amount:billed,mainType:"INCOME",category:"SERVICE_REVENUE",paymentMethod:payment,
         sourceType:"JOB_REVENUE",sourceId:`JOB_REVENUE:${domainJob.id}`
       }]:[]
     });
@@ -2347,7 +2387,7 @@ app.post("/api/jobs/:id/close", auth, upload.single("file"), (req,res)=>{
     workAudit(req,closeType==='Partial'?'PARTIAL_CLOSE':(closeType==='Full'?'FULL_CLOSE':'FAILED_CLOSE'),job.id,job,updated,1,`workflow_root_id=${rootId}; next_job_id=${result.mutation?.nextJobId||''}`);
     res.json({ok:true,idempotent:result.idempotent,next_job_id:result.mutation?.nextJobId||null,storedPath,financial_item_id:result.financialItems?.[0]?.id||updated.financial_ledger_id||null,workflow_root_id:rootId});
   }catch(err){
-    removeUploadedFile();
+    
     const code=err.code||err.message||"Close operation failed";
     res.status(['JOB_ALREADY_CLOSED','WORKFLOW_ALREADY_FINALIZED'].includes(code)?409:(err.status||400)).json({error:code});
   }
