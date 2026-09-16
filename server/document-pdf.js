@@ -302,7 +302,10 @@ class PdfBuilder {
 }
 
 function usedCodes(values) {
-  const codes = new Set([32, 45, 47, 58, 46, 36, 40, 41, 44, 35]);
+  // Always embed the printable ASCII range. Dynamic invoice fields (dates, amounts,
+  // sequence numbers) can contain digits or punctuation that are not present in
+  // static labels; omitting those glyphs produces visible replacement boxes.
+  const codes = new Set(Array.from({ length: 95 }, (_value, index) => index + 32));
   values.forEach((value) => [...safeText(value)].forEach((character) => codes.add(Math.min(character.codePointAt(0), 0xffff))));
   return [...codes].sort((left, right) => left - right);
 }
@@ -575,6 +578,7 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
   const counterpartyAddress = safeText(invoice.counterparty_address || "");
   const counterpartyTax = safeText(invoice.counterparty_tax_id || "");
   const counterpartyContact = [invoice.counterparty_contact, invoice.counterparty_email, invoice.counterparty_phone].filter(Boolean).join(" | ");
+  const workflowPhaseInvoice = invoice.source_type === "workflow" && invoice.direction === "receivable";
   const lines = [
     `${DARK} rg 0 0 612 792 re f\n`,
     textCommand(directionLabel, 390, 748, 20, GOLD),
@@ -594,15 +598,20 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
     textCommand(counterpartyTax ? `Tax ID: ${counterpartyTax}` : "", 54, 552, 8, MUTED),
     textCommand(truncate(counterpartyContact, 500, 8, metrics), 54, 536, 8, MUTED),
     textCommand(truncate(invoice.summary || "", 500, 9, metrics), 54, 514, 9, CREAM),
-    textCommand("DESCRIPTION", 54, 486, 8, GOLD),
-    textCommand("QTY", 374, 486, 8, GOLD),
-    textCommand("UNIT PRICE", 416, 486, 8, GOLD),
-    textCommand("LINE TOTAL", 496, 486, 8, GOLD),
+    textCommand(workflowPhaseInvoice ? "PHASE" : "DESCRIPTION", 54, 486, 8, GOLD),
+    workflowPhaseInvoice ? "" : textCommand("QTY", 374, 486, 8, GOLD),
+    workflowPhaseInvoice ? "" : textCommand("UNIT PRICE", 416, 486, 8, GOLD),
+    textCommand(workflowPhaseInvoice ? "PHASE SUBTOTAL" : "LINE TOTAL", workflowPhaseInvoice ? 452 : 496, 486, 8, GOLD),
     `${MUTED} RG .5 w 54 474 504 0 re\n`
   ];
   let y = 452;
   for (const item of items.slice(0, 9)) {
-    lines.push(textCommand(truncate(item.item_description || "Item", 315, 9, metrics), 54, y, 9, CREAM));
+    lines.push(textCommand(truncate(item.item_description || "Item", workflowPhaseInvoice ? 380 : 315, 9, metrics), 54, y, 9, CREAM));
+    if (workflowPhaseInvoice) {
+      lines.push(textCommand(money(item.total_price || item.unit_price || 0, invoice.currency || "USD"), 452, y, 8, CREAM));
+      y -= 24;
+      continue;
+    }
     lines.push(textCommand(String(Number(item.quantity || 0)), 376, y, 9, CREAM));
     lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 416, y, 8, CREAM));
     lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 496, y, 8, CREAM));
@@ -637,7 +646,7 @@ function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], co
   for (let index = 0; index < sourceItems.length; index += 9) chunks.push(sourceItems.slice(index, index + 9));
   if (!chunks.length) chunks.push([]);
   const pageCount = chunks.length;
-  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "DESCRIPTION", "QTY", "UNIT PRICE", "LINE TOTAL", "SUBTOTAL", "TAX", "TAX (0.00%)", "%", "TOTAL USD", "Issue Date", "Due Date", "Page", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE", "|"];
+  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "DESCRIPTION", "PHASE", "PHASE SUBTOTAL", "QTY", "UNIT PRICE", "LINE TOTAL", "SUBTOTAL", "TAX", "TAX (0.00%)", "%", "TOTAL USD", "Issue Date", "Due Date", "Page", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE", "|"];
   return createPdf({
     pages: chunks.map((pageItems, index) => (metrics, logoResources) => businessInvoicePage({ company, invoice, items: pageItems, counterpartyName, page: index + 1, pages: pageCount, showTotals: index === pageCount - 1, metrics, logoResources })),
     size: LETTER,
