@@ -797,7 +797,6 @@ registerBusinessOperationsRoutes({
   jobDomain,
   invoiceEngine
 });
-scheduleFinancialStatementClose();
 registerWorkshopWorkflowRoutes({
   app,
   db,
@@ -3086,6 +3085,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.use(uploadErrorHandler);
+scheduleFinancialStatementClose();
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
 function startServer(port = PORT) {
