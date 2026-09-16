@@ -409,8 +409,8 @@ test("administrator navigation has four primary areas with Finance & Invoicing f
   assert.match(appSource, /id:"technical"[\s\S]*label:\["Technical Operation","Technikai működés"\]/);
   assert.match(appSource, /id:"marketing"[\s\S]*label:\["Marketing","Marketing"\]/);
   assert.match(appSource, /id:"website_events"[\s\S]*label:\["Website & Events","Weboldal és események"\]/);
-  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Finance"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["invoice_documents","Invoices Documents"[\s\S]*\["knowledge_base","Invoices & Documents \/ Document Archive"/);
-  assert.match(appSource, /technical[\s\S]*\["audit_log","Audit Log"[\s\S]*\["backups","Backups"[\s\S]*\["website_services","Services"[\s\S]*\["system_integrations","System Activation & Integrations"[\s\S]*\["workshop_workflow","Workshop Workflow"/);
+  assert.match(appSource, /finance_invoicing[\s\S]*\["finance","Balance Sheet"[\s\S]*\["income_statement","Income Statement"[\s\S]*\["invoice_documents","Invoices Documents"/);
+  assert.match(appSource, /technical[\s\S]*\["audit_log","Audit Log"[\s\S]*\["backups","Backups"[\s\S]*\["knowledge_base","Company Documents Archive"[\s\S]*\["website_services","Services"[\s\S]*\["system_integrations","System Activation & Integrations"[\s\S]*\["workshop_workflow","Workshop Workflow"/);
   assert.match(appSource, /marketing[\s\S]*\["customer_inbox","Customer Inbox"/);
   assert.match(appSource, /website_events[\s\S]*\["website_artists","Artists"[\s\S]*\["pages_content","Pages & Content"[\s\S]*\["publish_preview","Publish & Preview"[\s\S]*\["event_tickets","Ticket Reservation"/);
   assert.match(appSource, /function adminGroupButtonMarkup/);
