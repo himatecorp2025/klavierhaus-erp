@@ -14,8 +14,8 @@ function groupBlock(app,id,next){
 function items(block){ return [...block.matchAll(/\["([a-z_]+)","([^"]+)"/g)].map(m=>[m[1],m[2]]); }
 
 const EXPECTED={
- finance_invoicing:["finance","income_statement","invoice_documents","knowledge_base"],
- technical:["audit_log","backups","pianos","contacts","closed_jobs","company_data","inventory","partners","planned_jobs","scheduler","website_services","settings","system_integrations","users","workshop_workflow"],
+ finance_invoicing:["finance","income_statement","invoice_documents"],
+ technical:["audit_log","backups","pianos","contacts","closed_jobs","knowledge_base","company_data","inventory","partners","planned_jobs","scheduler","website_services","settings","system_integrations","users","workshop_workflow"],
  marketing:["marketing_overview","customer_inbox","website_reviews","campaigns_utm","leads","tracking_cookies","seo_keywords","heatmap"],
  website_events:["website_artists","website_contacts","digital_attendance","events","event_guest_list","event_invitations","media_library","pages_content","publish_preview","showroom_pianos","event_tickets"]
 };
@@ -27,8 +27,9 @@ test("the four admin groups contain all 38 cards in the approved locations",()=>
   const marketing=items(groupBlock(app,"marketing","website_events"));
   const website=items(groupBlock(app,"website_events",null));
   assert.deepEqual(finance.map(x=>x[0]),EXPECTED.finance_invoicing);
+  assert.equal(finance[0][1],"Balance Sheet");
   assert.equal(finance[2][1],"Invoices Documents");
-  assert.match(finance[3][1],/Invoices & Documents \/ Document Archive/);
+  assert.equal(technical[5][1],"Company Documents Archive");
   assert.deepEqual(technical.map(x=>x[0]),EXPECTED.technical);
   assert.deepEqual(marketing.map(x=>x[0]),EXPECTED.marketing);
   assert.deepEqual(website.map(x=>x[0]),EXPECTED.website_events);
@@ -36,7 +37,7 @@ test("the four admin groups contain all 38 cards in the approved locations",()=>
   assert.doesNotMatch(app,/Landing Page Design|landing_page_design/);
 });
 
-test("Finance, Income Statement, Invoices Documents and Document Archive stay separate",()=>{
+test("Balance Sheet, Income Statement, Invoices Documents and Company Documents Archive stay separate",()=>{
   const app=read("public/app.js");
   const html=read("public/index.html");
   assert.match(app,/async function renderFinance\(selectedMonth=""\)/);
@@ -45,7 +46,7 @@ test("Finance, Income Statement, Invoices Documents and Document Archive stay se
   assert.match(app,/Open Invoices Documents/);
   assert.match(app,/Create Invoice \/ Bill/);
   assert.match(app,/async function renderIncomeStatement/);
-  assert.match(app,/knowledge_base:\{api:"knowledge_base"/);
+  assert.match(app,/async function renderCompanyDocumentsArchive/);
   for(const id of ["finance","income_statement","invoice_documents","knowledge_base"]) assert.match(html,new RegExp(`id="${id}"`));
 });
 
