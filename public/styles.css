@@ -2288,3 +2288,26 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .cash-roll-forward-grid .cf-line{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:1px solid var(--line);border-radius:12px;padding:14px;background:#081525}
 .cash-roll-forward-grid .cf-line b{font-size:1.2rem}
 @media(max-width:760px){.opening-balance-custom-row{grid-template-columns:1fr}.opening-balance-custom-row button{width:100%}.cash-roll-forward-grid{grid-template-columns:1fr}}
+
+/* Operational workflow linking, predictive selectors, notes and inspection history */
+.workflow-typeahead-field{position:relative}
+.workflow-typeahead-results{position:absolute;z-index:80;left:0;right:0;top:calc(100% - .35rem);max-height:17rem;overflow:auto;background:var(--panel,#fff);border:1px solid rgba(15,40,75,.16);border-radius:10px;box-shadow:0 12px 34px rgba(15,40,75,.16);padding:.35rem}
+.workflow-typeahead-option,.workflow-typeahead-add{display:flex;width:100%;flex-direction:column;align-items:flex-start;gap:.15rem;text-align:left;background:transparent;color:inherit;border:0;border-radius:8px;padding:.55rem .65rem;cursor:pointer}
+.workflow-typeahead-option:hover,.workflow-typeahead-option:focus,.workflow-typeahead-add:hover,.workflow-typeahead-add:focus{background:rgba(28,112,198,.09)}
+.workflow-typeahead-option strong{font-size:.9rem}.workflow-typeahead-option small{font-size:.76rem;color:var(--muted,#687386)}
+.workflow-typeahead-add{color:#176fc1;font-weight:700}
+.job-workflow-link{border:1px solid rgba(29,111,190,.16);border-radius:12px;padding:.8rem;background:rgba(28,112,198,.035)}
+.job-workflow-toggle{display:flex;align-items:center;gap:.55rem;font-weight:700}.job-workflow-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin-top:.7rem}
+.calendar-workshop-link{position:absolute;right:.45rem;top:.42rem;display:grid;place-items:center;width:1.65rem;height:1.65rem;border-radius:50%;background:#e8f3ff;color:#1267b0;border:1px solid rgba(18,103,176,.28);z-index:5;cursor:pointer}
+.calendar-workshop-link svg{width:1rem;height:1rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.workflow-stage-card-inner{position:relative}.workflow-note-bell{position:absolute;right:.15rem;top:.05rem;width:1.35rem;height:1.35rem;display:grid;place-items:center;color:#1471c8;z-index:3}
+.workflow-note-bell svg{width:1.1rem;height:1.1rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.workflow-create-phase-notes textarea{min-height:4.2rem;resize:vertical}
+.workflow-inspection-create,.workflow-inspection-panel{border:1px solid rgba(19,99,169,.17);border-radius:14px;padding:1rem;background:rgba(25,104,177,.035)}
+.workflow-inspection-question{display:flex!important;align-items:flex-start;gap:.55rem;margin:.45rem 0 .7rem;font-weight:650}
+.workflow-inspection-warning{color:#9a4e00;background:#fff6e8;border:1px solid #f2c986;border-radius:8px;padding:.55rem .65rem;margin:.45rem 0}
+.workflow-inspection-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.workflow-inspection-grid article{border:1px solid rgba(15,40,75,.1);border-radius:12px;padding:.85rem;background:rgba(255,255,255,.65)}
+.workflow-inspection-grid article>label{display:block;margin:.6rem 0}.workflow-inspection-link{display:inline-block;margin:.2rem .45rem .55rem 0;color:#1267b0;font-weight:700;text-decoration:none}
+.piano-inspection-history{margin-top:1rem;border-top:1px solid rgba(15,40,75,.12);padding-top:.85rem}.piano-inspection-history article{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.65rem 0;border-bottom:1px solid rgba(15,40,75,.08)}
+.piano-inspection-history article div{display:grid;gap:.15rem}.piano-inspection-history article span,.piano-inspection-history article small{color:var(--muted,#687386)}.piano-inspection-history a{color:#1267b0;font-weight:700;text-decoration:none}
+@media(max-width:760px){.job-workflow-options,.workflow-inspection-grid{grid-template-columns:1fr}.workflow-typeahead-results{position:relative;top:auto;margin-top:.25rem}}
