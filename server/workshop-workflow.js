@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, createJobDomain } = require("./job-domain");
 const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods");
 
@@ -20,7 +22,7 @@ function hardDeleteWorkflowData({ db, workflowId, audit }) {
   if (!workflow) return null;
   const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages WHERE workflow_id=?").get(workflowId).count;
   const tx = db.transaction(() => {
-    db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
+    db.prepare("UPDATE jobs SET workflow_id=NULL,workshop_workflow_id=CASE WHEN workshop_workflow_id=? THEN NULL ELSE workshop_workflow_id END,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? OR workshop_workflow_id=?").run(workflowId,workflowId,workflowId);
     db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=?").run(workflowId);
     db.prepare("DELETE FROM workflow_stages WHERE workflow_id=?").run(workflowId);
     db.prepare("DELETE FROM workshop_workflows WHERE id=?").run(workflowId);
@@ -34,7 +36,7 @@ function purgeAllWorkflowData({ db, audit }) {
   const workflowCount = db.prepare("SELECT COUNT(*) AS count FROM workshop_workflows").get().count;
   const stageCount = db.prepare("SELECT COUNT(*) AS count FROM workflow_stages").get().count;
   const tx = db.transaction(() => {
-    db.prepare("UPDATE jobs SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
+    db.prepare("UPDATE jobs SET workflow_id=NULL,workshop_workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL OR workshop_workflow_id IS NOT NULL").run();
     db.prepare("UPDATE knowledge_base SET workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE workflow_id IS NOT NULL").run();
     db.prepare("DELETE FROM workflow_stages").run();
     db.prepare("DELETE FROM workshop_workflows").run();
@@ -44,7 +46,7 @@ function purgeAllWorkflowData({ db, audit }) {
   return { workflowCount, stageCount };
 }
 
-function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadmin, rid, nowISO, upload, notifyUser, jobDomain, invoiceEngine }) {
+function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadmin, rid, nowISO, upload, inspectionUpload, uploadDir, notifyUser, jobDomain, invoiceEngine }) {
   const domain = jobDomain || createJobDomain({ db, rid });
   const isSuper = (user) => Boolean(user && (user.role === "SUPERADMIN" || Number(user.is_superadmin || 0) === 1));
   const isAdmin = (user) => isSuper(user) || user?.role === "ADMIN";
@@ -138,7 +140,8 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       financial_lines: lines,
       finance_summary: summary,
       is_overdue: row.current_status === "ACTIVE" && row.final_due_at < localDateTimeFromISO(nowISO()),
-      final_due_at_ny: row.final_due_at
+      final_due_at_ny: row.final_due_at,
+      intake_photos_list: (()=>{try{return JSON.parse(row.intake_photos||"[]");}catch(_error){return [];}})()
     };
   }
 
@@ -165,7 +168,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,
-      p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
+      p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.finish,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
       cu.name AS created_by_name,
       tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
       FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id
@@ -186,6 +189,48 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const row = stageById(id);
     if (!row || row.workflow_id !== workflowId) throw error("WORKFLOW_STAGE_NOT_FOUND");
     return row;
+  }
+
+  function inspectionReady(workflow, type) {
+    if (type === "INTAKE") return workflow?.intake_inspection_status && workflow.intake_inspection_status !== "PENDING" && Boolean(workflow.intake_pdf_path);
+    return workflow?.dispatch_inspection_status === "APPROVED" && Boolean(workflow.dispatch_pdf_path);
+  }
+
+  function assertInspectionForStage(workflow, stage, nextStatus) {
+    if (workflow.mode === "INBOUND" && stage.stage_code === "INBOUND" && ["IN_PROGRESS","COMPLETED"].includes(nextStatus) && !inspectionReady(workflow,"INTAKE")) throw error("INTAKE_INSPECTION_REQUIRED");
+    if (stage.stage_code === "FINAL_HANDOVER" && nextStatus === "COMPLETED" && !inspectionReady(workflow,"DISPATCH")) throw error("DISPATCH_INSPECTION_REQUIRED");
+  }
+
+  function persistPianoInspectionFile({ workflow, file, inspectionType, inspectionStatus, inspectedBy, inspectedAt }) {
+    if (!file || !uploadDir) return null;
+    const targetDir=path.join(uploadDir,"piano-history",String(workflow.piano_id));
+    fs.mkdirSync(targetDir,{recursive:true});
+    const ext=path.extname(file.originalname||file.filename||"").toLowerCase()||".bin";
+    const filename=`${inspectionType.toLowerCase()}-${Date.now()}-${rid("H").replace(/[^a-zA-Z0-9_-]/g,"")}${ext}`;
+    const target=path.join(targetDir,filename);
+    fs.copyFileSync(file.path,target);
+    const publicPath=`/uploads/piano-history/${workflow.piano_id}/${filename}`;
+    db.prepare(`INSERT INTO piano_inspection_history(id,piano_id,workflow_id,inspection_type,inspection_status,file_path,original_filename,mime_type,inspected_by,inspected_at) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+      .run(rid("PIH"),workflow.piano_id,workflow.id,inspectionType,inspectionStatus||null,publicPath,file.originalname||filename,file.mimetype||null,inspectedBy||null,inspectedAt);
+    return publicPath;
+  }
+
+  function createWorkflowForJob(job, actor, options={}) {
+    if (!job?.client_id) throw error("WORKFLOW_JOB_CLIENT_REQUIRED");
+    if (!job?.piano_id) throw error("WORKFLOW_JOB_PIANO_REQUIRED");
+    const client=db.prepare("SELECT id,name FROM contacts WHERE id=?").get(job.client_id);
+    const piano=db.prepare("SELECT id,brand,model,serial_no,finish FROM pianos WHERE id=?").get(job.piano_id);
+    if(!client)throw error("CLIENT_NOT_FOUND");if(!piano)throw error("PIANO_NOT_FOUND");
+    const assignee=userById(job.assigned_user_id)||{id:job.assigned_user_id||actor.id,name:job.assigned_to||actor.name};
+    const finalDueAt=localDateTime(options.final_due_at||job.end_time);if(!finalDueAt)throw error("WORKFLOW_TITLE_AND_FINAL_DEADLINE_REQUIRED");
+    const defs=definitions(false);if(!defs.length)throw error("WORKFLOW_ACTIVE_PHASE_REQUIRED");
+    const id=rid("WF"),key=`WF-${new Date().getFullYear()}-${id.slice(-8)}`,title=clean(options.title||job.title||"Workshop workflow",240);
+    db.prepare(`INSERT INTO workshop_workflows(id,workflow_key,client_id,piano_id,mode,job_id,title,description,notes,due_time,current_status,financial_status,final_due_at,timezone,current_location,transport_address,transport_responsible_user_id,transport_responsible_name,final_handover_type,created_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,key,client.id,piano.id,"INBOUND",job.id,title,clean(options.description||job.instructions||job.notes),clean(options.notes||job.notes),finalDueAt.slice(11,16),"ACTIVE","OPEN",finalDueAt,"America/New_York",clean(job.service_address,500),clean(job.service_address,500),assignee.id||null,assignee.name||null,"DELIVERY",actor.id);
+    const insert=db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,card_title,status,assigned_user_id,assigned_to,due_at,details,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,?)`);
+    defs.forEach((definition,index)=>insert.run(rid("WFS"),id,definition.code,index,definition.name_en,definition.name_hu,title,"WAITING",index===0?assignee.id||null:null,index===0?assignee.name||null:null,definition.code==="FINAL_HANDOVER"?finalDueAt:null,"",clean(options.notes||job.notes)));
+    db.prepare("UPDATE jobs SET workshop_workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id,job.id);
+    return workflowById(id);
   }
 
   function stageCanStart(workflow, stage) {
@@ -366,24 +411,24 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         const linkedStart = requestedCalendarStart || shiftLocalMinutes(finalDueAt,-SCHEDULE_INTERVAL_MINUTES);
         const linkedEnd = requestedCalendarEnd || finalDueAt;
         const pianoName = piano.display_name || `${piano.brand || ""} ${piano.model || ""}`.trim() || piano.serial_no || piano.id;
-        db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,workflow_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          linkedJobId,`WFJOB-${key}`,linkedJobId,1,"ACTIVE",id,title,"Workflow",client.id,client.name,piano.id,pianoName,firstAssignee.id,firstAssignee.name,req.user.id,req.user.name,"Medium","Open",linkedStart,linkedEnd,"America/New_York",0,SCHEDULE_INTERVAL_MINUTES/60,SCHEDULE_INTERVAL_MINUTES,0,clean(body.transport_address||body.current_location,500),clean(body.description),clean(body.description)
+        db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,workflow_id,workshop_workflow_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          linkedJobId,`WFJOB-${key}`,linkedJobId,1,"ACTIVE",id,id,title,"Workflow",client.id,client.name,piano.id,pianoName,firstAssignee.id,firstAssignee.name,req.user.id,req.user.name,"Medium","Open",linkedStart,linkedEnd,"America/New_York",0,SCHEDULE_INTERVAL_MINUTES/60,SCHEDULE_INTERVAL_MINUTES,0,clean(body.transport_address||body.current_location,500),clean(body.description),clean(body.description)
         );
-        db.prepare(`INSERT INTO workshop_workflows(id,workflow_key,client_id,piano_id,mode,planned_job_id,job_id,title,description,current_status,financial_status,final_due_at,timezone,current_location,transport_address,transport_responsible_user_id,transport_responsible_name,transport_note,final_handover_type,created_by_user_id)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          id, key, clientId, pianoId, mode, plannedJobId || null, linkedJobId, title, clean(body.description), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
+        db.prepare(`INSERT INTO workshop_workflows(id,workflow_key,client_id,piano_id,mode,planned_job_id,job_id,title,description,notes,due_time,current_status,financial_status,final_due_at,timezone,current_location,transport_address,transport_responsible_user_id,transport_responsible_name,transport_note,final_handover_type,created_by_user_id)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          id, key, clientId, pianoId, mode, plannedJobId || null, linkedJobId, title, clean(body.description), clean(body.notes), finalDueAt.slice(11,16), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
         );
         if (plannedJobId) db.prepare("UPDATE planned_jobs SET workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id, plannedJobId);
-        const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,card_title,status,assigned_user_id,assigned_to,due_at,details,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,card_title,status,assigned_user_id,assigned_to,due_at,details,notes,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
         stageDefinitions.forEach((definition, index) => {
           const relevant = selectedDefinitions.some((selected) => selected.code === definition.code);
           const assignedStage = relevant ? stageAssignees.get(definition.code) : null;
           const stageStatus = relevant ? "WAITING" : "NOT_REQUIRED";
           const due = relevant && definition.code === "FINAL_HANDOVER" ? finalDueAt : (relevant ? localDateTime(body[`stage_due_${definition.code}`]) : "");
           const cardTitle = relevant ? clean(body[`stage_card_title_${definition.code}`] || body[`stage_title_${definition.code}`] || title, 240) : null;
-          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, cardTitle, stageStatus, assignedStage?.id || null, assignedStage?.name || null, due || null, "", definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_inspection : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_assessment : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_quote : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_meeting : null, definition.code === "INBOUND" && relevant ? numeric(body.preliminary_quote_amount) : 0);
+          insertStage.run(rid("WFS"), id, definition.code, index, definition.name_en, definition.name_hu, cardTitle, stageStatus, assignedStage?.id || null, assignedStage?.name || null, due || null, "", clean(body[`stage_notes_${definition.code}`]||body.notes), definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_inspection : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_assessment : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_quote : null, definition.code === "INBOUND" && mode === "INBOUND" && relevant ? prelim.preliminary_meeting : null, definition.code === "INBOUND" && relevant ? numeric(body.preliminary_quote_amount) : 0);
         });
         directAudit(req, "WORKFLOW_CREATED", id, null, { workflow_key: key, client_id: clientId, piano_id: pianoId, mode, main_responsible_user_id: req.user.id, first_stage_id: firstDefinition.code, active_stage_codes: selectedDefinitions.map((definition) => definition.code) }, "Workshop workflow created");
       });
@@ -400,6 +445,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const values = [];
       if (body.title !== undefined) { changes.push("title=?"); values.push(clean(body.title, 240)); }
       if (body.description !== undefined) { changes.push("description=?"); values.push(clean(body.description)); }
+      if (body.notes !== undefined) { changes.push("notes=?"); values.push(clean(body.notes)); }
       if (body.final_handover_type !== undefined) { changes.push("final_handover_type=?"); values.push(body.final_handover_type === "ON_SITE" ? "ON_SITE" : "DELIVERY"); }
       if (body.final_due_at !== undefined) {
         throw error("FINAL_DEADLINE_IMMUTABLE");
@@ -432,6 +478,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         if (!STATUS.has(status)) throw error("INVALID_WORKFLOW_STAGE_STATUS");
         if (stage.status === "NOT_REQUIRED" && status !== "NOT_REQUIRED") throw error("WORKFLOW_STAGE_MUST_BE_ACTIVATED");
         if (status === "IN_PROGRESS" && !stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
+        assertInspectionForStage(workflow,stage,status);
         if (status === "IN_PROGRESS" && !validId(body.assigned_user_id || stage.assigned_user_id)) throw error("WORKFLOW_RESPONSIBLE_REQUIRED_TO_START");
         if (status === "COMPLETED" && stage.stage_order > 0 && !stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
         if (stage.stage_order === 0 && workflow.mode === "INBOUND" && status === "COMPLETED" && [stage.preliminary_inspection, stage.preliminary_assessment, stage.preliminary_quote, stage.preliminary_meeting].some((value) => !value)) throw error("INBOUND_PRELIMINARY_FIELDS_REQUIRED");
@@ -440,6 +487,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         if (status === "COMPLETED") { changes.push("completed_at=?"); values.push(nowISO()); }
       }
       if (body.details !== undefined) { changes.push("details=?"); values.push(clean(body.details)); }
+      if (body.notes !== undefined) { changes.push("notes=?"); values.push(clean(body.notes)); }
       if (body.card_title !== undefined) { changes.push("card_title=?"); values.push(clean(body.card_title, 240)); }
       if (body.block_reason !== undefined) { changes.push("block_reason=?"); values.push(clean(body.block_reason, 2000)); }
       if (body.due_at !== undefined) {
@@ -487,6 +535,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (!["NOT_REQUIRED", "WAITING"].includes(stage.status)) throw error("WORKFLOW_STAGE_ALREADY_ACTIVE");
       if (!stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
       const startNow = body.start_now === true || String(body.start_now).toLowerCase() === "true";
+      if(startNow) assertInspectionForStage(workflow,stage,"IN_PROGRESS");
       const assignmentMode = clean(body.assignment_mode, 40).toUpperCase() || "MANUAL";
       const assigneeId = validId(body.assigned_user_id || stage.assigned_user_id);
       const assignee = assigneeId ? userById(assigneeId) : null;
@@ -587,6 +636,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const body = req.body || {}, changes = [], values = [];
       if (body.title !== undefined) { const title = clean(body.title, 240); if (!title) throw error("FINANCIAL_LINE_TITLE_REQUIRED"); changes.push("title=?"); values.push(title); }
       if (body.description !== undefined) { changes.push("description=?"); values.push(clean(body.description)); }
+      if (body.notes !== undefined) { changes.push("notes=?"); values.push(clean(body.notes)); }
       if (body.amount !== undefined) { const amount = numeric(body.amount, NaN); if (!Number.isFinite(amount) || amount < 0) throw error("INVALID_FINANCIAL_LINE_AMOUNT"); changes.push("amount=?"); values.push(amount); }
       if (body.billing_status !== undefined) { const billingStatus = String(body.billing_status).toUpperCase(); if (!["CHARGEABLE", "WARRANTY", "FREE", "COMPENSATION", "CREDIT"].includes(billingStatus)) throw error("INVALID_BILLING_STATUS"); changes.push("billing_status=?"); values.push(billingStatus); }
       if (!changes.length) return res.json({ line: financialRows(workflow.id).find((item) => item.id === line.id), summary: signedFinanceSummary(financialRows(workflow.id)) });
@@ -658,6 +708,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
           if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now, paymentMethod });
+          db.prepare("UPDATE jobs SET workflow_status='COMPLETED',updated_at=CURRENT_TIMESTAMP WHERE workshop_workflow_id=?").run(workflow.id);
           return { closedId };
         }
       });
@@ -682,6 +733,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         db.prepare("UPDATE workflow_stages SET status='ABORTED',block_reason=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND status NOT IN ('COMPLETED','NOT_REQUIRED')").run(reason, workflow.id);
         db.prepare("UPDATE workshop_workflows SET current_status='ABORTED',aborted_at=?,aborted_by_user_id=?,abort_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(now, req.user.id, reason, workflow.id);
         if(workflow.job_id) db.prepare("UPDATE jobs SET status='Cancelled',workflow_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.job_id);
+        db.prepare("UPDATE jobs SET workflow_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE workshop_workflow_id=?").run(workflow.id);
         db.prepare("INSERT INTO workflow_audit_events(id,workflow_id,action,reason,actor_user_id,snapshot_json) VALUES(?,?,?,?,?,?)").run(rid("WAE"), workflow.id, "SECONDARY_DELETE", reason, req.user.id, JSON.stringify({ workflow }));
         directAudit(req, "WORKFLOW_SECONDARY_DELETE", workflow.id, workflow, { current_status: "ABORTED" }, reason);
       })();
@@ -712,6 +764,64 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (!result) throw error("WORKFLOW_NOT_FOUND");
       res.json({ ok: true, success: true, deleted_id: workflow.id, deleted_workflow_id: workflow.id, deleted_stages: result.stageCount, audit_preserved: true });
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
+  app.post("/api/jobs/:jobId/workshop-workflow", auth, permit("ADMIN", "MANAGER", "WORKER"), (req,res)=>{
+    try{
+      const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.jobId);if(!job)throw error("JOB_NOT_FOUND");
+      const action=clean(req.body?.action,20).toUpperCase()||"CREATE";
+      let workflow;
+      db.transaction(()=>{
+        if(action==="ATTACH"){
+          workflow=requireWorkflow(validId(req.body?.workflow_id));
+          if(workflow.current_status!=="ACTIVE")throw error("WORKFLOW_NOT_ACTIVE");
+          if(job.client_id&&String(workflow.client_id)!==String(job.client_id))throw error("WORKFLOW_JOB_CLIENT_MISMATCH");
+          if(job.piano_id&&String(workflow.piano_id)!==String(job.piano_id))throw error("WORKFLOW_JOB_PIANO_MISMATCH");
+          db.prepare("UPDATE jobs SET workshop_workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id,job.id);
+        }else if(action==="DETACH"){
+          db.prepare("UPDATE jobs SET workshop_workflow_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(job.id);workflow=null;
+        }else workflow=createWorkflowForJob(job,req.user,req.body||{});
+      })();
+      directAudit(req,"JOB_WORKFLOW_LINK_UPDATED",job.id,job,{workshop_workflow_id:workflow?.id||null},`action=${action}`);
+      res.json({ok:true,workflow:workflow?decorateWorkflow(workflowById(workflow.id),true):null,job:db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id)});
+    }catch(e){res.status(e.code==="JOB_NOT_FOUND"||e.code==="WORKFLOW_NOT_FOUND"?404:400).json({error:e.code||e.message});}
+  });
+
+  app.get("/api/pianos/:pianoId/inspection-history",auth,permit("ADMIN","MANAGER","WORKER"),(req,res)=>{
+    res.json(db.prepare("SELECT * FROM piano_inspection_history WHERE piano_id=? ORDER BY inspected_at DESC,created_at DESC").all(req.params.pianoId));
+  });
+
+  app.post("/api/workflows/:id/inspections/intake",auth,permit("ADMIN","MANAGER","WORKER"),inspectionUpload?.fields([{name:"pdf",maxCount:1},{name:"photos",maxCount:10}]),(req,res)=>{
+    const uploaded=[...(req.files?.pdf||[]),...(req.files?.photos||[])];
+    try{
+      const workflow=requireWorkflow(req.params.id),pdf=req.files?.pdf?.[0],photos=req.files?.photos||[],status=clean(req.body?.status,40).toUpperCase();
+      if(!pdf||String(pdf.mimetype).toLowerCase()!=="application/pdf"||path.extname(pdf.originalname||"").toLowerCase()!==".pdf")throw error("INTAKE_PDF_REQUIRED");
+      if(!["FLAWLESS","PRE_EXISTING_DAMAGE"].includes(status))throw error("INVALID_INTAKE_INSPECTION_STATUS");
+      const allowedPhotoExt=new Set([".jpg",".jpeg",".png",".webp"]),allowedPhotoMime=new Set(["image/jpeg","image/jpg","image/png","image/webp"]);
+      if(photos.some(file=>!allowedPhotoExt.has(path.extname(file.originalname||"").toLowerCase())||!allowedPhotoMime.has(String(file.mimetype||"").toLowerCase())))throw error("INVALID_INTAKE_PHOTO");
+      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"";
+      const historyPdf=persistPianoInspectionFile({workflow,file:pdf,inspectionType:"INTAKE",inspectionStatus:status,inspectedBy,inspectedAt});
+      const photoPaths=photos.map(file=>persistPianoInspectionFile({workflow,file,inspectionType:"DAMAGE_PHOTO",inspectionStatus:status,inspectedBy,inspectedAt})).filter(Boolean);
+      const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
+      db.prepare("UPDATE workshop_workflows SET intake_inspection_status=?,intake_pdf_path=?,intake_photos=?,intake_inspected_by=?,intake_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,JSON.stringify(photoPaths),inspectedBy,inspectedAt,workflow.id);
+      directAudit(req,"WORKFLOW_INTAKE_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf,photos:photoPaths},"Arrival inspection recorded");
+      res.json(decorateWorkflow(workflowById(workflow.id),true));
+    }catch(e){uploaded.forEach(file=>{try{fs.unlinkSync(file.path);}catch(_error){}});res.status(400).json({error:e.code||e.message});}
+  });
+
+  app.post("/api/workflows/:id/inspections/dispatch",auth,permit("ADMIN","MANAGER","WORKER"),inspectionUpload?.fields([{name:"pdf",maxCount:1}]),(req,res)=>{
+    const uploaded=[...(req.files?.pdf||[])];
+    try{
+      const workflow=requireWorkflow(req.params.id),pdf=req.files?.pdf?.[0],status=clean(req.body?.status||"APPROVED",40).toUpperCase();
+      if(!pdf||String(pdf.mimetype).toLowerCase()!=="application/pdf"||path.extname(pdf.originalname||"").toLowerCase()!==".pdf")throw error("DISPATCH_PDF_REQUIRED");
+      if(!["APPROVED","ISSUE_FOUND"].includes(status))throw error("INVALID_DISPATCH_INSPECTION_STATUS");
+      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"";
+      const historyPdf=persistPianoInspectionFile({workflow,file:pdf,inspectionType:"DISPATCH",inspectionStatus:status,inspectedBy,inspectedAt});
+      const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
+      db.prepare("UPDATE workshop_workflows SET dispatch_inspection_status=?,dispatch_pdf_path=?,dispatch_inspected_by=?,dispatch_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,inspectedBy,inspectedAt,workflow.id);
+      directAudit(req,"WORKFLOW_DISPATCH_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf},"Outgoing inspection recorded");
+      res.json(decorateWorkflow(workflowById(workflow.id),true));
+    }catch(e){uploaded.forEach(file=>{try{fs.unlinkSync(file.path);}catch(_error){}});res.status(400).json({error:e.code||e.message});}
   });
 
   app.post("/api/workflows/:id/documents", auth, permit("ADMIN", "MANAGER", "WORKER"), upload?.single("file"), (req, res) => {
