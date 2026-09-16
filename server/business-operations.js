@@ -69,6 +69,107 @@ function roundFinancial(value) {
   return Math.round((parsed + Number.EPSILON) * 100) / 100;
 }
 
+const NEW_YORK_TIME_ZONE = "America/New_York";
+function newYorkParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NEW_YORK_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  }).formatToParts(date);
+  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+function newYorkDateKey(value = new Date()) { const p = newYorkParts(value); return `${p.year}-${p.month}-${p.day}`; }
+function newYorkMonthKey(value = new Date()) { const p = newYorkParts(value); return `${p.year}-${p.month}`; }
+function timeZoneOffsetMs(date, timeZone = NEW_YORK_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hourCycle:"h23" }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+  const asUtc = Date.UTC(values.year, values.month - 1, values.day, values.hour, values.minute, values.second);
+  return asUtc - date.getTime();
+}
+function newYorkLocalToUtc(year, month, day, hour = 0, minute = 0, second = 0) {
+  const localUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  let guess = localUtc;
+  for (let i = 0; i < 4; i += 1) guess = localUtc - timeZoneOffsetMs(new Date(guess));
+  return new Date(guess);
+}
+function nextNewYorkMonthBoundary(value = new Date()) {
+  const p = newYorkParts(value);
+  let year = Number(p.year), month = Number(p.month) + 1;
+  if (month === 13) { month = 1; year += 1; }
+  return newYorkLocalToUtc(year, month, 1, 0, 0, 0);
+}
+function actualMonthEndDate(month) {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ""))) return null;
+  const [year, monthNumber] = String(month).split("-").map(Number);
+  return `${month}-${String(new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+function invoiceLifecycleStatus(invoice, now = new Date()) {
+  const status = String(invoice?.status || "").toLowerCase();
+  if (status === "void") return "Void";
+  if (status === "paid") return "Paid";
+  const due = String(invoice?.due_date || "");
+  if (due && /^\d{4}-\d{2}-\d{2}$/.test(due) && due < newYorkDateKey(now)) return "Overdue";
+  return "Pending";
+}
+function sqliteTimestampToUtc(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) { const parsed = new Date(text); return Number.isNaN(parsed.getTime()) ? null : parsed; }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) { const parsed = new Date(`${text.replace(" ", "T")}Z`); return Number.isNaN(parsed.getTime()) ? null : parsed; }
+  return null;
+}
+function invoicePaidPeriod(invoice) {
+  const paidAt = sqliteTimestampToUtc(invoice?.paid_at);
+  if (paidAt) return newYorkMonthKey(paidAt);
+  const issueDate = String(invoice?.issue_date || "");
+  return /^\d{4}-\d{2}-\d{2}$/.test(issueDate) ? issueDate.slice(0, 7) : "";
+}
+function archiveEligibleInvoices(db, predicate, now = new Date()) {
+  const archivedAt = now.toISOString();
+  const rows = db.prepare("SELECT id,paid_at,issue_date FROM invoices WHERE status='paid' AND archived_at IS NULL").all();
+  const update = db.prepare("UPDATE invoices SET archived_at=?,archived_period=? WHERE id=? AND status='paid' AND archived_at IS NULL");
+  const apply = db.transaction(() => {
+    let changes = 0;
+    for (const row of rows) {
+      const period = invoicePaidPeriod(row);
+      if (!period || !predicate(period)) continue;
+      changes += Number(update.run(archivedAt, period, row.id).changes || 0);
+    }
+    return changes;
+  });
+  return apply();
+}
+function closeInvoicePeriod(db, period, now = new Date()) {
+  if (!/^\d{4}-\d{2}$/.test(String(period || ""))) throw new Error("INVALID_INVOICE_PERIOD");
+  return archiveEligibleInvoices(db, (paidPeriod) => paidPeriod <= period, now);
+}
+function closeCompletedInvoicePeriods(db, now = new Date()) {
+  const currentMonth = newYorkMonthKey(now);
+  return archiveEligibleInvoices(db, (paidPeriod) => paidPeriod < currentMonth, now);
+}
+function nextNewYorkMonthClose(value = new Date()) {
+  return new Date(nextNewYorkMonthBoundary(value).getTime() - 1000);
+}
+const MAX_INVOICE_CLOSE_TIMER_MS = 6 * 60 * 60 * 1000;
+function scheduleInvoicePeriodClose(db) {
+  closeCompletedInvoicePeriods(db, new Date());
+  const scheduleNext = (base = new Date()) => {
+    const closeAt = nextNewYorkMonthClose(base);
+    const waitUntilClose = () => {
+      const remaining = closeAt.getTime() - Date.now();
+      if (remaining <= 0) {
+        closeInvoicePeriod(db, newYorkMonthKey(closeAt), new Date());
+        scheduleNext(new Date(closeAt.getTime() + 2000));
+        return;
+      }
+      const timer = setTimeout(waitUntilClose, Math.min(remaining, MAX_INVOICE_CLOSE_TIMER_MS));
+      if (typeof timer.unref === "function") timer.unref();
+    };
+    waitUntilClose();
+  };
+  scheduleNext();
+}
+
 function normalizeEmail(value) { return clean(value, 320).toLowerCase(); }
 function validEmail(value) { return EMAIL_PATTERN.test(normalizeEmail(value)); }
 function newId(prefix) { return `${prefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`; }
@@ -257,9 +358,14 @@ function attachmentUrl(scope, tokenOrId, attachmentId) {
     : `/api/customer-conversations/${encodeURIComponent(tokenOrId)}/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
-function createBusinessDocumentService({ db, uploadDir, transactionalEmail, websiteBaseUrl = "", env = process.env }) {
+function createBusinessDocumentService({ db, uploadDir, transactionalEmail, websiteBaseUrl = "", env = process.env, invoiceEngineProvider = null }) {
   const documentDir = path.join(uploadDir || path.join(__dirname, "uploads"), "documents");
   fs.mkdirSync(documentDir, { recursive: true });
+  const engine = () => {
+    const value = typeof invoiceEngineProvider === "function" ? invoiceEngineProvider() : invoiceEngineProvider;
+    if (!value) throw Object.assign(new Error("INVOICE_ENGINE_UNAVAILABLE"), { status: 503 });
+    return value;
+  };
 
   function deliveryRow(eventKey) { return db.prepare("SELECT * FROM communication_deliveries WHERE event_key=?").get(eventKey); }
   function beginDelivery({ eventKey, deliveryType, recipientEmail, eventId, paymentId, ticketId, conversationId }) {
@@ -284,9 +390,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
   function eventDocumentData(event, tickets) {
     return { event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveTicketLogoPath(readCompanyData(db).logo_url, uploadDir) };
   }
-  function ticketDocumentGenerator(mode) {
-    return mode === "front" ? generateTicketFrontPdf : mode === "back" ? generateTicketBackPdf : generateTicketFullPdf;
-  }
+  function ticketDocumentGenerator(mode) { return mode === "front" ? generateTicketFrontPdf : mode === "back" ? generateTicketBackPdf : generateTicketFullPdf; }
   function persistTicketDocument(ticket, documentType, pdf, userId = null) {
     const normalized = String(documentType || "FULL").toUpperCase();
     const filePath = artifactPath(`ticket-${ticket.id}-${normalized.toLowerCase()}`, ticket.id);
@@ -298,23 +402,6 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
       .run(newId("TDOC"), ticket.id, ticket.event_id, normalized, publicDocumentPath(filePath), userId);
     return { document_type: normalized, stored_path: publicDocumentPath(filePath), file_path: filePath };
   }
-
-  function invoiceNumber(payment, company) {
-    const existing = db.prepare("SELECT invoice_number FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${payment.id}%`);
-    if (existing?.invoice_number) return existing.invoice_number;
-    const year = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric" }).format(new Date());
-    return `${company.invoice_prefix || "KH"}-${year}-${String(Date.now()).slice(-8)}`;
-  }
-
-  function createFinancialItem(payment, event, userName = "SYSTEM") {
-    const amount = Number(payment.amount_total || 0) / 100;
-    if (amount <= 0 || db.prepare("SELECT 1 FROM financial_items WHERE source_type='event_payment' AND source_id=? LIMIT 1").get(payment.id)) return;
-    db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,source_type,source_id,created_by)
-      VALUES(?,?,?,?,?,'INCOME','CONCERT_SERVICE_REVENUE','ONE_TIME','Credit Card','1010','event_payment',?,?)`).run(
-      newId("FIN"), new Date().toISOString().slice(0, 10), `Event ticket sale · ${event.title_en}`, `Stripe Sandbox payment ${payment.id}`, amount, payment.id, userName
-    );
-  }
-
   function createRefundFinancialItem(payment, event) {
     const amount = Number(payment.amount_total || 0) / 100;
     if (amount <= 0 || db.prepare("SELECT 1 FROM financial_items WHERE source_type='event_payment_refund' AND source_id=? LIMIT 1").get(payment.id)) return;
@@ -322,6 +409,54 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
       VALUES(?,?,?,?,?,'EXPENSE','EVENT_REFUND','ONE_TIME','Credit Card','1010','event_payment_refund',?,'SYSTEM')`).run(
       newId("FIN"), new Date().toISOString().slice(0, 10), `Event ticket refund · ${event.title_en}`, `Stripe Sandbox refund ${payment.id}`, amount, payment.id
     );
+  }
+  function eventDueDate(event, issueDate) {
+    const eventDate = String(event?.start_at || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate >= issueDate ? eventDate : issueDate;
+  }
+  function ensureTicketInvoice(ticket, event, { status = null } = {}) {
+    if (!ticket || Number(ticket.price_cents || 0) <= 0) return null;
+    const invoiceEngine = engine();
+    let invoice = ticket.invoice_id ? invoiceEngine.invoiceDetail(ticket.invoice_id) : null;
+    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`ticket:${ticket.id}`);
+    const desiredStatus = status || (ticket.payment_status === "PAID" ? "paid" : "issued");
+    const method = normalizePaymentMethod(ticket.payment_method) || "Cash";
+    if (!invoice) {
+      const issueDate = String(ticket.paid_at || ticket.reserved_at || ticket.created_at || new Date().toISOString()).slice(0, 10);
+      invoice = invoiceEngine.createInvoice({
+        direction:"receivable", issueDate, dueDate:eventDueDate(event,issueDate), sourceType:"event", sourceId:`ticket:${ticket.id}`,
+        summary:`Event ticket: ${event.title_en || event.title_hu || event.id}`, taxRate:0, paymentMethod:method, status:desiredStatus,
+        items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${ticket.attendee_name || ticket.buyer_name || "Ticket"}`, quantity:1, unit_price:Number(ticket.price_cents || 0)/100, line_type:"fee" }]
+      });
+    } else if (desiredStatus === "paid" && invoice.status !== "paid") {
+      db.prepare("UPDATE invoices SET status='paid',payment_method=?,paid_at=COALESCE(paid_at,CURRENT_TIMESTAMP) WHERE id=?").run(method, invoice.id);
+      invoice = invoiceEngine.invoiceDetail(invoice.id);
+    } else invoice = invoiceEngine.invoiceDetail(invoice.id);
+    db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,ticket.id);
+    db.prepare("DELETE FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=?").run(ticket.id);
+    return invoice;
+  }
+  function ensurePaymentInvoice(payment, event, tickets) {
+    const invoiceEngine = engine();
+    let invoice = payment.invoice_id ? invoiceEngine.invoiceDetail(payment.invoice_id) : null;
+    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`payment:${payment.id}`);
+    if (!invoice) {
+      const issueDate = String(payment.paid_at || payment.created_at || new Date().toISOString()).slice(0, 10);
+      invoice = invoiceEngine.createInvoice({
+        direction:"receivable", issueDate, dueDate:issueDate, sourceType:"event", sourceId:`payment:${payment.id}`,
+        summary:`Event ticket sale: ${event.title_en || event.title_hu || event.id}`, taxRate:0, paymentMethod:"Credit Card", status:"paid",
+        items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${Number(payment.quantity || tickets.length || 1)} ticket(s)`, quantity:1, unit_price:Number(payment.amount_total || 0)/100, line_type:"fee" }]
+      });
+    } else invoice = invoiceEngine.invoiceDetail(invoice.id);
+    db.prepare("UPDATE event_payments SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,payment.id);
+    db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE event_payment_id=?").run(invoice.id,payment.id);
+    db.prepare("DELETE FROM financial_items WHERE source_type='event_payment' AND source_id=?").run(payment.id);
+    return invoice;
+  }
+  function businessInvoicePdf(invoice, counterpartyName = "") {
+    const company = readCompanyData(db);
+    const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
+    return generateBusinessInvoicePdf({ company, invoice, items: invoice.items || [], counterpartyName: counterpartyName || invoice.counterparty_name || "Event Customer", logoPath });
   }
 
   async function sendPurchaseDocuments(paymentId, { resend = false } = {}) {
@@ -331,149 +466,53 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
     if (!event || !tickets.length) throw new Error("EVENT_TICKETS_NOT_READY");
     const company = readCompanyData(db);
-    const invoice = invoiceNumber(payment, company);
-    const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-    const pdfOptions = eventDocumentData(event, tickets);
-    const ticketPdf = generateTicketFrontPdf(pdfOptions);
+    const invoice = ensurePaymentInvoice(payment,event,tickets);
+    const ticketPdf = generateTicketFrontPdf(eventDocumentData(event, tickets));
     tickets.forEach((ticket) => {
       persistTicketDocument(ticket, "FRONT", generateTicketFrontPdf(eventDocumentData(event, [ticket])));
       persistTicketDocument(ticket, "BACK", generateTicketBackPdf(eventDocumentData(event, [ticket])));
       persistTicketDocument(ticket, "FULL", generateTicketFullPdf(eventDocumentData(event, [ticket])));
     });
-    const invoicePdf = generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath });
-    const ticketPath = artifactPath("tickets", payment.id); const invoicePath = artifactPath("invoice", payment.id);
+    const invoicePdf = businessInvoicePdf(invoice,payment.purchaser_name);
+    const ticketPath = artifactPath("tickets", payment.id); const invoicePath = artifactPath("central-invoice", invoice.id);
     if (!fs.existsSync(ticketPath) || resend) fs.writeFileSync(ticketPath, ticketPdf);
     if (!fs.existsSync(invoicePath) || resend) fs.writeFileSync(invoicePath, invoicePdf);
-    const existingInvoice = db.prepare("SELECT id FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${payment.id}%`);
-    if (!existingInvoice) db.prepare(`INSERT INTO knowledge_base(id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number)
-      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(newId("DOC"), `Invoice ${invoice}`, "Event Ticketing", "Event Invoice", JSON.stringify({ payment_id: payment.id, event_id: event.id }), publicDocumentPath(invoicePath), payment.purchaser_name, Number(payment.amount_total || 0) / 100, "Credit Card", invoice);
-    createFinancialItem(payment, event);
     const key = `event-purchase-documents:${payment.id}`;
     beginDelivery({ eventKey: key, deliveryType: "EVENT_PURCHASE_DOCUMENTS", recipientEmail: payment.purchaser_email, eventId: event.id, paymentId: payment.id });
     if (!transactionalEmail?.sendEventPurchaseConfirmation) {
       finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      return { status: "NOT_CONFIGURED", invoice_number: invoice, ticket_file: publicDocumentPath(ticketPath), invoice_file: publicDocumentPath(invoicePath) };
+      return { status: "NOT_CONFIGURED", invoice_number: invoice.invoice_number, ticket_file: publicDocumentPath(ticketPath), invoice_file: publicDocumentPath(invoicePath) };
     }
     try {
-      const sent = await transactionalEmail.sendEventPurchaseConfirmation({ to: payment.purchaser_email, purchaserName: payment.purchaser_name, event, payment, tickets, invoiceNumber: invoice, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey: key });
+      const sent = await transactionalEmail.sendEventPurchaseConfirmation({ to: payment.purchaser_email, purchaserName: payment.purchaser_name, event, payment, tickets, invoiceNumber: invoice.invoice_number, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey: key });
       finishDelivery(key, { status: "SENT", providerMessageId: sent.providerMessageId });
-      return { status: "SENT", provider_message_id: sent.providerMessageId, invoice_number: invoice };
+      return { status: "SENT", provider_message_id: sent.providerMessageId, invoice_number: invoice.invoice_number };
     } catch (error) {
       finishDelivery(key, { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", errorCode: error.code || "EMAIL_DELIVERY_FAILED" });
-      return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", invoice_number: invoice };
+      return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", invoice_number: invoice.invoice_number };
     }
   }
-
   async function sendTicketDocuments({ eventId, ticketIds, deliveryType = "EVENT_FREE_TICKETS" }) {
     const event = db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
     const tickets = db.prepare(`SELECT * FROM event_tickets WHERE event_id=? AND id IN (${(ticketIds || []).map(() => "?").join(",") || "NULL"}) ORDER BY ticket_sequence,id`).all(eventId, ...(ticketIds || []));
     if (!event || !tickets.length) return { status: "NOT_READY" };
-    const first = tickets[0];
-    const key = `${deliveryType.toLowerCase()}:${first.id}`;
+    const first = tickets[0]; const key = `${deliveryType.toLowerCase()}:${first.id}`;
     beginDelivery({ eventKey: key, deliveryType, recipientEmail: first.contact_email, eventId, ticketId: first.id });
     const pdf = generateTicketFrontPdf(eventDocumentData(event, tickets));
-    if (!validEmail(first.contact_email) || !transactionalEmail?.sendEventTicketDocuments) {
-      finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      return { status: "NOT_CONFIGURED" };
-    }
-    try {
-      const sent = await transactionalEmail.sendEventTicketDocuments({ to: first.contact_email, event, tickets, ticketPdf: pdf, language: "en", websiteBaseUrl, idempotencyKey: key });
-      finishDelivery(key, { status: "SENT", providerMessageId: sent.providerMessageId });
-      return { status: "SENT", provider_message_id: sent.providerMessageId };
-    } catch (error) {
-      finishDelivery(key, { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", errorCode: error.code || "EMAIL_DELIVERY_FAILED" });
-      return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED" };
-    }
+    if (!validEmail(first.contact_email) || !transactionalEmail?.sendEventTicketDocuments) { finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" }); return { status: "NOT_CONFIGURED" }; }
+    try { const sent = await transactionalEmail.sendEventTicketDocuments({ to: first.contact_email, event, tickets, ticketPdf: pdf, language: "en", websiteBaseUrl, idempotencyKey: key }); finishDelivery(key, { status: "SENT", providerMessageId: sent.providerMessageId }); return { status: "SENT", provider_message_id: sent.providerMessageId }; }
+    catch (error) { finishDelivery(key, { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", errorCode: error.code || "EMAIL_DELIVERY_FAILED" }); return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED" }; }
   }
+  function ticketPdfForTicket(ticketId, mode = "full") { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});return ticketDocumentGenerator(mode)(eventDocumentData(event,[ticket])); }
+  function ticketPdfForPayment(paymentId, mode = "full") { const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);if(!payment)throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);if(!event||!tickets.length)throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"),{status:404});return ticketDocumentGenerator(mode)(eventDocumentData(event,tickets)); }
+  function generateTicketDocuments(ticketId, { mode = "full", userId = null } = {}) { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});const normalized=String(mode||"full").toLowerCase();const document=persistTicketDocument(ticket,normalized.toUpperCase(),ticketDocumentGenerator(normalized)(eventDocumentData(event,[ticket])),userId);return {ticket_id:ticket.id,event_id:event.id,mode:normalized,...document}; }
+  function ticketDocuments(ticketId) { return db.prepare("SELECT document_type,stored_path,generated_at,generated_by_user_id FROM event_ticket_documents WHERE ticket_id=? ORDER BY document_type").all(ticketId); }
+  function invoicePdfForPayment(paymentId) { const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);if(!payment)throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);if(!event||!tickets.length)throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"),{status:404});const invoice=ensurePaymentInvoice(payment,event,tickets);return {pdf:businessInvoicePdf(invoice,payment.purchaser_name),invoice_number:invoice.invoice_number,stored_path:null}; }
+  function invoicePdfForTicket(ticketId) { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});if(ticket.payment_status!=="PAID"||Number(ticket.price_cents||0)<=0)throw Object.assign(new Error("TICKET_INVOICE_REQUIRES_PAID_PRICE"),{status:409});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});const invoice=ensureTicketInvoice(ticket,event,{status:"paid"});const pdf=businessInvoicePdf(invoice,ticket.buyer_name||ticket.attendee_name);const invoicePath=artifactPath("central-invoice",invoice.id);if(!fs.existsSync(invoicePath))fs.writeFileSync(invoicePath,pdf);return {pdf,invoice_number:invoice.invoice_number,stored_path:publicDocumentPath(invoicePath)}; }
 
-  function ticketPdfForTicket(ticketId, mode = "full") {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
-    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
-    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
-    const company = readCompanyData(db);
-    return ticketDocumentGenerator(mode)(eventDocumentData(event, [ticket]));
-  }
-
-  function ticketPdfForPayment(paymentId, mode = "full") {
-    const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
-    if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
-    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
-    if (!event || !tickets.length) throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"), { status: 404 });
-    const company = readCompanyData(db);
-    return ticketDocumentGenerator(mode)(eventDocumentData(event, tickets));
-  }
-
-  function generateTicketDocuments(ticketId, { mode = "full", userId = null } = {}) {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
-    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
-    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
-    const normalized = String(mode || "full").toLowerCase();
-    const generator = ticketDocumentGenerator(normalized);
-    const document = persistTicketDocument(ticket, normalized.toUpperCase(), generator(eventDocumentData(event, [ticket])), userId);
-    return { ticket_id: ticket.id, event_id: event.id, mode: normalized, ...document };
-  }
-
-  function ticketDocuments(ticketId) {
-    return db.prepare("SELECT document_type,stored_path,generated_at,generated_by_user_id FROM event_ticket_documents WHERE ticket_id=? ORDER BY document_type").all(ticketId);
-  }
-
-  function invoicePdfForPayment(paymentId) {
-    const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
-    if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
-    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
-    if (!event || !tickets.length) throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"), { status: 404 });
-    const company = readCompanyData(db);
-    const invoice = invoiceNumber(payment, company);
-    return { pdf: generateInvoicePdf({ company, event, payment, tickets, invoiceNumber: invoice, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) }), invoice_number: invoice };
-  }
-
-  function invoicePdfForTicket(ticketId) {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);
-    if (!ticket) throw Object.assign(new Error("TICKET_NOT_FOUND"), { status: 404 });
-    if (ticket.payment_status !== "PAID" || Number(ticket.price_cents || 0) <= 0) throw Object.assign(new Error("TICKET_INVOICE_REQUIRES_PAID_PRICE"), { status: 409 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
-    if (!event) throw Object.assign(new Error("EVENT_NOT_FOUND"), { status: 404 });
-    const company = readCompanyData(db);
-    const payment = {
-      id: `ticket:${ticket.id}`,
-      purchaser_name: ticket.buyer_name || ticket.attendee_name,
-      purchaser_email: ticket.contact_email || "",
-      amount_total: Number(ticket.price_cents || 0),
-      currency: ticket.currency || "USD",
-      status: "PAID"
-    };
-    const invoice = invoiceNumber(payment, company);
-    const pdf = generateInvoicePdf({ company, event, payment, tickets: [ticket], invoiceNumber: invoice, language: "en", logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) });
-    const invoicePath = artifactPath("invoice-ticket", ticket.id);
-    if (!fs.existsSync(invoicePath)) fs.writeFileSync(invoicePath, pdf);
-    const existing = db.prepare("SELECT id FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? LIMIT 1").get(`%${ticket.id}%`);
-    if (!existing) db.prepare(`INSERT INTO knowledge_base(id,title,category,content_type,body,stored_path,owner,amount,payment_method,invoice_number)
-      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(newId("DOC"), `Invoice ${invoice}`, "Event Ticketing", "Event Invoice", JSON.stringify({ ticket_id: ticket.id, event_id: event.id }), publicDocumentPath(invoicePath), payment.purchaser_name, Number(ticket.price_cents || 0) / 100, normalizePaymentMethod(ticket.payment_method) || "Credit Card", invoice);
-    return { pdf, invoice_number: invoice, stored_path: publicDocumentPath(invoicePath) };
-  }
-
-  return Object.freeze({
-    companyData: () => readCompanyData(db),
-    sendPurchaseDocuments,
-    sendTicketDocuments,
-    ticketPdfForTicket,
-    ticketPdfForPayment,
-    generateTicketDocuments,
-    ticketDocuments,
-    invoicePdfForPayment,
-    invoicePdfForTicket,
-    deliveryRow,
-    recordDelivery,
-    async onPaymentFulfilled({ paymentId }) { return sendPurchaseDocuments(paymentId); },
-    onPaymentRefunded({ paymentId }) {
-      const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
-      const event = payment && db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
-      if (payment && event) createRefundFinancialItem(payment, event);
-    }
+  return Object.freeze({ companyData:()=>readCompanyData(db),sendPurchaseDocuments,sendTicketDocuments,ticketPdfForTicket,ticketPdfForPayment,generateTicketDocuments,ticketDocuments,invoicePdfForPayment,invoicePdfForTicket,deliveryRow,recordDelivery,ensureTicketInvoice,ensurePaymentInvoice,
+    async onPaymentFulfilled({paymentId}){return sendPurchaseDocuments(paymentId);},
+    onPaymentRefunded({paymentId}){const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);const event=payment&&db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);if(payment&&event)createRefundFinancialItem(payment,event);}
   });
 }
 
@@ -522,6 +561,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const normalizedMethod = paymentMethod(method);
     db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), normalizedMethod, normalizedMethod === "Payment Link" ? clean(paymentLinkUrl, 2000) || null : null, clean(notes, 5000) || null, status);
+    if (status === "paid") db.prepare("UPDATE invoices SET paid_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
     const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,sort_order,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?,?)");
     normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type, item.sort_order, item.payment_method, item.financial_status));
     const created = invoiceDetail(id);
@@ -565,6 +605,15 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
       db.prepare(`UPDATE workshop_workflows SET billing_status='Unbilled',invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(invoice.source_id);
+    } else if (invoice.source_type === "event" && invoice.direction === "receivable") {
+      const sourceId = String(invoice.source_id || "");
+      if (sourceId.startsWith("ticket:")) {
+        db.prepare("UPDATE event_tickets SET invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(sourceId.slice(7));
+      } else if (sourceId.startsWith("payment:")) {
+        const paymentId = sourceId.slice(8);
+        db.prepare("UPDATE event_payments SET invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(paymentId);
+        db.prepare("UPDATE event_tickets SET invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE event_payment_id=?").run(paymentId);
+      }
     }
   }
 
@@ -600,7 +649,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const method = paymentMethod(entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null);
-    const estimated = money(job.planned_amount || entries.find((entry) => entry.mainType !== "EXPENSE")?.amount || 0);
+    const estimated = money(entries.find((entry) => entry.mainType !== "EXPENSE")?.amount ?? job.billed_amount ?? 0);
     const dailyRateAmount = Number(job.daily_rate_enabled || 0) === 1 ? money(job.daily_rate_allocated_amount) : 0;
     const extraCompensation = money(job.technician_extra_compensation || 0);
     const contractorTotal = money(dailyRateAmount + extraCompensation);
@@ -693,17 +742,22 @@ function registerBusinessOperationsRoutes(options) {
     const invoiceSelect = `SELECT i.*,c.name AS client_name,p.company_name AS partner_name,
       CASE WHEN i.partner_id IS NOT NULL THEN COALESCE(p.company_name,i.summary,'Partner') ELSE COALESCE(c.company,c.name,i.summary,'Client') END AS counterparty_name
       FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id`;
+    scheduleInvoicePeriodClose(db);
     app.get("/api/invoices", auth, financeReader, (req, res) => {
-      const month = clean(req.query.month, 7), direction = clean(req.query.direction, 20), status = clean(req.query.status, 30);
+      closeCompletedInvoicePeriods(db, new Date());
+      const month = clean(req.query.month, 7), direction = clean(req.query.direction, 20), status = clean(req.query.status, 30), bucket = clean(req.query.bucket, 20).toLowerCase();
       const where = [], params = [];
       if (/^\d{4}-\d{2}$/.test(month)) { where.push("substr(i.issue_date,1,7)=?"); params.push(month); }
       if (["receivable","payable"].includes(direction)) { where.push("i.direction=?"); params.push(direction); }
       if (["draft","issued","paid","void","carried_over"].includes(status)) { where.push("i.status=?"); params.push(status); }
-      const rows = db.prepare(`${invoiceSelect}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY i.issue_date DESC,i.invoice_number DESC`).all(...params);
-      const active = rows.filter((row) => row.status !== "void");
-      const revenue = active.filter((row) => row.direction === "receivable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
-      const payables = active.filter((row) => row.direction === "payable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
-      res.json({ invoices: rows, summary: { revenue, payables, net: revenue - payables } });
+      if (bucket === "active") where.push("i.archived_at IS NULL AND i.status<>'void'");
+      if (bucket === "archive") where.push("(i.archived_at IS NOT NULL OR i.status='void')");
+      const rows = db.prepare(`${invoiceSelect}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY COALESCE(i.archived_at,i.issue_date) DESC,i.invoice_number DESC`).all(...params)
+        .map((row) => ({ ...row, lifecycle_status: invoiceLifecycleStatus(row, new Date()) }));
+      const accountingRows = rows.filter((row) => row.status !== "void");
+      const revenue = accountingRows.filter((row) => row.direction === "receivable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      const payables = accountingRows.filter((row) => row.direction === "payable").reduce((sum,row)=>sum+Number(row.total_amount||0),0);
+      res.json({ invoices: rows, bucket: bucket || "all", summary: { revenue: roundFinancial(revenue), payables: roundFinancial(payables), net: roundFinancial(revenue - payables) } });
     });
     app.get("/api/invoice-counterparties", auth, admin, (_req, res) => {
       const partners = db.prepare(`SELECT id,company_name,tax_id,billing_address,contact_person,contact_email,contact_phone,default_tax_rate
@@ -782,7 +836,72 @@ function registerBusinessOperationsRoutes(options) {
       res.json({ jobs, workflows, all: [...jobs, ...workflows] });
     });
     app.get("/api/invoices/:id", auth, financeReader, (req, res) => {
-      const row = invoiceEngine.invoiceDetail(req.params.id); if (!row) return res.status(404).json({ error: "INVOICE_NOT_FOUND" }); res.json(row);
+      const row = invoiceEngine.invoiceDetail(req.params.id);
+      if (!row) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      row.lifecycle_status = invoiceLifecycleStatus(row, new Date());
+      row.adjustments = db.prepare("SELECT * FROM invoice_adjustments WHERE invoice_id=? ORDER BY adjusted_at DESC,id DESC").all(row.id);
+      res.json(row);
+    });
+    app.patch("/api/invoices/:id", auth, admin, (req, res) => {
+      try {
+        const before = invoiceEngine.invoiceDetail(req.params.id);
+        if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+        const reason = clean(req.body?.reason, 2000);
+        if (reason.length < 5) return res.status(400).json({ error: "ADJUSTMENT_REASON_MIN_5" });
+        const issueDate = clean(req.body?.issue_date ?? before.issue_date, 10);
+        const dueDate = clean(req.body?.due_date ?? before.due_date, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: "INVALID_INVOICE_DATE" });
+        const summary = clean(req.body?.summary ?? before.summary, 2000);
+        if (summary.length < 3) return res.status(400).json({ error: "INVOICE_SUMMARY_TOO_SHORT" });
+        const taxRate = req.body?.tax_rate === undefined ? Number(before.tax_rate || 0) : parseFinancialNumber(req.body.tax_rate);
+        if (!Number.isFinite(taxRate) || taxRate < 0) return res.status(400).json({ error: "INVALID_TAX_RATE" });
+        const requestedMethod = req.body?.payment_method === undefined ? before.payment_method : normalizePaymentMethod(req.body.payment_method, { allowEmpty: false });
+        if (!requestedMethod) return res.status(400).json({ error: "INVALID_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
+        let nextStatus = before.status;
+        if (before.status !== "void" && req.body?.financial_status !== undefined) {
+          const financialStatus = clean(req.body.financial_status, 20).toLowerCase();
+          if (!['paid','pending'].includes(financialStatus)) return res.status(400).json({ error: "INVALID_FINANCIAL_STATUS" });
+          nextStatus = financialStatus === 'paid' ? 'paid' : 'issued';
+        }
+        const rawItems = Array.isArray(req.body?.items) ? req.body.items : before.items;
+        const items = rawItems.map((item, index) => {
+          const description = clean(item?.item_description || item?.description, 1000);
+          const quantity = parseFinancialNumber(item?.quantity);
+          const unitPrice = parseFinancialNumber(item?.unit_price);
+          if (description.length < 3 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw Object.assign(new Error("INVALID_INVOICE_ITEMS"), { status: 400 });
+          const lineMethodRaw = clean(item?.payment_method, 120);
+          const lineMethod = lineMethodRaw ? normalizePaymentMethod(lineMethodRaw, { allowEmpty: false }) : null;
+          if (lineMethodRaw && !lineMethod) throw Object.assign(new Error("INVALID_ITEM_PAYMENT_METHOD"), { status: 400 });
+          const lineStatusRaw = clean(item?.financial_status, 20).toLowerCase();
+          const lineStatus = lineStatusRaw ? (['paid','pending'].includes(lineStatusRaw) ? lineStatusRaw : null) : null;
+          if (lineStatusRaw && !lineStatus) throw Object.assign(new Error("INVALID_ITEM_FINANCIAL_STATUS"), { status: 400 });
+          return { description, quantity, unit_price: roundFinancial(unitPrice), total_price: roundFinancial(quantity * unitPrice), line_type: ['material','fee','custom'].includes(item?.line_type) ? item.line_type : 'custom', sort_order:index, payment_method: lineMethod, financial_status: lineStatus };
+        });
+        const subtotal = roundFinancial(items.reduce((sum, item) => sum + item.total_price, 0));
+        if (!(subtotal > 0)) return res.status(400).json({ error: "INVOICE_TOTAL_REQUIRED" });
+        const taxAmount = roundFinancial(subtotal * taxRate / 100);
+        const totalAmount = roundFinancial(subtotal + taxAmount);
+        const adjustedAt = new Date();
+        const adjustedAtLocalParts = newYorkParts(adjustedAt);
+        const adjustedAtLocal = `${adjustedAtLocalParts.year}-${adjustedAtLocalParts.month}-${adjustedAtLocalParts.day}T${adjustedAtLocalParts.hour}:${adjustedAtLocalParts.minute}:${adjustedAtLocalParts.second}[America/New_York]`;
+        const after = db.transaction(() => {
+          if (before.source_type === 'manual') invoiceEngine.reverseLedger(before);
+          db.prepare(`UPDATE invoices SET issue_date=?,due_date=?,summary=?,subtotal=?,tax_rate=?,tax_amount=?,total_amount=?,payment_method=?,notes=?,status=?,paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,CURRENT_TIMESTAMP) ELSE NULL END,archived_at=CASE WHEN ?='paid' THEN archived_at ELSE NULL END,archived_period=CASE WHEN ?='paid' THEN archived_period ELSE NULL END WHERE id=?`).run(
+            issueDate,dueDate,summary,subtotal,roundFinancial(taxRate),taxAmount,totalAmount,requestedMethod,clean(req.body?.notes ?? before.notes,5000)||null,nextStatus,nextStatus,nextStatus,nextStatus,before.id
+          );
+          db.prepare("DELETE FROM invoice_items WHERE invoice_id=?").run(before.id);
+          const insert = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,sort_order,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?,?)");
+          for (const item of items) insert.run(newId('BLI'),before.id,item.description,item.quantity,item.unit_price,item.total_price,item.line_type,item.sort_order,item.payment_method,item.financial_status);
+          const updated = invoiceEngine.invoiceDetail(before.id);
+          if (updated.source_type === 'manual') invoiceEngine.postManualInvoiceLedger(updated, req.user);
+          db.prepare(`INSERT INTO invoice_adjustments(id,invoice_id,reason,adjusted_by_user_id,adjusted_by_name,adjusted_at,adjusted_at_local,previous_values,new_values) VALUES(?,?,?,?,?,?,?,?,?)`).run(
+            newId('IADJ'),before.id,reason,req.user.id||null,req.user.name||req.user.email||req.user.id||'Unknown',adjustedAt.toISOString(),adjustedAtLocal,JSON.stringify(before),JSON.stringify(updated)
+          );
+          return updated;
+        })();
+        audit(req,'ADJUST','invoices',before.id,before,after,1,reason,'FINANCIAL');
+        res.json({ ...after, lifecycle_status: invoiceLifecycleStatus(after, adjustedAt) });
+      } catch (error) { sendError(res,error); }
     });
     app.post("/api/invoices/:id/status", auth, admin, (req, res) => {
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
@@ -790,7 +909,7 @@ function registerBusinessOperationsRoutes(options) {
       if (before.status === "void") return res.status(409).json({ error: "VOID_INVOICE_IMMUTABLE" });
       const after = db.transaction(() => {
         if (before.source_type === "manual" && before.status === "paid" && status !== "paid") invoiceEngine.reverseLedger(before);
-        db.prepare("UPDATE invoices SET status=? WHERE id=?").run(status, before.id);
+        db.prepare("UPDATE invoices SET status=?,paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,CURRENT_TIMESTAMP) ELSE NULL END,archived_at=CASE WHEN ?='paid' THEN archived_at ELSE NULL END,archived_period=CASE WHEN ?='paid' THEN archived_period ELSE NULL END WHERE id=?").run(status,status,status,status,before.id);
         const updated = invoiceEngine.invoiceDetail(before.id);
         if (updated.source_type === "manual") invoiceEngine.postManualInvoiceLedger(updated, req.user);
         return updated;
@@ -800,7 +919,7 @@ function registerBusinessOperationsRoutes(options) {
     app.post("/api/invoices/:id/void", auth, admin, (req, res) => {
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
       if (before.status === "void") return res.json(before);
-      db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("UPDATE invoices SET status='void',voided_at=CURRENT_TIMESTAMP,voided_by=? WHERE id=?").run(req.user.name || req.user.id, before.id); })();
+      db.transaction(() => { invoiceEngine.reverseLedger(before); db.prepare("UPDATE invoices SET status='void',voided_at=CURRENT_TIMESTAMP,voided_by=?,archived_at=CURRENT_TIMESTAMP,archived_period=COALESCE(archived_period,substr(issue_date,1,7)) WHERE id=?").run(req.user.name || req.user.id, before.id); })();
       const after = invoiceEngine.invoiceDetail(before.id); audit(req, "VOID", "invoices", before.id, before, after, 1, clean(req.body?.reason, 1000) || "Invoice voided", "FINANCIAL"); res.json(after);
     });
     app.delete("/api/invoices/:id", auth, admin, (req, res) => {
@@ -874,7 +993,7 @@ function registerBusinessOperationsRoutes(options) {
       const paidBreakdownRows = db.prepare(`SELECT payment_method,SUM(total_amount) AS amount FROM invoices WHERE substr(issue_date,1,7)=? AND status='paid' AND payment_method IS NOT NULL GROUP BY payment_method`).all(month);
       const paidByMethod = new Map(paidBreakdownRows.map((row) => [row.payment_method, Number(row.amount || 0)]));
       const breakdown = PAYMENT_METHODS.map((method) => ({ payment_method: method, amount: paidByMethod.get(method) || 0 }));
-      const monthEnd = `${month}-31`;
+      const monthEnd = actualMonthEndDate(month);
       const carried = db.prepare(`${invoiceSelect} WHERE i.status IN ('issued','carried_over') AND COALESCE(i.due_date,'9999-12-31')<=? ORDER BY i.due_date,i.invoice_number`).all(monthEnd);
       const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
       const pdf = generateMonthlyInvoiceReportPdf({ company, month, summary:{ revenue, costs, net: revenue-costs }, paymentBreakdown: breakdown, carried, invoices: rows, logoPath });
@@ -1057,13 +1176,26 @@ function registerBusinessOperationsRoutes(options) {
   }
 
   function recordManualTicketIncome(ticket, event, userName = "SYSTEM") {
-    if (ticket.payment_status !== "PAID" || Number(ticket.price_cents || 0) <= 0) return;
-    if (db.prepare("SELECT 1 FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=? LIMIT 1").get(ticket.id)) return;
-    db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,source_type,source_id,created_by)
-      VALUES(?,?,?,?,?,'INCOME','CONCERT_SERVICE_REVENUE','ONE_TIME',?,'1010','event_manual_ticket',?,?)`).run(
-      newId("FIN"), new Date().toISOString().slice(0, 10), `Event ticket sale · ${event.title_en}`, `Administrative ticket ${ticket.id}`, Number(ticket.price_cents || 0) / 100,
-      normalizePaymentMethod(ticket.payment_method) || "Cash", ticket.id, userName
-    );
+    if (Number(ticket.price_cents || 0) <= 0) return null;
+    const method = normalizePaymentMethod(ticket.payment_method) || "Cash";
+    const desiredStatus = ticket.payment_status === "PAID" ? "paid" : "issued";
+    let invoice = ticket.invoice_id ? invoiceEngine.invoiceDetail(ticket.invoice_id) : null;
+    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`ticket:${ticket.id}`);
+    if (!invoice) {
+      const issueDate = String(ticket.paid_at || ticket.reserved_at || ticket.created_at || new Date().toISOString()).slice(0,10);
+      const eventDate = String(event?.start_at || "").slice(0,10);
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate >= issueDate ? eventDate : issueDate;
+      invoice = invoiceEngine.createInvoice({
+        direction:"receivable",issueDate,dueDate,sourceType:"event",sourceId:`ticket:${ticket.id}`,summary:`Event ticket: ${event?.title_en || event?.title_hu || event?.id || ticket.event_id}`,taxRate:0,paymentMethod:method,status:desiredStatus,
+        items:[{item_description:`${event?.title_en || event?.title_hu || "Event"} · ${ticket.attendee_name || ticket.buyer_name || "Ticket"}`,quantity:1,unit_price:Number(ticket.price_cents||0)/100,line_type:"fee"}]
+      });
+    } else {
+      if (desiredStatus === "paid" && invoice.status !== "paid") db.prepare("UPDATE invoices SET status='paid',payment_method=?,paid_at=COALESCE(paid_at,CURRENT_TIMESTAMP) WHERE id=?").run(method,invoice.id);
+      invoice = invoiceEngine.invoiceDetail(invoice.id);
+    }
+    db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,ticket.id);
+    db.prepare("DELETE FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=?").run(ticket.id);
+    return invoice;
   }
 
   app.get("/api/events/tickets/:id.pdf", auth, admin, (req, res) => {
@@ -1371,9 +1503,10 @@ function registerBusinessOperationsRoutes(options) {
   });
 
   app.get("/api/event-payments/:id/documents", auth, admin, (req, res) => {
-    const payment = db.prepare("SELECT id,event_id,status,purchaser_name,purchaser_email,amount_total,currency FROM event_payments WHERE id=?").get(req.params.id);
+    const payment = db.prepare("SELECT id,event_id,status,purchaser_name,purchaser_email,amount_total,currency,invoice_id FROM event_payments WHERE id=?").get(req.params.id);
     if (!payment) return res.status(404).json({ error: "EVENT_PAYMENT_NOT_FOUND" });
-    res.json({ payment, delivery: documentService.deliveryRow(`event-purchase-documents:${payment.id}`), documents: db.prepare("SELECT id,title,content_type,stored_path,invoice_number,amount,created_at FROM knowledge_base WHERE content_type='Event Invoice' AND body LIKE ? ORDER BY created_at DESC").all(`%${payment.id}%`) });
+    const invoice = payment.invoice_id ? invoiceEngine.invoiceDetail(payment.invoice_id) : null;
+    res.json({ payment, delivery: documentService.deliveryRow(`event-purchase-documents:${payment.id}`), invoice });
   });
   app.post("/api/event-payments/:id/documents/resend", auth, admin, async (req, res) => {
     try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
@@ -1629,4 +1762,4 @@ function registerBusinessOperationsRoutes(options) {
   });
 }
 
-module.exports = { COMPANY_KEYS, createBusinessDocumentService, createInvoiceEngine, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail };
+module.exports = { COMPANY_KEYS, createBusinessDocumentService, createInvoiceEngine, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail, invoiceLifecycleStatus, closeInvoicePeriod, closeCompletedInvoicePeriods, nextNewYorkMonthBoundary, nextNewYorkMonthClose, actualMonthEndDate };
