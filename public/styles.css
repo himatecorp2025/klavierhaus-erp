@@ -2227,3 +2227,44 @@ button .billing-svg-icon{pointer-events:none}
 .purge-invoices-warning__icon,.purge-invoices-warning-icon{display:grid;width:44px;height:44px;place-items:center;border:1px solid rgba(255,127,114,.55);border-radius:50%;color:#ff7f72;font-size:24px;font-weight:950}
 .purge-invoices-warning h3{margin:0 0 7px;color:#ffb1aa}.purge-invoices-warning p{margin:0;line-height:1.55;color:var(--muted)}
 @media(max-width:768px){.finance-dashboard-grid{grid-template-columns:1fr}.finance-dashboard-lines>div{align-items:flex-start}.purge-invoices-warning{grid-template-columns:1fr}.purge-invoices-warning__icon,.purge-invoices-warning-icon{width:38px;height:38px}}
+
+/* Finance lifecycle + Company Documents Archive (22-4 scoped update) */
+.invoice-lifecycle-tabs{display:flex;gap:8px;align-items:center;margin:14px 0 18px;padding:4px;border:1px solid rgba(230,228,223,.12);border-radius:12px;width:max-content;max-width:100%;background:rgba(0,0,0,.18)}
+.invoice-lifecycle-tabs button{background:transparent;border:0;color:rgba(230,228,223,.68);padding:9px 14px;border-radius:9px;font-weight:700;cursor:pointer}
+.invoice-lifecycle-tabs button.active{background:rgba(230,228,223,.12);color:#e6e4df;box-shadow:inset 0 0 0 1px rgba(230,228,223,.16)}
+.invoice-status-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.72rem;font-weight:800;line-height:1.45;border:1px solid transparent}
+.invoice-status-badge.status-pending,.invoice-row.status-pending{--invoice-state:rgba(232,157,54,.92)}
+.invoice-status-badge.status-paid,.invoice-row.status-paid{--invoice-state:rgba(83,183,128,.92)}
+.invoice-status-badge.status-overdue,.invoice-row.status-overdue{--invoice-state:rgba(220,91,91,.94)}
+.invoice-status-badge.status-void,.invoice-row.status-void{--invoice-state:rgba(220,91,91,.6)}
+.invoice-status-badge{color:var(--invoice-state);border-color:color-mix(in srgb,var(--invoice-state) 50%,transparent);background:color-mix(in srgb,var(--invoice-state) 12%,transparent)}
+.invoice-row.status-pending,.invoice-row.status-paid,.invoice-row.status-overdue{border-left:3px solid var(--invoice-state)}
+.invoice-adjustment-warning{margin:0 0 14px;padding:12px 14px;border:1px solid rgba(232,157,54,.32);border-radius:10px;background:rgba(232,157,54,.08);color:#e6e4df}
+.invoice-adjustment-items{display:grid;gap:10px;margin:10px 0 16px}
+.invoice-adjustment-item{display:grid;grid-template-columns:minmax(0,2fr) minmax(90px,.6fr) minmax(120px,.8fr);gap:10px;padding:12px;border:1px solid rgba(230,228,223,.1);border-radius:10px;background:rgba(255,255,255,.02)}
+.invoice-adjustment-item .field.full{grid-column:1/-1}
+.adjustment-reason-field textarea{min-height:90px}
+.company-documents-shell{overflow:hidden}
+.company-document-form{display:grid;gap:14px;margin-top:14px}
+.company-document-dropzone{display:flex;min-height:150px;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;border:1px dashed rgba(230,228,223,.34);border-radius:14px;background:rgba(255,255,255,.025);padding:20px;cursor:pointer;transition:border-color .15s ease,background .15s ease}
+.company-document-dropzone:hover,.company-document-dropzone:focus,.company-document-dropzone.is-dragover{outline:none;border-color:rgba(230,228,223,.68);background:rgba(230,228,223,.065)}
+.company-document-dropzone span,.company-document-dropzone small{color:rgba(230,228,223,.65)}
+.company-document-dropzone b{max-width:100%;overflow-wrap:anywhere;color:#e6e4df}
+.company-document-metadata{margin:0}
+.company-document-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,.34fr);gap:10px;margin:22px 0 12px}
+.company-document-table td:first-child{min-width:210px}.company-document-table td:first-child small{display:block;margin-top:4px;color:rgba(230,228,223,.55);overflow-wrap:anywhere}
+.company-document-preview-card{width:min(94vw,1100px);max-width:min(94vw,1100px);height:min(88dvh,860px);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden}
+.company-document-preview-card iframe{width:100%;flex:1;min-height:360px;border:1px solid rgba(230,228,223,.12);border-radius:10px;background:#fff}
+.company-document-office-preview{display:grid;place-content:center;min-height:320px;text-align:center;padding:24px;border:1px dashed rgba(230,228,223,.2);border-radius:10px;background:rgba(0,0,0,.16)}
+.company-document-office-preview strong{overflow-wrap:anywhere}
+a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:none}
+@media (max-width:768px){
+ .invoice-lifecycle-tabs{width:100%;display:grid;grid-template-columns:1fr 1fr}.invoice-lifecycle-tabs button{white-space:normal}
+ .invoice-adjustment-item{grid-template-columns:1fr}.invoice-adjustment-item .field.full{grid-column:auto}
+ .company-document-filters{grid-template-columns:1fr}.company-document-table{overflow-x:auto}
+ .company-document-preview-card{width:calc(100vw - 32px);max-width:calc(100vw - 32px);height:calc(100dvh - 32px);max-height:calc(100dvh - 32px)}
+ .company-document-preview-card iframe{min-height:240px}
+}
+.balance-sheet-official-grid .balance-sheet-column{align-content:start}
+.balance-sheet-official-grid .balance-sheet-total{margin-top:6px;padding-top:14px;border-top:1px solid rgba(230,228,223,.28);font-size:1.02rem}
+.balance-sheet-official-grid .balance-sheet-total strong{letter-spacing:.035em}
