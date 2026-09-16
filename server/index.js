@@ -74,7 +74,7 @@ const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
 const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env,invoiceEngineProvider:()=>invoiceEngine});
-const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
+const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,onPaymentRecorded:businessDocuments.onPaymentRecorded,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -736,7 +736,8 @@ registerEventRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   stripeSandbox,
-  invoiceEngine
+  invoiceEngine,
+  documentService: businessDocuments
 });
 registerWebsiteContentRoutes({
   app,
@@ -1402,7 +1403,7 @@ app.post("/api/financial-items", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   const id=req.body.id || rid("FI");
   const item_date=req.body.item_date || today();
   const title=(req.body.title||"").trim();
-  const amount=Number(req.body.amount||0);
+  const amount=roundMoney(Number(req.body.amount||0));
   const main_type=req.body.main_type;
   const recurrence=req.body.recurrence || "ONE_TIME";
   if(!title) return res.status(400).json({error:"Title is required / Megnevezés kötelező"});
@@ -1425,7 +1426,7 @@ app.put("/api/financial-items/:id", auth, permit("ADMIN","MANAGER"), (req,res)=>
   const allowed=["item_date","title","description","amount","main_type","category","recurrence","payment_method","balance_account","job_id","client_id","piano_id","source_type","source_id"];
   const body={...req.body};
   if(body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
-  if(body.amount!==undefined) body.amount=Number(body.amount||0);
+  if(body.amount!==undefined) body.amount=roundMoney(Number(body.amount||0));
   if(body.main_type!==undefined && !["INCOME","EXPENSE","ASSET","LIABILITY","EQUITY"].includes(body.main_type)) return res.status(400).json({error:"Invalid main type / Hibás fő típus"});
   if(body.recurrence!==undefined && !["ONE_TIME","MONTHLY"].includes(body.recurrence)) return res.status(400).json({error:"Invalid recurrence / Hibás ismétlődés"});
   const cols=allowed.filter(c=>body[c]!==undefined);
@@ -1461,30 +1462,42 @@ function incomeStatementPayload(month){
   const closedJobs=db.prepare(`SELECT * FROM jobs WHERE status='Completed' AND completed_at >= ? AND completed_at < ?`).all(monthStart,monthEnd);
   const openJobs=db.prepare("SELECT COUNT(*) c FROM jobs WHERE status!='Completed' OR status IS NULL").get().c;
 
-  const monthInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date>=? AND issue_date<? ORDER BY issue_date,invoice_number`).all(monthStart,monthEnd);
+  const monthInvoices=db.prepare(`SELECT * FROM invoices
+    WHERE (source_type='event' AND revenue_recognition_status='RECOGNIZED' AND revenue_recognition_date>=? AND revenue_recognition_date<?)
+       OR (source_type<>'event' AND issue_date>=? AND issue_date<?)
+    ORDER BY COALESCE(revenue_recognition_date,issue_date),invoice_number`).all(monthStart,monthEnd,monthStart,monthEnd);
   const asOfInvoices=db.prepare(`SELECT * FROM invoices WHERE issue_date<? ORDER BY issue_date,invoice_number`).all(monthEnd);
+  const monthCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
+    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.revenue_effect_date>=? AND cm.revenue_effect_date<? ORDER BY cm.revenue_effect_date,cm.created_at,cm.id`).all(monthStart,monthEnd);
+  const asOfCreditMemos=db.prepare(`SELECT cm.*,i.source_type AS invoice_source_type,i.status AS invoice_status FROM invoice_credit_memos cm JOIN invoices i ON i.id=cm.invoice_id
+    WHERE cm.accounting_effect=1 AND i.status<>'void' AND cm.memo_date<? ORDER BY cm.memo_date,cm.created_at,cm.id`).all(monthEnd);
   const monthFinancial=db.prepare(`SELECT * FROM financial_items WHERE ((recurrence='MONTHLY' AND item_date<?) OR (recurrence!='MONTHLY' AND item_date>=? AND item_date<?)) ORDER BY item_date,created_at`).all(monthEnd,monthStart,monthEnd);
   const asOfFinancial=db.prepare(`SELECT * FROM financial_items WHERE item_date<? ORDER BY item_date,created_at`).all(monthEnd);
   const monthDirect=monthFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
   const asOfDirect=asOfFinancial.filter(item=>!isInvoiceDerivedFinancialItem(item));
-  const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect});
+  const snapshot=buildAccountingSnapshot({monthInvoices,monthDirectItems:monthDirect,asOfInvoices,asOfDirectItems:asOfDirect,monthCreditMemos,asOfCreditMemos});
 
   const accountMap=new Map();
   const addPnl=(code,name_en,name_hu,category,amount)=>{
     const value=roundMoney(amount);
     if(Math.abs(value)<0.005) return;
     const current=accountMap.get(code)||{code,name_en,name_hu,category,debit_total:0,credit_total:0,balance:0};
-    current.balance=roundMoney(current.balance+Math.abs(value));
-    if(category==='REVENUE') current.credit_total=roundMoney(current.credit_total+Math.abs(value));
-    else current.debit_total=roundMoney(current.debit_total+Math.abs(value));
+    current.balance=roundMoney(current.balance+value);
+    if(category==='REVENUE'){
+      if(value>=0) current.credit_total=roundMoney(current.credit_total+value);
+      else current.debit_total=roundMoney(current.debit_total+Math.abs(value));
+    }else if(value>=0) current.debit_total=roundMoney(current.debit_total+value);
+    else current.credit_total=roundMoney(current.credit_total+Math.abs(value));
     accountMap.set(code,current);
   };
-  const eventInvoiceRevenue=roundMoney(monthInvoices.filter(row=>row.status!=='void'&&row.direction==='receivable'&&row.source_type==='event').reduce((sum,row)=>sum+Number(row.total_amount||0),0));
-  const serviceInvoiceRevenue=roundMoney(snapshot.pnl.invoiceRevenue-eventInvoiceRevenue);
+  const eventInvoiceRevenue=roundMoney(monthInvoices.filter(row=>row.status!=='void'&&row.direction==='receivable'&&row.source_type==='event'&&row.revenue_recognition_status==='RECOGNIZED').reduce((sum,row)=>roundMoney(sum+Number(row.subtotal||0)),0));
+  const eventContraRevenue=roundMoney(monthCreditMemos.filter(row=>row.invoice_source_type==='event'&&row.memo_type==='EVENT_REFUND').reduce((sum,row)=>roundMoney(sum+Number(row.subtotal_amount||0)),0));
+  const serviceInvoiceRevenue=roundMoney(snapshot.pnl.grossInvoiceRevenue-eventInvoiceRevenue);
   addPnl('SERVICE_REVENUE','Service Revenue','Szolgáltatási bevétel','REVENUE',serviceInvoiceRevenue);
   addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue);
+  addPnl('TICKET_REFUND_CONTRA_REVENUE','Ticket Refunds — Contra Revenue','Jegy-visszatérítés — bevételcsökkentés','REVENUE',-eventContraRevenue);
   const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
-  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>sum+Number(row.total_amount||0),0));
+  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
   const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
   addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor Expense','Alvállalkozói közvetlen költség','EXPENSE',subcontractorExpense);
   addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense);
@@ -1496,28 +1509,34 @@ function incomeStatementPayload(month){
   const trialBalance=[
     ...Array.from(accountMap.values()),
     {code:'CASH_BANK',name_en:'Cash & Bank Accounts',name_hu:'Készpénz és bankszámlák',category:'ASSET',debit_total:Math.max(0,balance.cashBankAccounts),credit_total:Math.max(0,-balance.cashBankAccounts),balance:balance.cashBankAccounts},
-    {code:'AR',name_en:'Accounts Receivable',name_hu:'Vevőkövetelések',category:'ASSET',debit_total:Math.max(0,balance.accountsReceivable),credit_total:0,balance:balance.accountsReceivable},
-    {code:'AP',name_en:'Accounts Payable',name_hu:'Szállítói kötelezettségek',category:'LIABILITY',debit_total:0,credit_total:Math.max(0,balance.accountsPayable),balance:balance.accountsPayable},
-    {code:'CURRENT_PERIOD_NET_INCOME',name_en:'Retained Earnings / Current Period Net Income',name_hu:'Eredménytartalék / Tárgyidőszaki nettó eredmény',category:'EQUITY',debit_total:Math.max(0,-balance.currentPeriodNetIncome),credit_total:Math.max(0,balance.currentPeriodNetIncome),balance:balance.currentPeriodNetIncome}
+    {code:'AR',name_en:'Accounts Receivable',name_hu:'Vevőkövetelések',category:'ASSET',debit_total:Math.max(0,balance.accountsReceivable),credit_total:Math.max(0,-balance.accountsReceivable),balance:balance.accountsReceivable},
+    {code:'MANUAL_ASSETS',name_en:'Equipment / Inventory / Prepaid & Other Assets',name_hu:'Berendezés / készlet / aktív időbeli elhatárolás és egyéb eszközök',category:'ASSET',debit_total:Math.max(0,balance.manualAssets),credit_total:Math.max(0,-balance.manualAssets),balance:balance.manualAssets},
+    {code:'AP',name_en:'Accounts Payable',name_hu:'Szállítói kötelezettségek',category:'LIABILITY',debit_total:Math.max(0,-balance.accountsPayable),credit_total:Math.max(0,balance.accountsPayable),balance:balance.accountsPayable},
+    {code:'SALES_TAX_PAYABLE',name_en:'Sales Tax Payable',name_hu:'Fizetendő forgalmi adó',category:'LIABILITY',debit_total:Math.max(0,-balance.salesTaxPayable),credit_total:Math.max(0,balance.salesTaxPayable),balance:balance.salesTaxPayable},
+    {code:'DEFERRED_REVENUE',name_en:'Deferred Revenue / Contract Liability',name_hu:'Halasztott bevétel / szerződéses kötelezettség',category:'LIABILITY',debit_total:Math.max(0,-balance.deferredRevenue),credit_total:Math.max(0,balance.deferredRevenue),balance:balance.deferredRevenue},
+    {code:'MANUAL_LIABILITIES',name_en:'Loans / Notes Payable & Other Liabilities',name_hu:'Hitelek / váltótartozások és egyéb kötelezettségek',category:'LIABILITY',debit_total:Math.max(0,-balance.manualLiabilities),credit_total:Math.max(0,balance.manualLiabilities),balance:balance.manualLiabilities},
+    {code:'OWNER_OPENING_EQUITY',name_en:"Owner's Opening Equity",name_hu:'Tulajdonosi nyitó tőke',category:'EQUITY',debit_total:Math.max(0,-balance.ownersOpeningEquity),credit_total:Math.max(0,balance.ownersOpeningEquity),balance:balance.ownersOpeningEquity},
+    {code:'RETAINED_CURRENT_NET_INCOME',name_en:'Retained Earnings / Current Net Income',name_hu:'Eredménytartalék / aktuális nettó eredmény',category:'EQUITY',debit_total:Math.max(0,-balance.currentPeriodNetIncome),credit_total:Math.max(0,balance.currentPeriodNetIncome),balance:balance.currentPeriodNetIncome},
+    {code:'MANUAL_EQUITY',name_en:'Other Manual Equity',name_hu:'Egyéb manuális saját tőke',category:'EQUITY',debit_total:Math.max(0,-balance.manualEquity),credit_total:Math.max(0,balance.manualEquity),balance:balance.manualEquity}
   ];
   const incomeDirect=monthDirect.filter(x=>x.main_type==='INCOME');
   const expenseDirect=monthDirect.filter(x=>x.main_type==='EXPENSE');
-  const passiveIncome=roundMoney(incomeDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0));
-  const recurringExpenses=roundMoney(expenseDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>s+Number(x.amount||0),0));
+  const passiveIncome=roundMoney(incomeDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>roundMoney(s+Number(x.amount||0)),0));
+  const recurringExpenses=roundMoney(expenseDirect.filter(x=>x.recurrence==='MONTHLY').reduce((s,x)=>roundMoney(s+Number(x.amount||0)),0));
   const revenue=snapshot.pnl.revenue, expenses=snapshot.pnl.expenses;
   return {
     month,monthStart,monthEndExclusive:monthEnd,generatedAt:new Date().toISOString(),
-    accountingLogic:{source:'invoices_plus_noninvoice_financial_items',generalLedger:'accrual_invoice_state_model',equation:'Assets = Liabilities + Equity'},
-    counts:{openJobs,closedJobs:closedJobs.length,financialItems:monthDirect.length,invoices:monthInvoices.length},
-    totals:{passiveIncome,oneTimeIncome:roundMoney(revenue-passiveIncome),revenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.accountsPayable,equity:balance.currentPeriodNetIncome,sources:balance.totalLiabilitiesEquity,netWorth:balance.currentPeriodNetIncome,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,accountsPayable:balance.accountsPayable,currentPeriodNetIncome:balance.currentPeriodNetIncome},
+    accountingLogic:{source:'invoices_credit_memos_plus_noninvoice_financial_items',generalLedger:'accrual_general_ledger_tax_deferred_revenue',equation:'Assets = Liabilities + Equity'},
+    counts:{openJobs,closedJobs:closedJobs.length,financialItems:monthDirect.length,invoices:monthInvoices.length,creditMemos:monthCreditMemos.length},
+    totals:{passiveIncome,oneTimeIncome:roundMoney(revenue-passiveIncome),revenue,grossInvoiceRevenue:snapshot.pnl.grossInvoiceRevenue,contraRevenue:snapshot.pnl.contraRevenue,recurringExpenses,oneTimeExpenses:roundMoney(expenses-recurringExpenses),expenses,profit:snapshot.pnl.profit,assets:balance.totalAssets,liabilities:balance.totalLiabilities,equity:balance.totalEquity,sources:balance.totalLiabilitiesEquity,netWorth:balance.totalEquity,cashBank:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity},
     balanceAudit:{balanced:balance.balanced,difference:balance.difference,absolute_difference:Math.abs(balance.difference)},
-    balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,currentPeriodNetIncome:balance.currentPeriodNetIncome,totalLiabilitiesEquity:balance.totalLiabilitiesEquity},
+    balanceSheet:{cashBankAccounts:balance.cashBankAccounts,accountsReceivable:balance.accountsReceivable,manualAssets:balance.manualAssets,totalAssets:balance.totalAssets,accountsPayable:balance.accountsPayable,salesTaxPayable:balance.salesTaxPayable,deferredRevenue:balance.deferredRevenue,manualLiabilities:balance.manualLiabilities,totalLiabilities:balance.totalLiabilities,ownersOpeningEquity:balance.ownersOpeningEquity,currentPeriodNetIncome:balance.currentPeriodNetIncome,manualEquity:balance.manualEquity,totalEquity:balance.totalEquity,totalLiabilitiesEquity:balance.totalLiabilitiesEquity},
     trialBalance,
     items:monthDirect,
-    invoices:monthInvoices
+    invoices:monthInvoices,
+    creditMemos:monthCreditMemos
   };
 }
-
 app.get("/api/income-statement/monthly", auth, permit("ADMIN","MANAGER"), (req,res)=>{
   try{ res.json(incomeStatementPayload(req.query.month || today().slice(0,7))); }
   catch(e){ res.status(400).json({error:e.message}); }
@@ -2594,7 +2613,13 @@ app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
   const rows=db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC").all(type);
   const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'"'+String(v??'').replaceAll('"','""')+'"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${type==='WORK'?'work-audit':'technical-audit'}.csv"`);res.send('\ufeff'+csv);
 });
-app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{const type=String(req.query.type||'ALL').toUpperCase(); if(type==='WORK'||type==='TECHNICAL')db.prepare('DELETE FROM audit_log WHERE audit_type=?').run(type);else db.prepare('DELETE FROM audit_log').run();res.json({ok:true});});
+app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{
+  const type=String(req.query.type||'ALL').toUpperCase();
+  if(type==='FINANCIAL') return res.status(405).json({error:'IMMUTABLE_FINANCIAL_AUDIT_LOG'});
+  if(type==='WORK'||type==='TECHNICAL') db.prepare('DELETE FROM audit_log WHERE audit_type=?').run(type);
+  else db.prepare("DELETE FROM audit_log WHERE audit_type<>'FINANCIAL'").run();
+  res.json({ok:true,financial_audit_preserved:true});
+});
 app.get('/api/backups',auth,permit('ADMIN'),(req,res)=>res.json(db.prepare('SELECT id,file_name,file_size,status,created_by,created_at,restored_at,restored_by FROM backup_log ORDER BY created_at DESC').all()));
 app.post('/api/backups',auth,requireSuperadmin,(req,res)=>{const b=createBackup(req.user.name||'SUPERADMIN');audit(req,'CREATE','backup',b.id,null,b);res.json(b);});
 app.get('/api/backups/:id/download',auth,requireSuperadmin,(req,res)=>{const b=db.prepare('SELECT * FROM backup_log WHERE id=?').get(req.params.id);if(!b||!fs.existsSync(b.file_path))return res.status(404).json({error:'BACKUP_NOT_FOUND'});res.download(b.file_path,b.file_name);});
@@ -2613,6 +2638,18 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   const clear=(table)=>{ if(exists(table)) db.prepare(`DELETE FROM ${table}`).run(); };
   const superadminId=String(req.user.id||"");
   if(!superadminId) return res.status(400).json({error:"Superadmin identity is missing"});
+  const immutableFinancialCount=exists("invoices")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoices").get()?.c||0):0;
+  const immutableAdjustmentCount=exists("invoice_adjustments")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_adjustments").get()?.c||0):0;
+  const immutableCreditMemoCount=exists("invoice_credit_memos")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_credit_memos").get()?.c||0):0;
+  if(immutableFinancialCount||immutableAdjustmentCount||immutableCreditMemoCount){
+    return res.status(409).json({
+      error:"IMMUTABLE_FINANCIAL_RECORDS",
+      message:"System reset is blocked while issued financial records exist. Financial documents must remain preserved and may only be voided with an audit reason.",
+      invoices:immutableFinancialCount,
+      adjustments:immutableAdjustmentCount,
+      credit_memos:immutableCreditMemoCount
+    });
+  }
 
   const tx=db.transaction(()=>{
     // Delete every business, import, audit, backup and configurable record.
