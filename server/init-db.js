@@ -184,7 +184,7 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal"));
+  const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("'event'"));
   const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
   return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || invoiceItemSettlementMissing || contactsTaxIdMissing || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
@@ -624,7 +624,7 @@ function migrateInvoicePaymentStandards() {
   const columns = tableColumns('invoices');
   const sql = tableSql('invoices');
   const constraintReady = sql.includes('Payment Link') && sql.includes('PayPal');
-  const columnsReady = columns.has('payment_link_url') && columns.has('notes');
+  const columnsReady = columns.has('payment_link_url') && columns.has('notes') && columns.has('paid_at') && columns.has('archived_at') && columns.has('archived_period') && sql.includes("'event'");
   if (constraintReady && columnsReady) {
     normalizePaymentMethodColumns();
     return;
@@ -632,6 +632,9 @@ function migrateInvoicePaymentStandards() {
   log('Migrating invoices to the seven-method payment standard');
   const paymentLinkExpr = columns.has('payment_link_url') ? 'payment_link_url' : 'NULL';
   const notesExpr = columns.has('notes') ? 'notes' : 'NULL';
+  const paidAtExpr = columns.has('paid_at') ? 'paid_at' : "CASE WHEN status='paid' THEN created_at ELSE NULL END";
+  const archivedAtExpr = columns.has('archived_at') ? 'archived_at' : 'NULL';
+  const archivedPeriodExpr = columns.has('archived_period') ? 'archived_period' : 'NULL';
   db.pragma('foreign_keys = OFF');
   try {
     db.transaction(() => {
@@ -644,7 +647,7 @@ function migrateInvoicePaymentStandards() {
           due_date TEXT,
           partner_id TEXT,
           client_id TEXT,
-          source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
+          source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual','event')),
           source_id TEXT,
           summary TEXT,
           subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0),
@@ -656,16 +659,19 @@ function migrateInvoicePaymentStandards() {
           payment_link_url TEXT,
           notes TEXT,
           status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+          paid_at TEXT,
           voided_at TEXT,
           voided_by TEXT,
+          archived_at TEXT,
+          archived_period TEXT,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
           FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
         )`);
       db.exec(`INSERT INTO invoices_payment_v2(
-        id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,voided_at,voided_by,created_at
+        id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,paid_at,voided_at,voided_by,archived_at,archived_period,created_at
       ) SELECT id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,
-        ${canonicalPaymentMethodSql('payment_method')},${paymentLinkExpr},${notesExpr},status,voided_at,voided_by,created_at FROM invoices`);
+        ${canonicalPaymentMethodSql('payment_method')},${paymentLinkExpr},${notesExpr},status,${paidAtExpr},voided_at,voided_by,${archivedAtExpr},${archivedPeriodExpr},created_at FROM invoices`);
       db.exec('DROP TABLE invoices; ALTER TABLE invoices_payment_v2 RENAME TO invoices;');
     })();
     ensureIndex('idx_invoices_direction_issue', 'CREATE INDEX IF NOT EXISTS idx_invoices_direction_issue ON invoices(direction,issue_date DESC)');
@@ -802,12 +808,12 @@ function runMigrations() {
     );
     CREATE TABLE IF NOT EXISTS invoices (
       id TEXT PRIMARY KEY, direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')), invoice_number TEXT NOT NULL UNIQUE,
-      issue_date TEXT NOT NULL, due_date TEXT, partner_id TEXT, client_id TEXT, source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual')),
+      issue_date TEXT NOT NULL, due_date TEXT, partner_id TEXT, client_id TEXT, source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual','event')),
       source_id TEXT, summary TEXT, subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0), tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0),
       tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0), total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0), currency TEXT NOT NULL DEFAULT 'USD',
       payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
       payment_link_url TEXT, notes TEXT,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), voided_at TEXT, voided_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), paid_at TEXT, voided_at TEXT, voided_by TEXT, archived_at TEXT, archived_period TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL, FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS invoice_sequences (
@@ -821,9 +827,18 @@ function runMigrations() {
       line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')), sort_order INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
       payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
       financial_status TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending')), FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+    )
+    );
+    CREATE TABLE IF NOT EXISTS invoice_adjustments (
+      id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, reason TEXT NOT NULL, adjusted_by_user_id TEXT, adjusted_by_name TEXT NOT NULL,
+      adjusted_at TEXT NOT NULL, adjusted_at_local TEXT NOT NULL, previous_values TEXT NOT NULL, new_values TEXT NOT NULL,
+      FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     )`);
     ensureColumn("invoices", "payment_link_url", "TEXT");
     ensureColumn("invoices", "notes", "TEXT");
+    ensureColumn("invoices", "paid_at", "TEXT");
+    ensureColumn("invoices", "archived_at", "TEXT");
+    ensureColumn("invoices", "archived_period", "TEXT");
     ensureColumn("invoice_items", "payment_method", "TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash'))");
     ensureColumn("invoice_items", "financial_status", "TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending'))");
     ensureColumn("invoice_items", "sort_order", "INTEGER NOT NULL DEFAULT 0");
@@ -849,6 +864,7 @@ function runMigrations() {
     ensureIndex("idx_invoices_source_direction_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_source_direction_unique ON invoices(direction,source_type,source_id) WHERE source_id IS NOT NULL AND trim(source_id)<>''");
     ensureIndex("idx_jobs_invoice_id", "CREATE INDEX IF NOT EXISTS idx_jobs_invoice_id ON jobs(invoice_id)");
     ensureIndex("idx_invoice_items_invoice", "CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id)");
+    ensureIndex("idx_invoice_adjustments_invoice_time", "CREATE INDEX IF NOT EXISTS idx_invoice_adjustments_invoice_time ON invoice_adjustments(invoice_id,adjusted_at DESC)");
     db.prepare(`UPDATE jobs SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1),invoice_status='Invoiced',invoice_number=(SELECT i.invoice_number FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='job' AND i.source_id=jobs.id AND i.status<>'void')`).run();
 
     ensureIndex("idx_jobs_daily_rate_capacity", "CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status)");
@@ -864,6 +880,9 @@ function runMigrations() {
     ensureColumn("financial_items", "source_type", "TEXT");
     ensureColumn("financial_items", "source_id", "TEXT");
     ensureColumn("knowledge_base", "workflow_id", "TEXT");
+    ensureColumn("knowledge_base", "effective_date", "TEXT");
+    ensureColumn("knowledge_base", "original_filename", "TEXT");
+    ensureColumn("knowledge_base", "mime_type", "TEXT");
     if (tableExists("workshop_workflows")) {
       ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
       ensureColumn("workshop_workflows", "job_id", "TEXT");
@@ -931,6 +950,8 @@ function runMigrations() {
     ensureColumn("event_tickets", "document_front_path", "TEXT");
     ensureColumn("event_tickets", "document_back_path", "TEXT");
     ensureColumn("event_tickets", "document_full_path", "TEXT");
+    ensureColumn("event_tickets", "invoice_id", "TEXT");
+    ensureColumn("event_payments", "invoice_id", "TEXT");
     ensureColumn("event_refund_requests", "review_note", "TEXT");
     ensureColumn("event_refund_requests", "reviewed_at", "TEXT");
     ensureColumn("event_refund_requests", "approved_at", "TEXT");
