@@ -3836,7 +3836,7 @@ function updateOpeningBalanceDifference(){
 }
 async function openOpeningBalanceModal(){
  if(!isAdmin())return showError('PERMISSION_DENIED');
- const payload=await api('/api/opening-balance'),row=payload.openingBalance||{};openingBalanceDraftItems=(row.items||[]).map(item=>({...item}));
+ const payload=await api('/api/opening-balance');if(payload.locked){return showError(bi('Opening Balance is permanently locked because the first official financial period has already been closed. Use a current-period capital or adjusting entry instead.','A nyitóegyenleg véglegesen zárolva van, mert az első hivatalos pénzügyi időszak már lezárult. Használj aktuális időszaki tőke- vagy helyesbítő tételt.'));}const row=payload.openingBalance||{};openingBalanceDraftItems=(row.items||[]).map(item=>({...item}));
  $('#modal').classList.remove('hidden');$('#modalTitle').textContent=bi('Set / Edit Opening Balance','Nyitóegyenleg beállítása / szerkesztése');
  $('#form').innerHTML=`<div class="opening-balance-form"><p class="muted">${bi('Enter the accountant-approved opening position. Saving is allowed only when Assets = Liabilities + Equity to the cent.','Add meg a könyvelő által jóváhagyott nyitópozíciót. Mentés csak fillérre kiegyensúlyozott mérleg esetén lehetséges.')}</p><div class="form-grid"><div class="field"><label>${req(bi('Opening date','Nyitó dátum'))}</label><input id="openingEffectiveDate" name="effective_date" type="date" value="${htmlText(row.effective_date||'2026-08-01')}" required></div><div class="field"><label>${bi('Opening Cash & Bank Balance','Nyitó készpénz- és bankállomány')}</label><input id="openingCash" type="number" step="0.01" min="0" value="${Number(row.opening_cash_bank||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Accounts Receivable','Nyitó vevőkövetelések')}</label><input id="openingAR" type="number" step="0.01" min="0" value="${Number(row.opening_accounts_receivable||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Accounts Payable','Nyitó szállítói tartozások')}</label><input id="openingAP" type="number" step="0.01" min="0" value="${Number(row.opening_accounts_payable||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Retained Earnings / Equity','Nyitó eredménytartalék / saját tőke')}</label><input id="openingEquity" type="number" step="0.01" value="${Number(row.opening_retained_earnings_equity||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div></div><div class="opening-balance-custom-head"><h4>${bi('Custom opening items','Egyedi nyitótételek')}</h4><button type="button" class="small ghost-btn" onclick="addOpeningBalanceItem()">+ ${bi('Add Custom Opening Item','Egyedi nyitótétel hozzáadása')}</button></div><div id="openingBalanceCustomItems" class="opening-balance-custom-items">${openingBalanceRowsMarkup()}</div><div id="openingBalanceDifference"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Save Opening Balance','Nyitóegyenleg mentése')}</button></div>`;
  $('#form').onsubmit=saveOpeningBalance;setTimeout(updateOpeningBalanceDifference,0);
@@ -3941,7 +3941,7 @@ function openFinancialItem(row=null){
      <option value="LIABILITY" ${selectedType==="LIABILITY"?"selected":""}>Liability / Kötelezettség</option>
      <option value="EQUITY" ${selectedType==="EQUITY"?"selected":""}>Equity / Saját tőke</option>
    </select></div>
-   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${source?.title||""}" required placeholder="${bi("Piano sale, tuning, rent...","Zongoraeladás, hangolás, bérleti díj...")}"></div>
+   <div class="field"><label>${req("Title / Megnevezés")}</label><input name="title" value="${row?.title||""}" required placeholder="${bi("Piano sale, tuning, rent...","Zongoraeladás, hangolás, bérleti díj...")}"></div>
    <div class="field"><label>${req("Amount / Összeg")}</label><input name="amount" type="number" min="0" step="0.01" value="${row?.amount||0}" required></div>
    <div class="field"><label>${req("Category / Kategória")}</label><select name="category" id="financialCategory">${optionsFrom(categoryList,row?.category||"")}</select></div>
    <div class="field"><label>${req("Recurrence / Ismétlődés")}</label><select name="recurrence"><option value="ONE_TIME" ${row?.recurrence!=="MONTHLY"?"selected":""}>One-time / Egyszeri</option><option value="MONTHLY" ${row?.recurrence==="MONTHLY"?"selected":""}>Monthly / Havi</option></select></div>
@@ -3951,11 +3951,13 @@ function openFinancialItem(row=null){
    <div class="field"><label>Client ID / Ügyfél ID</label><input name="client_id" value="${row?.client_id||""}"></div>
    <div class="field"><label>Piano ID / Zongora ID</label><input name="piano_id" value="${row?.piano_id||""}"></div>
    <div class="field full"><label>Description / Leírás</label><textarea name="description" placeholder="${bi("Short explanation for future reference.","Rövid magyarázat, hogy később is egyértelmű legyen.")}">${row?.description||""}</textarea></div>
- </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>${isEdit?"Save changes / Módosítás mentése":"Create item / Tétel létrehozása"}</button></div>`;
+   ${isEdit?`<div class="field full adjustment-reason-field"><label>${req(bi("Reason for Adjustment","Módosítás oka"))}</label><textarea name="reason" minlength="5" required placeholder="${bi("Minimum 5 characters. Closed-period changes are posted into the current open period.","Minimum 5 karakter. A lezárt időszakot érintő korrekció az aktuális nyitott időszakban kerül elszámolásra.")}"></textarea></div>`:""}
+ </div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">Cancel / Mégse</button><button>${isEdit?"Save audited adjustment / Auditált módosítás mentése":"Create item / Tétel létrehozása"}</button></div>`;
  $("#form").onsubmit=async e=>{
    e.preventDefault();
    const body=Object.fromEntries(new FormData(e.target));
    body.amount=Number(body.amount||0);
+   if(isEdit&&String(body.reason||'').trim().length<5)return showError(bi('Reason for Adjustment must contain at least 5 characters.','A módosítás okának legalább 5 karaktert kell tartalmaznia.'));
    try{
      if(isEdit) await api(`/api/financial-items/${row.id}`,{method:"PUT",body:JSON.stringify(body)});
      else await api("/api/financial-items",{method:"POST",body:JSON.stringify(body)});
@@ -3970,8 +3972,10 @@ function refreshFinancialCategoryOptions(){
  if(cat) cat.innerHTML=optionsFrom(financialCategoryOptions[t]||financialCategoryOptions.INCOME,"");
 }
 async function deleteFinancialItem(id){
- if(!await appConfirm(bi("Delete this financial item?","Biztosan törlöd ezt a pénzügyi tételt?"),{type:"error",confirmText:bi("Delete","Törlés")})) return;
- try{await api(`/api/financial-items/${id}`,{method:"DELETE"});await renderFinance()}catch(err){showError(err)}
+ if(!await appConfirm(bi("Void this financial item? The original record will remain permanently in the audit trail and a current-period reversal will remove its accounting effect.","Stornózod ezt a pénzügyi tételt? Az eredeti rekord véglegesen megmarad az auditnaplóban, és egy aktuális időszaki ellenkönyvelés vezeti ki a számviteli hatását."),{type:"error",confirmText:bi("Void item","Tétel stornózása")})) return;
+ const reason=await appPrompt(bi("Reason for Adjustment (minimum 5 characters)","Módosítás oka (minimum 5 karakter)"),{type:"error"});
+ if(reason===null)return;if(String(reason||'').trim().length<5)return showError(bi('Reason for Adjustment must contain at least 5 characters.','A módosítás okának legalább 5 karaktert kell tartalmaznia.'));
+ try{await api(`/api/financial-items/${id}`,{method:"DELETE",body:JSON.stringify({reason:String(reason).trim()})});await renderFinance()}catch(err){showError(err)}
 }
 function currentMonthKey(){
  return newYorkNowLocal().slice(0,7);
