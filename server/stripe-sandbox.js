@@ -48,8 +48,15 @@ function createStripeSandbox(options = {}) {
   let secretKey = cleanText(options.secretKey ?? env.STRIPE_SECRET_KEY, 500);
   let webhookSecret = cleanText(options.webhookSecret ?? env.STRIPE_WEBHOOK_SECRET, 500);
   const websiteBaseUrl = normalizeBaseUrl(options.websiteBaseUrl ?? env.WEBSITE_BASE_URL, "https://klavierhaus-home.onrender.com");
+  const onPaymentRecorded = typeof options.onPaymentRecorded === "function" ? options.onPaymentRecorded : null;
   const onPaymentFulfilled = typeof options.onPaymentFulfilled === "function" ? options.onPaymentFulfilled : null;
   const onPaymentRefunded = typeof options.onPaymentRefunded === "function" ? options.onPaymentRefunded : null;
+  function callTransactionalCallback(callback, payload, code) {
+    if (!callback) return null;
+    const result = callback(payload);
+    if (result && typeof result.then === "function") throw new Error(`${code}_MUST_BE_SYNCHRONOUS`);
+    return result;
+  }
   const ticketService = options.ticketService || createTicketService({ db });
 
   if (LIVE_SECRET_PREFIXES.some((prefix) => secretKey.startsWith(prefix))) {
@@ -265,9 +272,20 @@ function createStripeSandbox(options = {}) {
     const paymentId = newId("EVPAY");
     const amountTotal = Number(session.amount_total ?? hold.amount_total);
     const createdTickets = [];
+    let committedPaymentId = paymentId;
+    let reusedExistingPayment = false;
     db.transaction(() => {
       const existingPayment = db.prepare("SELECT * FROM event_payments WHERE stripe_checkout_session_id=?").get(session.id);
-      if (existingPayment) return;
+      if (existingPayment) {
+        committedPaymentId = existingPayment.id;
+        reusedExistingPayment = true;
+        if (!existingPayment.invoice_id) {
+          callTransactionalCallback(onPaymentRecorded, { paymentId: existingPayment.id, eventId: event.id, ticketIds: [], session }, "PAYMENT_INVOICE_CALLBACK");
+          const linked = db.prepare("SELECT invoice_id FROM event_payments WHERE id=?").get(existingPayment.id);
+          if (!linked?.invoice_id) throw new Error("PAYMENT_INVOICE_ATOMICITY_FAILED");
+        }
+        return;
+      }
       db.prepare(`INSERT INTO event_payments(id,event_id,hold_id,status,purchaser_name,purchaser_email,quantity,amount_total,currency,stripe_checkout_session_id,stripe_payment_intent_id,test_mode,paid_at)
         VALUES(?,?,?,'PAID',?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(
         paymentId,
@@ -304,18 +322,19 @@ function createStripeSandbox(options = {}) {
       }
       db.prepare(`UPDATE event_checkout_holds SET status='PAID',stripe_payment_intent_id=?,purchaser_name=?,purchaser_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(paymentIntent, customer.name, customer.email, hold.id);
+      callTransactionalCallback(onPaymentRecorded, { paymentId, eventId: event.id, ticketIds: createdTickets, session }, "PAYMENT_INVOICE_CALLBACK");
+      const linked = db.prepare("SELECT invoice_id FROM event_payments WHERE id=?").get(paymentId);
+      if (!linked?.invoice_id) throw new Error("PAYMENT_INVOICE_ATOMICITY_FAILED");
     })();
-    if (onPaymentFulfilled) {
+    if (!reusedExistingPayment && onPaymentFulfilled) {
       try {
-        await onPaymentFulfilled({ paymentId, eventId: event.id, ticketIds: createdTickets, session });
+        await onPaymentFulfilled({ paymentId: committedPaymentId, eventId: event.id, ticketIds: createdTickets, session });
       } catch (error) {
-        // Ticket/payment fulfilment is already committed. Document delivery can
-        // be retried from the admin payment workspace without rolling back a
-        // valid purchase because an external provider or PDF write failed.
-        console.warn(`[stripe-sandbox] Purchase documents were not delivered for ${paymentId}: ${error.message}`);
+        console.warn(`[stripe-sandbox] Purchase documents were not delivered for ${committedPaymentId}: ${error.message}`);
       }
     }
-    return { paid: true, hold_id: hold.id, payment_id: paymentId, ticket_ids: createdTickets };
+    const committedTickets = reusedExistingPayment ? db.prepare("SELECT id FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(committedPaymentId).map((row) => row.id) : createdTickets;
+    return { paid: true, hold_id: hold.id, payment_id: committedPaymentId, ticket_ids: committedTickets };
   }
 
   async function processWebhookEvent(event) {
@@ -337,12 +356,14 @@ function createStripeSandbox(options = {}) {
         const refund = event.data.object;
         const status = refund.status === "succeeded" ? "REFUNDED" : refund.status === "failed" ? "REFUND_FAILED" : "REFUND_PENDING";
         const paymentIntentId = typeof refund.payment_intent === "string" ? refund.payment_intent : refund.payment_intent?.id || "";
-        db.prepare("UPDATE event_payments SET status=?,stripe_refund_id=COALESCE(stripe_refund_id,?),updated_at=CURRENT_TIMESTAMP WHERE stripe_payment_intent_id=?")
-          .run(status, refund.id, paymentIntentId);
-        if (status === "REFUNDED" && onPaymentRefunded) {
-          const payment = db.prepare("SELECT id,event_id FROM event_payments WHERE stripe_payment_intent_id=?").get(paymentIntentId);
-          if (payment) await onPaymentRefunded({ paymentId: payment.id, eventId: payment.event_id, refund });
-        }
+        db.transaction(() => {
+          db.prepare("UPDATE event_payments SET status=?,stripe_refund_id=COALESCE(stripe_refund_id,?),refunded_at=CASE WHEN ?='REFUNDED' THEN COALESCE(refunded_at,CURRENT_TIMESTAMP) ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE stripe_payment_intent_id=?")
+            .run(status, refund.id, status, paymentIntentId);
+          if (status === "REFUNDED" && onPaymentRefunded) {
+            const payment = db.prepare("SELECT id,event_id FROM event_payments WHERE stripe_payment_intent_id=?").get(paymentIntentId);
+            if (payment) callTransactionalCallback(onPaymentRefunded, { paymentId: payment.id, eventId: payment.event_id, refund }, "PAYMENT_REFUND_CALLBACK");
+          }
+        })();
         result = { refund_status: status };
       }
       db.prepare("UPDATE stripe_webhook_events SET status='PROCESSED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
@@ -382,14 +403,14 @@ function createStripeSandbox(options = {}) {
       metadata: { payment_id: ticket.payment_id, administrative_reason: cleanText(reason, 400) }
     }, { idempotencyKey: `kh-full-refund-${ticket.payment_id}` });
     db.transaction(() => {
-      db.prepare("UPDATE event_payments SET status=?,stripe_refund_id=?,refunded_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(refund.status === "succeeded" ? "REFUNDED" : "REFUND_PENDING", refund.id, ticket.payment_id);
+      db.prepare("UPDATE event_payments SET status=?,stripe_refund_id=?,refunded_at=CASE WHEN ?='REFUNDED' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(refund.status === "succeeded" ? "REFUNDED" : "REFUND_PENDING", refund.id, refund.status === "succeeded" ? "REFUNDED" : "REFUND_PENDING", ticket.payment_id);
       db.prepare("UPDATE event_tickets SET status='REFUNDED',updated_at=CURRENT_TIMESTAMP WHERE event_payment_id=? AND status IN ('VALID','USED')")
         .run(ticket.payment_id);
       db.prepare("UPDATE event_checkout_holds SET status='REFUNDED',updated_at=CURRENT_TIMESTAMP WHERE id=(SELECT hold_id FROM event_payments WHERE id=?)")
         .run(ticket.payment_id);
+      if (onPaymentRefunded && refund.status === "succeeded") callTransactionalCallback(onPaymentRefunded, { paymentId: ticket.payment_id, eventId: ticket.event_id, refund }, "PAYMENT_REFUND_CALLBACK");
     })();
-    if (onPaymentRefunded && refund.status === "succeeded") await onPaymentRefunded({ paymentId: ticket.payment_id, eventId: ticket.event_id, refund });
     return db.prepare("SELECT * FROM event_payments WHERE id=?").get(ticket.payment_id);
   }
 
