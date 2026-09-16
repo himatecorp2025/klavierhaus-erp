@@ -1265,6 +1265,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
   audit_type TEXT DEFAULT 'TECHNICAL'
 );
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
+CREATE TRIGGER IF NOT EXISTS trg_financial_audit_log_immutable_delete
+BEFORE DELETE ON audit_log
+WHEN OLD.audit_type='FINANCIAL'
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_AUDIT_LOG');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_financial_audit_log_immutable_update
+BEFORE UPDATE ON audit_log
+WHEN OLD.audit_type='FINANCIAL' OR NEW.audit_type='FINANCIAL'
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_AUDIT_LOG');
+END;
 
 
 CREATE TABLE IF NOT EXISTS employee_daily_rates (
@@ -1323,10 +1335,13 @@ CREATE TABLE IF NOT EXISTS invoices (
   tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
   total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
   currency TEXT NOT NULL DEFAULT 'USD',
-  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash','NONE / INTERNAL')),
   payment_link_url TEXT,
   notes TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+  revenue_recognition_status TEXT NOT NULL DEFAULT 'RECOGNIZED' CHECK(revenue_recognition_status IN ('RECOGNIZED','DEFERRED')),
+  revenue_recognition_date TEXT,
+  deferred_event_id TEXT,
   paid_at TEXT,
   voided_at TEXT,
   voided_by TEXT,
@@ -1376,9 +1391,90 @@ CREATE TABLE IF NOT EXISTS invoice_adjustments (
   adjusted_at_local TEXT NOT NULL,
   previous_values TEXT NOT NULL,
   new_values TEXT NOT NULL,
-  FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+  FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_adjustments_invoice_time ON invoice_adjustments(invoice_id,adjusted_at DESC);
+
+CREATE TABLE IF NOT EXISTS credit_memo_sequences (
+  sequence_year TEXT PRIMARY KEY,
+  last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0),
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS invoice_credit_memos (
+  id TEXT PRIMARY KEY,
+  credit_memo_number TEXT NOT NULL UNIQUE,
+  invoice_id TEXT NOT NULL,
+  event_id TEXT,
+  memo_type TEXT NOT NULL CHECK(memo_type IN ('EVENT_REFUND','VOID_REVERSAL')),
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  memo_date TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  subtotal_amount REAL NOT NULL DEFAULT 0 CHECK(subtotal_amount >= 0),
+  tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
+  total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
+  revenue_effect_date TEXT,
+  cash_effect INTEGER NOT NULL DEFAULT 1 CHECK(cash_effect IN (0,1)),
+  accounting_effect INTEGER NOT NULL DEFAULT 1 CHECK(accounting_effect IN (0,1)),
+  created_by_user_id TEXT,
+  created_by_name TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_type,source_id),
+  FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_credit_memos_invoice_date ON invoice_credit_memos(invoice_id,memo_date DESC);
+CREATE INDEX IF NOT EXISTS idx_credit_memos_revenue_effect ON invoice_credit_memos(revenue_effect_date,memo_type);
+
+CREATE TRIGGER IF NOT EXISTS trg_invoices_immutable_delete
+BEFORE DELETE ON invoices
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_RECORD');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_immutable_delete
+BEFORE DELETE ON invoice_adjustments
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_ADJUSTMENT');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_reason_required
+BEFORE INSERT ON invoice_adjustments
+WHEN length(trim(COALESCE(NEW.reason,''))) < 5
+BEGIN
+  SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_immutable_update
+BEFORE UPDATE ON invoice_adjustments
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_ADJUSTMENT');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_immutable_delete
+BEFORE DELETE ON invoice_credit_memos
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_reason_required
+BEFORE INSERT ON invoice_credit_memos
+WHEN length(trim(COALESCE(NEW.reason,''))) < 5
+BEGIN
+  SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_immutable_update
+BEFORE UPDATE ON invoice_credit_memos
+WHEN NEW.id<>OLD.id OR NEW.credit_memo_number<>OLD.credit_memo_number OR NEW.invoice_id<>OLD.invoice_id OR COALESCE(NEW.event_id,'')<>COALESCE(OLD.event_id,'')
+  OR NEW.memo_type<>OLD.memo_type OR NEW.source_type<>OLD.source_type OR NEW.source_id<>OLD.source_id OR NEW.memo_date<>OLD.memo_date OR NEW.reason<>OLD.reason
+  OR NEW.subtotal_amount<>OLD.subtotal_amount OR NEW.tax_amount<>OLD.tax_amount OR NEW.total_amount<>OLD.total_amount OR NEW.cash_effect<>OLD.cash_effect OR NEW.accounting_effect<>OLD.accounting_effect
+  OR COALESCE(NEW.created_by_user_id,'')<>COALESCE(OLD.created_by_user_id,'') OR NEW.created_by_name<>OLD.created_by_name OR NEW.created_at<>OLD.created_at
+  OR OLD.revenue_effect_date IS NOT NULL OR NEW.revenue_effect_date IS NULL
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO');
+END;
 
 CREATE TABLE IF NOT EXISTS financial_items (
   id TEXT PRIMARY KEY,
