@@ -125,21 +125,22 @@ test("three-level invoice deletion contract includes Void, single hard delete, i
 
 test("admin navigation is exactly four primary groups with finance separated and clean technical/website card sets", () => {
   const app = read("public/app.js");
-  const nav = block(app, "const adminNavGroups=[", "];\nconst technicalGroupForAlphabeticSort");
+  const nav = block(app, "const adminNavGroups=[", "];\nconst adminNavigationItems");
   const ids = [...nav.matchAll(/\{id:"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(ids, ["finance_invoicing", "technical", "marketing", "website_events"]);
 
   const finance = block(nav, '{id:"finance_invoicing"', ' {id:"technical"');
-  for (const key of ["finance", "income_statement", "invoice_documents"]) assert.ok(finance.includes(`["${key}"`));
+  for (const key of ["finance", "income_statement", "knowledge_base"]) assert.ok(finance.includes(`["${key}"`));
   const technical = block(nav, '{id:"technical"', ' {id:"marketing"');
   const techViews = [...technical.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(techViews, ["pianos", "contacts", "inventory", "partners", "scheduler", "workshop_workflow"]);
-  const techLabels = [...technical.matchAll(/\["[a-z_]+","([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(techLabels, ["Client Piano", "Clients", "Inventory", "Partners", "Scheduler", "Workshop Workflow"]);
+  assert.deepEqual(techViews, ["workshop_workflow","scheduler","planned_jobs","contacts","pianos","inventory","partners","closed_jobs","users","audit_log","backups","settings","company_data","system_integrations"]);
+  assert.ok(!technical.includes('["finance"'));
+  assert.ok(!technical.includes('["income_statement"'));
+  assert.ok(!technical.includes('["knowledge_base"'));
 
   const website = nav.slice(nav.indexOf('{id:"website_events"'));
   const websiteViews = [...website.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(websiteViews, ["event_guest_list", "pages_content", "event_tickets"]);
+  assert.deepEqual(websiteViews, ["pages_content","website_services","showroom_pianos","website_artists","media_library","events","event_tickets","event_invitations","event_guest_list","digital_attendance","website_contacts","customer_inbox","publish_preview"]);
   assert.doesNotMatch(nav, /Landing Page Design|landing_page_design/);
 
   assert.match(app, /brandHomeButton/);
