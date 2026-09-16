@@ -184,7 +184,7 @@ function migrationRequiresBackup() {
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
   const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
-  const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("'event'"));
+  const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableColumns("invoices").has("revenue_recognition_status") || !tableColumns("invoices").has("revenue_recognition_date") || !tableColumns("invoices").has("deferred_event_id") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("NONE / INTERNAL") || !tableSql("invoices").includes("'event'"));
   const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
   return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || invoiceItemSettlementMissing || contactsTaxIdMissing || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
@@ -608,6 +608,7 @@ function canonicalPaymentMethodSql(columnName) {
     WHEN upper(trim(${columnName})) IN ('PAYMENT LINK','PAYMENT_LINK') THEN 'Payment Link'
     WHEN upper(trim(${columnName}))='PAYPAL' THEN 'PayPal'
     WHEN upper(trim(${columnName})) IN ('CASH','ON_SITE','ON SITE') THEN 'Cash'
+    WHEN upper(trim(${columnName})) IN ('NONE / INTERNAL','NONE','INTERNAL') THEN 'NONE / INTERNAL'
     ELSE NULL
   END`;
 }
@@ -623,18 +624,22 @@ function migrateInvoicePaymentStandards() {
   if (!tableExists('invoices')) return;
   const columns = tableColumns('invoices');
   const sql = tableSql('invoices');
-  const constraintReady = sql.includes('Payment Link') && sql.includes('PayPal');
-  const columnsReady = columns.has('payment_link_url') && columns.has('notes') && columns.has('paid_at') && columns.has('archived_at') && columns.has('archived_period') && sql.includes("'event'");
+  const constraintReady = sql.includes('Payment Link') && sql.includes('PayPal') && sql.includes('NONE / INTERNAL');
+  const columnsReady = columns.has('payment_link_url') && columns.has('notes') && columns.has('paid_at') && columns.has('archived_at') && columns.has('archived_period')
+    && columns.has('revenue_recognition_status') && columns.has('revenue_recognition_date') && columns.has('deferred_event_id') && sql.includes("'event'");
   if (constraintReady && columnsReady) {
     normalizePaymentMethodColumns();
     return;
   }
-  log('Migrating invoices to the seven-method payment standard');
+  log('Migrating invoices to immutable GAAP payment and revenue-recognition standard');
   const paymentLinkExpr = columns.has('payment_link_url') ? 'payment_link_url' : 'NULL';
   const notesExpr = columns.has('notes') ? 'notes' : 'NULL';
   const paidAtExpr = columns.has('paid_at') ? 'paid_at' : "CASE WHEN status='paid' THEN created_at ELSE NULL END";
   const archivedAtExpr = columns.has('archived_at') ? 'archived_at' : 'NULL';
   const archivedPeriodExpr = columns.has('archived_period') ? 'archived_period' : 'NULL';
+  const recognitionStatusExpr = columns.has('revenue_recognition_status') ? "COALESCE(NULLIF(revenue_recognition_status,''),'RECOGNIZED')" : "'RECOGNIZED'";
+  const recognitionDateExpr = columns.has('revenue_recognition_date') ? 'revenue_recognition_date' : 'issue_date';
+  const deferredEventExpr = columns.has('deferred_event_id') ? 'deferred_event_id' : 'NULL';
   db.pragma('foreign_keys = OFF');
   try {
     db.transaction(() => {
@@ -655,10 +660,13 @@ function migrateInvoicePaymentStandards() {
           tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
           total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
           currency TEXT NOT NULL DEFAULT 'USD',
-          payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+          payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash','NONE / INTERNAL')),
           payment_link_url TEXT,
           notes TEXT,
           status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+          revenue_recognition_status TEXT NOT NULL DEFAULT 'RECOGNIZED' CHECK(revenue_recognition_status IN ('RECOGNIZED','DEFERRED')),
+          revenue_recognition_date TEXT,
+          deferred_event_id TEXT,
           paid_at TEXT,
           voided_at TEXT,
           voided_by TEXT,
@@ -669,9 +677,9 @@ function migrateInvoicePaymentStandards() {
           FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
         )`);
       db.exec(`INSERT INTO invoices_payment_v2(
-        id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,paid_at,voided_at,voided_by,archived_at,archived_period,created_at
+        id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,revenue_recognition_status,revenue_recognition_date,deferred_event_id,paid_at,voided_at,voided_by,archived_at,archived_period,created_at
       ) SELECT id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,
-        ${canonicalPaymentMethodSql('payment_method')},${paymentLinkExpr},${notesExpr},status,${paidAtExpr},voided_at,voided_by,${archivedAtExpr},${archivedPeriodExpr},created_at FROM invoices`);
+        ${canonicalPaymentMethodSql('payment_method')},${paymentLinkExpr},${notesExpr},status,${recognitionStatusExpr},${recognitionDateExpr},${deferredEventExpr},${paidAtExpr},voided_at,voided_by,${archivedAtExpr},${archivedPeriodExpr},created_at FROM invoices`);
       db.exec('DROP TABLE invoices; ALTER TABLE invoices_payment_v2 RENAME TO invoices;');
     })();
     ensureIndex('idx_invoices_direction_issue', 'CREATE INDEX IF NOT EXISTS idx_invoices_direction_issue ON invoices(direction,issue_date DESC)');
@@ -684,6 +692,147 @@ function migrateInvoicePaymentStandards() {
   }
   const fkProblems = db.prepare('PRAGMA foreign_key_check').all();
   if (fkProblems.length) throw new Error(`Invoice payment migration produced ${fkProblems.length} foreign-key violation(s)`);
+}
+
+function migrateInvoiceAdjustmentImmutability() {
+  if (!tableExists('invoice_adjustments')) return;
+  const sql = tableSql('invoice_adjustments');
+  if (/ON\s+DELETE\s+RESTRICT/i.test(sql)) return;
+  log('Migrating invoice adjustments to delete-restricted immutable audit storage');
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`DROP TABLE IF EXISTS invoice_adjustments_immutable_v2;
+        CREATE TABLE invoice_adjustments_immutable_v2 (
+          id TEXT PRIMARY KEY,
+          invoice_id TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          adjusted_by_user_id TEXT,
+          adjusted_by_name TEXT NOT NULL,
+          adjusted_at TEXT NOT NULL,
+          adjusted_at_local TEXT NOT NULL,
+          previous_values TEXT NOT NULL,
+          new_values TEXT NOT NULL,
+          FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT
+        )`);
+      db.exec(`INSERT INTO invoice_adjustments_immutable_v2(
+        id,invoice_id,reason,adjusted_by_user_id,adjusted_by_name,adjusted_at,adjusted_at_local,previous_values,new_values
+      ) SELECT id,invoice_id,reason,adjusted_by_user_id,adjusted_by_name,adjusted_at,adjusted_at_local,previous_values,new_values FROM invoice_adjustments`);
+      db.exec('DROP TABLE invoice_adjustments; ALTER TABLE invoice_adjustments_immutable_v2 RENAME TO invoice_adjustments;');
+    })();
+    ensureIndex('idx_invoice_adjustments_invoice_time', 'CREATE INDEX IF NOT EXISTS idx_invoice_adjustments_invoice_time ON invoice_adjustments(invoice_id,adjusted_at DESC)');
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+  const fkProblems = db.prepare('PRAGMA foreign_key_check').all();
+  if (fkProblems.length) throw new Error(`Invoice adjustment immutability migration produced ${fkProblems.length} foreign-key violation(s)`);
+}
+
+function newYorkDate(value) {
+  const date = new Date(value || Date.now());
+  const safe = Number.isNaN(date.getTime()) ? new Date() : date;
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(safe).reduce((out, part) => { out[part.type] = part.value; return out; }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function resolveInvoiceEventId(invoice) {
+  if (invoice?.deferred_event_id) return invoice.deferred_event_id;
+  const sourceId = String(invoice?.source_id || '');
+  if (sourceId.startsWith('ticket:') && tableExists('event_tickets')) {
+    return db.prepare('SELECT event_id FROM event_tickets WHERE id=?').get(sourceId.slice(7))?.event_id || null;
+  }
+  if (sourceId.startsWith('payment:') && tableExists('event_payments')) {
+    return db.prepare('SELECT event_id FROM event_payments WHERE id=?').get(sourceId.slice(8))?.event_id || null;
+  }
+  return null;
+}
+
+function backfillInvoiceRevenueRecognition() {
+  if (!tableExists('invoices')) return;
+  db.prepare(`UPDATE invoices
+    SET revenue_recognition_status='RECOGNIZED',revenue_recognition_date=COALESCE(revenue_recognition_date,issue_date)
+    WHERE source_type<>'event'`).run();
+  if (!tableExists('events')) return;
+  const eventInvoices = db.prepare("SELECT * FROM invoices WHERE source_type='event'").all();
+  const update = db.prepare('UPDATE invoices SET revenue_recognition_status=?,revenue_recognition_date=?,deferred_event_id=? WHERE id=?');
+  db.transaction(() => {
+    for (const invoice of eventInvoices) {
+      const eventId = resolveInvoiceEventId(invoice);
+      const event = eventId ? db.prepare('SELECT id,status,status_before_close,end_at FROM events WHERE id=?').get(eventId) : null;
+      const status = String(event?.status || '').toUpperCase();
+      const recognized = Boolean(event && (status === 'COMPLETED' || (status === 'CLOSED' && String(event.status_before_close || '').toUpperCase() === 'COMPLETED')));
+      update.run(recognized ? 'RECOGNIZED' : 'DEFERRED', recognized ? newYorkDate(event.end_at) : null, eventId, invoice.id);
+    }
+  })();
+}
+
+function backfillEventRefundCreditMemos() {
+  if (!tableExists('invoice_credit_memos') || !tableExists('credit_memo_sequences') || !tableExists('financial_items') || !tableExists('invoices')) return;
+  const legacy = db.prepare("SELECT * FROM financial_items WHERE source_type IN ('event_payment_refund','event_manual_ticket_refund') ORDER BY item_date,created_at,id").all();
+  if (!legacy.length) return;
+  const nextNumber = (memoDate) => {
+    const year = String(memoDate || newYorkDate()).slice(0, 4);
+    const row = db.prepare(`INSERT INTO credit_memo_sequences(sequence_year,last_number,updated_at) VALUES(?,1,CURRENT_TIMESTAMP)
+      ON CONFLICT(sequence_year) DO UPDATE SET last_number=credit_memo_sequences.last_number+1,updated_at=CURRENT_TIMESTAMP RETURNING last_number`).get(year);
+    return `CM-${year}-${String(Number(row?.last_number || 1)).padStart(4,'0')}`;
+  };
+  db.transaction(() => {
+    for (const item of legacy) {
+      const sourceType = String(item.source_type || '');
+      const sourceId = String(item.source_id || '');
+      const normalizedSourceType = sourceType === 'event_payment_refund' ? 'EVENT_PAYMENT_REFUND' : 'EVENT_MANUAL_TICKET_REFUND';
+      if (!sourceId || db.prepare('SELECT 1 FROM invoice_credit_memos WHERE source_type=? AND source_id=?').get(normalizedSourceType, sourceId)) continue;
+      let invoiceId = null;
+      let eventId = null;
+      if (sourceType === 'event_payment_refund' && tableExists('event_payments')) {
+        const payment = db.prepare('SELECT id,event_id,invoice_id FROM event_payments WHERE id=?').get(sourceId);
+        invoiceId = payment?.invoice_id || db.prepare("SELECT id FROM invoices WHERE source_type='event' AND source_id=? LIMIT 1").get(`payment:${sourceId}`)?.id || null;
+        eventId = payment?.event_id || null;
+      } else if (sourceType === 'event_manual_ticket_refund' && tableExists('event_tickets')) {
+        const ticket = db.prepare('SELECT id,event_id,invoice_id FROM event_tickets WHERE id=?').get(sourceId);
+        invoiceId = ticket?.invoice_id || db.prepare("SELECT id FROM invoices WHERE source_type='event' AND source_id=? LIMIT 1").get(`ticket:${sourceId}`)?.id || null;
+        eventId = ticket?.event_id || null;
+      }
+      if (!invoiceId) continue;
+      const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(invoiceId);
+      if (!invoice) continue;
+      const total = Math.round((Number(item.amount || 0) + Number.EPSILON) * 100) / 100;
+      if (!(total > 0)) continue;
+      const invoiceTotal = Math.round((Number(invoice.total_amount || 0) + Number.EPSILON) * 100) / 100;
+      const ratio = invoiceTotal > 0 ? Math.min(1, total / invoiceTotal) : 0;
+      const subtotal = Math.round((Number(invoice.subtotal || 0) * ratio + Number.EPSILON) * 100) / 100;
+      const tax = Math.round((total - subtotal + Number.EPSILON) * 100) / 100;
+      const memoDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item.item_date || '')) ? item.item_date : newYorkDate(item.created_at);
+      const recognized = String(invoice.revenue_recognition_status || 'RECOGNIZED').toUpperCase() === 'RECOGNIZED';
+      db.prepare(`INSERT INTO invoice_credit_memos(id,credit_memo_number,invoice_id,event_id,memo_type,source_type,source_id,memo_date,reason,subtotal_amount,tax_amount,total_amount,revenue_effect_date,cash_effect,accounting_effect,created_by_name)
+        VALUES(?,?,?,?,?,'${normalizedSourceType}',?,?,?,?,?,?,?,1,1,'MIGRATION')`).run(
+        `CM-${crypto.randomUUID()}`, nextNumber(memoDate), invoice.id, eventId || invoice.deferred_event_id || null, 'EVENT_REFUND', sourceId, memoDate,
+        `Migrated legacy event refund ${sourceId}`, subtotal, tax, total, recognized ? memoDate : null
+      );
+    }
+  })();
+}
+
+function ensureInvoiceImmutability() {
+  if (!tableExists('invoices') || !tableExists('invoice_adjustments') || !tableExists('invoice_credit_memos')) return;
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_invoices_immutable_delete BEFORE DELETE ON invoices BEGIN SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_RECORD'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_financial_audit_log_immutable_delete BEFORE DELETE ON audit_log WHEN OLD.audit_type='FINANCIAL' BEGIN SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_AUDIT_LOG'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_financial_audit_log_immutable_update BEFORE UPDATE ON audit_log WHEN OLD.audit_type='FINANCIAL' OR NEW.audit_type='FINANCIAL' BEGIN SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_AUDIT_LOG'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_immutable_delete BEFORE DELETE ON invoice_adjustments BEGIN SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_ADJUSTMENT'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_reason_required BEFORE INSERT ON invoice_adjustments WHEN length(trim(COALESCE(NEW.reason,'')))<5 BEGIN SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_adjustments_immutable_update BEFORE UPDATE ON invoice_adjustments BEGIN SELECT RAISE(ABORT,'IMMUTABLE_INVOICE_ADJUSTMENT'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_immutable_delete BEFORE DELETE ON invoice_credit_memos BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_reason_required BEFORE INSERT ON invoice_credit_memos WHEN length(trim(COALESCE(NEW.reason,'')))<5 BEGIN SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_immutable_update BEFORE UPDATE ON invoice_credit_memos
+    WHEN NEW.id<>OLD.id OR NEW.credit_memo_number<>OLD.credit_memo_number OR NEW.invoice_id<>OLD.invoice_id OR COALESCE(NEW.event_id,'')<>COALESCE(OLD.event_id,'')
+      OR NEW.memo_type<>OLD.memo_type OR NEW.source_type<>OLD.source_type OR NEW.source_id<>OLD.source_id OR NEW.memo_date<>OLD.memo_date OR NEW.reason<>OLD.reason
+      OR NEW.subtotal_amount<>OLD.subtotal_amount OR NEW.tax_amount<>OLD.tax_amount OR NEW.total_amount<>OLD.total_amount OR NEW.cash_effect<>OLD.cash_effect OR NEW.accounting_effect<>OLD.accounting_effect
+      OR COALESCE(NEW.created_by_user_id,'')<>COALESCE(OLD.created_by_user_id,'') OR NEW.created_by_name<>OLD.created_by_name OR NEW.created_at<>OLD.created_at
+      OR OLD.revenue_effect_date IS NOT NULL OR NEW.revenue_effect_date IS NULL
+    BEGIN SELECT RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO'); END;
+  `);
 }
 
 function runMigrations() {
@@ -811,9 +960,11 @@ function runMigrations() {
       issue_date TEXT NOT NULL, due_date TEXT, partner_id TEXT, client_id TEXT, source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','workflow','manual','event')),
       source_id TEXT, summary TEXT, subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0), tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0),
       tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0), total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0), currency TEXT NOT NULL DEFAULT 'USD',
-      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
+      payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash','NONE / INTERNAL')),
       payment_link_url TEXT, notes TEXT,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')), paid_at TEXT, voided_at TEXT, voided_by TEXT, archived_at TEXT, archived_period TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','paid','void','carried_over')),
+      revenue_recognition_status TEXT NOT NULL DEFAULT 'RECOGNIZED' CHECK(revenue_recognition_status IN ('RECOGNIZED','DEFERRED')), revenue_recognition_date TEXT, deferred_event_id TEXT,
+      paid_at TEXT, voided_at TEXT, voided_by TEXT, archived_at TEXT, archived_period TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL, FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS invoice_sequences (
@@ -831,13 +982,16 @@ function runMigrations() {
     CREATE TABLE IF NOT EXISTS invoice_adjustments (
       id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, reason TEXT NOT NULL, adjusted_by_user_id TEXT, adjusted_by_name TEXT NOT NULL,
       adjusted_at TEXT NOT NULL, adjusted_at_local TEXT NOT NULL, previous_values TEXT NOT NULL, new_values TEXT NOT NULL,
-      FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT
     )`);
     ensureColumn("invoices", "payment_link_url", "TEXT");
     ensureColumn("invoices", "notes", "TEXT");
     ensureColumn("invoices", "paid_at", "TEXT");
     ensureColumn("invoices", "archived_at", "TEXT");
     ensureColumn("invoices", "archived_period", "TEXT");
+    ensureColumn("invoices", "revenue_recognition_status", "TEXT NOT NULL DEFAULT 'RECOGNIZED'");
+    ensureColumn("invoices", "revenue_recognition_date", "TEXT");
+    ensureColumn("invoices", "deferred_event_id", "TEXT");
     ensureColumn("invoice_items", "payment_method", "TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash'))");
     ensureColumn("invoice_items", "financial_status", "TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending'))");
     ensureColumn("invoice_items", "sort_order", "INTEGER NOT NULL DEFAULT 0");
@@ -846,6 +1000,20 @@ function runMigrations() {
       last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0), updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(direction,sequence_year)
     )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS credit_memo_sequences (
+      sequence_year TEXT PRIMARY KEY,last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0),updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS invoice_credit_memos (
+      id TEXT PRIMARY KEY,credit_memo_number TEXT NOT NULL UNIQUE,invoice_id TEXT NOT NULL,event_id TEXT,
+      memo_type TEXT NOT NULL CHECK(memo_type IN ('EVENT_REFUND','VOID_REVERSAL')),source_type TEXT NOT NULL,source_id TEXT NOT NULL,
+      memo_date TEXT NOT NULL,reason TEXT NOT NULL,subtotal_amount REAL NOT NULL DEFAULT 0 CHECK(subtotal_amount >= 0),
+      tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
+      revenue_effect_date TEXT,cash_effect INTEGER NOT NULL DEFAULT 1 CHECK(cash_effect IN (0,1)),accounting_effect INTEGER NOT NULL DEFAULT 1 CHECK(accounting_effect IN (0,1)),
+      created_by_user_id TEXT,created_by_name TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(source_type,source_id),
+      FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT,FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_credit_memos_invoice_date ON invoice_credit_memos(invoice_id,memo_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_credit_memos_revenue_effect ON invoice_credit_memos(revenue_effect_date,memo_type);`);
     const sequenceUpsert = db.prepare(`INSERT INTO invoice_sequences(direction,sequence_year,last_number,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(direction,sequence_year) DO UPDATE SET last_number=MAX(invoice_sequences.last_number,excluded.last_number),updated_at=CURRENT_TIMESTAMP`);
     for (const invoice of db.prepare("SELECT direction,invoice_number,issue_date FROM invoices").all()) {
@@ -1005,6 +1173,10 @@ function runMigrations() {
 
   migrateColumns();
   migrateInvoicePaymentStandards();
+  migrateInvoiceAdjustmentImmutability();
+  backfillInvoiceRevenueRecognition();
+  backfillEventRefundCreditMemos();
+  ensureInvoiceImmutability();
   migrateEventTicketData();
   migrateWebsiteContactLeadStatuses();
   migrateCustomerConversationSchema();
@@ -1121,10 +1293,10 @@ function runMigrations() {
     ["1000","Cash","Készpénz","ASSET","DEBIT"],["1010","Bank","Bank","ASSET","DEBIT"],
     ["1020","Undeposited Checks","Befizetés előtti csekkek","ASSET","DEBIT"],
     ["1200","Accounts Receivable","Vevőkövetelés","ASSET","DEBIT"],["1300","Inventory","Készlet","ASSET","DEBIT"],
-    ["1500","Fixed Assets","Befektetett eszközök","ASSET","DEBIT"],["2000","Accounts Payable","Szállítói tartozás","LIABILITY","CREDIT"],
+    ["1500","Fixed Assets","Befektetett eszközök","ASSET","DEBIT"],["2000","Accounts Payable","Szállítói tartozás","LIABILITY","CREDIT"],["2010","Sales Tax Payable","Fizetendő forgalmi adó","LIABILITY","CREDIT"],["2020","Deferred Revenue","Halasztott bevétel","LIABILITY","CREDIT"],
     ["2100","SBA Loan","SBA hitel","LIABILITY","CREDIT"],["3000","Owner Equity","Saját tőke","EQUITY","CREDIT"],
     ["4000","Sales Revenue","Árbevétel","REVENUE","CREDIT"],["4100","Restoration Revenue","Felújítási bevétel","REVENUE","CREDIT"],
-    ["4200","Tuning Revenue","Hangolási bevétel","REVENUE","CREDIT"],["4300","Concert Service Revenue","Koncertszerviz bevétel","REVENUE","CREDIT"],
+    ["4200","Tuning Revenue","Hangolási bevétel","REVENUE","CREDIT"],["4300","Concert Service Revenue","Koncertszerviz bevétel","REVENUE","CREDIT"],["4390","Ticket Refund Contra Revenue","Jegy-visszatérítés bevételcsökkentés","REVENUE","DEBIT"],
     ["5000","Cost of Goods Sold","Eladott áruk költsége","EXPENSE","DEBIT"],["6100","Rent Expense","Bérleti díj","EXPENSE","DEBIT"],
     ["6200","Transport Expense","Szállítási költség","EXPENSE","DEBIT"],["6300","Payroll Expense","Bérköltség","EXPENSE","DEBIT"],
     ["6400","Interest Expense","Kamatköltség","EXPENSE","DEBIT"]
