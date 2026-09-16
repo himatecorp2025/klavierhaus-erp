@@ -13,7 +13,12 @@ test("business invoice PDF uses one-based months, complete QTY/TAX glyphs and dy
   const source = read("server/document-pdf.js");
   assert.match(source, /date\.getMonth\(\) \+ 1/);
   assert.match(source, /textCommand\(`Issue Date: \$\{formatPdfDate\(invoice\.issue_date\)\}`/);
-  assert.match(source, /"DESCRIPTION", "QTY", "UNIT PRICE", "LINE TOTAL"/);
+  assert.match(source, /"DESCRIPTION"/);
+  assert.match(source, /"QTY"/);
+  assert.match(source, /"UNIT PRICE"/);
+  assert.match(source, /"LINE TOTAL"/);
+  assert.match(source, /"PHASE"/);
+  assert.match(source, /"PHASE SUBTOTAL"/);
   assert.match(source, /"TAX \(0\.00%\)", "%"/);
   assert.match(source, /company\.address_line1/);
   assert.match(source, /company\.tax_id/);
@@ -26,6 +31,9 @@ test("business invoice PDF uses one-based months, complete QTY/TAX glyphs and dy
   });
   assert.ok(Buffer.isBuffer(pdf));
   assert.ok(pdf.length > 10000);
+  const pdfBinary = pdf.toString("binary");
+  assert.match(pdfBinary, /<0034> <0034>/, "dynamic amount digit 4 must be embedded in the PDF font map");
+  assert.match(pdfBinary, /<0039> <0039>/, "dynamic date digit 9 must be embedded in the PDF font map");
 });
 
 test("manual invoice dates support typed MM/DD/YYYY plus calendar selection and strict three-character validation", () => {
