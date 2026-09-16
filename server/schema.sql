@@ -1465,13 +1465,18 @@ BEGIN
   SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED');
 END;
 
-CREATE TRIGGER IF NOT EXISTS trg_invoice_credit_memos_immutable_update
+DROP TRIGGER IF EXISTS trg_invoice_credit_memos_immutable_update;
+CREATE TRIGGER trg_invoice_credit_memos_immutable_update
 BEFORE UPDATE ON invoice_credit_memos
 WHEN NEW.id<>OLD.id OR NEW.credit_memo_number<>OLD.credit_memo_number OR NEW.invoice_id<>OLD.invoice_id OR COALESCE(NEW.event_id,'')<>COALESCE(OLD.event_id,'')
   OR NEW.memo_type<>OLD.memo_type OR NEW.source_type<>OLD.source_type OR NEW.source_id<>OLD.source_id OR NEW.memo_date<>OLD.memo_date OR NEW.reason<>OLD.reason
   OR NEW.subtotal_amount<>OLD.subtotal_amount OR NEW.tax_amount<>OLD.tax_amount OR NEW.total_amount<>OLD.total_amount OR NEW.cash_effect<>OLD.cash_effect OR NEW.accounting_effect<>OLD.accounting_effect
   OR COALESCE(NEW.created_by_user_id,'')<>COALESCE(OLD.created_by_user_id,'') OR NEW.created_by_name<>OLD.created_by_name OR NEW.created_at<>OLD.created_at
-  OR OLD.revenue_effect_date IS NOT NULL OR NEW.revenue_effect_date IS NULL
+  OR (COALESCE(NEW.revenue_effect_date,'')<>COALESCE(OLD.revenue_effect_date,'') AND NOT (
+       (OLD.revenue_effect_date IS NULL AND NEW.revenue_effect_date IS NOT NULL)
+       OR (OLD.revenue_effect_date IS NOT NULL AND NEW.revenue_effect_date IS NULL
+           AND EXISTS(SELECT 1 FROM invoices i WHERE i.id=NEW.invoice_id AND i.revenue_recognition_status='DEFERRED'))
+     ))
 BEGIN
   SELECT RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO');
 END;
@@ -1496,6 +1501,93 @@ CREATE TABLE IF NOT EXISTS financial_items (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Immutable audit layer for direct financial items. Original rows are preserved;
+-- voiding is represented by an effective-dated reversal and a permanent audit record.
+CREATE TABLE IF NOT EXISTS financial_item_adjustments (
+  id TEXT PRIMARY KEY,
+  financial_item_id TEXT NOT NULL,
+  adjustment_type TEXT NOT NULL CHECK(adjustment_type IN ('UPDATE','VOID','CLOSED_PERIOD_ADJUSTMENT')),
+  reason TEXT NOT NULL,
+  adjusted_by_user_id TEXT,
+  adjusted_by_name TEXT NOT NULL,
+  adjusted_at TEXT NOT NULL,
+  adjusted_at_local TEXT NOT NULL,
+  previous_values TEXT NOT NULL,
+  new_values TEXT NOT NULL,
+  reversal_item_id TEXT,
+  replacement_item_id TEXT,
+  FOREIGN KEY(financial_item_id) REFERENCES financial_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY(reversal_item_id) REFERENCES financial_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY(replacement_item_id) REFERENCES financial_items(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_financial_item_adjustments_item_time ON financial_item_adjustments(financial_item_id,adjusted_at DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS financial_item_voids (
+  financial_item_id TEXT PRIMARY KEY,
+  effective_date TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  voided_by_user_id TEXT,
+  voided_by_name TEXT NOT NULL,
+  voided_at TEXT NOT NULL,
+  voided_at_local TEXT NOT NULL,
+  reversal_item_id TEXT NOT NULL,
+  FOREIGN KEY(financial_item_id) REFERENCES financial_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY(reversal_item_id) REFERENCES financial_items(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_financial_item_voids_effective ON financial_item_voids(effective_date,financial_item_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_adjustments_reason_required
+BEFORE INSERT ON financial_item_adjustments
+WHEN length(trim(COALESCE(NEW.reason,''))) < 5
+BEGIN
+  SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_adjustments_immutable_update
+BEFORE UPDATE ON financial_item_adjustments
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM_ADJUSTMENT');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_adjustments_immutable_delete
+BEFORE DELETE ON financial_item_adjustments
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM_ADJUSTMENT');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_voids_reason_required
+BEFORE INSERT ON financial_item_voids
+WHEN length(trim(COALESCE(NEW.reason,''))) < 5
+BEGIN
+  SELECT RAISE(ABORT,'ADJUSTMENT_REASON_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_voids_immutable_update
+BEFORE UPDATE ON financial_item_voids
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM_VOID');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_financial_item_voids_immutable_delete
+BEFORE DELETE ON financial_item_voids
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM_VOID');
+END;
+
+-- Operational mirror rows generated from invoices/jobs may still be rebuilt by
+-- their source modules. Direct/manual financial records can never be hard-deleted.
+CREATE TRIGGER IF NOT EXISTS trg_financial_items_direct_immutable_delete
+BEFORE DELETE ON financial_items
+WHEN COALESCE(OLD.source_type,'') NOT IN (
+  'JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','MANUAL_INVOICE',
+  'WORKFLOW_INVOICE_REVENUE','WORKFLOW_INVOICE_MATERIAL',
+  'event_payment_refund','event_manual_ticket_refund','event_manual_ticket','event_payment',
+  'closed_job','job_close_revenue'
+)
+BEGIN
+  SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM');
+END;
 
 CREATE TABLE IF NOT EXISTS opening_balance_sets (
   id TEXT PRIMARY KEY,
@@ -1545,6 +1637,52 @@ CREATE TRIGGER IF NOT EXISTS trg_financial_statement_snapshots_immutable_delete
 BEFORE DELETE ON financial_statement_snapshots
 BEGIN
   SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_STATEMENT_SNAPSHOT');
+END;
+
+-- Once the first official live period (2026-08) has been closed, the opening
+-- position becomes part of the immutable accounting history. Any later capital
+-- correction must be posted into the current open period instead of rewriting
+-- the opening balance.
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_sets_period_lock_insert
+BEFORE INSERT ON opening_balance_sets
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_sets_period_lock_update
+BEFORE UPDATE ON opening_balance_sets
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_sets_period_lock_delete
+BEFORE DELETE ON opening_balance_sets
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_items_period_lock_insert
+BEFORE INSERT ON opening_balance_items
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_items_period_lock_update
+BEFORE UPDATE ON opening_balance_items
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_opening_balance_items_period_lock_delete
+BEFORE DELETE ON opening_balance_items
+WHEN EXISTS(SELECT 1 FROM financial_statement_snapshots WHERE period='2026-08')
+BEGIN
+  SELECT RAISE(ABORT,'OPENING_BALANCE_LOCKED');
 END;
 
 CREATE TABLE IF NOT EXISTS inventory_items (
