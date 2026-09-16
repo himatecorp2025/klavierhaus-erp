@@ -874,6 +874,7 @@ function runMigrations() {
     ensureColumn("contacts", "interest_notes", "TEXT");
 
     // Pianos and piano import.
+    ensureColumn("pianos", "finish", "TEXT");
     ensureColumn("pianos", "build_year", "INTEGER");
     ensureColumn("pianos", "size_cm", "TEXT");
     ensureColumn("pianos", "size_in", "TEXT");
@@ -922,6 +923,7 @@ function runMigrations() {
     ensureColumn("jobs", "planned_minutes", "INTEGER DEFAULT 0");
     ensureColumn("jobs", "notes", "TEXT");
     ensureColumn("jobs", "workflow_id", "TEXT");
+    ensureColumn("jobs", "workshop_workflow_id", "TEXT");
     ensureColumn("jobs", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
     ensureColumn("jobs", "financial_ledger_id", "TEXT");
     ensureColumn("jobs", "closed_at", "TEXT");
@@ -1055,6 +1057,17 @@ function runMigrations() {
       ensureColumn("workshop_workflows", "job_id", "TEXT");
       ensureColumn("workshop_workflows", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
       ensureColumn("workshop_workflows", "invoice_id", "TEXT");
+      ensureColumn("workshop_workflows", "notes", "TEXT");
+      ensureColumn("workshop_workflows", "due_time", "TEXT");
+      ensureColumn("workshop_workflows", "intake_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
+      ensureColumn("workshop_workflows", "intake_pdf_path", "TEXT");
+      ensureColumn("workshop_workflows", "intake_photos", "TEXT NOT NULL DEFAULT '[]'");
+      ensureColumn("workshop_workflows", "intake_inspected_by", "TEXT");
+      ensureColumn("workshop_workflows", "intake_inspected_at", "TEXT");
+      ensureColumn("workshop_workflows", "dispatch_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
+      ensureColumn("workshop_workflows", "dispatch_pdf_path", "TEXT");
+      ensureColumn("workshop_workflows", "dispatch_inspected_by", "TEXT");
+      ensureColumn("workshop_workflows", "dispatch_inspected_at", "TEXT");
       ensureIndex("idx_workflows_invoice_id", "CREATE INDEX IF NOT EXISTS idx_workflows_invoice_id ON workshop_workflows(invoice_id)");
       db.prepare(`UPDATE workshop_workflows SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void')`).run();
     }
@@ -1076,11 +1089,24 @@ function runMigrations() {
     }
     if (tableExists("workflow_stages")) {
       ensureColumn("workflow_stages", "card_title", "TEXT");
+      ensureColumn("workflow_stages", "notes", "TEXT");
       ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
       ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
       ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
     }
+
+    if (tableExists("jobs") && tableExists("workshop_workflows")) {
+      db.prepare("UPDATE jobs SET workshop_workflow_id=workflow_id WHERE (workshop_workflow_id IS NULL OR trim(workshop_workflow_id)='') AND workflow_id IS NOT NULL AND trim(workflow_id)<>''").run();
+      ensureIndex("idx_jobs_workshop_workflow", "CREATE INDEX IF NOT EXISTS idx_jobs_workshop_workflow ON jobs(workshop_workflow_id)");
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS piano_inspection_history (
+      id TEXT PRIMARY KEY,piano_id TEXT NOT NULL,workflow_id TEXT,inspection_type TEXT NOT NULL CHECK(inspection_type IN ('INTAKE','DISPATCH','DAMAGE_PHOTO')),
+      inspection_status TEXT,file_path TEXT NOT NULL,original_filename TEXT,mime_type TEXT,inspected_by TEXT,inspected_at TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
+    )`);
+    ensureIndex("idx_piano_inspection_history_piano", "CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_piano ON piano_inspection_history(piano_id,inspected_at DESC)");
+    ensureIndex("idx_piano_inspection_history_workflow", "CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_workflow ON piano_inspection_history(workflow_id,inspection_type)");
 
     // Public events and Stripe Sandbox. These nullable additions preserve every
     // existing event and ticket while enabling cancellation and payment links.
