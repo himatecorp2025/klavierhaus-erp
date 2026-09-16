@@ -66,7 +66,7 @@ const adminNavGroups=[
   ["contacts","Clients","Ügyfelek","👥"],
   ["closed_jobs","Closed Jobs","Lezárt munkák","✅"],
   ["knowledge_base","Company Documents Archive","Céges dokumentumtár",""],
-  ["company_data","Company Data","Cégadatok","▥"],
+  ["company_data","Corporate Data","Cégadatok","▥"],
   ["inventory","Inventory","Leltár","📦"],
   ["partners","Partners","Partnerek",""],
   ["planned_jobs","Planned Jobs","Tervezett munkák","🗂"],
@@ -782,6 +782,7 @@ function completeLoginSession(result,email=""){
  localStorage.setItem("kh_user",JSON.stringify(user));
  if(email)localStorage.setItem("kh_last_login_email",email);
  pendingAccountActivation=null;
+ navigationHomeNeutral=true;
  forceWorkflowHomeOnBoot=true;
  enforceDarkAppearance();
  loadLanguage();
@@ -1143,6 +1144,9 @@ async function boot(){
    if(userInfo)userInfo.textContent=`${user?.name||""} · ${user?.role||""}`;
    try{userPermissions=await api("/api/my-permissions");}catch(error){if(isAuthenticationError(error))return false;console.warn("Permissions unavailable during bootstrap:",error?.message||error);userPermissions={all:isSuperadmin(),permissions:[]};}
    await loadAdminModuleState();
+   const requestedBootView=viewFromLocation();
+   const bootToNeutralHome=forceWorkflowHomeOnBoot||!requestedBootView;
+   if(bootToNeutralHome)navigationHomeNeutral=true;
    renderNavigation();
    updateStaticChromeLanguage();
    const danger=document.getElementById("deleteEverythingBtn");
@@ -1163,9 +1167,9 @@ async function boot(){
    const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
    if(notificationsReady){
     document.getElementById("app")?.classList.remove("hidden");
-    const bootView=forceWorkflowHomeOnBoot?"workshop_workflow":(viewFromLocation()||"workshop_workflow");
+    const bootView=forceWorkflowHomeOnBoot?"workshop_workflow":(requestedBootView||"workshop_workflow");
     forceWorkflowHomeOnBoot=false;
-    await render(bootView,{noHistory:true,replaceHistory:true});
+    await render(bootView,{noHistory:true,replaceHistory:true,homeNavigation:bootToNeutralHome});
    }else{
     const gate=document.getElementById("notificationActivationGate");
     const gateVisible=Boolean(gate&&!gate.classList.contains("hidden"));
@@ -3560,8 +3564,13 @@ const financialCategoryOptions={
  INCOME:[
    ["SERVICE_REVENUE","Service Revenue / Szolgáltatási bevétel"],
    ["PIANO_SALE","Piano Sale Revenue / Zongoraeladás bevétele"],
-   ["PASSIVE_REVENUE","Recurring Revenue / Ismétlődő bevétel"],
-   ["OTHER_INCOME","Other Income / Egyéb bevétel"]
+   ["PIANO_RENTAL_LEASE","Piano Rental & Lease / Zongorabérlet és lízing"],
+   ["HALL_SALON_RENTAL","Hall & Salon Rental / Terem- és szalonbérlet"],
+   ["PRACTICE_REHEARSAL_FEES","Practice & Rehearsal Fees / Gyakorlási és próbadíjak"],
+   ["INTEREST_INCOME","Interest Income / Kamatbevétel"],
+   ["ROYALTY_CONTRACT_INCOME","Royalty & Contract Income / Jogdíj és szerződéses bevétel"],
+   ["PASSIVE_REVENUE","Legacy Passive Revenue / Korábbi passzív bevétel"],
+   ["OTHER_INCOME","Other Non-Operating Income / Egyéb működésen kívüli bevétel"]
  ],
  EXPENSE:[
    ["MATERIALS","Materials Expense / Anyagköltség"],
@@ -3783,14 +3792,66 @@ function openCompanyDocumentPreview(storedPath,title,mimeType='',filename=''){
  closeOverlayById('companyDocumentPreviewOverlay');const overlay=document.createElement('div');overlay.id='companyDocumentPreviewOverlay';overlay.className='nested-modal-overlay company-document-preview-overlay';const canEmbed=/pdf|image/i.test(mimeType)||/\.(pdf|png|jpe?g|webp)$/i.test(filename||storedPath);overlay.innerHTML=`<section class="nested-modal-card company-document-preview-card" role="dialog" aria-modal="true"><header><h3>${htmlText(title||filename||bi('Document Preview','Dokumentum előnézet'))}</h3><button type="button" class="modal-close ghost-btn" onclick="closeOverlayById('companyDocumentPreviewOverlay')">${billingIcon('close')}</button></header>${canEmbed?`<iframe src="${htmlText(storedPath)}" title="${htmlText(title||filename||'Document preview')}"></iframe>`:`<div class="company-document-office-preview"><p>${bi('This office document is stored securely. Use Download to open it in its native application.','Ez az irodai dokumentum biztonságosan tárolva van. A Letöltés gombbal nyisd meg a natív alkalmazásában.')}</p><strong>${htmlText(filename||'')}</strong></div>`}<div class="actions"><a class="button-like" href="${htmlText(storedPath)}" download="${htmlText(filename||'document')}">${billingIcon('download')} ${bi('Download','Letöltés')}</a><button type="button" class="ghost-btn" onclick="closeOverlayById('companyDocumentPreviewOverlay')">${bi('Close','Bezárás')}</button></div></section>`;document.body.appendChild(overlay);
 }
 
-async function renderFinance(selectedMonth=""){
- const month=selectedMonth||currentMonthKey();
- let data=null;
- try{data=await loadMonthlyIncomeStatement(month);}catch(error){return showError(error)}
- const balance=data?.balanceSheet||{},audit=data?.balanceAudit||{};
+let financialStatementPeriodsCache=null;
+async function loadFinancialStatementPeriods(force=false){
+ if(financialStatementPeriodsCache&&!force)return financialStatementPeriodsCache;
+ financialStatementPeriodsCache=await api('/api/financial-statements/periods');
+ return financialStatementPeriodsCache;
+}
+function financialStatementArchiveMarkup(periods,statement){
+ const title=statement==='balance-sheet'?bi('Closed monthly Balance Sheets','Lezárt havi mérlegek'):bi('Closed monthly Income Statements','Lezárt havi eredménykimutatások');
+ return `<div class="panel financial-statement-archive"><div class="toolbar"><div><h3>${title}</h3><p class="muted">${bi('Official month-end snapshots are immutable and begin with August 2026.','A hivatalos hóvégi pillanatképek nem módosíthatók, és 2026 augusztusától érhetők el.')}</p></div></div><div class="table-wrap"><table><thead><tr><th>${bi('Period','Időszak')}</th><th>${bi('Period end','Időszak vége')}</th><th>${bi('Closed in New York time','Lezárás New York-i idő szerint')}</th><th>PDF</th></tr></thead><tbody>${(periods||[]).map(row=>`<tr><td><b>${htmlText(row.period)}</b></td><td>${htmlText(row.period_end||'')}</td><td>${htmlText(row.closed_at_local||'')}</td><td><button class="small" onclick="downloadFinancialStatementPdf('${statement}','${htmlText(row.period)}')">${billingIcon('download')} PDF</button></td></tr>`).join('')||`<tr><td colspan="4" class="muted">${bi('No closed financial periods yet.','Még nincs lezárt pénzügyi időszak.')}</td></tr>`}</tbody></table></div></div>`;
+}
+async function downloadFinancialStatementPdf(statement,period=''){
+ try{
+  const endpoint=period?`/api/financial-statements/${encodeURIComponent(statement)}/${encodeURIComponent(period)}.pdf`:`/api/financial-statements/${encodeURIComponent(statement)}/realtime.pdf`;
+  const response=await fetch(endpoint,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||`HTTP ${response.status}`);
+  const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=`klavierhaus-${statement}-${period?`${period}-closed`:`${currentMonthKey()}-realtime`}.pdf`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){showError(error)}
+}
+let openingBalanceDraftItems=[];
+function openingBalanceRowsMarkup(){
+ return openingBalanceDraftItems.map((item,index)=>`<div class="opening-balance-custom-row" data-opening-index="${index}"><input data-opening-name value="${htmlText(item.item_name||'')}" placeholder="${bi('Item name','Tétel megnevezése')}" oninput="syncOpeningBalanceDraft()"><select data-opening-type onchange="syncOpeningBalanceDraft()"><option value="ASSET" ${item.item_type==='ASSET'?'selected':''}>Asset</option><option value="LIABILITY" ${item.item_type==='LIABILITY'?'selected':''}>Liability</option><option value="EQUITY" ${item.item_type==='EQUITY'?'selected':''}>Equity</option></select><input data-opening-amount type="number" step="0.01" min="0" value="${Number(item.amount||0).toFixed(2)}" oninput="syncOpeningBalanceDraft()"><button type="button" class="small danger-btn" onclick="removeOpeningBalanceItem(${index})">×</button></div>`).join('');
+}
+function syncOpeningBalanceDraft(){
+ const rows=[...document.querySelectorAll('[data-opening-index]')];
+ openingBalanceDraftItems=rows.map(row=>({item_name:row.querySelector('[data-opening-name]')?.value||'',item_type:row.querySelector('[data-opening-type]')?.value||'ASSET',amount:Number(row.querySelector('[data-opening-amount]')?.value||0)}));
+ updateOpeningBalanceDifference();
+}
+function addOpeningBalanceItem(){syncOpeningBalanceDraft();openingBalanceDraftItems.push({item_name:'',item_type:'ASSET',amount:0});const box=document.getElementById('openingBalanceCustomItems');if(box)box.innerHTML=openingBalanceRowsMarkup();updateOpeningBalanceDifference();}
+function removeOpeningBalanceItem(index){syncOpeningBalanceDraft();openingBalanceDraftItems.splice(index,1);const box=document.getElementById('openingBalanceCustomItems');if(box)box.innerHTML=openingBalanceRowsMarkup();updateOpeningBalanceDifference();}
+function openingBalanceFormPayload(){
+ syncOpeningBalanceDraft();
+ return {effective_date:document.getElementById('openingEffectiveDate')?.value||'',opening_cash_bank:Number(document.getElementById('openingCash')?.value||0),opening_accounts_receivable:Number(document.getElementById('openingAR')?.value||0),opening_accounts_payable:Number(document.getElementById('openingAP')?.value||0),opening_retained_earnings_equity:Number(document.getElementById('openingEquity')?.value||0),items:openingBalanceDraftItems};
+}
+function updateOpeningBalanceDifference(){
+ const el=document.getElementById('openingBalanceDifference');if(!el)return;
+ const cash=Number(document.getElementById('openingCash')?.value||0),ar=Number(document.getElementById('openingAR')?.value||0),ap=Number(document.getElementById('openingAP')?.value||0),equity=Number(document.getElementById('openingEquity')?.value||0);
+ let customAssets=0,customLiabilities=0,customEquity=0;
+ for(const item of openingBalanceDraftItems){const amount=roundFinancial(Number(item.amount||0));if(item.item_type==='ASSET')customAssets=roundFinancial(customAssets+amount);else if(item.item_type==='LIABILITY')customLiabilities=roundFinancial(customLiabilities+amount);else customEquity=roundFinancial(customEquity+amount);}
+ const assets=roundFinancial(cash+ar+customAssets),sources=roundFinancial(ap+equity+customLiabilities+customEquity),difference=roundFinancial(assets-sources),balanced=Math.abs(difference)<0.01;
+ el.className=`opening-balance-integrity ${balanced?'is-balanced':'is-unbalanced'}`;el.innerHTML=`<strong>${balanced?bi('Balanced','Kiegyensúlyozott'):bi('Out of balance','Nincs egyensúlyban')}</strong><span>${bi('Assets','Eszközök')}: ${invoiceMoney(assets)} · ${bi('Liabilities + Equity','Kötelezettségek + saját tőke')}: ${invoiceMoney(sources)} · ${bi('Difference','Eltérés')}: ${invoiceMoney(difference)}</span>`;
+}
+async function openOpeningBalanceModal(){
+ if(!isAdmin())return showError('PERMISSION_DENIED');
+ const payload=await api('/api/opening-balance'),row=payload.openingBalance||{};openingBalanceDraftItems=(row.items||[]).map(item=>({...item}));
+ $('#modal').classList.remove('hidden');$('#modalTitle').textContent=bi('Set / Edit Opening Balance','Nyitóegyenleg beállítása / szerkesztése');
+ $('#form').innerHTML=`<div class="opening-balance-form"><p class="muted">${bi('Enter the accountant-approved opening position. Saving is allowed only when Assets = Liabilities + Equity to the cent.','Add meg a könyvelő által jóváhagyott nyitópozíciót. Mentés csak fillérre kiegyensúlyozott mérleg esetén lehetséges.')}</p><div class="form-grid"><div class="field"><label>${req(bi('Opening date','Nyitó dátum'))}</label><input id="openingEffectiveDate" name="effective_date" type="date" value="${htmlText(row.effective_date||'2026-08-01')}" required></div><div class="field"><label>${bi('Opening Cash & Bank Balance','Nyitó készpénz- és bankállomány')}</label><input id="openingCash" type="number" step="0.01" min="0" value="${Number(row.opening_cash_bank||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Accounts Receivable','Nyitó vevőkövetelések')}</label><input id="openingAR" type="number" step="0.01" min="0" value="${Number(row.opening_accounts_receivable||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Accounts Payable','Nyitó szállítói tartozások')}</label><input id="openingAP" type="number" step="0.01" min="0" value="${Number(row.opening_accounts_payable||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div><div class="field"><label>${bi('Opening Retained Earnings / Equity','Nyitó eredménytartalék / saját tőke')}</label><input id="openingEquity" type="number" step="0.01" value="${Number(row.opening_retained_earnings_equity||0).toFixed(2)}" oninput="updateOpeningBalanceDifference()"></div></div><div class="opening-balance-custom-head"><h4>${bi('Custom opening items','Egyedi nyitótételek')}</h4><button type="button" class="small ghost-btn" onclick="addOpeningBalanceItem()">+ ${bi('Add Custom Opening Item','Egyedi nyitótétel hozzáadása')}</button></div><div id="openingBalanceCustomItems" class="opening-balance-custom-items">${openingBalanceRowsMarkup()}</div><div id="openingBalanceDifference"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi('Cancel','Mégse')}</button><button type="submit">${bi('Save Opening Balance','Nyitóegyenleg mentése')}</button></div>`;
+ $('#form').onsubmit=saveOpeningBalance;setTimeout(updateOpeningBalanceDifference,0);
+}
+async function saveOpeningBalance(event){
+ event.preventDefault();
+ try{const body=openingBalanceFormPayload();await api('/api/opening-balance',{method:'PUT',body:JSON.stringify(body)});closeModal();financialStatementPeriodsCache=null;showToast(bi('Opening balance saved.','Nyitóegyenleg mentve.'),'success');await renderFinance();}catch(error){showError(error)}
+}
+async function renderFinance(){
+ const month=currentMonthKey();let data=null,periods=[];
+ try{[data,periods]=await Promise.all([loadMonthlyIncomeStatement(month),loadFinancialStatementPeriods(true)]);}catch(error){return showError(error)}
+ const balance=data?.balanceSheet||{},audit=data?.balanceAudit||{},opening=data?.openingBalance;
  const operatingBalance=roundFinancial(Number(balance.cashBankAccounts||0)+Number(balance.accountsReceivable||0)-Number(balance.accountsPayable||0));
  const balanced=Boolean(audit.balanced);
- $('#finance').innerHTML=`<div class="panel finance-panel finance-dashboard"><div class="toolbar"><div><p class="event-kicker">Finance & Invoicing</p><h2>${bi('Balance Sheet','Mérleg')}</h2><p class="muted">${bi('Official US GAAP balance sheet with an operating KPI strip. Invoice management is available in Invoices Documents.','Hivatalos US GAAP mérleg operatív KPI balanszsávval. A számlakezelés az Invoices Documents kártyán érhető el.')}</p></div><div class="toolbar-actions"><input id="financeDashboardMonth" type="month" value="${htmlText(month)}" onchange="renderFinance(this.value)"><button class="ghost-btn" type="button" onclick="render('invoice_documents')">${bi('Open Invoices Documents','Invoices Documents megnyitása')}</button><button class="ghost-btn" type="button" onclick="render('income_statement')">${bi('Open Income Statement','Eredménykimutatás megnyitása')}</button></div></div><div class="invoice-kpi-grid finance-dashboard-kpis"><div class="invoice-kpi revenue"><span>${bi('Cash & Bank Accounts','Készpénz és bankszámlák')}</span><strong>${invoiceMoney(balance.cashBankAccounts||0)}</strong></div><div class="invoice-kpi"><span>${bi('Accounts Receivable','Vevőkövetelések')}</span><strong>${invoiceMoney(balance.accountsReceivable||0)}</strong></div><div class="invoice-kpi payable"><span>${bi('Accounts Payable','Szállítói kötelezettségek')}</span><strong>${invoiceMoney(balance.accountsPayable||0)}</strong></div><div class="invoice-kpi net ${operatingBalance<0?'negative':'positive'}"><span>${bi('Operating Balance','Operatív egyenleg')}</span><strong>${operatingBalance<0?'-':'+'}${invoiceMoney(Math.abs(operatingBalance))}</strong></div></div><div class="finance-dashboard-grid balance-sheet-official-grid"><section class="panel finance-dashboard-card balance-sheet-column"><div class="workflow-block-head"><h3>${bi('ASSETS','ESZKÖZÖK')}</h3></div><div class="finance-dashboard-lines"><div><span>${bi('Cash & Bank Accounts','Készpénz és bankszámlák')}</span><b>${invoiceMoney(balance.cashBankAccounts||0)}</b></div><div><span>${bi('Accounts Receivable (AR)','Vevőkövetelések (AR)')}</span><b>${invoiceMoney(balance.accountsReceivable||0)}</b></div><div><span>${bi('Equipment / Inventory / Prepaid & Other Assets','Berendezés / készlet / aktív időbeli elhatárolás és egyéb eszközök')}</span><b>${invoiceMoney(balance.manualAssets||0)}</b></div><div class="balance-sheet-total"><strong>${bi('TOTAL ASSETS','ÖSSZES ESZKÖZ')}</strong><b>${invoiceMoney(balance.totalAssets||0)}</b></div></div></section><section class="panel finance-dashboard-card balance-sheet-column"><div class="workflow-block-head"><h3>${bi('LIABILITIES & EQUITY','KÖTELEZETTSÉGEK ÉS SAJÁT TŐKE')}</h3></div><div class="finance-dashboard-lines"><div><span>${bi('Accounts Payable (AP)','Szállítói kötelezettségek (AP)')}</span><b>${invoiceMoney(balance.accountsPayable||0)}</b></div><div><span>${bi('Sales Tax Payable','Fizetendő forgalmi adó')}</span><b>${invoiceMoney(balance.salesTaxPayable||0)}</b></div><div><span>${bi('Deferred Revenue / Contract Liability','Halasztott bevétel / szerződéses kötelezettség')}</span><b>${invoiceMoney(balance.deferredRevenue||0)}</b></div><div><span>${bi('Loans / Notes Payable & Other Liabilities','Hitelek / váltótartozások és egyéb kötelezettségek')}</span><b>${invoiceMoney(balance.manualLiabilities||0)}</b></div><div><span>${bi("Owner's Opening Equity",'Tulajdonosi nyitó tőke')}</span><b>${invoiceMoney(balance.ownersOpeningEquity||0)}</b></div><div><span>${bi('Retained Earnings / Current Net Income','Eredménytartalék / aktuális nettó eredmény')}</span><b>${invoiceMoney(balance.currentPeriodNetIncome||0)}</b></div><div><span>${bi('Other Manual Equity','Egyéb manuális saját tőke')}</span><b>${invoiceMoney(balance.manualEquity||0)}</b></div><div class="balance-sheet-total"><strong>${bi('TOTAL LIABILITIES & EQUITY','ÖSSZES KÖTELEZETTSÉG ÉS SAJÁT TŐKE')}</strong><b>${invoiceMoney(balance.totalLiabilitiesEquity||0)}</b></div></div></section></div><div class="balance-integrity ${balanced?'is-balanced':'is-unbalanced'}" role="status"><strong>${balanced?`<span class="balance-check-icon" aria-hidden="true">✓</span> ${bi('Balanced (In Balance: $0.00 difference)','Kiegyensúlyozott (Eltérés: $0.00)')}`:`${bi('Out of Balance','Eltérés a mérlegben')}: ${invoiceMoney(audit.absolute_difference||0)}`}</strong><span>${bi('Assets = Liabilities + Equity','Eszközök = Kötelezettségek + Saját tőke')}</span></div></div>`;
+ $('#finance').innerHTML=`<div class="panel finance-panel finance-dashboard"><div class="toolbar"><div><p class="event-kicker">Finance & Invoicing</p><h2>${bi('Balance Sheet','Mérleg')}</h2><p class="muted">${bi('Official US GAAP balance sheet. Current values are real-time; closed months are immutable snapshots below.','Hivatalos US GAAP mérleg. A jelenlegi értékek valós idejűek; a lezárt hónapok alul nem módosítható pillanatképként érhetők el.')}</p>${opening?`<p class="muted">${bi('Opening position','Nyitópozíció')}: <b>${htmlText(opening.effective_date||'')}</b></p>`:''}</div><div class="toolbar-actions">${isAdmin()?`<button type="button" class="ghost-btn" onclick="openOpeningBalanceModal()">${bi('Set / Edit Opening Balance','Nyitóegyenleg beállítása / szerkesztése')}</button>`:''}<button type="button" onclick="downloadFinancialStatementPdf('balance-sheet')">${billingIcon('download')} ${bi('Export Real-Time PDF','Valós idejű PDF export')}</button><button class="ghost-btn" type="button" onclick="render('invoice_documents')">${bi('Open Invoices Documents','Invoices Documents megnyitása')}</button><button class="ghost-btn" type="button" onclick="render('income_statement')">${bi('Open Income Statement','Eredménykimutatás megnyitása')}</button></div></div><div class="invoice-kpi-grid finance-dashboard-kpis"><div class="invoice-kpi revenue"><span>${bi('Cash & Bank Accounts','Készpénz és bankszámlák')}</span><strong>${invoiceMoney(balance.cashBankAccounts||0)}</strong></div><div class="invoice-kpi"><span>${bi('Accounts Receivable','Vevőkövetelések')}</span><strong>${invoiceMoney(balance.accountsReceivable||0)}</strong></div><div class="invoice-kpi payable"><span>${bi('Accounts Payable','Szállítói kötelezettségek')}</span><strong>${invoiceMoney(balance.accountsPayable||0)}</strong></div><div class="invoice-kpi net ${operatingBalance<0?'negative':'positive'}"><span>${bi('Operating Balance','Operatív egyenleg')}</span><strong>${operatingBalance<0?'-':'+'}${invoiceMoney(Math.abs(operatingBalance))}</strong></div></div><div class="finance-dashboard-grid balance-sheet-official-grid"><section class="panel finance-dashboard-card balance-sheet-column"><div class="workflow-block-head"><h3>${bi('ASSETS','ESZKÖZÖK')}</h3></div><div class="finance-dashboard-lines"><div><span>${bi('Cash & Bank Accounts','Készpénz és bankszámlák')}</span><b>${invoiceMoney(balance.cashBankAccounts||0)}</b></div><div><span>${bi('Accounts Receivable (AR)','Vevőkövetelések (AR)')}</span><b>${invoiceMoney(balance.accountsReceivable||0)}</b></div><div><span>${bi('Equipment / Inventory / Prepaid & Other Assets','Berendezés / készlet / aktív időbeli elhatárolás és egyéb eszközök')}</span><b>${invoiceMoney(balance.manualAssets||0)}</b></div><div class="balance-sheet-total"><strong>${bi('TOTAL ASSETS','ÖSSZES ESZKÖZ')}</strong><b>${invoiceMoney(balance.totalAssets||0)}</b></div></div></section><section class="panel finance-dashboard-card balance-sheet-column"><div class="workflow-block-head"><h3>${bi('LIABILITIES & EQUITY','KÖTELEZETTSÉGEK ÉS SAJÁT TŐKE')}</h3></div><div class="finance-dashboard-lines"><div><span>${bi('Accounts Payable (AP)','Szállítói kötelezettségek (AP)')}</span><b>${invoiceMoney(balance.accountsPayable||0)}</b></div><div><span>${bi('Sales Tax Payable','Fizetendő forgalmi adó')}</span><b>${invoiceMoney(balance.salesTaxPayable||0)}</b></div><div><span>${bi('Deferred Revenue / Contract Liability','Halasztott bevétel / szerződéses kötelezettség')}</span><b>${invoiceMoney(balance.deferredRevenue||0)}</b></div><div><span>${bi('Loans / Notes Payable & Other Liabilities','Hitelek / váltótartozások és egyéb kötelezettségek')}</span><b>${invoiceMoney(balance.manualLiabilities||0)}</b></div><div><span>${bi('Opening Retained Earnings / Equity','Nyitó eredménytartalék / saját tőke')}</span><b>${invoiceMoney(balance.ownersOpeningEquity||0)}</b></div><div><span>${bi('Retained Earnings / Current Net Income','Eredménytartalék / aktuális nettó eredmény')}</span><b>${invoiceMoney(balance.currentPeriodNetIncome||0)}</b></div><div><span>${bi('Other Equity','Egyéb saját tőke')}</span><b>${invoiceMoney(balance.manualEquity||0)}</b></div><div class="balance-sheet-total"><strong>${bi('TOTAL LIABILITIES & EQUITY','ÖSSZES KÖTELEZETTSÉG ÉS SAJÁT TŐKE')}</strong><b>${invoiceMoney(balance.totalLiabilitiesEquity||0)}</b></div></div></section></div><div class="balance-integrity ${balanced?'is-balanced':'is-unbalanced'}" role="status"><strong>${balanced?`<span class="balance-check-icon" aria-hidden="true">✓</span> ${bi('Balanced (In Balance: $0.00 difference)','Kiegyensúlyozott (Eltérés: $0.00)')}`:`${bi('Out of Balance','Eltérés a mérlegben')}: ${invoiceMoney(audit.absolute_difference||0)}`}</strong><span>${bi('Assets = Liabilities + Equity','Eszközök = Kötelezettségek + Saját tőke')}</span></div></div>${financialStatementArchiveMarkup(periods,'balance-sheet')}`;
 }
 
 async function renderInvoiceDocuments(selectedMonth=""){
@@ -3913,8 +3974,7 @@ async function deleteFinancialItem(id){
  try{await api(`/api/financial-items/${id}`,{method:"DELETE"});await renderFinance()}catch(err){showError(err)}
 }
 function currentMonthKey(){
- const d=new Date();
- return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+ return newYorkNowLocal().slice(0,7);
 }
 function previousMonths(count=24){
  const arr=[];
@@ -3931,118 +3991,19 @@ async function loadMonthlyIncomeStatement(month){
  return await api(`/api/income-statement/monthly?month=${encodeURIComponent(month)}`);
 }
 function renderIncomeSheetHTML(d, includeTrial=true){
- const acct=c=>d.trialBalance.filter(a=>a.category===c);
-
- const lineRows=(arr,fallback)=>arr.length
-   ? arr.map(a=>`<div class="cf-line"><span>${currentLang==="hu"?(a.name_hu||a.name_en):(a.name_en||a.name_hu)}</span><b>${money(a.balance)}</b></div>`).join("")
-   : fallback.map(x=>`<div class="cf-line empty"><span>${parenLabel(x)}</span><b>—</b></div>`).join("");
-
- const fallbackIncome=[
-   "Service Revenue (Szolgáltatási bevétel)",
-   "Interest Income (Kamatbevétel)",
-   "Dividend Income (Osztalékbevétel)",
-   "Real Estate Income (Ingatlanbevétel)",
-   "Business Income (Üzleti bevétel)",
-   "Other Income (Egyéb bevétel)"
- ];
- const fallbackExpenses=[
-   "Taxes (Adók)",
-   "Materials Expense (Anyagköltség)",
-   "Contractor Labor (Alvállalkozói munkadíj)",
-   "Transportation (Szállítás)",
-   "Rent (Bérleti díj)",
-   "Insurance (Biztosítás)",
-   "Repair Expense (Javítási költség)",
-   "Other Expense (Egyéb költség)"
- ];
- const incomeRows=lineRows(acct("REVENUE"),fallbackIncome);
- const expenseRows=lineRows(acct("EXPENSE"),fallbackExpenses);
-
- const trial=includeTrial?`<div class="panel income-trial-table no-print-break">
-   <h3>${bi("Technical Summary","Technikai összesítő")}</h3>
-   <p class="muted">${bi("General Ledger has been removed. This section is kept only for export compatibility.","A Főkönyv funkció törölve lett, ez csak export-kompatibilitási hely.")}</p>
-   <div class="table-wrap"><table>
-     <thead><tr><th>${bi("Code","Kód")}</th><th>${bi("Account","Számla")}</th><th>${bi("Category","Kategória")}</th><th>${bi("Debit","Tartozik")}</th><th>${bi("Credit","Követel")}</th><th>${bi("Balance","Egyenleg")}</th></tr></thead>
-     <tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">${bi("No ledger data","Nincs főkönyvi adat")}</td></tr>`}</tbody>
-   </table></div>
- </div>`:"";
-
- return `<div class="grid kpis income-statement-kpis">
-   <div class="kpi"><span>${bi("Revenue","Bevétel")}</span><strong>${money(d.totals.revenue)}</strong></div>
-   <div class="kpi"><span>${bi("Expenses","Kiadások")}</span><strong>${money(d.totals.expenses)}</strong></div>
-   <div class="kpi"><span>${bi("Net Operating Income","Nettó működési eredmény")}</span><strong>${money(d.totals.profit)}</strong></div>
- </div>
-
- <div class="cashflow-layout">
-   <div class="cf-main-title">
-     <h2>${bi("Income Statement","Eredménykimutatás")}</h2>
-     <p>${bi("Cashflow-style monthly business overview","Cashflow-jellegű havi vállalati áttekintés")}</p>
-   </div>
-
-   <div class="cf-upper">
-     <div class="cf-left-stack">
-       <div class="cf-card">
-         <div class="cf-card-head">${bi("Income ($/month)","Bevételek ($/hó)")}</div>
-         <div class="cf-card-body">${incomeRows}</div>
-       </div>
-
-       <div class="cf-card">
-         <div class="cf-card-head">${bi("Expenses ($/month)","Kiadások ($/hó)")}</div>
-         <div class="cf-card-body">${expenseRows}</div>
-       </div>
-     </div>
-
-     <div class="cf-right-stack">
-       <div class="cf-card cf-bookkeeper">
-         <div class="cf-card-head">${bi("Bookkeeper","Könyvvizsgáló")}</div>
-         <div class="cf-card-body">
-           <div class="cf-line big"><span>${bi("Passive Income","Passzív jövedelem")}</span><b>${money(d.totals.passiveIncome||0)}</b></div>
-           <div class="cf-rule"></div>
-           <div class="cf-line total"><span>${bi("Total Income","Összes bevétel")}</span><b>${money(d.totals.revenue)}</b></div>
-         </div>
-       </div>
-
-       <div class="cf-card cf-cashflow">
-         <div class="cf-card-body">
-           <div class="cf-line total"><span>${bi("Total Expenses","Összes kiadás")}</span><b>${money(d.totals.expenses)}</b></div>
-           <div class="cf-rule"></div>
-           <div class="cf-line cashflow"><span>${bi("Monthly Cash Flow","Havi készpénzáramlás")}</span><b>${money(d.totals.profit)}</b></div>
-         </div>
-       </div>
-     </div>
-   </div>
-
- </div>${trial}`;
+ const lineRows=(arr,fallback)=>arr?.length?arr.map(a=>`<div class="cf-line"><span>${currentLang==='hu'?(a.name_hu||a.name_en):(a.name_en||a.name_hu)}</span><b>${money(a.balance)}</b></div>`).join(''):`<div class="cf-line empty"><span>${fallback}</span><b>—</b></div>`;
+ const operatingRows=lineRows(d.operatingRevenueAccounts,bi('No operating revenue activity','Nincs üzemi árbevételi mozgás'));
+ const passiveRows=lineRows(d.passiveIncomeAccounts,bi('No passive or non-operating income','Nincs passzív vagy működésen kívüli bevétel'));
+ const expenseRows=lineRows(d.expenseAccounts,bi('No expense activity','Nincs költségmozgás'));
+ const cash=d.cashFlow||{};
+ const trial=includeTrial?`<div class="panel income-trial-table no-print-break"><h3>${bi('Technical Summary','Technikai összesítő')}</h3><div class="table-wrap"><table><thead><tr><th>${bi('Code','Kód')}</th><th>${bi('Account','Számla')}</th><th>${bi('Category','Kategória')}</th><th>${bi('Debit','Tartozik')}</th><th>${bi('Credit','Követel')}</th><th>${bi('Balance','Egyenleg')}</th></tr></thead><tbody>${d.trialBalance.map(a=>`<tr><td>${a.code}</td><td>${a.name_en}<br><small>${a.name_hu}</small></td><td>${a.category}</td><td>${money(a.debit_total)}</td><td>${money(a.credit_total)}</td><td>${money(a.balance)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted">${bi('No ledger data','Nincs főkönyvi adat')}</td></tr>`}</tbody></table></div></div>`:'';
+ return `<div class="grid kpis income-statement-kpis"><div class="kpi"><span>${bi('Operating Revenue','Üzemi árbevétel')}</span><strong>${money(d.totals.operatingRevenue||0)}</strong></div><div class="kpi"><span>${bi('Passive & Non-Operating Income','Passzív és működésen kívüli bevétel')}</span><strong>${money(d.totals.passiveNonOperatingIncome||0)}</strong></div><div class="kpi"><span>${bi('Expenses','Kiadások')}</span><strong>${money(d.totals.expenses||0)}</strong></div><div class="kpi"><span>${bi('Net Income','Nettó eredmény')}</span><strong>${money(d.totals.profit||0)}</strong></div></div><div class="cashflow-layout"><div class="cf-main-title"><h2>${bi('Income Statement','Eredménykimutatás')}</h2><p>${bi('Accrual P&L with a monthly cash roll-forward','Időbeli elhatárolásos P&L havi pénzeszköz-gördítéssel')}</p></div><div class="cf-upper"><div class="cf-left-stack"><div class="cf-card"><div class="cf-card-head">${bi('Operating Revenue','Üzemi árbevétel')}</div><div class="cf-card-body">${operatingRows}<div class="cf-rule"></div><div class="cf-line total"><span>${bi('Total Operating Revenue','Összes üzemi árbevétel')}</span><b>${money(d.totals.operatingRevenue||0)}</b></div></div></div><div class="cf-card"><div class="cf-card-head">${bi('Expenses','Kiadások')}</div><div class="cf-card-body">${expenseRows}<div class="cf-rule"></div><div class="cf-line total"><span>${bi('Total Expenses','Összes kiadás')}</span><b>${money(d.totals.expenses||0)}</b></div></div></div></div><div class="cf-right-stack"><div class="cf-card cf-bookkeeper"><div class="cf-card-head">${bi('Passive & Non-Operating Income','Passzív és működésen kívüli bevétel')}</div><div class="cf-card-body">${passiveRows}<div class="cf-rule"></div><div class="cf-line total"><span>${bi('Total Passive & Non-Operating Income','Összes passzív és működésen kívüli bevétel')}</span><b>${money(d.totals.passiveNonOperatingIncome||0)}</b></div></div></div><div class="cf-card"><div class="cf-card-head">${bi('Net Income','Nettó eredmény')}</div><div class="cf-card-body"><div class="cf-line cashflow"><span>${bi('Operating + Non-Operating − Expenses','Üzemi + passzív − kiadások')}</span><b>${money(d.totals.profit||0)}</b></div></div></div></div></div><div class="cf-card cash-roll-forward"><div class="cf-card-head">${bi('Monthly Cash Flow Roll-Forward','Havi pénzáramlás-gördítés')}</div><div class="cf-card-body cash-roll-forward-grid"><div class="cf-line"><span>${bi('Beginning Balance','Előző havi nyitó egyenleg')}</span><b>${money(cash.beginningBalance||0)}</b></div><div class="cf-line"><span>${bi('Net Cash Flow','Tárgyhavi nettó pénzáramlás')}</span><b>${money(cash.netCashFlow||0)}</b></div><div class="cf-line total"><span>${bi('Ending Balance','Tárgyhavi záró egyenleg')}</span><b>${money(cash.endingBalance||0)}</b></div></div></div></div>${trial}`;
 }
 
-
 async function renderIncomeStatement(){
- const currentMonth=currentMonthKey();
- const d=await loadMonthlyIncomeStatement(currentMonth);
- const past=await Promise.all(previousMonths(12).map(m=>loadMonthlyIncomeStatement(m).catch(()=>null)));
- const pastRows=past.filter(Boolean);
-
- $("#income_statement").innerHTML=`<div class="panel no-print">
-   <div class="toolbar">
-     <div>
-       <h3>${bi("Current monthly export","Aktuális havi export")}</h3>
-       <p class="muted">${bi("Current month","Aktuális hónap")}: <b>${d.month}</b> · ${bi("Period start","Időszak kezdete")}: <b>${d.monthStart}</b> · ${bi("Generated","Lekérés ideje")}: <b>${new Date(d.generatedAt).toLocaleString()}</b></p>
-     </div>
-     <div class="toolbar-actions">${isAdmin()?`<button class="ghost-btn" onclick="openEmployeeDailyRates()">${bi("Employee Daily Rates","Munkavállalói napidíjak")}</button>`:""}<button onclick="exportIncomeStatementPDF('${d.month}')">${bi("Export current month PDF","Aktuális hónap PDF export")}</button></div>
-   </div>
- </div>
-
- <div id="incomeStatementCurrent" data-month="${d.month}">
-   ${renderIncomeSheetHTML(d,false)}
- </div>
-
- <div class="panel no-print">
-   <div class="toolbar"><h3>${bi("Previous monthly income statements","Korábbi havi eredménykimutatások")}</h3></div>
-   <div class="table-wrap"><table>
-     <thead><tr><th>${bi("Month","Hónap")}</th><th>${bi("Period start","Időszak kezdete")}</th><th>${bi("Revenue","Bevétel")}</th><th>${bi("Expenses","Kiadások")}</th><th>${bi("Profit","Eredmény")}</th><th>Export</th></tr></thead>
-     <tbody>${pastRows.map(x=>`<tr><td>${x.month}</td><td>${x.monthStart}</td><td>${money(x.totals.revenue)}</td><td>${money(x.totals.expenses)}</td><td>${money(x.totals.profit)}</td><td><button class="small" onclick="exportIncomeStatementPDF('${x.month}')">PDF</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">${bi("No previous monthly data","Nincs korábbi havi adat.")}</td></tr>`}</tbody>
-   </table></div>
- </div>`;
+ const currentMonth=currentMonthKey();let d=null,periods=[];
+ try{[d,periods]=await Promise.all([loadMonthlyIncomeStatement(currentMonth),loadFinancialStatementPeriods(true)]);}catch(error){return showError(error)}
+ $('#income_statement').innerHTML=`<div class="panel no-print"><div class="toolbar"><div><p class="event-kicker">Finance & Invoicing</p><h2>${bi('Income Statement','Eredménykimutatás')}</h2><p class="muted">${bi('Current period is real-time. Closed monthly statements are immutable and downloadable below.','A jelenlegi időszak valós idejű. A lezárt havi kimutatások nem módosíthatók és alul letölthetők.')}</p><p class="muted">${bi('Current month','Aktuális hónap')}: <b>${d.month}</b> · ${bi('Generated','Lekérés ideje')}: <b>${new Date(d.generatedAt).toLocaleString()}</b></p></div><div class="toolbar-actions">${isAdmin()?`<button class="ghost-btn" onclick="openEmployeeDailyRates()">${bi('Employee Daily Rates','Munkavállalói napidíjak')}</button>`:''}<button onclick="downloadFinancialStatementPdf('income-statement')">${billingIcon('download')} ${bi('Export Real-Time PDF','Valós idejű PDF export')}</button></div></div></div><div id="incomeStatementCurrent" data-month="${d.month}">${renderIncomeSheetHTML(d,false)}</div>${financialStatementArchiveMarkup(periods,'income-statement')}`;
 }
 
 async function openEmployeeDailyRates(){
@@ -4058,39 +4019,8 @@ async function saveEmployeeDailyRate(userId){
  try{await api(`/api/employee-daily-rates/${encodeURIComponent(userId)}`,{method:'PUT',body:JSON.stringify({rate,currency,effective_date})});showToast(bi('Daily rate saved.','Napidíj mentve.'),'success');}catch(error){showError(error)}
 }
 
-async function exportIncomeStatementPDF(month=currentMonthKey()){
- const d=await loadMonthlyIncomeStatement(month);
- const generated=new Date().toLocaleString();
- const filename=`income_statement_${month}_${new Date().toISOString().replace(/[:.]/g,"-")}.pdf`;
- const html=renderIncomeSheetHTML(d,true);
- const win=window.open("", "_blank");
- win.document.write(`<!doctype html><html><head><title>${filename}</title><style>
-   :root{--bg:#07101d;--panel:#0d1b2e;--panel-2:#13243b;--panel2:#13243b;--text:#f4f7fb;--muted:#9fb0c7;--line:#27405f;--blue:#4aa3ff;--green:#2ecc71;--red:#ff5b5b;--orange:#ff9f43;--purple:#b084f5;--shadow:0 12px 35px rgba(0,0,0,.25)}
-   *{box-sizing:border-box}
-   body{font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);padding:22px;margin:0}
-   .pdf-meta{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin-bottom:18px;padding:18px;box-shadow:var(--shadow)}
-   .pdf-meta h1{margin:0 0 8px;font-size:24px}.pdf-meta p{margin:4px 0;color:var(--muted)}
-   .grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(4,1fr);margin-bottom:18px}.kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
-   .kpi span{color:var(--muted);display:block}.kpi strong{font-size:26px}
-   .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow)}
-   .cashflow-layout{display:flex;flex-direction:column;gap:18px;margin-top:18px}.cf-main-title{text-align:center;padding:4px 0 0}.cf-main-title h2{font-size:30px;margin:0 0 4px}.cf-main-title p{margin:0;color:var(--muted)}
-   .cf-upper{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;align-items:stretch}.cf-left-stack,.cf-right-stack{display:flex;flex-direction:column;gap:18px}
-   .cf-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)}
-   .cf-card-head{background:var(--panel-2);border-bottom:1px solid var(--line);padding:12px 16px;font-size:18px;font-weight:900}.cf-card-head span{color:var(--muted);font-weight:700;font-size:14px}.cf-card-head-sum{display:flex;justify-content:space-between;gap:14px}.cf-card-head-sum b{font-size:19px}
-   .cf-card-body{padding:14px 18px}.cf-line{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;border-bottom:1px solid rgba(148,163,184,.22);padding:8px 0;min-height:34px}.cf-line span{font-weight:650}.cf-line small{color:var(--muted);font-weight:600}.cf-line b{font-variant-numeric:tabular-nums}.cf-line.big{min-height:88px;align-items:center;font-size:19px;border-bottom:0}.cf-line.total{font-size:18px;font-weight:900;border-bottom:0}.cf-line.cashflow{font-size:19px;font-weight:950;border-bottom:0}.cf-rule{height:2px;background:var(--line);margin:18px 0}.cf-bookkeeper{min-height:270px}.cf-cashflow{min-height:190px;display:flex;flex-direction:column;justify-content:center}.cf-balance-title{text-align:center;font-size:30px;font-weight:950;margin-top:8px}.cf-balance{display:grid;grid-template-columns:1fr 1fr;gap:22px}.cf-footer{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:10px 18px;box-shadow:var(--shadow)}.cf-footer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid var(--line);padding:7px;text-align:left}th{background:var(--panel-2)}.muted{color:var(--muted)}
-   @media print{body{background:#fff;color:#111;padding:12px}.pdf-meta,.kpi,.panel,.cf-card,.cf-footer{box-shadow:none;break-inside:avoid}.pdf-meta,.kpi,.panel,.cf-card,.cf-footer{background:#fff;color:#111;border-color:#aaa}.cf-card-head,th{background:#eee;color:#111}.cf-main-title p,.muted,.cf-card-head span,.cf-line small{color:#555}.no-print{display:none!important}.cf-upper,.cf-balance{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:repeat(4,1fr)}}
- </style></head><body>
-   <div class="pdf-meta">
-     <h1>Klavierhaus - Monthly Income Statement / Havi eredménykimutatás</h1>
-     <p><b>${bi("Month","Hónap")}:</b> ${d.month}</p>
-     <p><b>${bi("Period start","Időszak kezdete")}:</b> ${d.monthStart}</p>
-     <p><b>Generated / Letöltés időbélyege:</b> ${generated}</p>
-   </div>
-   ${html}
-   <script>window.onload=function(){document.title=${JSON.stringify(filename)};setTimeout(()=>window.print(),250);}</script>
- </body></html>`);
- win.document.close();
-}
+async function exportIncomeStatementPDF(month=currentMonthKey()){return downloadFinancialStatementPdf("income-statement",month===currentMonthKey()?"":month);}
+async function exportBalanceSheetPDF(month=""){return downloadFinancialStatementPdf("balance-sheet",month);}
 
 async function renderClosedJobs(){
  const target=forceShowView("closed_jobs");
