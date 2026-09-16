@@ -9,6 +9,7 @@ const { readGuestData } = require("./guest-data");
 const { createTicketService } = require("./ticket-service");
 const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods");
 const { buildConversationAutoReplyEmail, buildConversationReplyEmail } = require("./transactional-email");
+const { workflowBillablePhaseSubtotal } = require("./accounting-domain");
 const { generateCustomerConversationReportPdf } = require("./helpdesk-pdf");
 const {
   attendanceError,
@@ -438,7 +439,16 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
         const after = invoiceEngine.invoiceDetail(invoice.id);
         invoiceEngine.recordAdjustment(before, after, "Ticket payment marked paid", { name: "SYSTEM" });
       }
-      if (recognition.revenueRecognitionStatus === "RECOGNIZED" && String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
+      if (recognition.revenueRecognitionStatus === "DEFERRED") {
+        const current = invoiceEngine.invoiceDetail(invoice.id);
+        const needsRepair = String(current.revenue_recognition_status || "").toUpperCase() !== "DEFERRED" || String(current.deferred_event_id || "") !== String(event.id) || current.revenue_recognition_date;
+        if (needsRepair) {
+          db.prepare("UPDATE invoices SET revenue_recognition_status='DEFERRED',revenue_recognition_date=NULL,deferred_event_id=? WHERE id=?").run(event.id, current.id);
+          db.prepare("UPDATE invoice_credit_memos SET revenue_effect_date=NULL WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1 AND revenue_effect_date IS NOT NULL").run(current.id);
+          const repaired = invoiceEngine.invoiceDetail(current.id);
+          invoiceEngine.recordAdjustment(current, repaired, "Event revenue recognition corrected to deferred", { name: "SYSTEM" });
+        }
+      } else if (String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
         invoiceEngine.recognizeEventRevenue({ eventId: event.id, recognitionDate: recognition.revenueRecognitionDate });
       }
       invoice = invoiceEngine.invoiceDetail(invoice.id);
@@ -461,7 +471,16 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
         items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${Number(payment.quantity || tickets.length || 1)} ticket(s)`, quantity:1, unit_price:Number(payment.amount_total || 0)/100, line_type:"fee" }]
       });
     } else {
-      if (recognition.revenueRecognitionStatus === "RECOGNIZED" && String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
+      if (recognition.revenueRecognitionStatus === "DEFERRED") {
+        const current = invoiceEngine.invoiceDetail(invoice.id);
+        const needsRepair = String(current.revenue_recognition_status || "").toUpperCase() !== "DEFERRED" || String(current.deferred_event_id || "") !== String(event.id) || current.revenue_recognition_date;
+        if (needsRepair) {
+          db.prepare("UPDATE invoices SET revenue_recognition_status='DEFERRED',revenue_recognition_date=NULL,deferred_event_id=? WHERE id=?").run(event.id, current.id);
+          db.prepare("UPDATE invoice_credit_memos SET revenue_effect_date=NULL WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1 AND revenue_effect_date IS NOT NULL").run(current.id);
+          const repaired = invoiceEngine.invoiceDetail(current.id);
+          invoiceEngine.recordAdjustment(current, repaired, "Event revenue recognition corrected to deferred", { name: "SYSTEM" });
+        }
+      } else if (String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
         invoiceEngine.recognizeEventRevenue({ eventId: event.id, recognitionDate: recognition.revenueRecognitionDate });
       }
       invoice = invoiceEngine.invoiceDetail(invoice.id);
@@ -784,11 +803,11 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id)).filter((stage) => stage.status !== "NOT_REQUIRED");
     const costLines = (lines || []).filter((row) => row.line_type === "COST");
     const items = phaseRows.map((stage) => {
-      let phaseSubtotal = 0;
-      for (const line of costLines.filter((row) => String(row.stage_id || "") === String(stage.id))) phaseSubtotal = money(phaseSubtotal + money(line.amount));
+      const phaseSubtotal = workflowBillablePhaseSubtotal(costLines.filter((row) => String(row.stage_id || "") === String(stage.id)));
+      if (phaseSubtotal < 0) throw Object.assign(new Error("WORKFLOW_PHASE_CREDIT_EXCEEDS_CHARGEABLE_TOTAL"), { status: 409 });
       const phaseName = stage.name_snapshot_en || stage.card_title || stage.stage_code || `Phase ${Number(stage.stage_order || 0) + 1}`;
       return { item_description: `Phase ${Number(stage.stage_order || 0) + 1}: ${phaseName}`, quantity: 1, unit_price: phaseSubtotal, line_type: "fee" };
-    });
+    }).filter((item) => money(item.unit_price) > 0);
     const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "issued", items });
     const sourceId = `WORKFLOW_INVOICE_REVENUE:${workflow.id}`;
     if (Number(invoice.subtotal || 0) > 0) {
@@ -851,6 +870,24 @@ function registerBusinessOperationsRoutes(options) {
         newId('IADJ'), before.id, reason, user?.id || null, user?.name || user?.email || user?.id || 'SYSTEM', adjustedAt.toISOString(), adjustedAtLocal, JSON.stringify(before), JSON.stringify(after)
       );
       return adjustedAt;
+    }
+    function financialPeriodClosedForDate(dateKey) {
+      const value = String(dateKey || "");
+      if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return false;
+      try {
+        return Boolean(db.prepare("SELECT 1 FROM financial_statement_snapshots WHERE period=? LIMIT 1").get(value.slice(0, 7)));
+      } catch (_error) {
+        return false;
+      }
+    }
+    function rejectClosedInvoicePeriod(res, invoice) {
+      if (!financialPeriodClosedForDate(invoice?.issue_date)) return false;
+      res.status(409).json({
+        error: "CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT",
+        period: String(invoice.issue_date).slice(0, 7),
+        message: "The invoice belongs to an officially closed financial period. Record any correction in the current open period instead of rewriting history."
+      });
+      return true;
     }
     function voidInvoiceRecord(before, reason, user) {
       if (before.status === 'void') return before;
@@ -934,6 +971,7 @@ function registerBusinessOperationsRoutes(options) {
         const issueDate = clean(req.body?.issue_date, 10) || new Date().toISOString().slice(0, 10);
         const dueDate = clean(req.body?.due_date, 10) || issueDate;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: "INVALID_INVOICE_DATE" });
+        if (financialPeriodClosedForDate(issueDate)) return res.status(409).json({ error: "CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT", period: issueDate.slice(0, 7) });
         if (financialStatus === "pending" && dueDate < issueDate) return res.status(400).json({ error: "DUE_DATE_BEFORE_ISSUE_DATE" });
         const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
         const items = rawItems.map((item) => {
@@ -984,6 +1022,7 @@ function registerBusinessOperationsRoutes(options) {
       try {
         const before = invoiceEngine.invoiceDetail(req.params.id);
         if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+        if (rejectClosedInvoicePeriod(res, before)) return;
         const reason = clean(req.body?.reason, 2000);
         if (reason.length < 5) return res.status(400).json({ error: "ADJUSTMENT_REASON_MIN_5" });
         const issueDate = clean(req.body?.issue_date ?? before.issue_date, 10);
@@ -1046,6 +1085,13 @@ function registerBusinessOperationsRoutes(options) {
       const status = clean(req.body?.status, 30); if (!["issued","paid","carried_over"].includes(status)) return res.status(400).json({ error: "INVALID_INVOICE_STATUS" });
       const reason = clean(req.body?.reason, 1000); if (reason.length < 5) return res.status(400).json({ error: "ADJUSTMENT_REASON_REQUIRED", minimum_length: 5 });
       if (before.status === "void") return res.status(409).json({ error: "VOID_INVOICE_IMMUTABLE" });
+      if (financialPeriodClosedForDate(before.issue_date) && status !== "paid") {
+        return res.status(409).json({
+          error: "CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT",
+          period: String(before.issue_date).slice(0, 7),
+          message: "Closed-period invoice content remains immutable. A carried receivable may still be settled in the current open period, but other historical status rewrites are prohibited."
+        });
+      }
       const after = db.transaction(() => {
         if (before.source_type === "manual" && before.status === "paid" && status !== "paid") invoiceEngine.reverseLedger(before);
         db.prepare("UPDATE invoices SET status=?,paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,CURRENT_TIMESTAMP) ELSE NULL END,archived_at=CASE WHEN ?='paid' THEN archived_at ELSE NULL END,archived_period=CASE WHEN ?='paid' THEN archived_period ELSE NULL END WHERE id=?").run(status,status,status,status,before.id);
@@ -1058,6 +1104,7 @@ function registerBusinessOperationsRoutes(options) {
     });
     app.post("/api/invoices/:id/void", auth, admin, (req, res) => {
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      if (rejectClosedInvoicePeriod(res, before)) return;
       const reason = clean(req.body?.reason, 1000); if (reason.length < 5) return res.status(400).json({ error: "ADJUSTMENT_REASON_REQUIRED", minimum_length: 5 });
       if (before.status === "void") return res.json(before);
       const after = voidInvoiceRecord(before, reason, req.user);
@@ -1066,6 +1113,7 @@ function registerBusinessOperationsRoutes(options) {
     app.delete("/api/invoices/:id", auth, admin, (req, res) => {
       if (req.user.role !== "SUPERADMIN") return res.status(403).json({ error: "SUPERADMIN_REQUIRED" });
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+      if (rejectClosedInvoicePeriod(res, before)) return;
       const reason = clean(req.body?.reason, 1000); if (reason.length < 5) return res.status(400).json({ error: "ADJUSTMENT_REASON_REQUIRED", minimum_length: 5 });
       const after = voidInvoiceRecord(before, reason, req.user);
       audit(req, "VOID_INSTEAD_OF_DELETE", "invoices", before.id, before, after, 1, reason, "FINANCIAL");
