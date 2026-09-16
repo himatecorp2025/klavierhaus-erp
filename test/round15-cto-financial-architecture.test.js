@@ -130,17 +130,22 @@ test("admin navigation is exactly four primary groups with finance separated and
   assert.deepEqual(ids, ["finance_invoicing", "technical", "marketing", "website_events"]);
 
   const finance = block(nav, '{id:"finance_invoicing"', ' {id:"technical"');
-  for (const key of ["finance", "income_statement", "knowledge_base"]) assert.ok(finance.includes(`["${key}"`));
+  const financeViews = [...finance.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
+  assert.deepEqual(financeViews, ["finance", "income_statement", "invoice_documents", "knowledge_base"]);
   const technical = block(nav, '{id:"technical"', ' {id:"marketing"');
   const techViews = [...technical.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(techViews, ["workshop_workflow","scheduler","planned_jobs","contacts","pianos","inventory","partners","closed_jobs","users","audit_log","backups","settings","company_data","system_integrations"]);
+  assert.deepEqual(techViews, ["audit_log","backups","pianos","contacts","closed_jobs","company_data","inventory","partners","planned_jobs","scheduler","website_services","settings","system_integrations","users","workshop_workflow"]);
   assert.ok(!technical.includes('["finance"'));
   assert.ok(!technical.includes('["income_statement"'));
   assert.ok(!technical.includes('["knowledge_base"'));
 
+  const marketing = block(nav, '{id:"marketing"', ' {id:"website_events"');
+  const marketingViews = [...marketing.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
+  assert.ok(marketingViews.includes("customer_inbox"));
+
   const website = nav.slice(nav.indexOf('{id:"website_events"'));
   const websiteViews = [...website.matchAll(/\["([a-z_]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(websiteViews, ["pages_content","website_services","showroom_pianos","website_artists","media_library","events","event_tickets","event_invitations","event_guest_list","digital_attendance","website_contacts","customer_inbox","publish_preview"]);
+  assert.deepEqual(websiteViews, ["website_artists","website_contacts","digital_attendance","events","event_guest_list","event_invitations","media_library","pages_content","publish_preview","showroom_pianos","event_tickets"]);
   assert.doesNotMatch(nav, /Landing Page Design|landing_page_design/);
 
   assert.match(app, /brandHomeButton/);
@@ -162,6 +167,8 @@ test("workflow billing UI and engine use manual phase costs and customer-facing 
   assert.doesNotMatch(activeDrawer, /workflowFinanceType|workflowFinanceCategory/);
 
   assert.match(workflowServer, /lineType = "COST", category = "OTHER"/);
+  assert.doesNotMatch(workflowServer, /workflow_materials|inventory_items|CENTRAL_INVENTORY|\/materials/);
+  assert.doesNotMatch(app, /workflowAddMaterial|workflowInventoryOptions|CENTRAL_INVENTORY|\/api\/workflows\/\$\{workflowId\}\/materials/);
   assert.match(business, /const phaseSubtotal = money\(costLines\.filter/);
   assert.match(business, /item_description: `Phase \$\{Number\(stage\.stage_order/);
   assert.doesNotMatch(block(business, "function createWorkflowInvoice", "\n  function reverseLedger"), /workflow_materials|materialRows|requested_quantity/);
