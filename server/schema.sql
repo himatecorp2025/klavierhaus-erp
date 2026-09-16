@@ -190,6 +190,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   payment_method TEXT CHECK(payment_method IS NULL OR payment_method='' OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
   invoice_status TEXT DEFAULT 'Not invoiced',
   invoice_number TEXT,
+  billing_status TEXT NOT NULL DEFAULT 'Unbilled' CHECK(billing_status IN ('Unbilled','Billed')),
+  invoice_id TEXT,
   close_notes TEXT,
   completed_at TEXT,
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','POSTED')),
@@ -1331,6 +1333,16 @@ CREATE INDEX IF NOT EXISTS idx_invoices_source ON invoices(source_type,source_id
 CREATE INDEX IF NOT EXISTS idx_invoices_status_due ON invoices(status,due_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_source_direction_unique ON invoices(direction,source_type,source_id) WHERE source_id IS NOT NULL AND trim(source_id)<>'';
 
+-- Persistent high-watermark for invoice numbering. Invoice-only purge intentionally
+-- preserves this table so a previously issued INV/VND number is never reused.
+CREATE TABLE IF NOT EXISTS invoice_sequences (
+  direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')),
+  sequence_year TEXT NOT NULL,
+  last_number INTEGER NOT NULL DEFAULT 0 CHECK(last_number >= 0),
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(direction,sequence_year)
+);
+
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,
   invoice_id TEXT NOT NULL,
@@ -1339,11 +1351,12 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0),
   total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
   line_type TEXT NOT NULL DEFAULT 'custom' CHECK(line_type IN ('material','fee','custom')),
+  sort_order INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
   payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
   financial_status TEXT CHECK(financial_status IS NULL OR financial_status IN ('paid','pending')),
   FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,id);
+CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id);
 
 CREATE TABLE IF NOT EXISTS financial_items (
   id TEXT PRIMARY KEY,
@@ -1479,6 +1492,8 @@ CREATE TABLE IF NOT EXISTS workshop_workflows (
   financial_closed_at TEXT,
   financial_closed_by_user_id TEXT,
   financial_closure_reason TEXT,
+  billing_status TEXT NOT NULL DEFAULT 'Unbilled' CHECK(billing_status IN ('Unbilled','Billed')),
+  invoice_id TEXT,
   aborted_at TEXT,
   aborted_by_user_id TEXT,
   abort_reason TEXT,
