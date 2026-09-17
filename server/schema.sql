@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS pianos (
   size_cm TEXT,
   size_in TEXT,
   size_display TEXT,
+  size_length TEXT,
   ownership TEXT,
   owner_contact_id TEXT,
   location TEXT,
@@ -163,6 +164,9 @@ CREATE TABLE IF NOT EXISTS client_pianos (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
   piano_id TEXT NOT NULL,
+  is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0,1)),
+  verified_at TEXT,
+  verified_by TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(client_id,piano_id),
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
@@ -170,6 +174,7 @@ CREATE TABLE IF NOT EXISTS client_pianos (
 );
 CREATE INDEX IF NOT EXISTS idx_client_pianos_client ON client_pianos(client_id,piano_id);
 CREATE INDEX IF NOT EXISTS idx_client_pianos_piano ON client_pianos(piano_id,client_id);
+CREATE INDEX IF NOT EXISTS idx_client_pianos_verified ON client_pianos(is_verified,client_id,piano_id);
 
 CREATE TABLE IF NOT EXISTS steinway_serial_registry (
   start_serial INTEGER PRIMARY KEY,
