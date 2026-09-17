@@ -107,6 +107,7 @@ function actualMonthEndDate(month) {
 function invoiceLifecycleStatus(invoice, now = new Date()) {
   const status = String(invoice?.status || "").toLowerCase();
   if (status === "void") return "Void";
+  if (status === "draft") return "Draft";
   if (status === "paid") return "Paid";
   const due = String(invoice?.due_date || "");
   if (due && /^\d{4}-\d{2}-\d{2}$/.test(due) && due < newYorkDateKey(now)) return "Overdue";
@@ -795,6 +796,32 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     }
     return created;
   }
+  function postWorkflowInvoiceLedger(invoice, actor = {}) {
+    if (!invoice || invoice.direction !== "receivable" || invoice.source_type !== "workflow") return null;
+    if (["draft", "void"].includes(String(invoice.status || "").toLowerCase())) return null;
+    const sourceId = `WORKFLOW_INVOICE_REVENUE:${invoice.source_id}`;
+    const existing = db.prepare("SELECT * FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=? LIMIT 1").get(sourceId);
+    if (existing) return existing;
+    if (!(Number(invoice.subtotal || 0) > 0)) return null;
+    const id = newId("FI");
+    db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
+      VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME',?,?,?,?,?,?,?,?)`).run(
+      id, invoice.issue_date, `Workshop invoice revenue: ${invoice.invoice_number}`, invoice.summary || "", Number(invoice.subtotal || 0), invoice.payment_method || "", balanceAccountFromPaymentMethod(invoice.payment_method || ""), null, invoice.client_id || null, null, "WORKFLOW_INVOICE_REVENUE", sourceId, actor.name || actor.id || "System"
+    );
+    return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
+  }
+
+  function createWorkflowPayableInvoice({ workflow, stage = null, line, partner, actor = {}, now = new Date().toISOString() }) {
+    if (!workflow || !line || !partner) throw Object.assign(new Error("WORKFLOW_PARTNER_PAYABLE_DATA_REQUIRED"), { status: 400 });
+    const issueDate = String(now).slice(0, 10);
+    const invoice = createInvoice({
+      direction: "payable", issueDate, dueDate: issueDate, partnerId: partner.id, sourceType: "workflow", sourceId: `WORKFLOW_LINE:${line.id}`,
+      summary: `${stage?.name_snapshot_en || line.title || "Workflow phase"} · ${workflow.title || workflow.id}`, taxRate: Number(partner.default_tax_rate || 0),
+      paymentMethod: null, status: "issued", items: [{ item_description: line.title || line.description || "Workflow partner cost", quantity: 1, unit_price: Number(line.amount || 0), line_type: "fee" }]
+    });
+    return invoice;
+  }
+
   function createWorkflowInvoice({ workflow, stages = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null }) {
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
@@ -808,14 +835,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       const phaseName = stage.name_snapshot_en || stage.card_title || stage.stage_code || `Phase ${Number(stage.stage_order || 0) + 1}`;
       return { item_description: `Phase ${Number(stage.stage_order || 0) + 1}: ${phaseName}`, quantity: 1, unit_price: phaseSubtotal, line_type: "fee" };
     }).filter((item) => money(item.unit_price) > 0);
-    const invoice = createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "issued", items });
-    const sourceId = `WORKFLOW_INVOICE_REVENUE:${workflow.id}`;
-    if (Number(invoice.subtotal || 0) > 0) {
-      const existing = db.prepare("SELECT id FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=? LIMIT 1").get(sourceId);
-      if (!existing) db.prepare(`INSERT INTO financial_items(id,item_date,title,description,amount,main_type,category,recurrence,payment_method,balance_account,job_id,client_id,piano_id,source_type,source_id,created_by)
-        VALUES(?,?,?,?,?,'INCOME','SERVICE_REVENUE','ONE_TIME',?,?,?,?,?,?,?,?)`).run(newId("FI"), issueDate, `Workshop invoice revenue: ${invoice.invoice_number}`, workflow.title || "", Number(invoice.subtotal || 0), method, balanceAccountFromPaymentMethod(method), workflow.job_id || null, workflow.client_id, workflow.piano_id, "WORKFLOW_INVOICE_REVENUE", sourceId, actor.name || actor.id || "System");
-    }
-    return invoice;
+    return createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "draft", items });
   }
   function reverseLedger(invoice) {
     if (!invoice) return;
@@ -831,7 +851,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=?").run(`WORKFLOW_INVOICE_REVENUE:${invoice.source_id}`);
     }
   }
-  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, createCreditMemo, recognizeEventRevenue, recordAdjustment, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
+  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, createWorkflowPayableInvoice, postWorkflowInvoiceLedger, createCreditMemo, recognizeEventRevenue, recordAdjustment, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
 }
 
 function registerBusinessOperationsRoutes(options) {
@@ -928,7 +948,7 @@ function registerBusinessOperationsRoutes(options) {
       if (bucket === "archive") where.push("(i.archived_at IS NOT NULL OR i.status='void')");
       const rows = db.prepare(`${invoiceSelect}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY COALESCE(i.archived_at,i.issue_date) DESC,i.invoice_number DESC`).all(...params)
         .map((row) => ({ ...row, lifecycle_status: invoiceLifecycleStatus(row, new Date()) }));
-      const accountingRows = rows.filter((row) => row.status !== "void");
+      const accountingRows = rows.filter((row) => !["void","draft"].includes(String(row.status || "").toLowerCase()));
       const recognizedReceivables = accountingRows.filter((row) => row.direction === "receivable" && (row.source_type !== "event" || row.revenue_recognition_status === "RECOGNIZED"));
       const revenue = recognizedReceivables.reduce((sum,row)=>roundFinancial(sum+Number(row.subtotal||0)),0);
       const payables = accountingRows.filter((row) => row.direction === "payable").reduce((sum,row)=>roundFinancial(sum+Number(row.total_amount||0)),0);
@@ -1080,6 +1100,25 @@ function registerBusinessOperationsRoutes(options) {
         res.json({ ...after, lifecycle_status: invoiceLifecycleStatus(after, adjustedAt) });
       } catch (error) { sendError(res,error); }
     });
+    app.post("/api/invoices/:id/issue", auth, admin, (req, res) => {
+      try {
+        const before = invoiceEngine.invoiceDetail(req.params.id);
+        if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+        if (before.status !== "draft") return res.status(409).json({ error: "INVOICE_NOT_DRAFT" });
+        if (financialPeriodClosedForDate(before.issue_date)) return res.status(409).json({ error: "CLOSED_PERIOD_IMMUTABLE_USE_CURRENT_PERIOD_ADJUSTMENT", period: String(before.issue_date).slice(0, 7) });
+        const reason = clean(req.body?.reason, 1000) || "Workflow draft approved and issued";
+        const after = db.transaction(() => {
+          db.prepare("UPDATE invoices SET status='issued' WHERE id=? AND status='draft'").run(before.id);
+          const updated = invoiceEngine.invoiceDetail(before.id);
+          if (updated.source_type === "workflow") invoiceEngine.postWorkflowInvoiceLedger(updated, req.user);
+          recordAdjustment(before, updated, reason, req.user);
+          return updated;
+        })();
+        audit(req, "ISSUE", "invoices", before.id, before, after, 1, reason, "FINANCIAL");
+        res.json({ ...after, lifecycle_status: invoiceLifecycleStatus(after, new Date()) });
+      } catch (error) { sendError(res, error); }
+    });
+
     app.post("/api/invoices/:id/status", auth, admin, (req, res) => {
       const before = invoiceEngine.invoiceDetail(req.params.id); if (!before) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
       const status = clean(req.body?.status, 30); if (!["issued","paid","carried_over"].includes(status)) return res.status(400).json({ error: "INVALID_INVOICE_STATUS" });
