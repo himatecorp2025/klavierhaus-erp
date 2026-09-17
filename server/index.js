@@ -2216,34 +2216,60 @@ app.post('/api/imports/pianos/:batchId/commit',auth,permit('ADMIN'),(req,res)=>{
 function createResourceRoutes(key, table, prefix, write, roles){
   app.get(`/api/${key}`, auth, (req,res)=>res.json(db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC`).all()));
   app.post(`/api/${key}`, auth, permit(...roles), (req,res)=>{
-    const id=req.body.id || (key==="contacts" ? nextContactId() : rid(prefix));
-    const body={...req.body};
-    if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
-    const cols=["id",...write].filter(c=>c==="id" || body[c]!==undefined);
-    db.prepare(`INSERT INTO ${table}(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:body[c]));
-    res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id));
+    try{
+      const id=req.body.id || (key==="contacts" ? nextContactId() : rid(prefix));
+      const body={...req.body};
+      if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
+      const cols=["id",...write].filter(c=>c==="id" || body[c]!==undefined);
+      const saved=db.transaction(()=>{
+        db.prepare(`INSERT INTO ${table}(${cols.join(",")}) VALUES(${cols.map(()=>"?").join(",")})`).run(...cols.map(c=>c==="id"?id:body[c]));
+        const row=db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id);
+        if(key==="contacts")jobDomain.syncCrmFollowUp({contact:row,actor:req.user});
+        return row;
+      })();
+      res.json(saved);
+    }catch(error){res.status(error.status||400).json({error:error.code||error.message});}
   });
   app.put(`/api/${key}/:id`, auth, permit(...roles), (req,res)=>{
-    const body={...req.body};
-    if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
-    const cols=write.filter(c=>body[c]!==undefined);
-    if(cols.length) db.prepare(`UPDATE ${table} SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]), req.params.id);
-    res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
+    try{
+      const body={...req.body};
+      if(write.includes("payment_method") && body.payment_method!==undefined){const normalized=body.payment_method?normalizePaymentMethod(body.payment_method,{allowEmpty:false}):null;if(body.payment_method&&!normalized)return res.status(400).json({error:"Invalid payment method / Hibás fizetési mód"});body.payment_method=normalized||"";}
+      const cols=write.filter(c=>body[c]!==undefined);
+      const saved=db.transaction(()=>{
+        if(cols.length) db.prepare(`UPDATE ${table} SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>body[c]), req.params.id);
+        const row=db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id);
+        if(!row)throw Object.assign(new Error(`${key.toUpperCase()}_NOT_FOUND`),{status:404,code:`${key.toUpperCase()}_NOT_FOUND`});
+        if(key==="contacts")jobDomain.syncCrmFollowUp({contact:row,actor:req.user});
+        return row;
+      })();
+      res.json(saved);
+    }catch(error){res.status(error.status||400).json({error:error.code||error.message});}
   });
   app.delete(`/api/${key}/:id`, auth, requireSuperadmin, (req,res)=>{
     if(key==="contacts"){
       db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(req.params.id);
+      db.prepare("DELETE FROM jobs WHERE COALESCE(is_crm_follow_up,0)=1 AND contact_id=?").run(req.params.id);
     }
     db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
     res.json({ok:true});
   });
 }
-createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address_line1","city","state","postal_code","country","address","billing_address","tax_id","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address_line1","city","state","postal_code","country","address","billing_address","tax_id","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","is_vip","follow_up_date","follow_up_cadence","follow_up_reason","relationship_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/contacts/:id", auth, (req,res)=>{
   const row=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!row)return res.status(404).json({error:"CONTACT_NOT_FOUND"});
   res.json(row);
+});
+
+app.post("/api/contacts/:id/follow-up/complete", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  try{
+    const before=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
+    if(!before)return res.status(404).json({error:"CONTACT_NOT_FOUND"});
+    const result=jobDomain.completeCrmFollowUp({contactId:req.params.id,cadence:req.body?.cadence||"",nextFollowUpDate:Object.prototype.hasOwnProperty.call(req.body||{},"follow_up_date")?req.body.follow_up_date:undefined,actor:req.user});
+    audit(req,"CRM_FOLLOW_UP_COMPLETE","contacts",req.params.id,before,result.contact,1,"CRM follow-up completed/rescheduled","TECHNICAL");
+    res.json(result);
+  }catch(error){res.status(error.status||400).json({error:error.code||error.message});}
 });
 
 registerPianoReferenceRoutes({app,db,auth,permit,audit,createPianoImportUpload});
@@ -2258,6 +2284,8 @@ app.get("/api/pianos", auth, (req,res)=>{
            c.address AS owner_address,
            cp.id AS client_piano_id,
            COALESCE(cp.is_verified,0) AS is_verified,
+           cp.piano_location_address,
+           cp.location_name,
            cp.verified_at,
            cp.verified_by
     FROM pianos p
@@ -2271,7 +2299,7 @@ app.get("/api/pianos", auth, (req,res)=>{
 app.get("/api/pianos/:id", auth, (req,res)=>{
   const row=db.prepare(`
     SELECT p.*,c.name AS owner_name,c.name AS client_name,c.email AS owner_email,c.phone AS owner_phone,c.address AS owner_address,
-           cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
+           cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.piano_location_address,cp.location_name,cp.verified_at,cp.verified_by
     FROM pianos p
     LEFT JOIN contacts c ON c.id=p.owner_contact_id
     LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id
@@ -2351,9 +2379,13 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,year,build_year,size_cm,size_in,size_display,size_length,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.finish||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,sizeLength,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
-  if(ownerContactId) linkClientPiano(ownerContactId,id);
+  if(ownerContactId){
+    linkClientPiano(ownerContactId,id);
+    db.prepare("UPDATE client_pianos SET location_name=?,piano_location_address=? WHERE client_id=? AND piano_id=?")
+      .run(String(req.body.location_name||"").trim(),String(req.body.piano_location_address||req.body.location||"").trim(),ownerContactId,id);
+  }
   refreshClientHasPiano(ownerContactId);
-  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+  const piano=db.prepare(`SELECT p.*,cp.location_name,cp.piano_location_address FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id WHERE p.id=?`).get(id);
   res.json(piano);
 });
 
@@ -2389,7 +2421,16 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
     refreshClientHasPiano(before.owner_contact_id);
     refreshClientHasPiano(ownerContactId);
   }
-  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(req.params.id);
+  const effectiveOwnerId=req.body.owner_contact_id!==undefined?(req.body.owner_contact_id||null):(db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(req.params.id)?.owner_contact_id||null);
+  if(effectiveOwnerId && (req.body.location_name!==undefined || req.body.piano_location_address!==undefined || req.body.location!==undefined)){
+    linkClientPiano(effectiveOwnerId,req.params.id);
+    const relation=db.prepare("SELECT location_name,piano_location_address FROM client_pianos WHERE client_id=? AND piano_id=?").get(effectiveOwnerId,req.params.id)||{};
+    const locationName=req.body.location_name!==undefined?String(req.body.location_name??"").trim():String(relation.location_name||"");
+    const physicalAddress=req.body.piano_location_address!==undefined?String(req.body.piano_location_address??"").trim():(req.body.location!==undefined?String(req.body.location??"").trim():String(relation.piano_location_address||""));
+    db.prepare("UPDATE client_pianos SET location_name=?,piano_location_address=? WHERE client_id=? AND piano_id=?")
+      .run(locationName,physicalAddress,effectiveOwnerId,req.params.id);
+  }
+  const piano=db.prepare(`SELECT p.*,cp.location_name,cp.piano_location_address FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id WHERE p.id=?`).get(req.params.id);
   res.json(piano);
 });
 
@@ -2469,10 +2510,11 @@ createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","c
 app.get("/api/client-profile/:id", auth, (req,res)=>{
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
-  const pianos=db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
+  const pianos=db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.piano_location_address,cp.location_name,cp.verified_at,cp.verified_by
     FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.created_at DESC`).all(req.params.id);
   const jobs=db.prepare(jobsSelectSql("WHERE j.client_id=? OR j.client_name=? ORDER BY j.start_time DESC LIMIT 50")).all(req.params.id, client.name);
-  res.json({client,pianos,jobs,lastVisit:jobs[0]?.start_time || client.last_contact || "",lastJob:jobs[0]?.title || ""});
+  const crmFollowUpJob=jobs.find((row)=>Number(row.is_crm_follow_up||0)===1&&!['Completed','Partially completed','Failed','Cancelled'].includes(String(row.status||'')))||null;
+  res.json({client,pianos,jobs,crmFollowUpJob,lastVisit:jobs.find((row)=>Number(row.is_crm_follow_up||0)!==1)?.start_time || client.last_contact || "",lastJob:jobs.find((row)=>Number(row.is_crm_follow_up||0)!==1)?.title || ""});
 });
 
 app.get("/api/jobs", auth, (req,res)=>{
@@ -2902,7 +2944,7 @@ app.post("/api/workflow/inline-client-piano", auth, permit("ADMIN","MANAGER","WO
 });
 
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
-  res.json(db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
+  res.json(db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.piano_location_address,cp.location_name,cp.verified_at,cp.verified_by
     FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.display_name,p.brand,p.model`).all(req.params.id));
 });
 
@@ -2937,8 +2979,10 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id,brand,model,req.body.serial_no||"",req.body.finish||"",buildYear,sizeCm,sizeIn,sizeDisplay,sizeLength,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
   linkClientPiano(client.id,id);
+  db.prepare("UPDATE client_pianos SET location_name=?,piano_location_address=? WHERE client_id=? AND piano_id=?")
+    .run(String(req.body.location_name||"").trim(),String(req.body.piano_location_address||req.body.location||client.address||"").trim(),client.id,id);
   refreshClientHasPiano(client.id);
-  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
+  const piano=db.prepare(`SELECT p.*,cp.location_name,cp.piano_location_address FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=? WHERE p.id=?`).get(client.id,id);
   res.json(piano);
 });
 
