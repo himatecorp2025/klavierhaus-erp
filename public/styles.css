@@ -2468,3 +2468,48 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .mobile-tasks-icon{position:relative;display:inline-flex;align-items:center;justify-content:center}.badge-counter{position:absolute;right:-11px;top:-8px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:#EF4444;color:#FFF;border:2px solid var(--panel,#0b1423);font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;line-height:1}.tasks-total-badge{display:inline-grid;place-items:center;min-width:34px;height:34px;padding:0 8px;border-radius:999px;background:#EF4444;color:#fff;font-weight:900}.mobile-deadline-list{display:grid;gap:12px}.mobile-deadline-tasks{max-width:780px;margin:0 auto}.deadline-notification-card.is-mobile{width:100%;background:rgba(15,23,42,.98)}
 @media(max-width:768px){.global-notification-stack{display:none!important}.mobile-deadline-tasks{padding-bottom:calc(88px + env(safe-area-inset-bottom))}.deadline-notification-card.is-mobile{padding:16px 16px 15px 18px;border-radius:16px}.deadline-notification-card.is-mobile .deadline-card-title strong{font-size:1rem;white-space:normal}.deadline-notification-card.is-mobile .deadline-card-subtitle,.deadline-notification-card.is-mobile .deadline-card-description{font-size:.86rem}.deadline-notification-card.is-mobile .deadline-card-actions{grid-template-columns:1fr;gap:8px}.deadline-notification-card.is-mobile .deadline-card-actions button{min-height:44px;font-size:.82rem}.deadline-notification-card.is-mobile .deadline-inline-panel input{min-height:46px;font-size:16px}.deadline-notification-card.is-mobile .deadline-inline-actions{display:grid;grid-template-columns:1fr 1fr}.deadline-notification-card.is-mobile .deadline-inline-actions button{min-height:44px}}
 @media(min-width:901px){body[data-current-view="tasks"] #tasks{display:none!important}}
+
+/* Client follow-up and global deadline stability hardening. */
+.client-name-link,
+.client-name-link:hover,
+.client-name-link:focus,
+.client-name-link:active{
+  appearance:none!important;
+  border:0!important;
+  background:transparent!important;
+  outline:none!important;
+  box-shadow:none!important;
+  color:#60A5FA!important;
+  text-decoration:none;
+  padding:0!important;
+  font:inherit;
+  font-weight:650;
+  cursor:pointer;
+  text-align:left;
+}
+.client-name-link:hover{color:#93C5FD!important;text-decoration:underline!important}
+.client-phone-cell{display:inline-flex;align-items:center;gap:7px;min-width:0}
+.client-followup-phone-alert{display:inline-grid;place-items:center;flex:0 0 26px;width:26px;height:26px;padding:0!important;border:1px solid color-mix(in srgb,var(--followup-phone-color) 45%,transparent)!important;border-radius:999px;background:color-mix(in srgb,var(--followup-phone-color) 11%,transparent)!important;color:var(--followup-phone-color)!important;box-shadow:none!important;cursor:pointer}
+.client-followup-phone-alert:hover,.client-followup-phone-alert:focus-visible{background:color-mix(in srgb,var(--followup-phone-color) 20%,transparent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--followup-phone-color) 16%,transparent)!important;outline:none!important}
+.client-followup-phone-alert svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.client-phone-quick-popover{position:fixed;z-index:2500;display:grid;gap:8px;padding:12px;border:1px solid #475569;border-radius:10px;background:rgba(15,23,42,.98);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 18px 44px rgba(0,0,0,.48);color:#E2E8F0}
+.client-phone-quick-popover strong{font-size:.9rem}.client-phone-quick-popover small{color:#94A3B8}.client-phone-quick-popover button{width:100%;min-height:38px;text-align:left}.client-phone-quick-popover button.success{border-color:rgba(16,185,129,.42);background:rgba(16,185,129,.13);color:#A7F3D0}
+.client-followup-shortcuts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}.client-followup-shortcuts button{padding:5px 7px;border-radius:7px;font-size:.7rem;line-height:1.15;background:#0F172A;color:#CBD5E1;border:1px solid #334155}.client-followup-shortcuts button:hover{border-color:#60A5FA;color:#DBEAFE}
+.admin-date-picker-time select{min-height:40px;width:100%;padding:8px 10px;border:1px solid #46657f;border-radius:8px;background:#081a2d;color:#eef3f6;font:inherit;font-size:14px;font-weight:800}
+
+#global-notification-stack.global-notification-stack{position:fixed!important;top:1.5rem!important;right:1.5rem!important;z-index:2000!important;width:360px;max-width:calc(100vw - 2rem);display:flex;flex-direction:column;gap:.65rem;pointer-events:none;max-height:calc(100dvh - 3rem)}
+.deadline-stack-toolbar{pointer-events:auto;flex:0 0 auto;display:flex;justify-content:flex-end}.deadline-stack-toolbar.hidden{display:none!important}.deadline-snooze-all{width:100%;min-height:38px;border:1px solid rgba(245,158,11,.45);border-radius:8px;background:rgba(15,23,42,.96);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 10px 26px rgba(0,0,0,.42);color:#FDE68A;font-size:.75rem;font-weight:800}
+.deadline-stack-list{pointer-events:none;min-height:0;display:flex;flex-direction:column;gap:0;overflow-x:hidden;overflow-y:auto;padding:1px 3px 10px 1px;scrollbar-width:thin;scrollbar-color:#475569 transparent}
+.deadline-notification-card{pointer-events:auto;max-height:560px;margin:0 0 .75rem 0;padding:14px 14px 13px 16px;border:1px solid #F59E0B!important;border-left:4px solid #F59E0B!important;border-radius:8px!important;background:rgba(15,23,42,.96)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;box-shadow:0 12px 30px rgba(0,0,0,.6)!important;color:#E2E8F0;overflow:hidden;animation:none!important;transform:translateX(0);opacity:1;transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .25s cubic-bezier(.4,0,.2,1),max-height .25s ease,margin .25s ease,padding .25s ease,border-width .25s ease}
+.deadline-notification-card.urgency-urgent_overdue{border:1px solid #EF4444!important;border-left:4px solid #EF4444!important;box-shadow:0 0 10px rgba(239,68,68,.35),0 12px 30px rgba(0,0,0,.6)!important}
+.deadline-notification-card.urgency-due_soon{border:1px solid #F59E0B!important;border-left:4px solid #F59E0B!important}
+.deadline-notification-card.urgency-upcoming{border:1px solid #10B981!important;border-left:4px solid #10B981!important}
+.deadline-notification-card.is-new{animation:slideUpIn .25s cubic-bezier(.4,0,.2,1) both!important}
+.deadline-notification-card.is-leaving{transform:translateX(120%)!important;opacity:0!important;max-height:0!important;margin-bottom:0!important;padding-top:0!important;padding-bottom:0!important;border-top-width:0!important;border-bottom-width:0!important;pointer-events:none!important}
+@keyframes slideUpIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+
+.quick-reschedule-popover.custom-scheduler-modal{position:fixed!important;inset:0!important;z-index:3000!important;display:grid;place-items:center;padding:20px;background:rgba(2,6,23,.56);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.quick-reschedule-card{width:min(520px,calc(100vw - 28px));display:grid;gap:14px;padding:18px;border:1px solid #475569;border-radius:12px;background:#0F172A;box-shadow:0 24px 70px rgba(0,0,0,.62);color:#E2E8F0}.quick-reschedule-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.quick-reschedule-head small{color:#F59E0B;font-weight:800;text-transform:uppercase;letter-spacing:.045em}.quick-reschedule-head h3{margin:3px 0 0}.quick-reschedule-card label{display:grid;gap:7px;color:#CBD5E1;font-size:.78rem;font-weight:800}.quick-reschedule-card input{width:100%;min-height:44px;background:#081525;color:#E2E8F0;border:1px solid #475569}.quick-reschedule-actions{display:flex;justify-content:flex-end;gap:8px}
+.custom-scheduler-modal,.scheduler-time-picker-popover,.flatpickr-calendar,.quick-reschedule-popover,.admin-date-picker-popover{z-index:3000!important}
+
+@media(max-width:768px){#global-notification-stack.global-notification-stack{display:none!important}.client-followup-shortcuts{display:grid;grid-template-columns:1fr 1fr}.quick-reschedule-popover.custom-scheduler-modal{padding:10px}.quick-reschedule-card{width:100%;max-height:calc(100dvh - 20px);overflow:auto}.quick-reschedule-actions{display:grid;grid-template-columns:1fr 1fr}.quick-reschedule-actions button{min-height:44px}}
