@@ -1301,10 +1301,10 @@ app.get('/api/notifications/active',auth,(req,res)=>{
 app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim();
   if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
-  const snoozedUntil=new Date(Date.now()+6*60*60*1000).toISOString(),id=rid('NSZ');
+  const snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString(),id=rid('NSZ');
   db.prepare('INSERT INTO notification_snooze_log(id,entity_type,entity_id,snoozed_until) VALUES(?,?,?,?)').run(id,entityType,entityId,snoozedUntil);
-  audit(req,'SNOOZE','notification_snooze_log',id,null,{entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil},1,'Deadline notification snoozed for exactly six hours','TECHNICAL');
-  res.json({ok:true,entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil,hours:6});
+  audit(req,'SNOOZE','notification_snooze_log',id,null,{entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil},1,'Deadline notification snoozed for exactly three hours','TECHNICAL');
+  res.json({ok:true,entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil,hours:3});
 });
 
 app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
