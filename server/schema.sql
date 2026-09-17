@@ -1917,6 +1917,23 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS workshop_subtasks (
+  id TEXT PRIMARY KEY,
+  stage_id TEXT NOT NULL REFERENCES workflow_stages(id) ON DELETE CASCADE,
+  workflow_id TEXT NOT NULL REFERENCES workshop_workflows(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0,1)),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','COMPLETED','DELAYED')),
+  assigned_to_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  delay_reason TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id);
+CREATE INDEX IF NOT EXISTS idx_subtasks_workflow ON workshop_subtasks(workflow_id,stage_id);
+
 CREATE TABLE IF NOT EXISTS workflow_stage_transfers (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,
