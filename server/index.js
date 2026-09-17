@@ -32,7 +32,14 @@ const { generateFinancialStatementPdf } = require("./document-pdf");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
-const { analyzeClientWorkbook, commitClientImportRecords } = require("./client-import");
+const {
+  analyzeClientWorkbook,
+  commitClientImportRecords,
+  clientPianoExportRows,
+  serializeClientPianoCsv,
+  parseStructuredClientPianoPayload,
+  commitStructuredClientPianoImport
+} = require("./client-import");
 const { ensureCentralPianoReference, centralPianoLookup, registerPianoReferenceRoutes } = require("./piano-reference-engine");
 const {
   createDocumentUpload,
@@ -2246,9 +2253,16 @@ app.get("/api/pianos", auth, (req,res)=>{
     SELECT p.*,
            c.name AS owner_name,
            c.name AS client_name,
-           c.address AS owner_address
+           c.email AS owner_email,
+           c.phone AS owner_phone,
+           c.address AS owner_address,
+           cp.id AS client_piano_id,
+           COALESCE(cp.is_verified,0) AS is_verified,
+           cp.verified_at,
+           cp.verified_by
     FROM pianos p
     LEFT JOIN contacts c ON c.id = p.owner_contact_id
+    LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id
     ORDER BY p.display_name, p.brand, p.model
   `).all();
   res.json(rows);
@@ -2256,13 +2270,48 @@ app.get("/api/pianos", auth, (req,res)=>{
 
 app.get("/api/pianos/:id", auth, (req,res)=>{
   const row=db.prepare(`
-    SELECT p.*,c.name AS owner_name,c.name AS client_name,c.address AS owner_address
+    SELECT p.*,c.name AS owner_name,c.name AS client_name,c.email AS owner_email,c.phone AS owner_phone,c.address AS owner_address,
+           cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
     FROM pianos p
     LEFT JOIN contacts c ON c.id=p.owner_contact_id
+    LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id
     WHERE p.id=?
   `).get(req.params.id);
   if(!row)return res.status(404).json({error:"PIANO_NOT_FOUND"});
   res.json(row);
+});
+
+app.post("/api/client-pianos/:id/verify", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  const before=db.prepare(`SELECT cp.*,p.id AS piano_id,p.brand,p.model,c.name AS client_name FROM client_pianos cp
+    JOIN pianos p ON p.id=cp.piano_id JOIN contacts c ON c.id=cp.client_id WHERE cp.id=?`).get(req.params.id);
+  if(!before)return res.status(404).json({error:"CLIENT_PIANO_LINK_NOT_FOUND"});
+  const verifiedBy=String(req.user?.name||req.user?.id||"").trim()||"SYSTEM";
+  db.prepare("UPDATE client_pianos SET is_verified=1,verified_at=CURRENT_TIMESTAMP,verified_by=? WHERE id=?").run(verifiedBy,before.id);
+  const after=db.prepare(`SELECT cp.*,p.id AS piano_id,p.brand,p.model,c.name AS client_name FROM client_pianos cp
+    JOIN pianos p ON p.id=cp.piano_id JOIN contacts c ON c.id=cp.client_id WHERE cp.id=?`).get(before.id);
+  audit(req,"VERIFY","client_pianos",before.id,before,after,1,"Client Piano data verified","TECHNICAL");
+  res.json(after);
+});
+
+app.get("/api/client-pianos/export", auth, (req,res)=>{
+  try{
+    const format=String(req.query?.format||"csv").trim().toLowerCase(),rows=clientPianoExportRows(db);
+    if(!["csv","json"].includes(format))return res.status(400).json({error:"CLIENT_PIANO_EXPORT_FORMAT_UNSUPPORTED"});
+    const content=format==="json"?JSON.stringify(rows,null,2):serializeClientPianoCsv(rows);
+    res.json({format,filename:`client-pianos.${format}`,content,totalRows:rows.length});
+  }catch(error){res.status(500).json({error:error.message||"CLIENT_PIANO_EXPORT_FAILED"});}
+});
+
+app.post("/api/client-pianos/import", auth, permit("ADMIN"), (req,res)=>{
+  try{
+    const format=String(req.body?.format||"").trim().toLowerCase(),content=String(req.body?.content||"");
+    const rows=parseStructuredClientPianoPayload({format,content});
+    const result=commitStructuredClientPianoImport(db,{rows,actorName:String(req.user?.name||req.user?.id||"IMPORT")});
+    audit(req,"IMPORT","client_pianos","STRUCTURED",null,{...result,format},1,`Structured Client Piano ${format.toUpperCase()} import`,'TECHNICAL');
+    res.status(201).json({ok:true,...result});
+  }catch(error){
+    res.status(400).json({error:error.message||"CLIENT_PIANO_IMPORT_FAILED",rowNumber:error.rowNumber||null,missingColumns:error.missingColumns||[]});
+  }
 });
 
 function pianoOwnerResolution(ownerContactId,ownershipType){
@@ -2287,6 +2336,7 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const id=req.body.id || rid("P");
   const brand=ensurePianoBrand(req.body.brand || "");
   const model=ensurePianoModel(brand,req.body.model || "");
+  if(!brand||!model)return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
   const display=`${brand} ${model}`.trim() || req.body.display_name || req.body.original_description || req.body.piano_name || "Unknown piano";
   const ownerContactId=req.body.owner_contact_id||null;
   const ownershipType=ownerContactId?"Customer owned":(req.body.ownership_type || req.body.ownership || "Unknown");
@@ -2297,9 +2347,10 @@ app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const sizeCm=req.body.size_cm||reference.size_cm||null;
   const sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null;
   const sizeDisplay=req.body.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,year,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.finish||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
+  const sizeLength=String(req.body.size_length||sizeDisplay||"").trim();
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,year,build_year,size_cm,size_in,size_display,size_length,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,external_reference,import_source,import_batch_id,original_description,owner_resolution)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand||reference.brand||"",model||reference.model||"",req.body.serial_no||"",req.body.finish||"",req.body.year||null,buildYear,sizeCm,sizeIn,sizeDisplay,sizeLength,ownershipType,ownershipType,display,ownerContactId,req.body.location||"",estimated,req.body.status||"Active",req.body.notes||"",req.body.external_reference||null,req.body.import_source||null,req.body.import_batch_id||null,req.body.original_description||null,resolution);
   if(ownerContactId) linkClientPiano(ownerContactId,id);
   refreshClientHasPiano(ownerContactId);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
@@ -2315,11 +2366,12 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   if(req.body.brand!==undefined) req.body.brand=ensurePianoBrand(req.body.brand);
   const catalogBrand=String(req.body.brand!==undefined?req.body.brand:before.brand||"").trim(),catalogModel=String(req.body.model!==undefined?req.body.model:before.model||"").trim();
   if(catalogBrand&&catalogModel)ensurePianoModel(catalogBrand,catalogModel);
+  if(!catalogBrand||!catalogModel)return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
   if(req.body.build_year===undefined && !candidate.build_year && reference.build_year) req.body.build_year=reference.build_year;
   if(req.body.size_cm===undefined && !candidate.size_cm && reference.size_cm) req.body.size_cm=reference.size_cm;
   if(req.body.size_in===undefined && !candidate.size_in && reference.size_inch) req.body.size_in=reference.size_inch;
   if(req.body.size_display===undefined && !candidate.size_display && reference.size_display) req.body.size_display=reference.size_display;
-  const allowed=["brand","model","serial_no","finish","year","build_year","size_cm","size_in","size_display","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
+  const allowed=["brand","model","serial_no","finish","year","build_year","size_cm","size_in","size_display","size_length","ownership","ownership_type","display_name","owner_contact_id","location","estimated_value","status","notes","external_reference","import_source","import_batch_id","original_description","owner_resolution"];
   if((req.body.brand!==undefined||req.body.model!==undefined)&&req.body.display_name===undefined){req.body.display_name=`${String(req.body.brand!==undefined?req.body.brand:before.brand||"").trim()} ${String(req.body.model!==undefined?req.body.model:before.model||"").trim()}`.trim();}
   const cols=allowed.filter(c=>req.body[c]!==undefined);
   if(cols.length) db.prepare(`UPDATE pianos SET ${cols.map(c=>`${c}=?`).join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...cols.map(c=>req.body[c]), req.params.id);
@@ -2329,8 +2381,11 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
     const ownershipType=ownerContactId?"Customer owned":requestedOwnership;
     const resolution=pianoOwnerResolution(ownerContactId,ownershipType);
     db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution=?,ownership=?,ownership_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(ownerContactId,resolution,ownershipType,ownershipType,req.params.id);
-    db.prepare("DELETE FROM client_pianos WHERE piano_id=?").run(req.params.id);
-    if(ownerContactId) linkClientPiano(ownerContactId,req.params.id);
+    const ownerChanged=String(ownerContactId||"")!==String(before.owner_contact_id||"");
+    if(ownerChanged){
+      db.prepare("DELETE FROM client_pianos WHERE piano_id=?").run(req.params.id);
+      if(ownerContactId) linkClientPiano(ownerContactId,req.params.id);
+    }
     refreshClientHasPiano(before.owner_contact_id);
     refreshClientHasPiano(ownerContactId);
   }
@@ -2414,7 +2469,8 @@ createResourceRoutes("knowledge_base","knowledge_base","KB",["job_id","title","c
 app.get("/api/client-profile/:id", auth, (req,res)=>{
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client) return res.status(404).json({error:"Client not found"});
-  const pianos=db.prepare(`SELECT DISTINCT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.created_at DESC`).all(req.params.id);
+  const pianos=db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
+    FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.created_at DESC`).all(req.params.id);
   const jobs=db.prepare(jobsSelectSql("WHERE j.client_id=? OR j.client_name=? ORDER BY j.start_time DESC LIMIT 50")).all(req.params.id, client.name);
   res.json({client,pianos,jobs,lastVisit:jobs[0]?.start_time || client.last_contact || "",lastJob:jobs[0]?.title || ""});
 });
@@ -2846,7 +2902,8 @@ app.post("/api/workflow/inline-client-piano", auth, permit("ADMIN","MANAGER","WO
 });
 
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
-  res.json(db.prepare(`SELECT DISTINCT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.display_name,p.brand,p.model`).all(req.params.id));
+  res.json(db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.verified_at,cp.verified_by
+    FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id WHERE cp.client_id=? ORDER BY p.display_name,p.brand,p.model`).all(req.params.id));
 });
 
 app.post("/api/contacts/:id/link-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
@@ -2871,13 +2928,14 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   const reference=centralPianoLookup(db,{serial:req.body.serial_no||"",brand:req.body.brand||"",model:req.body.model||"",currentYear:2026});
   const brand=ensurePianoBrand(req.body.brand || reference.brand || "");
   const model=ensurePianoModel(brand,req.body.model || reference.model || "");
+  if(!brand||!model)return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
   const ownershipType=req.body.ownership_type || "Customer owned";
   const estimated=Number(req.body.estimated_value||0);
-  const buildYear=req.body.build_year||reference.build_year||null,sizeCm=req.body.size_cm||reference.size_cm||null,sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null,sizeDisplay=req.body.size_display||reference.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null);
-  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,build_year,size_cm,size_in,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,brand,model,req.body.serial_no||"",req.body.finish||"",buildYear,sizeCm,sizeIn,sizeDisplay,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
+  const buildYear=req.body.build_year||reference.build_year||null,sizeCm=req.body.size_cm||reference.size_cm||null,sizeIn=req.body.size_in||req.body.size_inch||reference.size_inch||null,sizeDisplay=req.body.size_display||reference.size_display||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null),sizeLength=String(req.body.size_length||sizeDisplay||"").trim();
+  db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,build_year,size_cm,size_in,size_display,size_length,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id,brand,model,req.body.serial_no||"",req.body.finish||"",buildYear,sizeCm,sizeIn,sizeDisplay,sizeLength,ownershipType,ownershipType,display,client.id,req.body.location||client.address||"",estimated,"Active",req.body.notes||"");
   linkClientPiano(client.id,id);
   refreshClientHasPiano(client.id);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
@@ -2889,13 +2947,25 @@ app.put("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (r
   const client=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
   if(!client)return res.status(404).json({error:"Client not found"});
   const ids = Array.isArray(req.body.piano_ids) ? [...new Set(req.body.piano_ids.map(id=>String(id||'').trim()).filter(Boolean))] : [];
-  const previous=db.prepare("SELECT piano_id FROM client_pianos WHERE client_id=?").all(client.id).map(row=>row.piano_id);
-  db.prepare("DELETE FROM client_pianos WHERE client_id=?").run(client.id);
-  db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE owner_contact_id=?").run(client.id);
-  const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?");
-  for(const pianoId of ids){const exists=db.prepare("SELECT id,owner_contact_id FROM pianos WHERE id=?").get(pianoId);if(!exists)continue;if(exists.owner_contact_id&&String(exists.owner_contact_id)!==String(client.id))refreshClientHasPiano(exists.owner_contact_id);upd.run(client.id,pianoId);linkClientPiano(client.id,pianoId);}
-  refreshClientHasPiano(client.id);
-  previous.forEach(pianoId=>{if(!ids.includes(pianoId)){const owner=db.prepare("SELECT owner_contact_id FROM pianos WHERE id=?").get(pianoId)?.owner_contact_id;if(owner)refreshClientHasPiano(owner);}});
+  const sync=db.transaction(()=>{
+    const previousRows=db.prepare("SELECT id,piano_id FROM client_pianos WHERE client_id=?").all(client.id),previousIds=previousRows.map(row=>row.piano_id),touchedOwners=new Set([client.id]);
+    for(const pianoId of previousIds){
+      if(ids.includes(pianoId))continue;
+      db.prepare("DELETE FROM client_pianos WHERE client_id=? AND piano_id=?").run(client.id,pianoId);
+      db.prepare("UPDATE pianos SET owner_contact_id=NULL,owner_resolution='UNIDENTIFIED_OWNER',ownership='Unknown',ownership_type='Unknown',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_contact_id=?").run(pianoId,client.id);
+    }
+    const upd=db.prepare("UPDATE pianos SET owner_contact_id=?,owner_resolution='MATCHED_CLIENT',ownership='Customer owned',ownership_type='Customer owned',updated_at=CURRENT_TIMESTAMP WHERE id=?");
+    for(const pianoId of ids){
+      const piano=db.prepare("SELECT id,owner_contact_id FROM pianos WHERE id=?").get(pianoId);if(!piano)continue;
+      if(piano.owner_contact_id&&String(piano.owner_contact_id)!==String(client.id))touchedOwners.add(String(piano.owner_contact_id));
+      upd.run(client.id,pianoId);
+      const existing=db.prepare("SELECT id FROM client_pianos WHERE client_id=? AND piano_id=?").get(client.id,pianoId);
+      db.prepare("DELETE FROM client_pianos WHERE piano_id=? AND client_id<>?").run(pianoId,client.id);
+      if(!existing)db.prepare("INSERT INTO client_pianos(id,client_id,piano_id) VALUES(?,?,?)").run(rid("CP"),client.id,pianoId);
+    }
+    touchedOwners.forEach(refreshClientHasPiano);
+  });
+  sync();
   res.json({ok:true,piano_ids:ids});
 });
 app.get("/api/closed-jobs", auth, (req,res)=>{
