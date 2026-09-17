@@ -2311,3 +2311,17 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .piano-inspection-history{margin-top:1rem;border-top:1px solid rgba(15,40,75,.12);padding-top:.85rem}.piano-inspection-history article{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.65rem 0;border-bottom:1px solid rgba(15,40,75,.08)}
 .piano-inspection-history article div{display:grid;gap:.15rem}.piano-inspection-history article span,.piano-inspection-history article small{color:var(--muted,#687386)}.piano-inspection-history a{color:#1267b0;font-weight:700;text-decoration:none}
 @media(max-width:760px){.job-workflow-options,.workflow-inspection-grid{grid-template-columns:1fr}.workflow-typeahead-results{position:relative;top:auto;margin-top:.25rem}}
+
+/* Workflow ergonomic phase creation and deterministic overdue state. */
+.workflow-create-phase-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;align-items:stretch!important;gap:16px!important;padding:14px!important}
+.workflow-create-phase-left,.workflow-create-phase-right{display:flex;flex-direction:column;gap:12px;min-width:0}
+.workflow-create-phase-left .workflow-phase-toggle{flex:0 0 auto}
+.workflow-create-phase-deadline{margin-top:auto}
+.workflow-create-phase-right>label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px;font-weight:800}
+.workflow-create-phase-short-description{flex:1}
+.workflow-create-phase-short-description textarea{min-height:88px;resize:vertical}
+.workflow-phase-detail-field textarea[readonly]{cursor:default;opacity:.9;background:color-mix(in srgb,var(--panel2) 88%,#000);border-style:dashed}
+.workflow-stage-due.is-overdue{display:inline-flex;align-items:center;width:max-content;max-width:100%;padding:5px 8px;border-radius:7px;background:#DC2626!important;color:#fff!important;border:1px solid #EF4444!important;box-shadow:none!important;animation:none!important}
+.workflow-stage-card.status-overdue .workflow-stage-due.is-overdue{color:#fff!important}
+.workflow-planned-job-field:not(.has-matches) select{opacity:.78}
+@media(max-width:900px){.workflow-create-phase-row{grid-template-columns:1fr!important}}
