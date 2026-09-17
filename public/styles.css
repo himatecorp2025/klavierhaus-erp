@@ -2385,3 +2385,24 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .workflow-file-upload-control::file-selector-button:hover,
 .workflow-inspection-card input[type=file]::file-selector-button:hover,
 .workflow-inspection-create input[type=file]::file-selector-button:hover{background:#2563EB!important}
+
+/* Workflow mode, piano catalog and predictive-address hardening. */
+.workflow-workshop-location-note{display:flex;align-items:center;min-height:48px;padding:.75rem 1rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,.72);color:#94A3B8;font-size:.86rem;line-height:1.45}
+.workflow-create-phase-row.is-inactive .workflow-create-phase-left,.workflow-create-phase-row.is-inactive .workflow-create-phase-right{opacity:.62}
+.workflow-stage-editor.is-inactive .workflow-stage-editor-grid{opacity:.58}
+.workflow-stage-enabled-toggle{margin:0 0 12px;padding:.6rem .7rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,.55)}
+.workflow-typeahead-results,.workflow-piano-search-results,.workflow-model-results,.workflow-country-results,.workflow-postal-results{max-height:240px!important;overflow-x:hidden!important;overflow-y:auto!important;background:#0F172A!important;border:1px solid #334155!important;border-radius:8px!important;scrollbar-width:thin!important;scrollbar-color:#334155 #0F172A!important;color:#E2E8F0!important}
+.workflow-typeahead-results::-webkit-scrollbar,.workflow-piano-search-results::-webkit-scrollbar,.workflow-model-results::-webkit-scrollbar,.workflow-country-results::-webkit-scrollbar,.workflow-postal-results::-webkit-scrollbar{width:7px!important}
+.workflow-typeahead-results::-webkit-scrollbar-track,.workflow-piano-search-results::-webkit-scrollbar-track,.workflow-model-results::-webkit-scrollbar-track,.workflow-country-results::-webkit-scrollbar-track,.workflow-postal-results::-webkit-scrollbar-track{background:#0F172A!important}
+.workflow-typeahead-results::-webkit-scrollbar-thumb,.workflow-piano-search-results::-webkit-scrollbar-thumb,.workflow-model-results::-webkit-scrollbar-thumb,.workflow-country-results::-webkit-scrollbar-thumb,.workflow-postal-results::-webkit-scrollbar-thumb{background:#334155!important;border-radius:8px!important}
+.workflow-typeahead-option,.workflow-typeahead-add{color:#E2E8F0!important}
+.workflow-typeahead-option small{color:#94A3B8!important}
+.workflow-typeahead-option:hover,.workflow-typeahead-option:focus,.workflow-typeahead-add:hover,.workflow-typeahead-add:focus{background:#1E293B!important}
+.workflow-typeahead-add{color:#60A5FA!important}
+.workflow-piano-completion{margin-top:.45rem;padding:.65rem;border:1px solid #334155;border-radius:8px;background:#0F172A;color:#CBD5E1}
+.workflow-piano-completion p{margin:0 0 .55rem;font-size:.78rem;color:#94A3B8}
+.workflow-piano-completion>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:end;gap:.5rem}
+.workflow-piano-completion label{display:grid;gap:.25rem;font-size:.72rem;font-weight:700;color:#94A3B8}
+.workflow-piano-completion input{min-width:0;width:100%}
+.workflow-country-combobox,.workflow-model-combobox,.workflow-brand-combobox{position:relative;min-width:0}
+@media(max-width:760px){.workflow-piano-completion>div{grid-template-columns:1fr}.workflow-workshop-location-note{grid-column:1/-1}}
