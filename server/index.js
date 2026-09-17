@@ -438,6 +438,15 @@ function nextContactId(){
   const next = Math.min(max + 1, 99999);
   return `C-${String(next).padStart(5,"0")}`;
 }
+function structuredContactAddress(body={}){
+  return [body.address_line1,body.city,[body.state,body.postal_code].filter(Boolean).join(" "),body.country].map(value=>String(value||"").trim()).filter(Boolean).join(", ");
+}
+function ensurePianoBrand(brand){
+  const value=String(brand||"").trim();
+  if(!value)return "";
+  db.prepare("INSERT OR IGNORE INTO piano_brands(brand_name,active) VALUES(?,1)").run(value);
+  return value;
+}
 function today(){ return new Date().toISOString().slice(0,10); }
 function nowISO(){ return new Date().toISOString(); }
 function nyToday(){
@@ -1755,9 +1764,9 @@ function incomeStatementPayload(month,{forceFullMonth=false}={}){
   addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue,'OPERATING_REVENUE');
   addPnl('TICKET_REFUND_CONTRA_REVENUE','Ticket Refunds — Contra Revenue','Jegy-visszatérítés — bevételcsökkentés','REVENUE',-eventContraRevenue,'OPERATING_REVENUE');
   const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
-  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.source_type==='job').reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
+  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>['job','workflow'].includes(String(row.source_type||''))).reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
   const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
-  addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor Expense','Alvállalkozói közvetlen költség','EXPENSE',subcontractorExpense,'EXPENSE');
+  addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor / Transport Expense','Alvállalkozói / szállítási közvetlen költség','EXPENSE',subcontractorExpense,'EXPENSE');
   addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense,'EXPENSE');
   for(const item of monthDirect){
     if(item.main_type==='INCOME'){
@@ -2216,7 +2225,7 @@ function createResourceRoutes(key, table, prefix, write, roles){
     res.json({ok:true});
   });
 }
-createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address","billing_address","tax_id","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
+createResourceRoutes("contacts","contacts","C",["name","company","type","email","phone","address_line1","city","state","postal_code","country","address","billing_address","tax_id","priority","status","owner","relationship_holder","loss_risk","last_contact","next_step","notes","has_piano","interested_buying","interest_brand","interest_model","interest_budget","interest_timeline","interest_notes","external_reference","import_source","import_batch_id"],["ADMIN","MANAGER","WORKER"]);
 
 app.get("/api/contacts/:id", auth, (req,res)=>{
   const row=db.prepare("SELECT * FROM contacts WHERE id=?").get(req.params.id);
@@ -2270,7 +2279,7 @@ function rejectDuplicatePianoSerial(res,serial,excludeId=null){const existing=ex
 app.post("/api/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   if(rejectDuplicatePianoSerial(res,req.body.serial_no))return;
   const id=req.body.id || rid("P");
-  const brand=req.body.brand || "";
+  const brand=ensurePianoBrand(req.body.brand || "");
   const model=req.body.model || "";
   const display=`${brand} ${model}`.trim() || req.body.display_name || req.body.original_description || req.body.piano_name || "Unknown piano";
   const ownerContactId=req.body.owner_contact_id||null;
@@ -2297,6 +2306,7 @@ app.put("/api/pianos/:id", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>
   if(req.body.serial_no!==undefined&&rejectDuplicatePianoSerial(res,req.body.serial_no,req.params.id))return;
   const candidate={...before,...req.body};
   const reference=centralPianoLookup(db,{serial:candidate.serial_no||"",brand:candidate.brand||"",model:candidate.model||"",currentYear:2026});
+  if(req.body.brand!==undefined) req.body.brand=ensurePianoBrand(req.body.brand);
   if(req.body.build_year===undefined && !candidate.build_year && reference.build_year) req.body.build_year=reference.build_year;
   if(req.body.size_cm===undefined && !candidate.size_cm && reference.size_cm) req.body.size_cm=reference.size_cm;
   if(req.body.size_in===undefined && !candidate.size_in && reference.size_inch) req.body.size_in=reference.size_inch;
@@ -2767,20 +2777,39 @@ app.post("/api/jobs/:id/close", auth, (req,res)=>{
   }
 });
 
+app.get("/api/piano-brands", auth, (_req,res)=>{
+  try{
+    db.prepare("INSERT OR IGNORE INTO piano_brands(brand_name) SELECT DISTINCT trim(brand) FROM pianos WHERE brand IS NOT NULL AND trim(brand)<>''").run();
+    res.json(db.prepare("SELECT brand_name FROM piano_brands WHERE active=1 ORDER BY lower(brand_name),brand_name").all().map(row=>row.brand_name));
+  }catch(error){res.status(500).json({error:error.message});}
+});
+app.post("/api/piano-brands", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
+  try{
+    const brandName=ensurePianoBrand(req.body?.brand_name||req.body?.brand||req.body?.make);
+    if(!brandName)return res.status(400).json({error:"PIANO_BRAND_REQUIRED"});
+    const row=db.prepare("SELECT brand_name,active,created_at FROM piano_brands WHERE lower(brand_name)=lower(?) LIMIT 1").get(brandName);
+    res.status(201).json(row||{brand_name:brandName,active:1});
+  }catch(error){res.status(400).json({error:error.message||"PIANO_BRAND_CREATE_FAILED"});}
+});
+
 app.post("/api/workflow/inline-client-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const body=req.body||{},name=String(body.name||"").trim(),email=String(body.email||"").trim(),phone=String(body.phone||"").trim();
   if(!name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
+  const addressLine1=String(body.address_line1||"").trim(),city=String(body.city||"").trim(),state=String(body.state||"").trim(),postalCode=String(body.postal_code||"").trim(),country=String(body.country||"United States").trim()||"United States";
+  if(!addressLine1||!city||!state||!postalCode||!country)return res.status(400).json({error:"CLIENT_ADDRESS_REQUIRED"});
+  const fullAddress=structuredContactAddress({address_line1:addressLine1,city,state,postal_code:postalCode,country});
   const hasPiano=body.has_piano===true||body.has_piano===1||String(body.has_piano||"").toLowerCase()==="true";
   if(hasPiano&&(!String(body.make||body.brand||"").trim()||!String(body.model||"").trim()||!String(body.serial_number||body.serial_no||"").trim())) return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
   try{
     const result=db.transaction(()=>{
       const clientId=nextContactId();
-      db.prepare("INSERT INTO contacts(id,name,email,phone,has_piano,status) VALUES(?,?,?,?,?,'Active')").run(clientId,name,email,phone,hasPiano?1:0);
+      db.prepare("INSERT INTO contacts(id,name,email,phone,address_line1,city,state,postal_code,country,address,billing_address,has_piano,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'Active')")
+        .run(clientId,name,email,phone,addressLine1,city,state,postalCode,country,fullAddress,fullAddress,hasPiano?1:0);
       let piano=null;
       if(hasPiano){
         const serial=String(body.serial_number||body.serial_no||"").trim();
         const duplicate=existingPianoBySerial(serial);if(duplicate){const e=new Error("PIANO_SERIAL_ALREADY_EXISTS");e.code="PIANO_SERIAL_ALREADY_EXISTS";throw e;}
-        const id=rid("P"),brand=String(body.make||body.brand||"").trim(),model=String(body.model||"").trim(),finish=String(body.finish||"").trim(),display=`${brand} ${model}`.trim();
+        const id=rid("P"),brand=ensurePianoBrand(body.make||body.brand||""),model=String(body.model||"").trim(),finish=String(body.finish||"").trim(),display=`${brand} ${model}`.trim();
         db.prepare("INSERT INTO pianos(id,brand,model,serial_no,finish,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,owner_resolution) VALUES(?,?,?,?,?,'Customer owned','Customer owned',?,?,'',0,'Active','','MATCHED_CLIENT')").run(id,brand,model,serial,finish,display,clientId);
         linkClientPiano(clientId,id);piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
       }
@@ -2814,7 +2843,7 @@ app.post("/api/contacts/:id/pianos", auth, permit("ADMIN","MANAGER","WORKER"), (
   if(rejectDuplicatePianoSerial(res,req.body.serial_no))return;
   const id=req.body.id || rid("P");
   const reference=centralPianoLookup(db,{serial:req.body.serial_no||"",brand:req.body.brand||"",model:req.body.model||"",currentYear:2026});
-  const brand=req.body.brand || reference.brand || "";
+  const brand=ensurePianoBrand(req.body.brand || reference.brand || "");
   const model=req.body.model || reference.model || "";
   const display=req.body.display_name || `${brand} ${model}`.trim() || req.body.piano_name || "Unknown piano";
   const ownershipType=req.body.ownership_type || "Customer owned";
