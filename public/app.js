@@ -35,6 +35,8 @@ let notificationUnreadCount=0;
 let notificationGateResolved=false;
 let notificationGateBusy=false;
 let currentNotifications=[];
+let deadlineNotifications=[];
+let deadlineNotificationPollTimer=null;
 let currentTimeLineInterval=null;
 let calendarAutoRefreshBusy=false;
 let jobDetailsRequestSequence=0;
@@ -188,11 +190,11 @@ const plannedJobProbabilities=["100% - Biztos","75% - Nagyon valószínű","50% 
 const staticTranslations={
  en:{
    appTitle:"Klavierhaus Work Management",loginSubtitle:"Calendar-first job management",email:"Email",password:"Password",login:"Login",logout:"Logout",deleteEverything:"Delete Everything",operations:"New York time based operations",logoutIn:"Logout in",securityLogout:"Security logout: you have been signed out after 10 minutes without clicking.",activationTitle:"Verify your account",activationDescription:"Enter the six-digit code sent to your contact email.",activationCode:"Activation code",activationVerify:"Verify and continue",activationResend:"Send a new code",activationBack:"Back to login",activationRecipient:"Code sent to",
-   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Company Documents Archive",finance:"Balance Sheet",income_statement:"Income Statement",invoice_documents:"Invoices Documents",inventory:"Inventory",events:"Events",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Search as you type...", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
+   scheduler:"Scheduler",planned_jobs:"Planned Jobs",contacts:"Clients",pianos:"Pianos",closed_jobs:"Closed Jobs",knowledge_base:"Company Documents Archive",finance:"Balance Sheet",income_statement:"Income Statement",invoice_documents:"Invoices Documents",inventory:"Inventory",events:"Events",users:"Users", audit_log:"Audit Log", settings:"Settings", today:"Today", tasks:"Tasks", more:"More", newJob:"New Job", calendar:"Calendar", all:"All", workerFilter:"Worker", failed:"Failed", noClosedJobs:"No closed jobs yet", actions:"Actions", searchClients:"Search clients by name, address, or piano", searchPlaceholder:"Search as you type...", myProfile:"My profile", phone:"Phone", address:"Address", newPassword:"New password", leaveEmpty:"Leave empty to keep current", saveChanges:"Save changes", createUser:"Create user", editUser:"Edit user", addUser:"Add user", customerStatus:"Status", ownerClient:"Owner", buyerLead:"Buyer lead", ownerBuyerLead:"Owner + buyer lead", generalContact:"General"
  },
  hu:{
    appTitle:"Klavierhaus munkakezelő rendszer",loginSubtitle:"Naptárközpontú munkakezelés",email:"Email",password:"Jelszó",login:"Belépés",logout:"Kilépés",deleteEverything:"Mindent töröl",operations:"New York-i időzóna szerinti működés",logoutIn:"Automatikus kilépés",securityLogout:"Biztonsági kijelentkezés: 10 perc kattintás nélküli inaktivitás miatt kijelentkeztettünk.",activationTitle:"Fiók ellenőrzése",activationDescription:"Add meg a kapcsolattartási e-mail-címedre küldött hatjegyű kódot.",activationCode:"Aktiválókód",activationVerify:"Ellenőrzés és belépés",activationResend:"Új kód küldése",activationBack:"Vissza a belépéshez",activationRecipient:"A kód címzettje",
-   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Céges dokumentumtár",finance:"Mérleg",income_statement:"Eredménykimutatás",invoice_documents:"Számladokumentumok",inventory:"Leltár",events:"Események",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Gépelés közbeni keresés...", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
+   scheduler:"Naptár",planned_jobs:"Tervezett munkák",contacts:"Ügyfelek",pianos:"Zongorák",closed_jobs:"Lezárt munkák",knowledge_base:"Céges dokumentumtár",finance:"Mérleg",income_statement:"Eredménykimutatás",invoice_documents:"Számladokumentumok",inventory:"Leltár",events:"Események",users:"Felhasználók", audit_log:"Módosítási napló", settings:"Beállítások", today:"Ma", tasks:"Teendők", more:"Továbbiak", newJob:"Új munka", calendar:"Naptár", all:"Minden", workerFilter:"Munkatárs", failed:"Sikertelen", noClosedJobs:"Még nincs lezárt munka", actions:"Műveletek", searchClients:"Ügyfelek keresése név, cím vagy zongora alapján", searchPlaceholder:"Gépelés közbeni keresés...", myProfile:"Adataim", phone:"Telefonszám", address:"Lakcím", newPassword:"Új jelszó", leaveEmpty:"Hagyd üresen, ha marad", saveChanges:"Módosítás mentése", createUser:"Felhasználó létrehozása", editUser:"Felhasználó szerkesztése", addUser:"Felhasználó hozzáadása", customerStatus:"Státusz", ownerClient:"Birtokló", buyerLead:"Érdeklődő", ownerBuyerLead:"Birtokló + érdeklődő", generalContact:"Általános"
  }
 };
 let branding={company_name:'Klavierhaus',short_name:'KH ERP',logo_url:'/icons/icon-512.png',login_background_url:'',branding_version:'1'};
@@ -1164,6 +1166,7 @@ async function boot(){
    initCustomSelectSystem();
    initAdminDatePickerSystem();
    initNotificationCenter();
+ initDeadlineNotificationEngine();
    initNotificationActivationGate();
    const notificationsReady=await evaluateMandatoryNotificationGate({showGate:true});
    if(notificationsReady){
@@ -1626,6 +1629,7 @@ async function render(v,opts={}){
   else if(v==="audit_log") await renderAuditLog();
   else if(v==="settings") await renderSettings();
   else if(v==="pianos") await renderPianos();
+  else if(v==="tasks") await renderDeadlineTasks();
   else if(v==="notifications") await renderNotifications();
   else await renderTable(v);
   ensureViewBackHeader(target,v);
@@ -1684,12 +1688,12 @@ function updateMobileNavigationLanguage(){
 function updateMobileNavigationActive(){
   document.querySelectorAll(".mobile-nav-btn[data-mobile-view]").forEach(btn=>btn.classList.toggle("active",!navigationHomeNeutral&&btn.dataset.mobileView===currentView));
   const more=document.getElementById("mobileMoreBtn");
-  if(more) more.classList.toggle("active",!navigationHomeNeutral&&!["today","contacts","pianos"].includes(currentView));
+  if(more) more.classList.toggle("active",!navigationHomeNeutral&&!["today","contacts","tasks"].includes(currentView));
 }
 function closeMobileMore(){ const sheet=document.getElementById("mobileMoreSheet"); if(sheet){sheet.classList.add("hidden");sheet.setAttribute("aria-hidden","true");document.body.classList.remove("mobile-sheet-open");} }
 function openMobileMore(){
   const sheet=document.getElementById("mobileMoreSheet"), items=document.getElementById("mobileMoreItems"); if(!sheet||!items)return;
-  const all=visibleNavigationItems().filter(n=>!['contacts','pianos'].includes(n[0]));
+  const all=visibleNavigationItems().filter(n=>n[0]!=='contacts');
   items.innerHTML=all.map(n=>`<button type="button" class="mobile-more-item ${!navigationHomeNeutral&&currentView===n[0]?'active':''}" data-more-view="${n[0]}"><span>${mobileViewIcon(n[0])}</span><b>${navLabel(n[0])}</b></button>`).join("")+`<button type="button" class="mobile-more-item" id="mobileProfileBtn"><span>👤</span><b>${tr('myProfile')}</b></button><button type="button" class="mobile-more-item" id="mobileLogoutBtn"><span>↪</span><b>${tr('logout')}</b></button>`;
   sheet.classList.remove("hidden");sheet.setAttribute("aria-hidden","false");document.body.classList.add("mobile-sheet-open");
   items.querySelectorAll("[data-more-view]").forEach(btn=>btn.onclick=()=>{closeMobileMore();render(btn.dataset.moreView,{navigationActivate:true});});
@@ -4583,6 +4587,72 @@ async function exportInventoryPDF(){
  win.document.close();
 }
 
+
+function deadlineNotificationIcon(type){
+ const common='class="deadline-notification-svg" viewBox="0 0 24 24" aria-hidden="true"';
+ if(type==='CLIENT_FOLLOWUP')return `<svg ${common}><path d="M6.6 3.8 9 8 7.2 9.8c1.5 3 3.9 5.4 6.9 6.9L16 15l4.2 2.4-.8 3.2c-.2.8-1 1.4-1.9 1.4C9 21.5 2.5 15 2 6.5c0-.9.6-1.7 1.4-1.9l3.2-.8Z"/></svg>`;
+ if(type==='WORKFLOW_STAGE')return `<svg ${common}><path d="M4 6h16v12H4zM7 6v7M11 6v7M15 6v7M19 6v7M6 13v5M10 13v5M14 13v5M18 13v5"/></svg>`;
+ return `<svg ${common}><path d="M5 4v3M19 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13H4V7a1 1 0 0 1 1-1Z"/></svg>`;
+}
+function deadlineUrgencyLabel(row){
+ const date=String(row?.target_date||'').replace('T',' ');
+ if(row?.urgency==='URGENT_OVERDUE')return `${bi('Urgent / overdue','Sürgős / lejárt')} · ${date}`;
+ if(row?.urgency==='DUE_SOON')return `${bi('Due soon','Hamarosan esedékes')} · ${date}`;
+ return `${bi('Upcoming','Közelgő')} · ${date}`;
+}
+function deadlineTypeLabel(type){return type==='CLIENT_FOLLOWUP'?bi('Client follow-up','Ügyfél megkeresés'):type==='WORKFLOW_STAGE'?bi('Workshop deadline','Műhely határidő'):bi('Calendar job','Naptári munka');}
+function deadlineCardMarkup(row,{mobile=false}={}){
+ const phone=row.phone?`<a class="deadline-phone" href="tel:${htmlText(String(row.phone).replace(/[^+\d]/g,''))}" onclick="event.stopPropagation()">${htmlText(row.phone)}</a>`:'';
+ return `<article class="deadline-notification-card urgency-${htmlText(String(row.urgency||'').toLowerCase())} ${mobile?'is-mobile':''}" data-deadline-card="${htmlText(row.id)}" data-entity-type="${htmlText(row.entity_type)}" data-entity-id="${htmlText(row.entity_id)}">
+  <div class="deadline-card-head"><span class="deadline-card-icon">${deadlineNotificationIcon(row.entity_type)}</span><div class="deadline-card-title"><small>${htmlText(deadlineTypeLabel(row.entity_type))}</small><strong>${htmlText(row.title||'')}</strong></div></div>
+  <p class="deadline-card-subtitle">${htmlText(row.subtitle||'')}${phone?` · ${phone}`:''}</p>
+  ${row.description?`<p class="deadline-card-description">${htmlText(row.description)}</p>`:''}
+  <span class="deadline-time-badge">${htmlText(deadlineUrgencyLabel(row))}</span>
+  <div class="deadline-card-actions"><button type="button" class="deadline-action-complete" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','complete')">✔ ${bi('Done','Kész')}</button><button type="button" class="deadline-action-reschedule" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','reschedule')">↻ ${bi('Reschedule','Újraütemezés')}</button><button type="button" class="deadline-action-snooze" onclick="snoozeDeadlineNotification('${htmlText(row.entity_type)}','${htmlText(row.entity_id)}','${htmlText(row.id)}')">◷ ${bi('Remind later','Később')}</button></div>
+  <div class="deadline-inline-panel hidden" data-deadline-panel="${htmlText(row.id)}"></div>
+ </article>`;
+}
+function updateDeadlineTaskBadge(count){const badge=document.getElementById('pwa-tasks-badge');if(!badge)return;const safe=Math.max(0,Number(count||0));badge.textContent=safe>99?'99+':String(safe);badge.classList.toggle('hidden',safe===0);}
+function renderDeadlineStack(rows=deadlineNotifications){const stack=document.getElementById('global-notification-stack');if(!stack)return;stack.innerHTML=rows.map(row=>deadlineCardMarkup(row)).join('');}
+async function refreshDeadlineNotifications({renderMobile=false}={}){
+ if(!token)return;
+ try{const payload=await api('/api/notifications/active');deadlineNotifications=Array.isArray(payload?.notifications)?payload.notifications:[];renderDeadlineStack();updateDeadlineTaskBadge(deadlineNotifications.length);if(renderMobile||currentView==='tasks')renderDeadlineTasksFromState();}
+ catch(error){console.warn('Deadline notifications unavailable:',error.message);}
+}
+function renderDeadlineTasksFromState(){
+ const box=ensureView('tasks');if(!box)return;
+ const cards=deadlineNotifications.map(row=>deadlineCardMarkup(row,{mobile:true})).join('');
+ box.innerHTML=`${mobileBackHeader(bi('Tasks','Teendők'))}<div class="panel mobile-deadline-tasks"><div class="toolbar"><div><p class="event-kicker">${bi('Active deadlines','Aktív határidők')}</p><h2>${bi('Tasks','Teendők')}</h2></div><span class="tasks-total-badge">${deadlineNotifications.length}</span></div><div class="mobile-deadline-list">${cards||`<div class="empty-notifications"><div class="empty-notifications-icon">✓</div><h3>${bi('No active tasks','Nincs aktív teendő')}</h3><p>${bi('There are no deadlines requiring action in the next 14 days.','Nincs beavatkozást igénylő határidő a következő 14 napban.')}</p></div>`}</div></div>`;
+}
+async function renderDeadlineTasks(){await refreshDeadlineNotifications({renderMobile:true});renderDeadlineTasksFromState();}
+function findDeadlineNotification(cardId){return deadlineNotifications.find(row=>String(row.id)===String(cardId));}
+function toggleDeadlineActionPanel(cardId,mode){
+ const row=findDeadlineNotification(cardId),panel=document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;
+ document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';}});
+ const open=panel.dataset.mode===mode&&!panel.classList.contains('hidden');if(open){panel.classList.add('hidden');panel.innerHTML='';panel.dataset.mode='';return;}
+ panel.dataset.mode=mode;panel.classList.remove('hidden');
+ if(mode==='complete'){panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" onclick="completeDeadlineNotification('${htmlText(cardId)}')">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" onclick="toggleDeadlineActionPanel('${htmlText(cardId)}','complete')">${bi('Cancel','Mégse')}</button></div>`;return;}
+ const value=String(row.target_date||'').slice(0,16);panel.innerHTML=`<input type="datetime-local" data-deadline-date value="${htmlText(value)}" required><input type="text" maxlength="2000" data-deadline-reason placeholder="${htmlText(bi('Reason for delay/change...','Késés/módosítás oka...'))}" required><div class="deadline-inline-actions"><button type="button" onclick="rescheduleDeadlineNotification('${htmlText(cardId)}')">${bi('Save','Mentés')}</button><button type="button" class="ghost-btn" onclick="toggleDeadlineActionPanel('${htmlText(cardId)}','reschedule')">${bi('Cancel','Mégse')}</button></div>`;
+}
+function animateDeadlineCardOut(cardId){document.querySelectorAll(`[data-deadline-card="${CSS.escape(String(cardId))}"]`).forEach(card=>card.classList.add('is-leaving'));}
+async function snoozeDeadlineNotification(entityType,entityId,cardId){try{animateDeadlineCardOut(cardId);await api('/api/notifications/snooze',{method:'POST',body:JSON.stringify({entity_type:entityType,entity_id:entityId})});setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),210);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}}
+async function completeDeadlineNotification(cardId){
+ const row=findDeadlineNotification(cardId),panel=document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;const note=panel.querySelector('[data-deadline-note]')?.value||'';
+ try{
+  if(row.entity_type==='WORKFLOW_STAGE'){const existing=String(row.existing_note||'').trim(),merged=[existing,note.trim()?`[${new Date().toISOString()}] ${bi('Completed from Tasks','Teendőkből lezárva')}: ${note.trim()}`:''].filter(Boolean).join('\n');await api(`/api/workflows/${encodeURIComponent(row.workflow_id)}/stages/${encodeURIComponent(row.entity_id)}`,{method:'PATCH',body:JSON.stringify({status:'COMPLETED',notes:merged})});}
+  else await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id,note})});
+  animateDeadlineCardOut(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),210);
+ }catch(error){showError(error);}
+}
+async function rescheduleDeadlineNotification(cardId){
+ const row=findDeadlineNotification(cardId),panel=document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;const targetDate=panel.querySelector('[data-deadline-date]')?.value||'',reason=panel.querySelector('[data-deadline-reason]')?.value.trim()||'';if(!targetDate||!reason)return showError(bi('Date and reason are required.','A dátum és az indoklás kötelező.'));
+ try{await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id,target_date:targetDate,reason})});animateDeadlineCardOut(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),210);}catch(error){showError(error);}
+}
+function initDeadlineNotificationEngine(){
+ if(deadlineNotificationPollTimer)clearInterval(deadlineNotificationPollTimer);
+ refreshDeadlineNotifications();deadlineNotificationPollTimer=setInterval(()=>{if(document.visibilityState!=="hidden")refreshDeadlineNotifications({renderMobile:currentView==='tasks'});},60000);
+ if(!window.__khDeadlineVisibilityBound){document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&token)refreshDeadlineNotifications({renderMobile:currentView==='tasks'});});window.__khDeadlineVisibilityBound=true;}
+}
 
 function notificationBellMarkup(id='notificationBell'){
  return `<button id="${id}" class="notification-bell" type="button" aria-label="${bi('Notifications','Értesítések')}" title="${bi('Notifications','Értesítések')}" onclick="openNotifications()">🔔<span class="notification-badge ${notificationUnreadCount>0?'':'hidden'}">${notificationUnreadCount||0}</span></button>`;
