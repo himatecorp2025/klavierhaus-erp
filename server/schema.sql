@@ -9,6 +9,11 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
   status TEXT DEFAULT 'Active',
   phone TEXT,
+  address_line1 TEXT,
+  city TEXT,
+  state TEXT,
+  postal_code TEXT,
+  country TEXT DEFAULT 'United States',
   address TEXT,
   calendar_color TEXT,
   google_calendar_email TEXT,
@@ -68,6 +73,11 @@ CREATE TABLE IF NOT EXISTS contacts (
   type TEXT,
   email TEXT,
   phone TEXT,
+  address_line1 TEXT,
+  city TEXT,
+  state TEXT,
+  postal_code TEXT,
+  country TEXT DEFAULT 'United States',
   address TEXT,
   billing_address TEXT,
   tax_id TEXT,
@@ -124,6 +134,15 @@ CREATE TABLE IF NOT EXISTS pianos (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pianos_serial_no_unique ON pianos(lower(trim(serial_no))) WHERE serial_no IS NOT NULL AND trim(serial_no)<>'';
+
+CREATE TABLE IF NOT EXISTS piano_brands (
+  brand_name TEXT PRIMARY KEY COLLATE NOCASE,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_piano_brands_active_name ON piano_brands(active,brand_name);
+INSERT OR IGNORE INTO piano_brands(brand_name,active) VALUES
+  ('Steinway & Sons',1),('Bösendorfer',1),('Yamaha',1),('Fazioli',1),('Bechstein',1);
 
 CREATE TABLE IF NOT EXISTS client_pianos (
   id TEXT PRIMARY KEY,
@@ -1913,12 +1932,16 @@ CREATE TABLE IF NOT EXISTS workflow_financial_lines (
   description TEXT,
   amount REAL NOT NULL DEFAULT 0,
   billing_status TEXT NOT NULL DEFAULT 'CHARGEABLE' CHECK(billing_status IN ('CHARGEABLE','WARRANTY','FREE','COMPENSATION','CREDIT')),
+  partner_id TEXT,
+  payable_invoice_id TEXT,
   posted_financial_item_id TEXT,
   created_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
   FOREIGN KEY(stage_id) REFERENCES workflow_stages(id) ON DELETE SET NULL,
+  FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
+  FOREIGN KEY(payable_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
   FOREIGN KEY(posted_financial_item_id) REFERENCES financial_items(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
