@@ -2325,3 +2325,24 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .workflow-stage-card.status-overdue .workflow-stage-due.is-overdue{color:#fff!important}
 .workflow-planned-job-field:not(.has-matches) select{opacity:.78}
 @media(max-width:900px){.workflow-create-phase-row{grid-template-columns:1fr!important}}
+
+
+/* Workflow finance/modal hardening — keeps floating controls above every backdrop without clipping. */
+.modal,.modal-overlay,.app-overlay{z-index:1000}
+.modal-box,.modal-container,.modal-dialog,.nested-modal-card{position:relative;z-index:1010}
+.dropdown-menu,.select-dropdown-list,.autocomplete-results,.workflow-typeahead-results,.manual-counterparty-menu{position:absolute;z-index:1050!important;pointer-events:auto}
+.field:has(.dropdown-menu),.field:has(.select-dropdown-list),.field:has(.autocomplete-results),.workflow-typeahead-field,.manual-counterparty-field{position:relative;overflow:visible;z-index:1040}
+.modal:has(.dropdown-menu:not(.hidden)),.modal:has(.select-dropdown-list:not(.hidden)),.modal:has(.autocomplete-results:not(.hidden)),.nested-modal-overlay:has(.workflow-typeahead-results:not(.hidden)),.nested-modal-overlay:has(.manual-counterparty-menu:not(.hidden)){overflow:auto}
+.modal-box:has(.dropdown-menu:not(.hidden)),.modal-box:has(.select-dropdown-list:not(.hidden)),.modal-box:has(.autocomplete-results:not(.hidden)),.nested-modal-card:has(.workflow-typeahead-results:not(.hidden)),.manual-invoice-card:has(.manual-counterparty-menu:not(.hidden)){overflow:visible!important;max-height:none}
+.manual-counterparty-menu,.workflow-typeahead-results{background:#0d1b2e;color:var(--text);border-color:#334155;box-shadow:0 18px 44px rgba(0,0,0,.58)}
+.manual-counterparty-option,.workflow-typeahead-option{pointer-events:auto;color:var(--text)}
+.workflow-inspection-create,.workflow-inspection-panel{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important}
+.workflow-inspection-grid article{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important}
+.workflow-inspection-question{display:flex!important;align-items:flex-start!important;gap:.75rem!important;margin:.55rem 0 .8rem!important}
+.workflow-inspection-question input{flex:0 0 auto;margin-top:.18rem}
+.workflow-inspection-question label,.workflow-inspection-question span{margin:0}
+.workflow-inspection-create input[type=file],.workflow-inspection-panel input[type=file]{border:1px solid #334155;background:#081525}
+.workflow-phase-cost-form{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(120px,.7fr) minmax(150px,.8fr) minmax(150px,.8fr) minmax(180px,1fr) auto;gap:.65rem;align-items:end}
+.status-draft,.badge.Draft{background:#475569!important;color:#f8fafc!important}
+@media(max-width:1050px){.workflow-phase-cost-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.workflow-phase-cost-form{grid-template-columns:1fr}}
