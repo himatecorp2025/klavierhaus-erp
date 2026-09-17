@@ -142,7 +142,22 @@ CREATE TABLE IF NOT EXISTS piano_brands (
 );
 CREATE INDEX IF NOT EXISTS idx_piano_brands_active_name ON piano_brands(active,brand_name);
 INSERT OR IGNORE INTO piano_brands(brand_name,active) VALUES
-  ('Steinway & Sons',1),('Bösendorfer',1),('Yamaha',1),('Fazioli',1),('Bechstein',1);
+  ('Steinway & Sons',1),('Bösendorfer',1),('Fazioli',1),('C. Bechstein',1),('Yamaha',1);
+
+CREATE TABLE IF NOT EXISTS piano_model_catalog (
+  brand_name TEXT NOT NULL COLLATE NOCASE,
+  model_name TEXT NOT NULL COLLATE NOCASE,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(brand_name,model_name)
+);
+CREATE INDEX IF NOT EXISTS idx_piano_model_catalog_active_brand ON piano_model_catalog(active,brand_name,model_name);
+INSERT OR IGNORE INTO piano_model_catalog(brand_name,model_name,active) VALUES
+  ('Steinway & Sons','D-274',1),('Steinway & Sons','B-211',1),('Steinway & Sons','A-188',1),('Steinway & Sons','O-180',1),('Steinway & Sons','M-170',1),('Steinway & Sons','S-155',1),('Steinway & Sons','K-132',1),
+  ('Bösendorfer','Imperial 290',1),('Bösendorfer','280VC',1),('Bösendorfer','225',1),('Bösendorfer','214VC',1),('Bösendorfer','200',1),('Bösendorfer','185VC',1),('Bösendorfer','170',1),('Bösendorfer','130',1),
+  ('Fazioli','F308',1),('Fazioli','F278',1),('Fazioli','F228',1),('Fazioli','F212',1),('Fazioli','F183',1),('Fazioli','F156',1),
+  ('C. Bechstein','D-282',1),('C. Bechstein','C-234',1),('C. Bechstein','B-212',1),('C. Bechstein','A-192',1),('C. Bechstein','L-167',1),('C. Bechstein','Concert 8',1),
+  ('Yamaha','CFX',1),('Yamaha','CF6',1),('Yamaha','CF4',1),('Yamaha','SX Series',1),('Yamaha','C3X',1),('Yamaha','U1',1),('Yamaha','U3',1);
 
 CREATE TABLE IF NOT EXISTS client_pianos (
   id TEXT PRIMARY KEY,
