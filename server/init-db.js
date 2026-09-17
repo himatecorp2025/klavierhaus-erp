@@ -166,6 +166,9 @@ function migrationRequiresBackup() {
   const usersMissingGoogleCalendarEmail = tableExists("users") && !tableColumns("users").has("google_calendar_email");
   const usersMissingContactEmail = tableExists("users") && !tableColumns("users").has("contact_email");
   const contactsTaxIdMissing = tableExists("contacts") && !tableColumns("contacts").has("tax_id");
+  const contactsCrmColumnsMissing = tableExists("contacts") && ["is_vip","follow_up_date","follow_up_cadence","follow_up_reason","relationship_notes"].some((column) => !tableColumns("contacts").has(column));
+  const clientPianoLocationColumnsMissing = tableExists("client_pianos") && ["piano_location_address","location_name"].some((column) => !tableColumns("client_pianos").has(column));
+  const jobsCrmColumnsMissing = tableExists("jobs") && ["is_crm_follow_up","contact_id"].some((column) => !tableColumns("jobs").has(column));
   const inventoryMissingCreator = tableExists("inventory_items") && !tableColumns("inventory_items").has("created_by_user_id");
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id","financial_status","financial_ledger_id","closed_at"].some((column) => !tableColumns("jobs").has(column));
@@ -186,7 +189,7 @@ function migrationRequiresBackup() {
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
   const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableColumns("invoices").has("revenue_recognition_status") || !tableColumns("invoices").has("revenue_recognition_date") || !tableColumns("invoices").has("deferred_event_id") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("NONE / INTERNAL") || !tableSql("invoices").includes("'event'"));
   const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
-  return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || invoiceItemSettlementMissing || contactsTaxIdMissing || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
+  return usersSql.includes("'VIEWER'") || invoicePaymentSchemaOutdated || invoiceItemSettlementMissing || contactsTaxIdMissing || contactsCrmColumnsMissing || clientPianoLocationColumnsMissing || jobsCrmColumnsMissing || usersMissingCalendarColor || usersMissingGoogleCalendarEmail || usersMissingContactEmail || inventoryMissingCreator || inventoryMissingReservedQuantity || jobsMissingPlannedMinutes || googleIntegrationMissing || activationTablesMissing || eventTablesMissing || websiteCatalogTablesMissing || websitePlatformTablesMissing || eventPlatformColumnsMissing || eventArtistForeignKeyMissing || sampleFlagsMissing || attendancePauseColumnsMissing || sampleContentMissing || workflowTablesMissing || systemIntegrationTablesMissing || jobsMissingRound5DomainColumns || round6DailyRateMissing || workflowMissingJobLink;
 }
 
 function migrateWebsiteContactLeadStatuses() {
@@ -847,6 +850,15 @@ function runMigrations() {
   // branch and receive the column plus its foreign key from schema.sql.
   if (tableExists("jobs")) {
     ensureColumn("jobs", "workshop_workflow_id", "TEXT");
+    ensureColumn("jobs", "is_crm_follow_up", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("jobs", "contact_id", "TEXT");
+  }
+  if (tableExists("contacts")) {
+    ensureColumn("contacts", "is_vip", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("contacts", "follow_up_date", "TEXT");
+    ensureColumn("contacts", "follow_up_cadence", "TEXT");
+    ensureColumn("contacts", "follow_up_reason", "TEXT");
+    ensureColumn("contacts", "relationship_notes", "TEXT");
   }
   // The current schema creates idx_client_pianos_verified immediately. On an
   // existing database, add the relation-verification columns before schema.sql
@@ -855,6 +867,8 @@ function runMigrations() {
     ensureColumn("client_pianos", "is_verified", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn("client_pianos", "verified_at", "TEXT");
     ensureColumn("client_pianos", "verified_by", "TEXT");
+    ensureColumn("client_pianos", "piano_location_address", "TEXT");
+    ensureColumn("client_pianos", "location_name", "TEXT");
   }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
@@ -894,6 +908,11 @@ function runMigrations() {
     ensureColumn("contacts", "interest_budget", "REAL DEFAULT 0");
     ensureColumn("contacts", "interest_timeline", "TEXT");
     ensureColumn("contacts", "interest_notes", "TEXT");
+    ensureColumn("contacts", "is_vip", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("contacts", "follow_up_date", "TEXT");
+    ensureColumn("contacts", "follow_up_cadence", "TEXT");
+    ensureColumn("contacts", "follow_up_reason", "TEXT");
+    ensureColumn("contacts", "relationship_notes", "TEXT");
 
     // Pianos and piano import.
     db.exec(`CREATE TABLE IF NOT EXISTS piano_brands (
@@ -928,6 +947,8 @@ function runMigrations() {
       is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0,1)),
       verified_at TEXT,
       verified_by TEXT,
+      piano_location_address TEXT,
+      location_name TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(client_id,piano_id),
       FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
@@ -936,6 +957,8 @@ function runMigrations() {
     ensureColumn("client_pianos", "is_verified", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn("client_pianos", "verified_at", "TEXT");
     ensureColumn("client_pianos", "verified_by", "TEXT");
+    ensureColumn("client_pianos", "piano_location_address", "TEXT");
+    ensureColumn("client_pianos", "location_name", "TEXT");
     db.prepare(`INSERT OR IGNORE INTO client_pianos(id,client_id,piano_id)
       SELECT 'CP-' || lower(hex(randomblob(12))), owner_contact_id, id FROM pianos
       WHERE owner_contact_id IS NOT NULL AND trim(owner_contact_id)<>''`).run();
@@ -975,6 +998,10 @@ function runMigrations() {
     ensureColumn("jobs", "technician_extra_compensation", "REAL NOT NULL DEFAULT 0");
     ensureColumn("jobs", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
     ensureColumn("jobs", "invoice_id", "TEXT");
+    ensureColumn("jobs", "is_crm_follow_up", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("jobs", "contact_id", "TEXT");
+    ensureIndex("idx_contacts_crm_follow_up", "CREATE INDEX IF NOT EXISTS idx_contacts_crm_follow_up ON contacts(follow_up_date,is_vip)");
+    ensureIndex("idx_jobs_crm_follow_up_contact", "CREATE INDEX IF NOT EXISTS idx_jobs_crm_follow_up_contact ON jobs(is_crm_follow_up,contact_id,status)");
 
     db.exec(`CREATE TABLE IF NOT EXISTS employee_daily_rates (
       user_id TEXT NOT NULL,
