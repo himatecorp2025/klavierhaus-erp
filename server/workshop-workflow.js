@@ -426,8 +426,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const stageDefinitions = definitions(true).sort((a, b) => a.sort_order - b.sort_order || String(a.id).localeCompare(String(b.id)));
       const explicitStageSelection = Object.keys(body).some((key) => key.startsWith("stage_enabled_"));
       const selectedDefinitions = stageDefinitions.filter((definition) => {
-        if (mode === "ON_SITE" && definition.code === "INBOUND") return false;
-        if (!explicitStageSelection) return true;
+        if (!explicitStageSelection) return mode === "ON_SITE" ? definition.code !== "INBOUND" : true;
         return ["1", "true", "on", "yes"].includes(String(body[`stage_enabled_${definition.code}`] || "").toLowerCase());
       });
       if (!selectedDefinitions.length) throw error("WORKFLOW_ACTIVE_PHASE_REQUIRED");
@@ -465,11 +464,11 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         const pianoName = piano.display_name || `${piano.brand || ""} ${piano.model || ""}`.trim() || piano.serial_no || piano.id;
         db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,workflow_id,workshop_workflow_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          linkedJobId,`WFJOB-${key}`,linkedJobId,1,"ACTIVE",id,id,title,"Workflow",client.id,client.name,piano.id,pianoName,firstAssignee.id,firstAssignee.name,req.user.id,req.user.name,"Medium","Open",linkedStart,linkedEnd,"America/New_York",0,SCHEDULE_INTERVAL_MINUTES/60,SCHEDULE_INTERVAL_MINUTES,0,clean(body.transport_address||body.current_location,500),clean(body.description),clean(body.description)
+          linkedJobId,`WFJOB-${key}`,linkedJobId,1,"ACTIVE",id,id,title,"Workflow",client.id,client.name,piano.id,pianoName,firstAssignee.id,firstAssignee.name,req.user.id,req.user.name,"Medium","Open",linkedStart,linkedEnd,"America/New_York",0,SCHEDULE_INTERVAL_MINUTES/60,SCHEDULE_INTERVAL_MINUTES,0,clean(body.transport_address,500),clean(body.description),clean(body.description)
         );
         db.prepare(`INSERT INTO workshop_workflows(id,workflow_key,client_id,piano_id,mode,planned_job_id,job_id,title,description,notes,due_time,current_status,financial_status,final_due_at,timezone,current_location,transport_address,transport_responsible_user_id,transport_responsible_name,transport_note,final_handover_type,created_by_user_id)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          id, key, clientId, pianoId, mode, plannedJobId || null, linkedJobId, title, clean(body.description), null, finalDueAt.slice(11,16), "ACTIVE", "OPEN", finalDueAt, "America/New_York", clean(body.current_location, 500), clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
+          id, key, clientId, pianoId, mode, plannedJobId || null, linkedJobId, title, clean(body.description), null, finalDueAt.slice(11,16), "ACTIVE", "OPEN", finalDueAt, "America/New_York", null, clean(body.transport_address, 500), transportAssignee?.id || null, transportAssignee?.name || null, clean(body.transport_note, 3000), mode === "ON_SITE" ? "ON_SITE" : "DELIVERY", req.user.id
         );
         if (plannedJobId) db.prepare("UPDATE planned_jobs SET workflow_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id, plannedJobId);
         const insertStage = db.prepare(`INSERT INTO workflow_stages(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,card_title,status,assigned_user_id,assigned_to,due_at,details,notes,preliminary_inspection,preliminary_assessment,preliminary_quote,preliminary_meeting,preliminary_quote_amount)
@@ -541,7 +540,6 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.status !== undefined) {
         const status = clean(body.status, 30).toUpperCase();
         if (!STATUS.has(status)) throw error("INVALID_WORKFLOW_STAGE_STATUS");
-        if (stage.status === "NOT_REQUIRED" && status !== "NOT_REQUIRED") throw error("WORKFLOW_STAGE_MUST_BE_ACTIVATED");
         if (status === "IN_PROGRESS" && !stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
         assertInspectionForStage(workflow,stage,status);
         if (status === "IN_PROGRESS" && !validId(body.assigned_user_id || stage.assigned_user_id)) throw error("WORKFLOW_RESPONSIBLE_REQUIRED_TO_START");
