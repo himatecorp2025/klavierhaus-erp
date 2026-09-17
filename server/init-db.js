@@ -848,6 +848,14 @@ function runMigrations() {
   if (tableExists("jobs")) {
     ensureColumn("jobs", "workshop_workflow_id", "TEXT");
   }
+  // The current schema creates idx_client_pianos_verified immediately. On an
+  // existing database, add the relation-verification columns before schema.sql
+  // so index creation cannot fail with "no such column: is_verified".
+  if (tableExists("client_pianos")) {
+    ensureColumn("client_pianos", "is_verified", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("client_pianos", "verified_at", "TEXT");
+    ensureColumn("client_pianos", "verified_by", "TEXT");
+  }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   ensureColumn("system_integration_health", "enabled", "INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))");
@@ -904,6 +912,7 @@ function runMigrations() {
     ensureColumn("pianos", "size_cm", "TEXT");
     ensureColumn("pianos", "size_in", "TEXT");
     ensureColumn("pianos", "size_display", "TEXT");
+    ensureColumn("pianos", "size_length", "TEXT");
     ensureColumn("pianos", "ownership_type", "TEXT DEFAULT 'Customer owned'");
     ensureColumn("pianos", "display_name", "TEXT");
     ensureColumn("pianos", "asset_recorded", "INTEGER DEFAULT 0");
@@ -916,14 +925,22 @@ function runMigrations() {
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
       piano_id TEXT NOT NULL,
+      is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0,1)),
+      verified_at TEXT,
+      verified_by TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(client_id,piano_id),
       FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
       FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE
     )`);
+    ensureColumn("client_pianos", "is_verified", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("client_pianos", "verified_at", "TEXT");
+    ensureColumn("client_pianos", "verified_by", "TEXT");
     db.prepare(`INSERT OR IGNORE INTO client_pianos(id,client_id,piano_id)
       SELECT 'CP-' || lower(hex(randomblob(12))), owner_contact_id, id FROM pianos
       WHERE owner_contact_id IS NOT NULL AND trim(owner_contact_id)<>''`).run();
+    db.prepare(`UPDATE pianos SET size_length=COALESCE(NULLIF(trim(size_length),''),NULLIF(trim(size_display),''),NULLIF(trim(size_cm),''),NULLIF(trim(size_in),''))
+      WHERE size_length IS NULL OR trim(size_length)=''`).run();
 
     // Jobs and immutable user/workflow links.
     ensureColumn("website_showroom_pianos", "build_year", "INTEGER");
@@ -1252,6 +1269,7 @@ function runMigrations() {
   ensureIndex("idx_pianos_owner_contact", "CREATE INDEX IF NOT EXISTS idx_pianos_owner_contact ON pianos(owner_contact_id)");
   ensureIndex("idx_client_pianos_client", "CREATE INDEX IF NOT EXISTS idx_client_pianos_client ON client_pianos(client_id,piano_id)");
   ensureIndex("idx_client_pianos_piano", "CREATE INDEX IF NOT EXISTS idx_client_pianos_piano ON client_pianos(piano_id,client_id)");
+  ensureIndex("idx_client_pianos_verified", "CREATE INDEX IF NOT EXISTS idx_client_pianos_verified ON client_pianos(is_verified,client_id,piano_id)");
   ensureFinancialSourceUniqueIndex();
   ensureIndex("idx_inventory_items_inventory_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_items_inventory_id ON inventory_items(inventory_id) WHERE inventory_id IS NOT NULL");
   ensureIndex("idx_inventory_items_category", "CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(main_category,piano_part_category,status)");
