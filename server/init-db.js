@@ -868,6 +868,11 @@ function runMigrations() {
     ensureColumn("users", "session_version", "INTEGER NOT NULL DEFAULT 0");
 
     // Contacts and customer import.
+    ensureColumn("contacts", "address_line1", "TEXT");
+    ensureColumn("contacts", "city", "TEXT");
+    ensureColumn("contacts", "state", "TEXT");
+    ensureColumn("contacts", "postal_code", "TEXT");
+    ensureColumn("contacts", "country", "TEXT DEFAULT 'United States'");
     ensureColumn("contacts", "address", "TEXT");
     ensureColumn("contacts", "billing_address", "TEXT");
     ensureColumn("contacts", "tax_id", "TEXT");
@@ -883,6 +888,17 @@ function runMigrations() {
     ensureColumn("contacts", "interest_notes", "TEXT");
 
     // Pianos and piano import.
+    db.exec(`CREATE TABLE IF NOT EXISTS piano_brands (
+      brand_name TEXT PRIMARY KEY COLLATE NOCASE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+    ensureIndex("idx_piano_brands_active_name", "CREATE INDEX IF NOT EXISTS idx_piano_brands_active_name ON piano_brands(active,brand_name)");
+    db.prepare("INSERT OR IGNORE INTO piano_brands(brand_name) SELECT DISTINCT trim(brand) FROM pianos WHERE brand IS NOT NULL AND trim(brand)<>''").run();
+    for (const brandName of ["Steinway & Sons", "Bösendorfer", "Yamaha", "Fazioli", "Bechstein"]) {
+      db.prepare("INSERT OR IGNORE INTO piano_brands(brand_name,active) VALUES(?,1)").run(brandName);
+    }
+
     ensureColumn("pianos", "finish", "TEXT");
     ensureColumn("pianos", "build_year", "INTEGER");
     ensureColumn("pianos", "size_cm", "TEXT");
@@ -1070,6 +1086,8 @@ function runMigrations() {
       ensureColumn("workshop_workflows", "due_time", "TEXT");
       ensureColumn("workshop_workflows", "intake_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
       ensureColumn("workshop_workflows", "intake_pdf_path", "TEXT");
+      ensureColumn("workflow_financial_lines", "partner_id", "TEXT");
+      ensureColumn("workflow_financial_lines", "payable_invoice_id", "TEXT");
       ensureColumn("workshop_workflows", "intake_photos", "TEXT NOT NULL DEFAULT '[]'");
       ensureColumn("workshop_workflows", "intake_inspected_by", "TEXT");
       ensureColumn("workshop_workflows", "intake_inspected_at", "TEXT");
