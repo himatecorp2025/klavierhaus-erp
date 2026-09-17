@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   billing_status TEXT NOT NULL DEFAULT 'Unbilled' CHECK(billing_status IN ('Unbilled','Billed')),
   invoice_id TEXT,
   close_notes TEXT,
+  completion_notes TEXT,
   completed_at TEXT,
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','POSTED')),
   financial_ledger_id TEXT,
@@ -1896,6 +1897,7 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   details TEXT,
   notes TEXT,
   block_reason TEXT,
+  delay_reason TEXT,
   financial_status TEXT NOT NULL DEFAULT 'OPEN' CHECK(financial_status IN ('OPEN','CLOSED')),
   financial_closed_at TEXT,
   financial_closed_by_user_id TEXT,
@@ -2081,6 +2083,15 @@ CREATE TABLE IF NOT EXISTS backup_log (
 
 
 -- Notification and PWA push infrastructure
+CREATE TABLE IF NOT EXISTS notification_snooze_log (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK(entity_type IN ('CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB')),
+  entity_id TEXT NOT NULL,
+  snoozed_until TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(entity_type,entity_id,snoozed_until);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   recipient_user_id TEXT NOT NULL,
