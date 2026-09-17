@@ -13,6 +13,7 @@ let currentLang="en";
 let currentSchedulerWorker=null;
 let currentSchedulerEntryFilter="ALL";
 let currentClientStatusFilter="ALL";
+let currentClientCrmFilter="ALL";
 let currentClientPage=1;
 let currentClientSearch="";
 let showOnlyMissingClientData=false;
@@ -1490,8 +1491,9 @@ function calendarEventDensityClass(j){
 }
 function calendarTypeIconMarkup(j){
  const isWorkflow=["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type);
- const label=isWorkflow?bi("Workshop workflow","M\u0171hely workflow"):bi("Scheduled customer job","\u00dctemezett \u00fcgyf\u00e9lmunka");
- return `<span class="calendar-type-badge ${isWorkflow?'is-workflow':'is-job'}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span aria-hidden="true">${isWorkflow?"🔨":"⚙️"}</span></span>`;
+ const isCrm=Number(j?.is_crm_follow_up||0)===1;
+ const label=isWorkflow?bi("Workshop workflow","Műhely workflow"):(isCrm?bi("CRM follow-up","CRM utánkövetés"):bi("Scheduled customer job","Ütemezett ügyfélmunka"));
+ return `<span class="calendar-type-badge ${isWorkflow?'is-workflow':(isCrm?'is-crm-followup':'is-job')}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span aria-hidden="true">${isWorkflow?"🔨":(isCrm?"📞":"⚙️")}</span></span>`;
 }
 function calendarEventCardMarkup(j){
  const time=`${String(j?.start_time||"").slice(11,16)}–${String(j?.end_time||"").slice(11,16)}`;
@@ -1506,7 +1508,9 @@ function calendarEventCardMarkup(j){
  }
  const client=String(j?.client_name||"—"),amount=calendarCardAmount(j);
  const responsible=String(j?.assigned_to||"—"),address=String(j?.service_address||"—"),notes=String(j?.notes||"").trim();
+ const isCrm=Number(j?.is_crm_follow_up||0)===1;
  const linkedWorkflowId=String(j?.linked_workshop_workflow_id||j?.workshop_workflow_id||j?.workflow_id||"");const workflowLink=linkedWorkflowId?`<span class="calendar-workshop-link" title="${bi("Open linked Workshop Workflow","Kapcsolt Workshop Workflow megnyitása")}" onclick="openLinkedWorkshopWorkflow('${htmlText(linkedWorkflowId)}',event)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 17l5-5 3 3 4-7M16 8h2v2"/></svg></span>`:"";
+ if(isCrm)return `${calendarTypeIconMarkup(j)}<span class="kh-event-ribbon crm-followup-ribbon">${bi("CRM FOLLOW-UP","CRM UTÁNKÖVETÉS")}</span><strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small>${notes?`<small class="event-card-notes" title="${htmlText(notes)}">${htmlText(notes)}</small>`:""}<span class="event-status">${calendarStatusIcon(j)}</span>`;
  return `${calendarTypeIconMarkup(j)}${workflowLink}<strong class="event-card-time">${htmlText(time)}</strong><b class="event-card-title">${htmlText(j?.title||"")}</b><small class="event-card-primary">${htmlText(client)} · ${htmlText(amount)}</small><small class="event-card-secondary">${htmlText(responsible)} · ${htmlText(address)}</small>${notes?`<small class="event-card-notes" title="${htmlText(notes)}">${htmlText(notes)}</small>`:""}<span class="event-status">${calendarStatusIcon(j)}</span>`;
 }
 
@@ -1524,6 +1528,7 @@ async function openCalendarEntry(row){
  if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(row?.calendar_entry_type)){
   await openSchedulerWorkflowDrawer(row);return;
  }
+ if(Number(row?.is_crm_follow_up||0)===1 && (row?.contact_id||row?.client_id))return clientProfile(row.contact_id||row.client_id);
  if(row?.calendar_entry_type!=="KLAVIERHAUS_EVENT")return openJobDetails(row);
  const event=await api(`/api/calendar-events/${encodeURIComponent(row.event_id)}`);
  const title=currentLang==="hu"?(event.title_hu||event.title_en):(event.title_en||event.title_hu);
@@ -3441,6 +3446,11 @@ function scheduleContactsRender(){
  clearTimeout(contactsRenderTimer);
  contactsRenderTimer=setTimeout(()=>render("contacts",{noHistory:true}),275);
 }
+function clientFollowUpDateValue(value){return String(value||"").trim().replace(" ","T").slice(0,16);}
+function clientFollowUpIsDue(client){const due=clientFollowUpDateValue(client?.follow_up_date);return Boolean(due)&&due<=String(nyNowLocalString()||"").slice(0,16);}
+function clientCrmFilterMatches(client){if(currentClientCrmFilter==="VIP")return Number(client?.is_vip||0)===1;if(currentClientCrmFilter==="FOLLOW_UP")return clientFollowUpIsDue(client);return true;}
+function setClientCrmFilter(mode){currentClientCrmFilter=["VIP","FOLLOW_UP"].includes(mode)?mode:"ALL";currentClientPage=1;render("contacts");}
+function clientFollowUpDateLabel(value){const raw=clientFollowUpDateValue(value);return raw?raw.replace("T"," "):"—";}
 
 async function renderContactsTable(data){
  const pianos=await api("/api/pianos").catch(()=>[]);
@@ -3454,8 +3464,9 @@ async function renderContactsTable(data){
  const filtered=enriched.filter(c=>{
    if(showOnlyMissingClientData && !clientHasMissingCoreData(c)) return false;
    if(currentClientStatusFilter!=="ALL" && customerStatusCode(c)!==currentClientStatusFilter) return false;
+   if(!clientCrmFilterMatches(c)) return false;
    const owned=pianosByOwner.get(String(c.id))||[];
-   const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
+   const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,c.follow_up_reason,c.relationship_notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
    return hay.includes(q);
  });
  const totalPages=Math.max(1,Math.ceil(filtered.length/CLIENTS_PER_PAGE));
@@ -3463,15 +3474,16 @@ async function renderContactsTable(data){
  const start=(currentClientPage-1)*CLIENTS_PER_PAGE;
  const pageRows=filtered.slice(start,start+CLIENTS_PER_PAGE);
  const pagination=clientPaginationHtml(currentClientPage,totalPages,filtered.length);
+ const vipCount=enriched.filter(c=>Number(c.is_vip||0)===1).length,dueCount=enriched.filter(clientFollowUpIsDue).length;
  const s=schemas.contacts;
- $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
+ $("#contacts").innerHTML=`<div class="panel"><div class="toolbar"><h3>${bi("Clients","Ügyfelek")}</h3><div class="toolbar-actions">${isAdmin()?`<button class="small" onclick="openClientImportModal()">${bi("Import Excel","Excel import")}</button>`:""}<button type="button" class="small missing-data-btn ${showOnlyMissingClientData?"active":""}" ${missingCount===0?"disabled":""} onclick="toggleMissingClientData()">${bi("Missing Data","Hiányzó adatok")} (${missingCount})</button><button class="small" onclick="exportTable('contacts')">Export CSV</button><button onclick="openForm('contacts')">+ ${bi("Add","Új")}</button></div></div><button id="clientFilterToggle" type="button" class="mobile-filter-toggle" aria-expanded="${mobileClientFiltersOpen}" onclick="toggleMobileFilterPanel('clientFilterPanel','clientFilterToggle','contacts')">⌕ ${bi("Filters","Szűrők")}</button><div id="clientFilterPanel" class="client-search client-search-grid mobile-collapsible-filter ${mobileClientFiltersOpen?"open":""}"><label>${tr("searchClients")}<input id="clientSearchInput" value="${previousSearch.replaceAll('"','&quot;')}" placeholder="${tr("searchPlaceholder")}"></label><label>${tr("customerStatus")}<select id="clientStatusFilter" onchange="currentClientStatusFilter=this.value;currentClientPage=1;render('contacts')">${customerStatusOptions()}</select></label><div class="client-crm-filters" role="group" aria-label="${bi("CRM quick filters","CRM gyorsszűrők")}"><button type="button" class="btn-filter-crm ${currentClientCrmFilter==='ALL'?'active':''}" onclick="setClientCrmFilter('ALL')">${bi("All clients","Összes ügyfél")}</button><button type="button" class="btn-filter-vip ${currentClientCrmFilter==='VIP'?'active':''}" onclick="setClientCrmFilter('VIP')">⭐ ${bi("VIP only","Csak VIP ügyfelek")} <span>${vipCount}</span></button><button type="button" class="btn-filter-followup ${currentClientCrmFilter==='FOLLOW_UP'?'active':''}" onclick="setClientCrmFilter('FOLLOW_UP')">📞 ${bi("Due follow-ups","Esedékes utánkövetések")} <span>${dueCount}</span></button></div></div><p class="muted customer-status-help">🎹 ${tr("ownerClient")} · 🛒 ${tr("buyerLead")} · 🎹🛒 ${tr("ownerBuyerLead")} · 👤 ${tr("generalContact")}</p>${pagination}<div class="table-scroll-top" id="contactsScrollTop" aria-label="${bi("Horizontal table scroll","Vízszintes táblázatgörgetés")}"><div class="table-scroll-spacer"></div></div><div class="table-wrap contacts-table-wrap" id="contactsTableWrap"><table><thead><tr>${s.cols.map(c=>`<th>${headerLabel('contacts',c)}</th>`).join("")}<th>${bi("Actions","Műveletek")}</th></tr></thead><tbody>${pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`}</tbody></table></div>${pagination}</div>`;
  const input=document.getElementById("clientSearchInput");
  if(input){input.removeAttribute("oninput");input.oninput=()=>{currentClientSearch=input.value;currentClientPage=1;renderContactResults();};}
  requestAnimationFrame(setupContactTableScroll);
 }
 function contactsRowsMarkup(pageRows){
  const s=schemas.contacts;
- return pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button><button class="small" onclick='openForm("contacts",${esc(r)})'>${bi("Edit","Szerkesztés")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`;
+ return pageRows.map(r=>`<tr>${s.cols.map(c=>`<td>${cellValue('contacts',c,r)}</td>`).join("")}<td><button class="small" onclick="clientProfile('${r.id}')">${bi("Profile","Adatlap")}</button>${isSuperadmin()?` <button class="small danger-btn" onclick="deleteGenericResource('contacts','${r.id}')">${bi("Delete","Törlés")}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="${s.cols.length+1}" class="muted">${bi("No matching clients","Nincs találat")}</td></tr>`;
 }
 function contactResultState(){
  const {data,pianos}=contactsRenderData;
@@ -3482,8 +3494,9 @@ function contactResultState(){
  const filtered=enriched.filter(c=>{
   if(showOnlyMissingClientData&&!clientHasMissingCoreData(c))return false;
   if(currentClientStatusFilter!=="ALL"&&customerStatusCode(c)!==currentClientStatusFilter)return false;
+  if(!clientCrmFilterMatches(c))return false;
   const owned=pianosByOwner.get(String(c.id))||[];
-  const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
+  const hay=[c.name,c.company,c.email,c.phone,c.address,c.notes,c.follow_up_reason,c.relationship_notes,customerStatusTitle(c),...owned.flatMap(p=>[p.brand,p.model,p.display_name,p.serial_no])].join(" ").toLowerCase();
   return hay.includes(q);
  });
  const totalPages=Math.max(1,Math.ceil(filtered.length/CLIENTS_PER_PAGE));
@@ -3523,7 +3536,9 @@ function phoneProfileHtml(value){
 function emailLink(value){const raw=String(value||"").trim();if(!raw)return "";return `<a class="contact-link email-link" href="mailto:${encodeURIComponent(raw)}">${htmlText(raw)}</a>`;}
 function mapLink(value){const raw=String(value||"").trim();if(!raw)return "";return `<a class="contact-link map-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}" target="_blank" rel="noopener noreferrer">${htmlText(raw)}</a>`;}
 function cellValue(key,c,r){
- if(key==="contacts" && c==="customer_status_icon") return `<span class="customer-status-icon" title="${customerStatusTitle(r)}">${customerStatusIcon(r)}</span>`;
+ if(key==="contacts" && c==="customer_status_icon") return `<span class="customer-status-icon" title="${customerStatusTitle(r)}">${customerStatusIcon(r)}</span>${Number(r.is_vip||0)===1?` <span class="vip-badge" title="VIP">VIP</span>`:""}`;
+ if(key==="contacts" && c==="name") return `${Number(r.is_vip||0)===1?'<span class="vip-star" title="VIP">⭐</span> ':''}<button type="button" class="client-name-profile-link" onclick="clientProfile('${htmlText(r.id)}')">${htmlText(r.name||"")}</button>`;
+ if(key==="contacts" && c==="next_step" && clientFollowUpIsDue(r)) return `<span class="followup-due-badge" title="${htmlText(r.follow_up_reason||r.next_step||bi("Follow-up due","Utánkövetés esedékes"))}">📞 ${bi("Follow-up due!","Esedékes megkeresés!")} (${htmlText(clientFollowUpDateLabel(r.follow_up_date))})</span>${r.next_step?`<small class="client-next-step-text">${htmlText(r.next_step)}</small>`:""}`;
  if(key==="contacts" && c==="phone") return phoneLink(r[c]);
  if(key==="contacts" && c==="email") return emailLink(r[c]);
  if(key==="contacts" && c==="address") return mapLink(r[c]);
@@ -3531,25 +3546,82 @@ function cellValue(key,c,r){
  if(c==="stored_path" && r[c]) return `<a href="${r[c]}" target="_blank">Download / Letöltés</a>`;
  return r[c]??"";
 }
+let activeClientProfileData=null;
+function clientProfileFollowUpSummary(contact){
+ const due=clientFollowUpIsDue(contact),date=clientFollowUpDateLabel(contact?.follow_up_date),reason=String(contact?.follow_up_reason||contact?.next_step||"").trim(),cadence=String(contact?.follow_up_cadence||"").trim();
+ if(!contact?.follow_up_date)return `<p class="muted">${bi("No follow-up scheduled.","Nincs ütemezett utánkövetés.")}</p>`;
+ return `<div class="client-followup-summary ${due?'due':''}"><b>${due?'📞 ':''}${due?bi("Follow-up due!","Esedékes megkeresés!"):bi("Next follow-up","Következő utánkövetés")}</b><span>${htmlText(date)}</span>${reason?`<p>${htmlText(reason)}</p>`:""}${cadence?`<small>${bi("Cadence","Gyakoriság")}: ${htmlText(cadence.replaceAll("_"," "))}</small>`:""}</div>`;
+}
+function clientProfilePianoMarkup(piano){
+ const name=`${piano?.brand||""} ${piano?.model||""}`.trim()||pianoDisplayName(piano),serial=String(piano?.serial_no||"").trim(),year=String(piano?.build_year||piano?.year||"").trim();
+ const locationName=String(piano?.location_name||"").trim(),address=String(piano?.piano_location_address||piano?.location||"").trim();
+ const technical=[serial?`SN: #${htmlText(serial)}`:"",year?`(${htmlText(year)})`:""].filter(Boolean).join(" · ");
+ const location=[locationName,address].filter(Boolean).map(htmlText).join(" – ")||bi("Piano location not recorded","A zongora helyszíne nincs rögzítve");
+ return `<article class="client-piano-reference"><div><b>${htmlText(name)}</b>${Number(piano?.is_verified||0)!==1?` ${pianoVerificationBadge(piano)}`:""}<span>${technical||htmlText(pianoReferenceMeta(piano)||bi("No optional technical data recorded","Nincs opcionális műszaki adat"))}</span><span class="client-piano-location">📍 ${location}</span></div><button type="button" class="small" onclick="pianoInfo('${htmlText(piano.id)}')">${bi("Information","Információ")}</button></article>`;
+}
+function clientProfilePianosMarkup(pianos=[]){return pianos.length?pianos.map(clientProfilePianoMarkup).join(""):`<p>${bi("No pianos linked","Nincs kapcsolt zongora")}</p>`;}
+function clientProfileJobsMarkup(jobs=[]){const regular=jobs.filter(row=>Number(row.is_crm_follow_up||0)!==1);return regular.map(x=>`<p>${htmlText(x.start_time)} · ${htmlText(x.title)} · ${htmlText(x.assigned_to)} · ${htmlText(x.status)}</p>`).join("")||`<p>${bi("No jobs","Nincs munka")}</p>`;}
+function clientProfileInterestMarkup(contact){return boolVal(contact?.interested_buying)?`<h3>${bi("Purchase Interest","Vásárlási érdeklődés")}</h3><div class="client-profile-read-grid"><p><b>${bi("Brand","Márka")}:</b> ${htmlText(contact.interest_brand||"—")}</p><p><b>${bi("Model","Típus")}:</b> ${htmlText(contact.interest_model||"—")}</p><p><b>${bi("Budget","Keretösszeg")}:</b> ${money(contact.interest_budget||0)}</p><p><b>${bi("Timeline","Időzítés")}:</b> ${htmlText(contact.interest_timeline||"—")}</p></div>${contact.interest_notes?`<p><b>${bi("Notes","Megjegyzés")}:</b> ${htmlText(contact.interest_notes)}</p>`:""}`:"";}
+function clientProfileCadenceOptions(value=""){return [["",bi("No automatic cadence","Nincs automatikus gyakoriság")],["CUSTOM",bi("Custom","Egyedi")],["3_MONTHS",bi("3 months","3 hónap")],["6_MONTHS",bi("6 months","6 hónap")],["1_YEAR",bi("1 year","1 év")]].map(([v,l])=>`<option value="${v}" ${String(value||"")===v?'selected':''}>${l}</option>`).join("");}
+function profileInputValue(value){return htmlText(value??"");}
+function setClientProfileMode(mode){
+ const shell=document.querySelector('.client-profile-shell');if(!shell)return;const edit=mode==="edit";shell.dataset.mode=edit?"edit":"view";
+ shell.querySelectorAll('[data-client-profile-input]').forEach(input=>{input.disabled=!edit;});
+ const first=edit?shell.querySelector('[data-client-profile-input]:not([type="checkbox"])'):null;if(first)setTimeout(()=>first.focus(),0);
+}
+function hydrateClientProfileEditor(contact){
+ const shell=document.querySelector('.client-profile-shell');if(!shell)return;
+ const value=(name,val)=>{const input=shell.querySelector(`[name="${name}"]`);if(input)input.value=val??"";};
+ ["name","company","phone","email","address","billing_address","owner","next_step","notes","follow_up_date","follow_up_reason","relationship_notes"].forEach(name=>value(name,contact?.[name]||""));
+ value("follow_up_cadence",contact?.follow_up_cadence||"");
+ const vip=shell.querySelector('[name="is_vip"]');if(vip)vip.checked=Number(contact?.is_vip||0)===1;
+}
+function updateClientProfileView(contact){
+ const shell=document.querySelector('.client-profile-shell');if(!shell)return;
+ const identity=shell.querySelector('#clientProfileIdentity');if(identity)identity.innerHTML=`${Number(contact?.is_vip||0)===1?'<span class="vip-star" title="VIP">⭐</span> ':''}${htmlText(contact?.name||"")} · ${htmlText(contact?.id||"")}${Number(contact?.is_vip||0)===1?' <span class="vip-badge">VIP</span>':''}`;
+ const phone=shell.querySelector('#clientProfilePhone');if(phone)phone.innerHTML=phoneProfileHtml(contact?.phone);
+ const email=shell.querySelector('#clientProfileEmail');if(email)email.innerHTML=emailLink(contact?.email)||"—";
+ const address=shell.querySelector('#clientProfileAddress');if(address)address.innerHTML=mapLink(contact?.address)||"—";
+ const billing=shell.querySelector('#clientProfileBilling');if(billing)billing.textContent=contact?.billing_address||"—";
+ const company=shell.querySelector('#clientProfileCompany');if(company)company.textContent=contact?.company||"—";
+ const owner=shell.querySelector('#clientProfileOwner');if(owner)owner.textContent=contact?.owner||contact?.relationship_holder||"—";
+ const next=shell.querySelector('#clientProfileNextStep');if(next)next.textContent=contact?.next_step||"—";
+ const notes=shell.querySelector('#clientProfileNotes');if(notes)notes.textContent=contact?.notes||"—";
+ const rel=shell.querySelector('#clientProfileRelationshipNotes');if(rel)rel.textContent=contact?.relationship_notes||"—";
+ const follow=shell.querySelector('#clientProfileFollowUpSummary');if(follow)follow.innerHTML=clientProfileFollowUpSummary(contact);
+ const followActions=shell.querySelector('#clientProfileFollowUpActions');if(followActions)followActions.classList.toggle('hidden',!contact?.follow_up_date);
+ const interest=shell.querySelector('#clientProfileInterest');if(interest)interest.innerHTML=clientProfileInterestMarkup(contact);
+ hydrateClientProfileEditor(contact);
+}
+function cancelClientProfileEdit(){if(activeClientProfileData?.client)hydrateClientProfileEditor(activeClientProfileData.client);setClientProfileMode("view");}
+async function saveClientProfileChanges(id){
+ const shell=document.querySelector('.client-profile-shell');if(!shell)return;const editForm=shell.querySelector('#clientProfileEditForm');if(!editForm)return;
+ const body={};editForm.querySelectorAll('[name]').forEach(input=>{body[input.name]=input.type==='checkbox'?(input.checked?1:0):input.value;});body.is_vip=editForm.querySelector('[name="is_vip"]')?.checked?1:0;
+ try{const saved=await api(`/api/contacts/${encodeURIComponent(id)}`,{method:"PUT",body:JSON.stringify(body)});activeClientProfileData={...(activeClientProfileData||{}),client:saved};updateClientProfileView(saved);setClientProfileMode("view");appAlert(bi("Client changes saved.","Ügyfélmódosítások elmentve."),"success");}catch(error){showError(error)}
+}
+async function completeClientFollowUp(id,cadence=""){
+ try{const result=await api(`/api/contacts/${encodeURIComponent(id)}/follow-up/complete`,{method:"POST",body:JSON.stringify({cadence})});activeClientProfileData={...(activeClientProfileData||{}),client:result.contact,crmFollowUpJob:result.next_job||null};updateClientProfileView(result.contact);setClientProfileMode("view");appAlert(result.next_job?bi("Follow-up completed and the next reminder was scheduled.","Utánkövetés lezárva, a következő emlékeztető ütemezve."):bi("Follow-up completed.","Utánkövetés lezárva."),"success");}catch(error){showError(error)}
+}
+async function refreshClientProfilePianos(clientId){
+ const fresh=await api(`/api/client-profile/${encodeURIComponent(clientId)}`);activeClientProfileData={...(activeClientProfileData||{}),...fresh};const list=document.getElementById('clientProfilePianoList');if(list)list.innerHTML=clientProfilePianosMarkup(fresh.pianos||[]);
+}
+function toggleClientPianoInlineForm(){const form=document.getElementById('clientProfilePianoAddForm');if(!form)return;form.classList.toggle('hidden');if(!form.classList.contains('hidden'))form.querySelector('input[name="brand"]')?.focus();}
+async function addClientProfilePiano(clientId){
+ const form=document.getElementById('clientProfilePianoAddForm');if(!form)return;const body={};form.querySelectorAll('[name]').forEach(input=>{body[input.name]=input.value;});if(!String(body.brand||"").trim()&&!String(body.model||"").trim()){appAlert(bi("Enter at least a brand or model.","Legalább márkát vagy modellt adj meg."),"warning");return;}
+ body.location=body.piano_location_address||"";
+ try{await api(`/api/contacts/${encodeURIComponent(clientId)}/pianos`,{method:"POST",body:JSON.stringify(body)});form.querySelectorAll('input,textarea').forEach(input=>{input.value="";});form.classList.add('hidden');await refreshClientProfilePianos(clientId);appAlert(bi("Piano added to client.","Zongora rögzítve az ügyfélhez."),"success");}catch(error){showError(error)}
+}
 async function clientProfile(id){
- let p=await api(`/api/client-profile/${id}`);
- $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=bi("Client profile","Ügyfélprofil");
- const interest=boolVal(p.client.interested_buying) ? `<h3>${bi("Purchase Interest","Vásárlási érdeklődés")}</h3><p><b>${bi("Brand","Márka")}:</b> ${p.client.interest_brand||""}</p><p><b>${bi("Model","Típus")}:</b> ${p.client.interest_model||""}</p><p><b>${bi("Budget","Keretösszeg")}:</b> ${money(p.client.interest_budget||0)}</p><p><b>${bi("Timeline","Időzítés")}:</b> ${p.client.interest_timeline||""}</p><p><b>${bi("Notes","Megjegyzés")}:</b> ${p.client.interest_notes||""}</p>` : "";
- $("#form").innerHTML=`<div class="work-card"><h4><span class="customer-status-icon">${customerStatusIcon({...p.client,_ownedPianoCount:p.pianos.length})}</span> ${htmlText(p.client.name)} · ${htmlText(p.client.id)}</h4>${phoneProfileHtml(p.client.phone)}<p><b>${bi("Email","E-mail")}:</b> ${emailLink(p.client.email)}</p><p><b>${bi("Address","Cím")}:</b> ${mapLink(p.client.address)}</p><p><b>${bi("Billing address","Számlázási cím")}:</b> ${htmlText(p.client.billing_address||"—")}</p><p><b>${bi("Last visit","Utolsó látogatás")}:</b> ${htmlText(p.lastVisit||"")}</p><p><b>${bi("Last job","Legutóbbi munka")}:</b> ${htmlText(p.lastJob||"")}</p>${interest}<h3>${bi("Pianos","Zongorák")}</h3><div class="client-piano-card-list">${p.pianos.map(x=>`<article class="client-piano-reference"><div><b>${htmlText(`${x.brand||""} ${x.model||""}`.trim()||pianoDisplayName(x))}</b>${Number(x.is_verified||0)!==1?` ${pianoVerificationBadge(x)}`:""}<span>${htmlText(pianoReferenceMeta(x)||bi("No optional technical data recorded","Nincs opcionális műszaki adat"))}</span></div><button type="button" class="small" onclick="pianoInfo('${htmlText(x.id)}')">${bi("Information","Információ")}</button></article>`).join("")||`<p>${bi("No pianos linked","Nincs kapcsolt zongora")}</p>`}</div><div id="clientPianoProfileTools"></div><h3>${bi("Jobs","Munkák")}</h3>${p.jobs.map(x=>`<p>${htmlText(x.start_time)} · ${htmlText(x.title)} · ${htmlText(x.assigned_to)} · ${htmlText(x.status)}</p>`).join("")||`<p>${bi("No jobs","Nincs munka")}</p>`}</div><div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button></div>`;
- $("#form").onsubmit=e=>e.preventDefault();
- renderClientPianoProfileTools(p.client.id);
+ const p=await api(`/api/client-profile/${encodeURIComponent(id)}`);activeClientProfileData=p;
+ $("#modal").classList.remove("hidden");$("#modalTitle").textContent=bi("Client profile","Ügyfélprofil");
+ const contact=p.client;
+ $("#form").innerHTML=`<section class="client-profile-shell" data-mode="view" data-client-id="${htmlText(contact.id)}"><div class="client-profile-topbar"><h4 id="clientProfileIdentity">${Number(contact.is_vip||0)===1?'<span class="vip-star" title="VIP">⭐</span> ':''}${htmlText(contact.name)} · ${htmlText(contact.id)}${Number(contact.is_vip||0)===1?' <span class="vip-badge">VIP</span>':''}</h4><button type="button" class="client-profile-edit-toggle" onclick="setClientProfileMode('edit')">✏️ ${bi("Edit","Szerkesztés")}</button></div><div class="client-profile-view-panel"><div class="client-profile-read-grid"><div><b>${bi("Company","Cég")}</b><span id="clientProfileCompany">${htmlText(contact.company||"—")}</span></div><div><b>${bi("Relationship owner","Kapcsolattartó gazda")}</b><span id="clientProfileOwner">${htmlText(contact.owner||contact.relationship_holder||"—")}</span></div><div class="full" id="clientProfilePhone">${phoneProfileHtml(contact.phone)}</div><div><b>${bi("Email","E-mail")}</b><span id="clientProfileEmail">${emailLink(contact.email)||"—"}</span></div><div><b>${bi("Address","Cím")}</b><span id="clientProfileAddress">${mapLink(contact.address)||"—"}</span></div><div><b>${bi("Billing address","Számlázási cím")}</b><span id="clientProfileBilling">${htmlText(contact.billing_address||"—")}</span></div><div><b>${bi("Last visit","Utolsó látogatás")}</b><span>${htmlText(p.lastVisit||"—")}</span></div><div><b>${bi("Last job","Legutóbbi munka")}</b><span>${htmlText(p.lastJob||"—")}</span></div><div><b>${bi("Next step","Következő lépés")}</b><span id="clientProfileNextStep">${htmlText(contact.next_step||"—")}</span></div><div><b>${bi("Notes","Megjegyzés")}</b><span id="clientProfileNotes">${htmlText(contact.notes||"—")}</span></div></div><section class="client-profile-crm"><div class="section-heading"><h3>${bi("CRM follow-up","CRM utánkövetés")}</h3>${Number(contact.is_vip||0)===1?'<span class="vip-badge">VIP</span>':''}</div><div id="clientProfileFollowUpSummary">${clientProfileFollowUpSummary(contact)}</div><p><b>${bi("Relationship Notes","Kapcsolati jegyzetek")}:</b> <span id="clientProfileRelationshipNotes">${htmlText(contact.relationship_notes||"—")}</span></p><div id="clientProfileFollowUpActions" class="client-followup-actions ${contact.follow_up_date?'':'hidden'}"><button type="button" class="small" onclick="completeClientFollowUp('${htmlText(contact.id)}','3_MONTHS')">✓ +3 ${bi("months","hónap")}</button><button type="button" class="small" onclick="completeClientFollowUp('${htmlText(contact.id)}','6_MONTHS')">✓ +6 ${bi("months","hónap")}</button><button type="button" class="small" onclick="completeClientFollowUp('${htmlText(contact.id)}','1_YEAR')">✓ +1 ${bi("year","év")}</button><button type="button" class="small ghost-btn" onclick="completeClientFollowUp('${htmlText(contact.id)}','CUSTOM')">✓ ${bi("Complete without next date","Lezárás új dátum nélkül")}</button></div></section><div id="clientProfileInterest">${clientProfileInterestMarkup(contact)}</div><h3>${bi("Pianos","Zongorák")}</h3><div id="clientProfilePianoList" class="client-piano-card-list">${clientProfilePianosMarkup(p.pianos||[])}</div><div id="clientPianoProfileTools"></div><h3>${bi("Jobs","Munkák")}</h3><div id="clientProfileJobs">${clientProfileJobsMarkup(p.jobs||[])}</div></div><div class="client-profile-edit-panel"><div id="clientProfileEditForm" class="client-profile-edit-form"><div class="form-grid"><div class="field"><label>${bi("Client name","Ügyfél neve")}</label><input data-client-profile-input name="name" value="${profileInputValue(contact.name)}" disabled></div><div class="field"><label>${bi("Company","Cég")}</label><input data-client-profile-input name="company" value="${profileInputValue(contact.company)}" disabled></div><div class="field"><label>${bi("Phone","Telefonszám")}</label><input data-client-profile-input name="phone" value="${profileInputValue(contact.phone)}" disabled></div><div class="field"><label>${bi("Email","E-mail")}</label><input data-client-profile-input name="email" type="email" value="${profileInputValue(contact.email)}" disabled></div><div class="field full"><label>${bi("Address","Cím")}</label><input data-client-profile-input name="address" value="${profileInputValue(contact.address)}" disabled></div><div class="field full"><label>${bi("Billing address","Számlázási cím")}</label><input data-client-profile-input name="billing_address" value="${profileInputValue(contact.billing_address)}" disabled></div><div class="field"><label>${bi("Relationship owner","Kapcsolattartó gazda")}</label><input data-client-profile-input name="owner" value="${profileInputValue(contact.owner)}" disabled></div><div class="field"><label class="client-vip-toggle"><input data-client-profile-input type="checkbox" name="is_vip" value="1" ${Number(contact.is_vip||0)===1?'checked':''} disabled><span>⭐ ${bi("VIP client","VIP ügyfél")}</span></label></div><div class="field"><label>${bi("Follow-up date","Utánkövetési dátum")}</label><input data-client-profile-input type="datetime-local" name="follow_up_date" value="${profileInputValue(clientFollowUpDateValue(contact.follow_up_date))}" disabled></div><div class="field"><label>${bi("Cadence","Gyakoriság")}</label><select data-client-profile-input name="follow_up_cadence" disabled>${clientProfileCadenceOptions(contact.follow_up_cadence)}</select></div><div class="field full"><label>${bi("Follow-up reason","Utánkövetés oka")}</label><input data-client-profile-input name="follow_up_reason" value="${profileInputValue(contact.follow_up_reason)}" disabled></div><div class="field full"><label>${bi("Next step","Következő lépés")}</label><input data-client-profile-input name="next_step" value="${profileInputValue(contact.next_step)}" disabled></div><div class="field full"><label>${bi("Relationship Notes","Kapcsolati jegyzetek")}</label><textarea data-client-profile-input name="relationship_notes" disabled>${htmlText(contact.relationship_notes||"")}</textarea></div><div class="field full"><label>${bi("Notes","Megjegyzés")}</label><textarea data-client-profile-input name="notes" disabled>${htmlText(contact.notes||"")}</textarea></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="cancelClientProfileEdit()">${bi("Cancel","Mégse")}</button><button type="button" onclick="saveClientProfileChanges('${htmlText(contact.id)}')">${bi("Save changes","Műveletek mentése")}</button></div></div></div></section><div class="actions client-profile-close"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Close","Bezár")}</button></div>`;
+ $("#form").onsubmit=e=>e.preventDefault();renderClientPianoProfileTools(contact.id);applyLanguageToDOM(document.getElementById("modal"));
 }
 async function addPianoToClient(clientId){
- const form=document.getElementById("pianoAddForm");
- const body=Object.fromEntries(new FormData(form));
- if(!(body.brand||body.model)){appAlert(bi("Enter at least a brand or model.","Legalább márkát vagy típust adj meg."),"warning");return}
- try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await clientProfile(clientId)}catch(err){showError(err)}
+ const form=document.getElementById("pianoAddForm");if(!form)return;const body=Object.fromEntries(new FormData(form));if(!(body.brand||body.model)){appAlert(bi("Enter at least a brand or model.","Legalább márkát vagy típust adj meg."),"warning");return}try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await refreshClientProfilePianos(clientId)}catch(err){showError(err)}
 }
-
-function openPianoCreateForClient(clientId){
- closeModal();openForm('pianos',null,{prefill:{owner_contact_id:clientId},onSaved:async()=>clientProfile(clientId)});
-}
+function openPianoCreateForClient(clientId){closeModal();openForm('pianos',null,{prefill:{owner_contact_id:clientId},onSaved:async()=>clientProfile(clientId)});}
 
 let currentClientImportAnalysis=null;
 function clientImportReasonLabel(code){
@@ -3679,9 +3751,8 @@ function setupContactFormBehavior(row){
 }
 
 async function renderClientPianoProfileTools(clientId){
- const box=document.getElementById("clientPianoProfileTools");
- if(!box) return;
- box.innerHTML=`<div class="inline-piano-form client-piano-profile-actions"><button type="button" onclick="openPianoCreateForClient('${htmlText(clientId)}')">+ ${bi("Add new piano to this client","Új zongora rögzítése ehhez az ügyfélhez")}</button><button type="button" class="small ghost-btn" onclick="showClientPianoManagement('${htmlText(clientId)}')">${bi("Manage linked pianos","Kapcsolt zongorák kezelése")}</button></div>`;
+ const box=document.getElementById("clientPianoProfileTools");if(!box)return;
+ box.innerHTML=`<div class="client-piano-profile-tools"><div class="client-piano-profile-actions"><button type="button" onclick="toggleClientPianoInlineForm()">+ ${bi("Add new piano to this client","Új zongora rögzítése ehhez az ügyfélhez")}</button></div><div id="clientProfilePianoAddForm" class="client-profile-inline-piano-form hidden"><div class="form-grid"><div class="field"><label>${bi("Brand","Márka")}</label><input name="brand"></div><div class="field"><label>${bi("Model","Modell")}</label><input name="model"></div><div class="field"><label>${bi("Serial number","Gyári szám")}</label><input name="serial_no"></div><div class="field"><label>${bi("Year","Évjárat")}</label><input name="build_year" type="number" min="1700" max="2100"></div><div class="field"><label>${bi("Location name","Helyszín neve")}</label><input name="location_name" placeholder="${bi("e.g. Hamptons Estate","pl. Hamptons Estate")}"></div><div class="field full"><label>${bi("Piano physical address","Zongora fizikai címe")}</label><input name="piano_location_address" placeholder="${bi("Address independent from the client's billing address","Az ügyfél számlázási címétől független cím")}"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="toggleClientPianoInlineForm()">${bi("Cancel","Mégse")}</button><button type="button" onclick="addClientProfilePiano('${htmlText(clientId)}')">${bi("Save piano","Zongora mentése")}</button></div></div></div>`;
 }
 async function showClientPianoManagement(clientId){
  const box=document.getElementById("clientPianoProfileTools");
