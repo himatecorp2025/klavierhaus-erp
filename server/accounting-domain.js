@@ -92,11 +92,11 @@ function isInvoiceDerivedFinancialItem(item) {
 }
 
 function activeInvoices(rows) {
-  return (rows || []).filter((row) => String(row?.status || "").toLowerCase() !== "void");
+  return (rows || []).filter((row) => !["void", "draft"].includes(String(row?.status || "").toLowerCase()));
 }
 
 function pendingInvoice(row) {
-  return ["issued", "carried_over", "draft"].includes(String(row?.status || "").toLowerCase());
+  return ["issued", "carried_over"].includes(String(row?.status || "").toLowerCase());
 }
 
 function invoiceSubtotal(row) {
