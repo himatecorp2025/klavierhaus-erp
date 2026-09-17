@@ -840,6 +840,15 @@ function runMigrations() {
   // Historical content is preserved; removal is an explicit administrator action.
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
+
+  // Existing databases may have the pre-Workshop-link jobs table. The schema
+  // creates an index on jobs.workshop_workflow_id, so the compatibility column
+  // must exist before the full schema is executed. Fresh databases skip this
+  // branch and receive the column plus its foreign key from schema.sql.
+  if (tableExists("jobs")) {
+    ensureColumn("jobs", "workshop_workflow_id", "TEXT");
+  }
+
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   ensureColumn("system_integration_health", "enabled", "INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))");
   ensureColumn("system_integration_backups", "backup_file_path", "TEXT NOT NULL DEFAULT ''");
