@@ -987,6 +987,7 @@ function runMigrations() {
     ensureColumn("jobs", "finalized_at", "TEXT");
     ensureColumn("jobs", "planned_minutes", "INTEGER DEFAULT 0");
     ensureColumn("jobs", "notes", "TEXT");
+    ensureColumn("jobs", "completion_notes", "TEXT");
     ensureColumn("jobs", "workflow_id", "TEXT");
     ensureColumn("jobs", "workshop_workflow_id", "TEXT");
     ensureColumn("jobs", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
@@ -1161,6 +1162,7 @@ function runMigrations() {
     if (tableExists("workflow_stages")) {
       ensureColumn("workflow_stages", "card_title", "TEXT");
       ensureColumn("workflow_stages", "notes", "TEXT");
+      ensureColumn("workflow_stages", "delay_reason", "TEXT");
       ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
       ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
@@ -1319,7 +1321,8 @@ function runMigrations() {
   ensureColumn("push_subscriptions", "device_id", "TEXT");
   ensureColumn("push_subscriptions", "last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP");
   ensureColumn("push_subscriptions", "verified_at", "TEXT");
-    ensureIndex("idx_notifications_event_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL");
+    ensureIndex("idx_notification_snooze_active", "CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(entity_type,entity_id,snoozed_until)");
+  ensureIndex("idx_notifications_event_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL");
   ensureIndex("idx_notifications_recipient_status", "CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC)");
   ensureIndex("idx_notifications_job", "CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id)");
   ensureIndex("idx_push_subscriptions_user", "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)");
