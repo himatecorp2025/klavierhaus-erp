@@ -39,6 +39,33 @@ function normalizeMoney(value) {
   const amount = Number(value || 0);
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
 }
+function normalizeCrmFollowUpDate(value) {
+  const raw = String(value || "").trim().replace(" ", "T");
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) throw domainError("INVALID_CRM_FOLLOW_UP_DATE", 400);
+  const normalized = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
+  if (!Number.isFinite(localDateTimeValue(normalized))) throw domainError("INVALID_CRM_FOLLOW_UP_DATE", 400);
+  return normalized;
+}
+function addLocalMinutes(value, minutes) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return value;
+  const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]) + Number(minutes || 0)));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}T${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`;
+}
+function addLocalMonths(value, months) {
+  const normalized = normalizeCrmFollowUpDate(value);
+  if (!normalized) return "";
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])));
+  const originalDay = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + Number(months || 0));
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(originalDay, lastDay));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}T${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`;
+}
 function domainError(code, status = 400, details = null) {
   const error = new Error(code);
   error.code = code;
@@ -48,6 +75,76 @@ function domainError(code, status = 400, details = null) {
 }
 
 function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BANK", invoiceEngine = null }) {
+  function syncCrmFollowUpState(contact, actor = {}) {
+    if (!contact?.id) throw domainError("CONTACT_NOT_FOUND", 404);
+    const followUpDate = normalizeCrmFollowUpDate(contact.follow_up_date);
+    const openJobs = db.prepare(`SELECT * FROM jobs WHERE COALESCE(is_crm_follow_up,0)=1 AND COALESCE(contact_id,client_id)=?
+      AND COALESCE(status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') ORDER BY created_at,id`).all(contact.id);
+    if (!followUpDate) {
+      if (openJobs.length) db.prepare(`DELETE FROM jobs WHERE COALESCE(is_crm_follow_up,0)=1 AND COALESCE(contact_id,client_id)=?
+        AND COALESCE(status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled')`).run(contact.id);
+      return { job: null, removed_open_jobs: openJobs.length, follow_up_date: null };
+    }
+    const reason = clean(contact.follow_up_reason || contact.next_step || "Ügyfél megkeresés", 500) || "Ügyfél megkeresés";
+    const title = clean(`📞 Hívás: ${clean(contact.name, 220)} – ${reason}`, 500);
+    const noteParts = [];
+    if (contact.phone) noteParts.push(`Telefon / Phone: ${clean(contact.phone, 500)}`);
+    if (contact.relationship_notes) noteParts.push(`Relationship Notes / Kapcsolati jegyzet: ${clean(contact.relationship_notes, 6000)}`);
+    const notes = noteParts.join("\n");
+    const assignedTo = clean(actor.name || contact.relationship_holder || contact.owner || "CRM", 200) || "CRM";
+    const assignedUserId = clean(actor.id || "", 160) || null;
+    const endTime = addLocalMinutes(followUpDate, 30);
+    let job = openJobs[0] || null;
+    if (job) {
+      db.prepare(`UPDATE jobs SET title=?,job_type='CRM Follow-Up / Ügyfél megkeresés',client_id=?,contact_id=?,client_name=?,client_phone=?,assigned_user_id=?,assigned_to=?,
+        status='Open',start_time=?,end_time=?,timezone=?,planned_hours=0.5,planned_minutes=30,service_address=?,instructions=?,notes=?,is_crm_follow_up=1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(title,contact.id,contact.id,clean(contact.name,300),clean(contact.phone,500),assignedUserId,assignedTo,followUpDate,endTime,JOB_TIMEZONE,clean(contact.address,1000),reason,notes,job.id);
+      if (openJobs.length > 1) {
+        const extraIds = openJobs.slice(1).map((row) => row.id);
+        const del = db.prepare("DELETE FROM jobs WHERE id=? AND COALESCE(is_crm_follow_up,0)=1");
+        extraIds.forEach((id) => del.run(id));
+      }
+    } else {
+      const id = rid("J");
+      db.prepare(`INSERT INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,title,job_type,client_id,contact_id,client_name,client_phone,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_hours,planned_minutes,service_address,instructions,notes,is_crm_follow_up)
+        VALUES(?,?,?,1,'ACTIVE',?,'CRM Follow-Up / Ügyfél megkeresés',?,?,?,?,?,?,?,?,'Medium','Open',?,?,?,0.5,30,?,?,?,1)`)
+        .run(id,`CRM-${id}`,id,title,contact.id,contact.id,clean(contact.name,300),clean(contact.phone,500),assignedUserId,assignedTo,assignedUserId,assignedTo,followUpDate,endTime,JOB_TIMEZONE,clean(contact.address,1000),reason,notes);
+      job = db.prepare("SELECT * FROM jobs WHERE id=?").get(id);
+    }
+    job = db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id);
+    return { job, removed_open_jobs: Math.max(0, openJobs.length - 1), follow_up_date: followUpDate };
+  }
+
+  function syncCrmFollowUp({ contact, actor = {} }) {
+    const run = db.transaction(() => syncCrmFollowUpState(contact, actor));
+    return run();
+  }
+
+  function completeCrmFollowUp({ contactId, cadence = "", nextFollowUpDate = undefined, actor = {} }) {
+    const run = db.transaction(() => {
+      const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
+      if (!contact) throw domainError("CONTACT_NOT_FOUND", 404);
+      const now = new Date().toISOString();
+      db.prepare(`UPDATE jobs SET status='Completed',workflow_status='COMPLETED',completed_at=COALESCE(completed_at,?),updated_at=CURRENT_TIMESTAMP
+        WHERE COALESCE(is_crm_follow_up,0)=1 AND COALESCE(contact_id,client_id)=? AND COALESCE(status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled')`).run(now, contact.id);
+      const requestedCadence = clean(cadence || contact.follow_up_cadence || "", 40);
+      const allowed = new Set(["CUSTOM","3_MONTHS","6_MONTHS","1_YEAR",""]);
+      if (!allowed.has(requestedCadence)) throw domainError("INVALID_CRM_FOLLOW_UP_CADENCE", 400);
+      let nextDate;
+      if (nextFollowUpDate !== undefined) nextDate = normalizeCrmFollowUpDate(nextFollowUpDate);
+      else if (requestedCadence === "3_MONTHS") nextDate = addLocalMonths(contact.follow_up_date || `${nyDateKey()}T10:00`, 3);
+      else if (requestedCadence === "6_MONTHS") nextDate = addLocalMonths(contact.follow_up_date || `${nyDateKey()}T10:00`, 6);
+      else if (requestedCadence === "1_YEAR") nextDate = addLocalMonths(contact.follow_up_date || `${nyDateKey()}T10:00`, 12);
+      else nextDate = "";
+      db.prepare("UPDATE contacts SET follow_up_date=?,follow_up_cadence=?,last_contact=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(nextDate || null, requestedCadence || contact.follow_up_cadence || null, now, contact.id);
+      const updated = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+      const sync = syncCrmFollowUpState(updated, actor);
+      return { contact: updated, completed: true, next_job: sync.job };
+    });
+    return run();
+  }
+
   function postFinancialItemOnce({ itemDate, title, description = "", amount, mainType, category, paymentMethod = "", jobId = null, clientId = null, pianoId = null, sourceType, sourceId, createdBy = "System" }) {
     if (!sourceType || !sourceId) throw new Error("FINANCIAL_SOURCE_REQUIRED");
     const existing = db.prepare("SELECT * FROM financial_items WHERE source_type=? AND source_id=? LIMIT 1").get(sourceType, sourceId);
@@ -266,7 +363,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     return run();
   }
 
-  return { postFinancialItemOnce, postClosedJobRevenue, employeeDailyRateForDate, dailyRateAllocationSummary, validateDailyRateAllocation, rebalanceDailyRateAllocations, patchJobSchedule, closeoutJobOrchestration };
+  return { postFinancialItemOnce, postClosedJobRevenue, syncCrmFollowUp, completeCrmFollowUp, employeeDailyRateForDate, dailyRateAllocationSummary, validateDailyRateAllocation, rebalanceDailyRateAllocations, patchJobSchedule, closeoutJobOrchestration };
 }
 
 module.exports = {
