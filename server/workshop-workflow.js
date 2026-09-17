@@ -76,6 +76,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   };
+  const roundMoney = (value) => Math.round((numeric(value) + Number.EPSILON) * 100) / 100;
   const error = (code, message = code) => { const e = new Error(message); e.code = code; return e; };
   const userById = (id) => id ? db.prepare("SELECT id,name,role,status FROM users WHERE id=? AND status='Active'").get(id) : null;
   const workflowById = (id) => db.prepare("SELECT * FROM workshop_workflows WHERE id=?").get(id);
@@ -132,9 +133,9 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   }
 
   function signedFinanceSummary(lines) {
-    const revenue = lines.filter((row) => row.line_type === "REVENUE").reduce((sum, row) => sum + numeric(row.amount), 0);
-    const costs = lines.filter((row) => row.line_type === "COST").reduce((sum, row) => sum + numeric(row.amount), 0);
-    return { revenue_total: revenue, cost_total: costs, net_total: revenue - costs };
+    const revenue = lines.filter((row) => row.line_type === "REVENUE").reduce((sum, row) => roundMoney(sum + numeric(row.amount)), 0);
+    const costs = lines.filter((row) => row.line_type === "COST").reduce((sum, row) => roundMoney(sum + numeric(row.amount)), 0);
+    return { revenue_total: revenue, cost_total: costs, net_total: roundMoney(revenue - costs) };
   }
 
   function decorateWorkflow(row, includeChildren = true) {
@@ -211,23 +212,27 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     if (stage.stage_code === "FINAL_HANDOVER" && nextStatus === "COMPLETED" && !inspectionReady(workflow,"DISPATCH")) throw error("DISPATCH_INSPECTION_REQUIRED");
   }
 
-  function persistPianoInspectionFile({ workflow, file, inspectionType, inspectionStatus, inspectedBy, inspectedAt }) {
+  function preparePianoInspectionFile({ workflow, file, inspectionType, inspectionStatus, inspectedBy, inspectedAt }) {
     if (!file || !uploadDir) return null;
     const targetDir=path.join(uploadDir,"piano-history",String(workflow.piano_id));
     fs.mkdirSync(targetDir,{recursive:true});
     const ext=path.extname(file.originalname||file.filename||"").toLowerCase()||".bin";
     const filename=`${inspectionType.toLowerCase()}-${Date.now()}-${rid("H").replace(/[^a-zA-Z0-9_-]/g,"")}${ext}`;
     const target=path.join(targetDir,filename);
-    fs.copyFileSync(file.path,target);
+    try{fs.copyFileSync(file.path,target);}catch(e){try{fs.unlinkSync(target);}catch(_error){}throw e;}
     const publicPath=`/uploads/piano-history/${workflow.piano_id}/${filename}`;
-    try {
-      db.prepare(`INSERT INTO piano_inspection_history(id,piano_id,workflow_id,inspection_type,inspection_status,file_path,original_filename,mime_type,inspected_by,inspected_at) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-        .run(rid("PIH"),workflow.piano_id,workflow.id,inspectionType,inspectionStatus||null,publicPath,file.originalname||filename,file.mimetype||null,inspectedBy||null,inspectedAt);
-      return publicPath;
-    } catch (e) {
-      try { fs.unlinkSync(target); } catch (_error) {}
-      throw e;
-    }
+    return { id:rid("PIH"), piano_id:workflow.piano_id, workflow_id:workflow.id, inspection_type:inspectionType, inspection_status:inspectionStatus||null, file_path:publicPath, original_filename:file.originalname||filename, mime_type:file.mimetype||null, inspected_by:inspectedBy||null, inspected_at:inspectedAt, absolute_path:target };
+  }
+
+  function insertPreparedPianoInspectionFile(prepared) {
+    if (!prepared) return null;
+    db.prepare(`INSERT INTO piano_inspection_history(id,piano_id,workflow_id,inspection_type,inspection_status,file_path,original_filename,mime_type,inspected_by,inspected_at) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+      .run(prepared.id,prepared.piano_id,prepared.workflow_id,prepared.inspection_type,prepared.inspection_status,prepared.file_path,prepared.original_filename,prepared.mime_type,prepared.inspected_by,prepared.inspected_at);
+    return prepared.file_path;
+  }
+
+  function cleanupPreparedInspectionFiles(preparedFiles=[]) {
+    preparedFiles.filter(Boolean).forEach((prepared)=>{try{fs.unlinkSync(prepared.absolute_path);}catch(_error){}});
   }
 
   function createWorkflowForJob(job, actor, options={}) {
@@ -442,6 +447,17 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.transport_responsible_user_id && !transportAssignee) throw error("WORKFLOW_RESPONSIBLE_NOT_FOUND");
       const id = rid("WF");
       const key = `WF-${new Date().getFullYear()}-${id.slice(-8)}`;
+      const preparedInspectionFiles=[];
+      let preparedIntakePdf=null,preparedIntakePhotos=[],inspectionMeta=null;
+      if(mode==="INBOUND"){
+        inspectionMeta={inspectedAt:nowISO(),inspectedBy:req.user?.name||req.user?.id||"",workflow:{id,piano_id:pianoId}};
+        preparedIntakePdf=preparePianoInspectionFile({workflow:inspectionMeta.workflow,file:intakePdf,inspectionType:"INTAKE",inspectionStatus:intakeStatus,inspectedBy:inspectionMeta.inspectedBy,inspectedAt:inspectionMeta.inspectedAt});
+        if(preparedIntakePdf){preparedInspectionFiles.push(preparedIntakePdf);persistedHistoryPaths.push(preparedIntakePdf.file_path);}
+        for(const file of intakePhotos){
+          const preparedPhoto=preparePianoInspectionFile({workflow:inspectionMeta.workflow,file,inspectionType:"DAMAGE_PHOTO",inspectionStatus:intakeStatus,inspectedBy:inspectionMeta.inspectedBy,inspectedAt:inspectionMeta.inspectedAt});
+          if(preparedPhoto){preparedIntakePhotos.push(preparedPhoto);preparedInspectionFiles.push(preparedPhoto);persistedHistoryPaths.push(preparedPhoto.file_path);}
+        }
+      }
       const transaction = db.transaction(() => {
         const linkedJobId = rid("J");
         const linkedStart = requestedCalendarStart || shiftLocalMinutes(finalDueAt,-SCHEDULE_INTERVAL_MINUTES);
@@ -469,11 +485,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           directAudit(req,"WORKFLOW_STAGE_CREATED",stageId,null,{workflow_id:id,stage_code:definition.code,status:stageStatus,card_title:cardTitle,details:shortDescription,notes:"",assigned_to:assignedStage?.name||null,due_at:due||null},"Workflow phase created");
         });
         if(mode==="INBOUND"){
-          const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"",workflowForInspection={id,piano_id:pianoId};
-          const historyPdf=persistPianoInspectionFile({workflow:workflowForInspection,file:intakePdf,inspectionType:"INTAKE",inspectionStatus:intakeStatus,inspectedBy,inspectedAt});if(historyPdf)persistedHistoryPaths.push(historyPdf);
-          const photoPaths=intakePhotos.map(file=>persistPianoInspectionFile({workflow:workflowForInspection,file,inspectionType:"DAMAGE_PHOTO",inspectionStatus:intakeStatus,inspectedBy,inspectedAt})).filter(Boolean);persistedHistoryPaths.push(...photoPaths);
+          const historyPdf=insertPreparedPianoInspectionFile(preparedIntakePdf);
+          const photoPaths=preparedIntakePhotos.map(insertPreparedPianoInspectionFile).filter(Boolean);
           const workflowPdf=`/uploads/workflow-inspections/${path.basename(intakePdf.path)}`;
-          db.prepare("UPDATE workshop_workflows SET intake_inspection_status=?,intake_pdf_path=?,intake_photos=?,intake_inspected_by=?,intake_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(intakeStatus,workflowPdf,JSON.stringify(photoPaths),inspectedBy,inspectedAt,id);
+          db.prepare("UPDATE workshop_workflows SET intake_inspection_status=?,intake_pdf_path=?,intake_photos=?,intake_inspected_by=?,intake_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(intakeStatus,workflowPdf,JSON.stringify(photoPaths),inspectionMeta.inspectedBy,inspectionMeta.inspectedAt,id);
           directAudit(req,"WORKFLOW_INTAKE_INSPECTION",id,null,{status:intakeStatus,pdf:workflowPdf,history_pdf:historyPdf,photos:photoPaths},"Arrival inspection recorded during workflow creation");
         }
         directAudit(req, "WORKFLOW_CREATED", id, null, { workflow_key: key, client_id: clientId, piano_id: pianoId, mode, main_responsible_user_id: req.user.id, first_stage_id: firstDefinition.code, active_stage_codes: selectedDefinitions.map((definition) => definition.code) }, "Workshop workflow created");
@@ -869,12 +884,20 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if(!["FLAWLESS","PRE_EXISTING_DAMAGE"].includes(status))throw error("INVALID_INTAKE_INSPECTION_STATUS");
       const allowedPhotoExt=new Set([".jpg",".jpeg",".png",".webp"]),allowedPhotoMime=new Set(["image/jpeg","image/jpg","image/png","image/webp"]);
       if(photos.some(file=>!allowedPhotoExt.has(path.extname(file.originalname||"").toLowerCase())||!allowedPhotoMime.has(String(file.mimetype||"").toLowerCase())))throw error("INVALID_INTAKE_PHOTO");
-      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"";
-      const historyPdf=persistPianoInspectionFile({workflow,file:pdf,inspectionType:"INTAKE",inspectionStatus:status,inspectedBy,inspectedAt});
-      const photoPaths=photos.map(file=>persistPianoInspectionFile({workflow,file,inspectionType:"DAMAGE_PHOTO",inspectionStatus:status,inspectedBy,inspectedAt})).filter(Boolean);
-      const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
-      db.prepare("UPDATE workshop_workflows SET intake_inspection_status=?,intake_pdf_path=?,intake_photos=?,intake_inspected_by=?,intake_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,JSON.stringify(photoPaths),inspectedBy,inspectedAt,workflow.id);
-      directAudit(req,"WORKFLOW_INTAKE_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf,photos:photoPaths},"Arrival inspection recorded");
+      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"",prepared=[];
+      try{
+        const preparedPdf=preparePianoInspectionFile({workflow,file:pdf,inspectionType:"INTAKE",inspectionStatus:status,inspectedBy,inspectedAt});
+        if(preparedPdf)prepared.push(preparedPdf);
+        const preparedPhotos=[];
+        for(const file of photos){const preparedPhoto=preparePianoInspectionFile({workflow,file,inspectionType:"DAMAGE_PHOTO",inspectionStatus:status,inspectedBy,inspectedAt});if(preparedPhoto){preparedPhotos.push(preparedPhoto);prepared.push(preparedPhoto);}}
+        const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
+        db.transaction(()=>{
+          const historyPdf=insertPreparedPianoInspectionFile(preparedPdf);
+          const photoPaths=preparedPhotos.map(insertPreparedPianoInspectionFile).filter(Boolean);
+          db.prepare("UPDATE workshop_workflows SET intake_inspection_status=?,intake_pdf_path=?,intake_photos=?,intake_inspected_by=?,intake_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,JSON.stringify(photoPaths),inspectedBy,inspectedAt,workflow.id);
+          directAudit(req,"WORKFLOW_INTAKE_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf,photos:photoPaths},"Arrival inspection recorded");
+        })();
+      }catch(e){cleanupPreparedInspectionFiles(prepared);throw e;}
       res.json(decorateWorkflow(workflowById(workflow.id),true));
     }catch(e){uploaded.forEach(file=>{try{fs.unlinkSync(file.path);}catch(_error){}});res.status(400).json({error:e.code||e.message});}
   });
@@ -885,11 +908,17 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const workflow=requireWorkflow(req.params.id),pdf=req.files?.pdf?.[0],status=clean(req.body?.status||"APPROVED",40).toUpperCase();
       if(!pdf||String(pdf.mimetype).toLowerCase()!=="application/pdf"||path.extname(pdf.originalname||"").toLowerCase()!==".pdf")throw error("DISPATCH_PDF_REQUIRED");
       if(!["APPROVED","ISSUE_FOUND"].includes(status))throw error("INVALID_DISPATCH_INSPECTION_STATUS");
-      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"";
-      const historyPdf=persistPianoInspectionFile({workflow,file:pdf,inspectionType:"DISPATCH",inspectionStatus:status,inspectedBy,inspectedAt});
-      const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
-      db.prepare("UPDATE workshop_workflows SET dispatch_inspection_status=?,dispatch_pdf_path=?,dispatch_inspected_by=?,dispatch_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,inspectedBy,inspectedAt,workflow.id);
-      directAudit(req,"WORKFLOW_DISPATCH_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf},"Outgoing inspection recorded");
+      const inspectedAt=nowISO(),inspectedBy=req.user?.name||req.user?.id||"",prepared=[];
+      try{
+        const preparedPdf=preparePianoInspectionFile({workflow,file:pdf,inspectionType:"DISPATCH",inspectionStatus:status,inspectedBy,inspectedAt});
+        if(preparedPdf)prepared.push(preparedPdf);
+        const workflowPdf=`/uploads/workflow-inspections/${path.basename(pdf.path)}`;
+        db.transaction(()=>{
+          const historyPdf=insertPreparedPianoInspectionFile(preparedPdf);
+          db.prepare("UPDATE workshop_workflows SET dispatch_inspection_status=?,dispatch_pdf_path=?,dispatch_inspected_by=?,dispatch_inspected_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status,workflowPdf,inspectedBy,inspectedAt,workflow.id);
+          directAudit(req,"WORKFLOW_DISPATCH_INSPECTION",workflow.id,null,{status,pdf:workflowPdf,history_pdf:historyPdf},"Outgoing inspection recorded");
+        })();
+      }catch(e){cleanupPreparedInspectionFiles(prepared);throw e;}
       res.json(decorateWorkflow(workflowById(workflow.id),true));
     }catch(e){uploaded.forEach(file=>{try{fs.unlinkSync(file.path);}catch(_error){}});res.status(400).json({error:e.code||e.message});}
   });
