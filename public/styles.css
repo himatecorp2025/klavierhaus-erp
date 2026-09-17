@@ -2303,10 +2303,10 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .workflow-stage-card-inner{position:relative}.workflow-note-bell{position:absolute;right:.15rem;top:.05rem;width:1.35rem;height:1.35rem;display:grid;place-items:center;color:#1471c8;z-index:3}
 .workflow-note-bell svg{width:1.1rem;height:1.1rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .workflow-create-phase-notes textarea{min-height:4.2rem;resize:vertical}
-.workflow-inspection-create,.workflow-inspection-panel{border:1px solid rgba(19,99,169,.17);border-radius:14px;padding:1rem;background:rgba(25,104,177,.035)}
-.workflow-inspection-question{display:flex!important;align-items:flex-start;gap:.55rem;margin:.45rem 0 .7rem;font-weight:650}
+.workflow-inspection-create,.workflow-inspection-panel{border:1px solid #334155;border-radius:8px;padding:1.25rem;background:var(--bg-surface-elevated,#1E293B);color:#E2E8F0}
+.workflow-inspection-question{display:flex!important;align-items:flex-start;gap:.75rem;margin:.55rem 0 .8rem;font-weight:650;color:#E2E8F0}
 .workflow-inspection-warning{color:#9a4e00;background:#fff6e8;border:1px solid #f2c986;border-radius:8px;padding:.55rem .65rem;margin:.45rem 0}
-.workflow-inspection-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.workflow-inspection-grid article{border:1px solid rgba(15,40,75,.1);border-radius:12px;padding:.85rem;background:rgba(255,255,255,.65)}
+.workflow-inspection-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.workflow-inspection-grid article{border:1px solid #334155;border-radius:8px;padding:1.25rem;background:var(--bg-surface-elevated,#1E293B);color:#E2E8F0}
 .workflow-inspection-grid article>label{display:block;margin:.6rem 0}.workflow-inspection-link{display:inline-block;margin:.2rem .45rem .55rem 0;color:#1267b0;font-weight:700;text-decoration:none}
 .piano-inspection-history{margin-top:1rem;border-top:1px solid rgba(15,40,75,.12);padding-top:.85rem}.piano-inspection-history article{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.65rem 0;border-bottom:1px solid rgba(15,40,75,.08)}
 .piano-inspection-history article div{display:grid;gap:.15rem}.piano-inspection-history article span,.piano-inspection-history article small{color:var(--muted,#687386)}.piano-inspection-history a{color:#1267b0;font-weight:700;text-decoration:none}
@@ -2332,12 +2332,12 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .modal-box,.modal-container,.modal-dialog,.nested-modal-card{position:relative;z-index:1010}
 .dropdown-menu,.select-dropdown-list,.autocomplete-results,.workflow-typeahead-results,.manual-counterparty-menu{position:absolute;z-index:1050!important;pointer-events:auto}
 .field:has(.dropdown-menu),.field:has(.select-dropdown-list),.field:has(.autocomplete-results),.workflow-typeahead-field,.manual-counterparty-field{position:relative;overflow:visible;z-index:1040}
-.modal:has(.dropdown-menu:not(.hidden)),.modal:has(.select-dropdown-list:not(.hidden)),.modal:has(.autocomplete-results:not(.hidden)),.nested-modal-overlay:has(.workflow-typeahead-results:not(.hidden)),.nested-modal-overlay:has(.manual-counterparty-menu:not(.hidden)){overflow:auto}
+.modal:has(.dropdown-menu:not(.hidden)),.modal:has(.select-dropdown-list:not(.hidden)),.modal:has(.autocomplete-results:not(.hidden)),.nested-modal-overlay:has(.workflow-typeahead-results:not(.hidden)),.nested-modal-overlay:has(.manual-counterparty-menu:not(.hidden)){overflow:visible!important}
 .modal-box:has(.dropdown-menu:not(.hidden)),.modal-box:has(.select-dropdown-list:not(.hidden)),.modal-box:has(.autocomplete-results:not(.hidden)),.nested-modal-card:has(.workflow-typeahead-results:not(.hidden)),.manual-invoice-card:has(.manual-counterparty-menu:not(.hidden)){overflow:visible!important;max-height:none}
 .manual-counterparty-menu,.workflow-typeahead-results{background:#0d1b2e;color:var(--text);border-color:#334155;box-shadow:0 18px 44px rgba(0,0,0,.58)}
 .manual-counterparty-option,.workflow-typeahead-option{pointer-events:auto;color:var(--text)}
-.workflow-inspection-create,.workflow-inspection-panel{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important}
-.workflow-inspection-grid article{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important}
+.workflow-inspection-create,.workflow-inspection-panel{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important;border-radius:8px!important;padding:1.25rem!important;color:#E2E8F0!important}
+.workflow-inspection-grid article{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important;border-radius:8px!important;padding:1.25rem!important;color:#E2E8F0!important}
 .workflow-inspection-question{display:flex!important;align-items:flex-start!important;gap:.75rem!important;margin:.55rem 0 .8rem!important}
 .workflow-inspection-question input{flex:0 0 auto;margin-top:.18rem}
 .workflow-inspection-question label,.workflow-inspection-question span{margin:0}
@@ -2346,3 +2346,25 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .status-draft,.badge.Draft{background:#475569!important;color:#f8fafc!important}
 @media(max-width:1050px){.workflow-phase-cost-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:680px){.workflow-phase-cost-form{grid-template-columns:1fr}}
+
+
+/* Workflow UI final hardening: no clipping, single-line statuses, premium assigned state. */
+.modal:has(.dropdown-menu:not(.hidden)),
+.modal:has(.select-dropdown-list:not(.hidden)),
+.modal:has(.autocomplete-results:not(.hidden)),
+.nested-modal-overlay:has(.workflow-typeahead-results:not(.hidden)),
+.nested-modal-overlay:has(.manual-counterparty-menu:not(.hidden)),
+.modal-box:has(.dropdown-menu:not(.hidden)),
+.modal-box:has(.select-dropdown-list:not(.hidden)),
+.modal-box:has(.autocomplete-results:not(.hidden)),
+.nested-modal-card:has(.workflow-typeahead-results:not(.hidden)),
+.manual-invoice-card:has(.manual-counterparty-menu:not(.hidden)){overflow:visible!important}
+.workflow-shell .workflow-stage-status,.workflow-card-status,.workflow-stage-card-header{display:flex;align-items:center;gap:.5rem;min-width:0;flex-wrap:nowrap}
+.workflow-shell .workflow-stage-status em,.workflow-card-status,.workflow-stage-card-header .status-badge{font-size:.75rem!important;letter-spacing:.02em!important;line-height:1.2;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal!important;padding:2px 8px}
+.workflow-shell .workflow-stage-card.status-assigned{background:rgba(168,85,247,.10)!important;border-color:rgba(168,85,247,.55)!important;color:#F3E8FF!important}
+.workflow-shell .workflow-stage-card.status-assigned:hover{background:rgba(168,85,247,.16)!important;color:#F3E8FF!important}
+.workflow-shell .workflow-stage-card.status-assigned .workflow-stage-status{width:max-content;max-width:100%;border:1px solid rgba(168,85,247,.4);border-radius:999px;background:rgba(168,85,247,.15);color:#F3E8FF}
+.workflow-shell .workflow-stage-card.status-assigned .workflow-status-dot{background:#A855F7!important;color:#F3E8FF!important}
+.workflow-inspection-create,.workflow-inspection-panel,.workflow-inspection-grid article{background:var(--bg-surface-elevated,#1E293B)!important;border:1px solid #334155!important;border-radius:8px!important;padding:1.25rem!important;color:#E2E8F0!important}
+.workflow-inspection-question{display:flex!important;align-items:flex-start!important;gap:.75rem!important;color:#E2E8F0!important}
+.workflow-inspection-create label,.workflow-inspection-panel label,.workflow-inspection-create p,.workflow-inspection-panel p{color:#E2E8F0}
