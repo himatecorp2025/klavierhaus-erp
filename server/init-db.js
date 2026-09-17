@@ -185,7 +185,7 @@ function migrationRequiresBackup() {
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const attendancePauseColumnsMissing = tableExists("event_attendance_sessions") && ["paused_at", "paused_by_user_id", "resumed_at", "resumed_by_user_id"].some((column) => !tableColumns("event_attendance_sessions").has(column));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
-  const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
+  const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workshop_subtasks","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
   const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableColumns("invoices").has("revenue_recognition_status") || !tableColumns("invoices").has("revenue_recognition_date") || !tableColumns("invoices").has("deferred_event_id") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("NONE / INTERNAL") || !tableSql("invoices").includes("'event'"));
   const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
@@ -1167,6 +1167,21 @@ function runMigrations() {
       ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
       ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
+      db.exec(`CREATE TABLE IF NOT EXISTS workshop_subtasks (
+        id TEXT PRIMARY KEY,
+        stage_id TEXT NOT NULL REFERENCES workflow_stages(id) ON DELETE CASCADE,
+        workflow_id TEXT NOT NULL REFERENCES workshop_workflows(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0,1)),
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','COMPLETED','DELAYED')),
+        assigned_to_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        delay_reason TEXT,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TEXT
+      )`);
+      ensureIndex("idx_subtasks_stage", "CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id)");
+      ensureIndex("idx_subtasks_workflow", "CREATE INDEX IF NOT EXISTS idx_subtasks_workflow ON workshop_subtasks(workflow_id,stage_id)");
     }
 
     if (tableExists("jobs") && tableExists("workshop_workflows")) {
