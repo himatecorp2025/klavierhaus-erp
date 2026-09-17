@@ -2575,3 +2575,44 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
   .deadline-notification-card.is-mobile.is-rescheduling{max-height:1400px!important;overflow:visible!important}
   .reschedule-popover-panel .quick-reschedule-actions{grid-template-columns:1fr 1fr}
 }
+
+/* Workshop workflow: official subtask catalog, swimlane-only movement and touch hold controls. */
+.workflow-shell .workflow-stage-dropzone{position:relative;min-width:0;min-height:100%;border:1px solid transparent;border-radius:12px;transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
+.workflow-shell .workflow-stage-dropzone.is-drop-target{border-color:#22c55e;background:rgba(34,197,94,.08);box-shadow:inset 0 0 0 1px rgba(34,197,94,.25)}
+.workflow-shell .workflow-stage-dropzone.is-invalid-drop{border-color:#ef4444;background:rgba(239,68,68,.08);cursor:not-allowed}
+.workflow-shell .workflow-stage-card[data-workflow-draggable="1"]{touch-action:pan-y;-webkit-user-select:none;user-select:none}
+.workflow-shell .workflow-stage-card.is-dragging{opacity:.55;transform:scale(.98)}
+.workflow-shell .workflow-stage-card.is-long-press-active{position:relative;z-index:3400;transform:scale(1.04)!important;box-shadow:0 14px 28px rgba(0,0,0,.6)!important;outline:2px solid #60a5fa;outline-offset:2px}
+.workflow-shell .workflow-swimlane.is-touch-dragging{position:relative;z-index:3}
+.workflow-shell .workflow-stage-empty--missing{display:flex;align-items:center;justify-content:center;min-height:184px;margin:10px 9px;border:1px dashed #4b647b;border-radius:12px;color:#6f8192;background:rgba(15,35,52,.35)}
+.workflow-subtask-progress{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;font-size:11px;font-weight:850;color:inherit}
+.workflow-subtask-progress>span{display:block;height:5px;border-radius:999px;background:rgba(255,255,255,.18);overflow:hidden}
+.workflow-subtask-progress>span>i{display:block;height:100%;border-radius:inherit;background:currentColor;opacity:.8}
+.workflow-assignee-stack{display:flex;align-items:center;padding-left:4px}
+.workflow-assignee-stack .workflow-assignee-avatar{margin-left:-4px;border:2px solid rgba(8,26,43,.92);box-shadow:none}
+.workflow-assignee-avatar--more{font-size:10px;letter-spacing:-.02em}
+.workflow-subtasks-block{margin-top:14px}
+.workflow-subtasks-block .workflow-block-head>div{display:flex;align-items:baseline;gap:9px;min-width:0}
+.workflow-subtasks-block .workflow-block-head p{margin:0;color:var(--muted);font-size:12px}
+.workflow-subtask-summary{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:900}
+.workflow-subtask-list{display:grid;gap:7px;margin-top:10px}
+.workflow-subtask-row{display:grid;grid-template-columns:34px minmax(150px,1fr) minmax(116px,.6fr) minmax(150px,.8fr);gap:8px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:9px;background:rgba(7,24,39,.46)}
+.workflow-subtask-row.status-completed{opacity:.78}
+.workflow-subtask-row.status-delayed{border-color:#f59e0b;background:rgba(245,158,11,.07)}
+.workflow-subtask-check{width:30px;height:30px;padding:0;border:1px solid #567087;border-radius:8px;background:#0b2036;color:#7ef0be;font-weight:950}
+.workflow-subtask-row.status-completed .workflow-subtask-check{border-color:#22c55e;background:rgba(34,197,94,.16)}
+.workflow-subtask-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+.workflow-subtask-copy strong{font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.workflow-subtask-copy small{color:var(--muted);font-size:10px}
+.workflow-subtask-copy .workflow-subtask-delay{color:#fbbf24}
+.workflow-subtask-status-select,.workflow-subtask-assignee{min-width:0;padding:7px;font-size:11px}
+.workflow-subtask-add{display:grid;grid-template-columns:minmax(170px,1.35fr) minmax(150px,1fr) minmax(155px,.85fr) auto;gap:8px;margin-top:10px;align-items:center}
+.workflow-subtask-add select,.workflow-subtask-add input{min-width:0;padding:8px;font-size:12px}
+.workflow-phase-secondary-actions .danger-btn{margin-left:auto}
+.admin-date-picker-popover{z-index:4500!important}
+@media(max-width:900px){
+ .workflow-subtask-row{grid-template-columns:34px minmax(0,1fr);align-items:start}
+ .workflow-subtask-status-select,.workflow-subtask-assignee{grid-column:2}
+ .workflow-subtask-add{grid-template-columns:1fr}
+ .workflow-subtask-add button{width:100%}
+}
