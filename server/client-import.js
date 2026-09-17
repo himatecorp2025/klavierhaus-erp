@@ -226,4 +226,203 @@ function commitClientImportRecords(db, { records, source, batchId }) {
   return run();
 }
 
-module.exports = { parseWorkbookSheets, detectClientSheet, analyzeClientWorkbook, commitClientImportRecords, normalizeEmailList, normalizePhones };
+const CLIENT_PIANO_STRUCTURED_FIELDS = Object.freeze([
+  "client_name",
+  "client_email",
+  "client_phone",
+  "address",
+  "brand",
+  "model",
+  "serial_number",
+  "year_built",
+  "size_length",
+  "finish",
+  "notes",
+  "is_verified"
+]);
+
+function clientPianoExportRows(db) {
+  return db.prepare(`
+    SELECT
+      COALESCE(c.name,'') AS client_name,
+      COALESCE(c.email,'') AS client_email,
+      COALESCE(c.phone,'') AS client_phone,
+      COALESCE(NULLIF(trim(p.location),''),NULLIF(trim(c.address),''),'') AS address,
+      COALESCE(p.brand,'') AS brand,
+      COALESCE(p.model,'') AS model,
+      COALESCE(p.serial_no,'') AS serial_number,
+      COALESCE(p.build_year,p.year,'') AS year_built,
+      COALESCE(NULLIF(trim(p.size_length),''),NULLIF(trim(p.size_display),''),NULLIF(trim(p.size_cm),''),NULLIF(trim(p.size_in),''),'') AS size_length,
+      COALESCE(p.finish,'') AS finish,
+      COALESCE(p.notes,'') AS notes,
+      CASE WHEN COALESCE(cp.is_verified,0)=1 THEN 1 ELSE 0 END AS is_verified
+    FROM client_pianos cp
+    JOIN pianos p ON p.id=cp.piano_id
+    JOIN contacts c ON c.id=cp.client_id
+    ORDER BY lower(c.name),lower(p.brand),lower(p.model),p.id
+  `).all().map(row => {
+    const out = {};
+    for (const field of CLIENT_PIANO_STRUCTURED_FIELDS) out[field] = row[field] ?? "";
+    return out;
+  });
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+function serializeClientPianoCsv(rows) {
+  const lines = [CLIENT_PIANO_STRUCTURED_FIELDS.join(",")];
+  for (const row of rows) lines.push(CLIENT_PIANO_STRUCTURED_FIELDS.map(field => csvCell(row[field])).join(","));
+  return lines.join("\r\n");
+}
+function parseCsvRows(content) {
+  const text = String(content ?? "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [], cell = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i += 1; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+      continue;
+    }
+    if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n") { row.push(cell.replace(/\r$/, "")); rows.push(row); row = []; cell = ""; }
+    else cell += ch;
+  }
+  if (quoted) throw new Error("CLIENT_PIANO_CSV_UNCLOSED_QUOTE");
+  if (cell.length || row.length) { row.push(cell.replace(/\r$/, "")); rows.push(row); }
+  return rows.filter(values => values.some(value => String(value ?? "").trim() !== ""));
+}
+function normalizeStructuredClientPianoRow(input = {}) {
+  const row = {};
+  for (const field of CLIENT_PIANO_STRUCTURED_FIELDS) row[field] = input[field] == null ? "" : String(input[field]).trim();
+  row.is_verified = /^(?:1|true|yes|y|verified)$/i.test(String(input.is_verified ?? "").trim()) ? 1 : 0;
+  return row;
+}
+function parseStructuredClientPianoPayload({ format, content }) {
+  const type = String(format || "").trim().toLowerCase();
+  let rows = [];
+  if (type === "json") {
+    const parsed = JSON.parse(String(content || "[]"));
+    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.rows) ? parsed.rows : [];
+    if (!rows.length && String(content || "").trim() !== "[]") throw new Error("CLIENT_PIANO_JSON_ROWS_REQUIRED");
+  } else if (type === "csv") {
+    const csvRows = parseCsvRows(content);
+    if (!csvRows.length) return [];
+    const header = csvRows.shift().map(value => String(value || "").trim());
+    const missing = CLIENT_PIANO_STRUCTURED_FIELDS.filter(field => !header.includes(field));
+    if (missing.length) {
+      const error = new Error("CLIENT_PIANO_IMPORT_COLUMNS_MISSING");
+      error.missingColumns = missing;
+      throw error;
+    }
+    rows = csvRows.map(values => Object.fromEntries(header.map((field, index) => [field, values[index] ?? ""])));
+  } else throw new Error("CLIENT_PIANO_IMPORT_FORMAT_UNSUPPORTED");
+  return rows.map(normalizeStructuredClientPianoRow);
+}
+
+function commitStructuredClientPianoImport(db, { rows, actorName = "IMPORT" }) {
+  const normalizedRows = Array.isArray(rows) ? rows.map(normalizeStructuredClientPianoRow) : [];
+  const run = db.transaction(() => {
+    const contacts = db.prepare("SELECT id,name,email,phone,address FROM contacts").all();
+    const byEmail = new Map(), byPhone = new Map(), byNameAddress = new Map();
+    const indexContact = contact => {
+      for (const email of normalizeEmailList(contact.email)) if (!byEmail.has(email)) byEmail.set(email, contact);
+      for (const phone of normalizePhones(contact.phone)) if (!byPhone.has(phone)) byPhone.set(phone, contact);
+      const key = `${normalizeText(contact.name)}::${normalizeText(contact.address)}`;
+      if (normalizeText(contact.name) && !byNameAddress.has(key)) byNameAddress.set(key, contact);
+    };
+    contacts.forEach(indexContact);
+    const idRows = db.prepare("SELECT id FROM contacts WHERE id LIKE 'C-%'").all();
+    let maxId = 0;
+    for (const row of idRows) { const match = String(row.id || "").match(/^C-(\d{1,5})$/); if (match) maxId = Math.max(maxId, Number(match[1])); }
+    const nextContactId = () => { maxId += 1; if (maxId > 99999) throw new Error("CONTACT_ID_LIMIT_REACHED"); return `C-${String(maxId).padStart(5, "0")}`; };
+    const touchedClients = new Set();
+    let createdClients = 0, updatedClients = 0, createdPianos = 0, updatedPianos = 0, verifiedLinks = 0;
+    for (let index = 0; index < normalizedRows.length; index++) {
+      const row = normalizedRows[index];
+      if (!row.client_name || !row.brand || !row.model) {
+        const error = new Error("CLIENT_PIANO_IMPORT_REQUIRED_FIELD");
+        error.rowNumber = index + 2;
+        throw error;
+      }
+      const email = normalizeEmailList(row.client_email)[0] || "", phone = normalizePhones(row.client_phone)[0] || "";
+      let client = email ? byEmail.get(email) : null;
+      if (!client && phone) client = byPhone.get(phone);
+      if (!client) client = byNameAddress.get(`${normalizeText(row.client_name)}::${normalizeText(row.address)}`) || null;
+      if (!client) {
+        const id = nextContactId();
+        db.prepare(`INSERT INTO contacts(id,name,type,email,phone,address,billing_address,priority,status,has_piano,interested_buying,notes)
+          VALUES(?,?,'General',?,?,?,?, 'Medium','Active',1,0,'')`).run(id,row.client_name,row.client_email,row.client_phone,row.address,row.address);
+        client = { id, name: row.client_name, email: row.client_email, phone: row.client_phone, address: row.address };
+        contacts.push(client); indexContact(client); createdClients += 1;
+      } else {
+        db.prepare(`UPDATE contacts SET name=?,email=CASE WHEN ?<>'' THEN ? ELSE email END,phone=CASE WHEN ?<>'' THEN ? ELSE phone END,
+          address=CASE WHEN ?<>'' THEN ? ELSE address END,billing_address=CASE WHEN ?<>'' THEN ? ELSE billing_address END,has_piano=1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(row.client_name,row.client_email,row.client_email,row.client_phone,row.client_phone,row.address,row.address,row.address,row.address,client.id);
+        client = { ...client, name: row.client_name, email: row.client_email || client.email, phone: row.client_phone || client.phone, address: row.address || client.address };
+        updatedClients += 1;
+      }
+      touchedClients.add(client.id);
+      db.prepare("INSERT OR IGNORE INTO piano_brands(brand_name,active) VALUES(?,1)").run(row.brand);
+      db.prepare("INSERT OR IGNORE INTO piano_model_catalog(brand_name,model_name,active) VALUES(?,?,1)").run(row.brand,row.model);
+      const serial = String(row.serial_number || "").trim();
+      let piano = serial ? db.prepare("SELECT * FROM pianos WHERE lower(trim(serial_no))=lower(trim(?)) LIMIT 1").get(serial) : null;
+      if (!piano) {
+        piano = db.prepare(`SELECT p.* FROM pianos p JOIN client_pianos cp ON cp.piano_id=p.id
+          WHERE cp.client_id=? AND lower(trim(COALESCE(p.brand,'')))=lower(trim(?)) AND lower(trim(COALESCE(p.model,'')))=lower(trim(?))
+            AND COALESCE(p.build_year,p.year,0)=COALESCE(?,0)
+            AND lower(trim(COALESCE(NULLIF(p.size_length,''),NULLIF(p.size_display,''),'')))=lower(trim(?))
+            AND lower(trim(COALESCE(p.finish,'')))=lower(trim(?)) LIMIT 1`)
+          .get(client.id,row.brand,row.model,Number(row.year_built)||null,row.size_length,row.finish);
+      }
+      const buildYear = Number(row.year_built) || null;
+      if (!piano) {
+        const pianoId = `P-${crypto.randomUUID()}`;
+        db.prepare(`INSERT INTO pianos(id,brand,model,serial_no,finish,build_year,size_length,size_display,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,owner_resolution)
+          VALUES(?,?,?,?,?,?,?,?, 'Customer owned','Customer owned',?,?,?,0,'Active',?,'MATCHED_CLIENT')`)
+          .run(pianoId,row.brand,row.model,serial,row.finish,buildYear,row.size_length,row.size_length,`${row.brand} ${row.model}`.trim(),client.id,row.address,row.notes);
+        piano = db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId); createdPianos += 1;
+      } else {
+        const previousOwner = String(piano.owner_contact_id || ""); if (previousOwner) touchedClients.add(previousOwner);
+        db.prepare(`UPDATE pianos SET brand=?,model=?,serial_no=?,finish=?,build_year=?,size_length=?,size_display=?,display_name=?,owner_contact_id=?,location=?,notes=?,
+          ownership='Customer owned',ownership_type='Customer owned',owner_resolution='MATCHED_CLIENT',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(row.brand,row.model,serial,row.finish,buildYear,row.size_length,row.size_length,`${row.brand} ${row.model}`.trim(),client.id,row.address,row.notes,piano.id);
+        updatedPianos += 1;
+      }
+      const currentLink = db.prepare("SELECT * FROM client_pianos WHERE client_id=? AND piano_id=? LIMIT 1").get(client.id,piano.id);
+      db.prepare("DELETE FROM client_pianos WHERE piano_id=? AND client_id<>?").run(piano.id,client.id);
+      if (currentLink) {
+        db.prepare("UPDATE client_pianos SET is_verified=?,verified_at=?,verified_by=? WHERE id=?")
+          .run(row.is_verified,row.is_verified ? new Date().toISOString() : null,row.is_verified ? actorName : null,currentLink.id);
+      } else {
+        db.prepare("INSERT INTO client_pianos(id,client_id,piano_id,is_verified,verified_at,verified_by) VALUES(?,?,?,?,?,?)")
+          .run(`CP-${crypto.randomUUID()}`,client.id,piano.id,row.is_verified,row.is_verified ? new Date().toISOString() : null,row.is_verified ? actorName : null);
+      }
+      if (row.is_verified) verifiedLinks += 1;
+    }
+    const countForClient = db.prepare("SELECT COUNT(*) AS c FROM client_pianos WHERE client_id=?");
+    const updateHasPiano = db.prepare("UPDATE contacts SET has_piano=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
+    for (const clientId of touchedClients) updateHasPiano.run(Number(countForClient.get(clientId)?.c || 0) > 0 ? 1 : 0, clientId);
+    return { totalRows: normalizedRows.length, createdClients, updatedClients, createdPianos, updatedPianos, verifiedLinks };
+  });
+  return run();
+}
+
+module.exports = {
+  parseWorkbookSheets,
+  detectClientSheet,
+  analyzeClientWorkbook,
+  commitClientImportRecords,
+  normalizeEmailList,
+  normalizePhones,
+  CLIENT_PIANO_STRUCTURED_FIELDS,
+  clientPianoExportRows,
+  serializeClientPianoCsv,
+  parseStructuredClientPianoPayload,
+  commitStructuredClientPianoImport
+};
