@@ -2616,3 +2616,68 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
  .workflow-subtask-add{grid-template-columns:1fr}
  .workflow-subtask-add button{width:100%}
 }
+
+
+/* Workshop workflow stability pass: fixed cells, clean card containment, modal backdrop and calendar layer. */
+.workflow-shell .workflow-board-head,
+.workflow-shell .workflow-row{
+  grid-template-columns:280px 1540px!important;
+  min-width:1820px!important;
+}
+.workflow-shell .workflow-stage-head,
+.workflow-shell .workflow-stage-grid{
+  grid-template-columns:repeat(var(--workflow-stage-count),220px)!important;
+  width:1540px!important;
+  min-width:1540px!important;
+  max-width:1540px!important;
+  box-sizing:border-box!important;
+}
+.workflow-shell .workflow-stage-dropzone,
+.workflow-shell .workflow-stage-heading{
+  flex:1 1 0!important;
+  min-width:170px!important;
+  max-width:220px!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+}
+.workflow-shell .workflow-stage-dropzone{padding:10px 9px!important;overflow:hidden!important}
+.workflow-shell .workflow-stage-card{
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;
+}
+.workflow-shell .workflow-stage-card-inner{width:100%!important;max-width:100%!important;box-sizing:border-box!important;overflow:hidden!important}
+.workflow-shell .workflow-stage-due,
+.workflow-card-deadline,
+.workflow-card-status,
+.workflow-shell .workflow-stage-status em{
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  box-sizing:border-box!important;
+}
+.workflow-shell .workflow-stage-status{width:100%!important;min-width:0!important}
+.workflow-shell .workflow-stage-status .workflow-status-dot,
+.workflow-shell .workflow-stage-status .workflow-status-icon{flex:0 0 22px!important}
+.workflow-note-bell{position:absolute!important;top:6px!important;right:6px!important;margin:0!important;z-index:4!important}
+.workflow-shell .workflow-drawer-backdrop{position:absolute;inset:0;z-index:19;border:0;border-radius:0;background:rgba(2,8,18,.58);backdrop-filter:blur(1.5px);cursor:default}
+.workflow-shell .workflow-drawer{z-index:20}
+.admin-date-picker-popover{z-index:5000!important}
+.workflow-event-log-context{display:block;margin-top:4px;color:var(--muted);font-size:.78rem}
+.workflow-full-log-pagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 2px}
+.workflow-full-log-pagination span{min-width:64px;text-align:center;color:var(--muted);font-weight:850}
+.workflow-full-log-pagination button{min-width:112px}
+@media(max-width:900px){
+  .workflow-shell .workflow-drawer-backdrop{position:fixed;inset:0;z-index:39}
+  .workflow-shell .workflow-drawer{z-index:40}
+}
+
+/* Silent authenticated-session restoration: suppress login flash while /api/me is verified. */
+html.session-restoring #login{visibility:hidden!important;}
+html.session-restoring #app{visibility:visible;}
