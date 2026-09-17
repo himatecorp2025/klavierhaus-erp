@@ -1807,6 +1807,10 @@ function adminDatePickerSync(input){
 }
 function adminDatePickerPosition(state){
  const anchor=state?.anchor,popover=state?.popover;if(!anchor||!popover)return;
+ if(state.inlineHost){
+  popover.style.removeProperty('left');popover.style.removeProperty('top');popover.style.removeProperty('width');
+  return;
+ }
  const rect=anchor.getBoundingClientRect(),width=Math.min(360,window.innerWidth-24),height=popover.offsetHeight||420;
  let left=Math.max(12,Math.min(rect.left,window.innerWidth-width-12)),top=rect.bottom+8;
  if(top+height>window.innerHeight-12&&rect.top-height-8>=12)top=rect.top-height-8;
@@ -1851,8 +1855,9 @@ function adminDatePickerOpen(input,anchor){
  if(!input||input.disabled)return;adminDatePickerSnapInputTime(input);
  if(activeAdminDatePicker?.input===input){adminDatePickerClose();return;}
  adminDatePickerClose();
- const popover=document.createElement("div");popover.className="admin-date-picker-popover";popover.id=`adminDatePicker_${Date.now()}`;document.body.appendChild(popover);
- const state={input,anchor:anchor||input.closest(".admin-date-control"),popover,monthKey:adminDatePickerMonthKey(input.value)};activeAdminDatePicker=state;
+ const popover=document.createElement("div");popover.className="admin-date-picker-popover";popover.id=`adminDatePicker_${Date.now()}`;
+ const inlineHost=input.closest?.('.reschedule-popover-panel')||null;(inlineHost||document.body).appendChild(popover);
+ const state={input,anchor:anchor||input.closest(".admin-date-control"),popover,inlineHost,monthKey:adminDatePickerMonthKey(input.value)};activeAdminDatePicker=state;
  state.anchor?.setAttribute("aria-controls",popover.id);state.anchor?.setAttribute("aria-expanded","true");adminDatePickerRender(state);adminDatePickerSync(input);
 }
 function workflowOpenDatePicker(inputOrId,anchor){const input=typeof inputOrId==="string"?document.getElementById(inputOrId):inputOrId;adminDatePickerOpen(input,anchor||input?.closest?.(".workflow-date-picker"));}
@@ -1886,7 +1891,7 @@ function initAdminDatePickerSystem(){
  document.addEventListener("pointerdown",event=>{if(!activeAdminDatePicker)return;if(activeAdminDatePicker.popover?.contains(event.target)||activeAdminDatePicker.anchor?.contains(event.target))return;adminDatePickerClose();},true);
  document.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeAdminDatePicker)adminDatePickerClose();},true);
  window.addEventListener("resize",()=>{if(activeAdminDatePicker)adminDatePickerPosition(activeAdminDatePicker);});
- document.addEventListener("scroll",event=>{if(activeAdminDatePicker&&!activeAdminDatePicker.popover?.contains(event.target))adminDatePickerClose();},true);
+ document.addEventListener("scroll",event=>{if(activeAdminDatePicker&&!activeAdminDatePicker.inlineHost&&!activeAdminDatePicker.popover?.contains(event.target))adminDatePickerClose();},true);
 }
 function decorateWorkflowToolbar(box){
  const actions=box?.querySelector(".workflow-day-actions");
@@ -4651,7 +4656,7 @@ function deadlineCardMarkup(row,{mobile=false}={}){
   <p class="deadline-card-subtitle">${deadlineSubtitleMarkup(row)}</p>
   <p class="deadline-card-description ${row.description?'':'hidden'}">${htmlText(row.description||'')}</p>
   <span class="deadline-time-badge">${htmlText(deadlineUrgencyLabel(row))}</span>
-  <div class="deadline-card-actions"><button type="button" class="deadline-action-complete" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','complete')">✔ ${bi('Done','Kész')}</button><button type="button" class="deadline-action-reschedule" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','reschedule')">↻ ${bi('Reschedule','Újraütemezés')}</button><button type="button" class="deadline-action-snooze" onclick="snoozeDeadlineNotification('${htmlText(row.entity_type)}','${htmlText(row.entity_id)}','${htmlText(row.id)}')">◷ ${bi('Remind later','Később')}</button></div>
+  <div class="deadline-card-actions"><button type="button" class="deadline-action-complete" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','complete',event)">✔ ${bi('Done','Kész')}</button><button type="button" class="deadline-action-reschedule" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','reschedule',event)">↻ ${bi('Reschedule','Újraütemezés')}</button><button type="button" class="deadline-action-snooze" onclick="snoozeDeadlineNotification('${htmlText(row.entity_type)}','${htmlText(row.entity_id)}','${htmlText(row.id)}')">◷ ${bi('Remind later','Később')}</button></div>
   <div class="deadline-inline-panel hidden" data-deadline-panel="${htmlText(row.id)}"></div>
  </article>`;
 }
@@ -4685,12 +4690,18 @@ function renderDeadlineTasksFromState(){
 }
 async function renderDeadlineTasks(){await refreshDeadlineNotifications({renderMobile:true});renderDeadlineTasksFromState();}
 function findDeadlineNotification(cardId){return deadlineNotifications.find(row=>String(row.id)===String(cardId));}
-function toggleDeadlineActionPanel(cardId,mode){
- const row=findDeadlineNotification(cardId),panel=document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row)return;
- if(mode==='reschedule'){document.querySelectorAll('.deadline-inline-panel').forEach(el=>{el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';});openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:''});return;}
- if(!panel)return;document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';}});
+function toggleDeadlineActionPanel(cardId,mode,event=null){
+ const row=findDeadlineNotification(cardId),clickedCard=event?.currentTarget?.closest?.('.deadline-notification-card')||null,card=clickedCard||document.querySelector(`[data-deadline-card="${CSS.escape(String(cardId))}"]`),panel=card?.querySelector?.(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`)||document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row)return;
+ if(mode==='reschedule'){
+  if(!panel||!card)return;
+  const alreadyOpen=panel.dataset.mode==='reschedule'&&!panel.classList.contains('hidden');
+  if(alreadyOpen){closeQuickRescheduleScheduler();return;}
+  document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
+  openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:'',anchorCard:card,hostPanel:panel});return;
+ }
+ if(!panel)return;closeQuickRescheduleScheduler();document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
  const open=panel.dataset.mode===mode&&!panel.classList.contains('hidden');if(open){panel.classList.add('hidden');panel.innerHTML='';panel.dataset.mode='';return;}
- panel.dataset.mode=mode;panel.classList.remove('hidden');panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" onclick="completeDeadlineNotification('${htmlText(cardId)}')">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" onclick="toggleDeadlineActionPanel('${htmlText(cardId)}','complete')">${bi('Cancel','Mégse')}</button></div>`;
+ panel.dataset.mode=mode;panel.classList.remove('hidden');panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" onclick="completeDeadlineNotification('${htmlText(cardId)}')">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" onclick="toggleDeadlineActionPanel('${htmlText(cardId)}','complete',event)">${bi('Cancel','Mégse')}</button></div>`;
 }
 function animateDeadlineCardOut(cardId,delay=0){setTimeout(()=>document.querySelectorAll(`[data-deadline-card="${CSS.escape(String(cardId))}"]`).forEach(card=>{card.classList.add('is-leaving');setTimeout(()=>card.remove(),270);}),delay);}
 function removeDeadlineNotificationLocal(cardId,{animate=false,delay=0}={}){if(animate)animateDeadlineCardOut(cardId,delay);deadlineNotifications=deadlineNotifications.filter(row=>String(row.id)!==String(cardId));updateDeadlineTaskBadge(deadlineNotifications.length);const shell=ensureDeadlineStackScaffold();shell?.toolbar?.classList.toggle('hidden',deadlineNotifications.length===0);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,Math.max(0,delay)+270);}
@@ -4709,16 +4720,23 @@ async function completeDeadlineNotification(cardId){
   animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);
  }catch(error){showError(error);}
 }
-function closeQuickRescheduleScheduler(){adminDatePickerClose();document.getElementById('quick-reschedule-popover')?.remove();activeQuickRescheduleContext=null;}
-function openQuickRescheduleScheduler({entityType,entityId,cardId='',initialDate='',reason='',clientId=''}){
- closeQuickRescheduleScheduler();activeQuickRescheduleContext={entityType,entityId,cardId,clientId};const value=clientFollowUpDateValue(initialDate)||String(nyNowLocalString()||'').slice(0,16);
- const pop=document.createElement('section');pop.id='quick-reschedule-popover';pop.className='quick-reschedule-popover custom-scheduler-modal';pop.innerHTML=`<div class="quick-reschedule-card"><div class="quick-reschedule-head"><div><small>${bi('30-minute scheduler','30 perces időpontválasztó')}</small><h3>${bi('Reschedule task','Teendő újraütemezése')}</h3></div><button type="button" class="ghost-btn" onclick="closeQuickRescheduleScheduler()" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></div><label>${bi('Date and time','Dátum és idő')}<input id="quickRescheduleDate" type="datetime-local" step="1800" data-date-picker-step-minutes="30" value="${htmlText(value)}" required></label><label>${bi('Reason for delay/change','Késés/módosítás oka')}<input id="quickRescheduleReason" type="text" maxlength="2000" value="${htmlText(reason)}" placeholder="${htmlText(bi('Reason for delay/change...','Késés/módosítás oka...'))}" required></label><div class="quick-reschedule-actions"><button type="button" class="ghost-btn" onclick="closeQuickRescheduleScheduler()">${bi('Cancel','Mégse')}</button><button type="button" onclick="saveQuickRescheduleScheduler()">${bi('Save new time','Új időpont mentése')}</button></div></div>`;document.body.appendChild(pop);enhanceAdminDatePickers(pop);requestAnimationFrame(()=>{const input=document.getElementById('quickRescheduleDate'),trigger=input?.closest('.admin-date-control')?.querySelector('.admin-date-control-trigger');if(input)adminDatePickerOpen(input,trigger||input);});
+function closeQuickRescheduleScheduler({deferRemoval=0}={}){
+ adminDatePickerClose();const pop=document.getElementById('quick-reschedule-popover'),panel=pop?.closest?.('.deadline-inline-panel')||null,card=pop?.closest?.('.deadline-notification-card')||null;activeQuickRescheduleContext=null;
+ const finalize=()=>{pop?.remove();if(panel){panel.classList.add('hidden');panel.innerHTML='';panel.dataset.mode='';}card?.classList.remove('is-rescheduling');};
+ if(deferRemoval>0)setTimeout(finalize,deferRemoval);else finalize();
+}
+function openQuickRescheduleScheduler({entityType,entityId,cardId='',initialDate='',reason='',clientId='',anchorCard=null,hostPanel=null}){
+ closeQuickRescheduleScheduler();const card=anchorCard||hostPanel?.closest?.('.deadline-notification-card')||null;activeQuickRescheduleContext={entityType,entityId,cardId,clientId};const value=clientFollowUpDateValue(initialDate)||String(nyNowLocalString()||'').slice(0,16);
+ const pop=document.createElement('section');pop.id='quick-reschedule-popover';pop.className=hostPanel?'quick-reschedule-popover reschedule-popover-panel':'quick-reschedule-popover custom-scheduler-modal';pop.innerHTML=`<div class="quick-reschedule-card"><div class="quick-reschedule-head"><div><small>${bi('30-minute scheduler','30 perces időpontválasztó')}</small><h3>${bi('Reschedule task','Teendő újraütemezése')}</h3></div><button type="button" class="ghost-btn" onclick="closeQuickRescheduleScheduler()" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></div><label>${bi('Date and time','Dátum és idő')}<input id="quickRescheduleDate" type="datetime-local" step="1800" data-date-picker-step-minutes="30" value="${htmlText(value)}" required></label><label>${bi('Reason for delay/change','Késés/módosítás oka')}<input id="quickRescheduleReason" type="text" maxlength="2000" value="${htmlText(reason)}" placeholder="${htmlText(bi('Reason for delay/change...','Késés/módosítás oka...'))}" required></label><div class="quick-reschedule-actions"><button type="button" class="ghost-btn" onclick="closeQuickRescheduleScheduler()">${bi('Cancel','Mégse')}</button><button type="button" onclick="saveQuickRescheduleScheduler()">${bi('Save new time','Új időpont mentése')}</button></div></div>`;
+ if(hostPanel){hostPanel.innerHTML='';hostPanel.dataset.mode='reschedule';hostPanel.classList.remove('hidden');hostPanel.appendChild(pop);card?.classList.add('is-rescheduling');}
+ else document.body.appendChild(pop);
+ enhanceAdminDatePickers(pop);requestAnimationFrame(()=>{const input=pop.querySelector('#quickRescheduleDate'),trigger=input?.closest('.admin-date-control')?.querySelector('.admin-date-control-trigger');if(input)adminDatePickerOpen(input,trigger||input);});
 }
 async function saveQuickRescheduleScheduler(){
  const context=activeQuickRescheduleContext,input=document.getElementById('quickRescheduleDate'),reasonInput=document.getElementById('quickRescheduleReason');if(!context||!input)return;const targetDate=input.value||'',reason=reasonInput?.value.trim()||'';if(!targetDate||!reason)return showError(bi('Date and reason are required.','A dátum és az indoklás kötelező.'));
- try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(row=>String(row.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}if(context.cardId){animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);}closeQuickRescheduleScheduler();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);}catch(error){showError(error);}
+ try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(row=>String(row.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}if(context.cardId){animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);closeQuickRescheduleScheduler({deferRemoval:270});}else closeQuickRescheduleScheduler();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);}catch(error){showError(error);}
 }
-async function rescheduleDeadlineNotification(cardId){const row=findDeadlineNotification(cardId);if(!row)return;openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:''});}
+async function rescheduleDeadlineNotification(cardId){const row=findDeadlineNotification(cardId),card=document.querySelector(`[data-deadline-card="${CSS.escape(String(cardId))}"]`),panel=card?.querySelector?.(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!card||!panel)return;openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:'',anchorCard:card,hostPanel:panel});}
 function initDeadlineNotificationEngine(){
  if(deadlineNotificationPollTimer)clearInterval(deadlineNotificationPollTimer);
  ensureDeadlineStackScaffold();refreshDeadlineNotifications();deadlineNotificationPollTimer=setInterval(()=>{if(document.visibilityState!=="hidden")refreshDeadlineNotifications({renderMobile:currentView==='tasks'});},60000);
