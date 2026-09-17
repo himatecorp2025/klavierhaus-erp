@@ -2406,3 +2406,38 @@ a.button-like{display:inline-flex;align-items:center;gap:7px;text-decoration:non
 .workflow-piano-completion input{min-width:0;width:100%}
 .workflow-country-combobox,.workflow-model-combobox,.workflow-brand-combobox{position:relative;min-width:0}
 @media(max-width:760px){.workflow-piano-completion>div{grid-template-columns:1fr}.workflow-workshop-location-note{grid-column:1/-1}}
+
+/* Client Piano normalization, verification and clean 5-column registry. */
+.piano-list-panel .client-piano-clean-table{width:100%;min-width:760px!important;table-layout:fixed;background:var(--bg-surface-elevated,#1E293B);border-collapse:separate;border-spacing:0}
+.piano-list-panel .client-piano-clean-table th,.piano-list-panel .client-piano-clean-table td{vertical-align:middle;padding:.8rem .9rem;border-bottom:1px solid #334155;line-height:1.35}
+.piano-list-panel .client-piano-clean-table th{background:#0F172A;color:#CBD5E1;font-size:.78rem;letter-spacing:.035em;text-transform:uppercase;white-space:nowrap}
+.piano-list-panel .client-piano-clean-table tbody tr{background:var(--bg-surface-elevated,#1E293B)}
+.piano-list-panel .client-piano-clean-table tbody tr:hover{background:#223047}
+.piano-list-panel .client-piano-clean-table th:nth-child(1),.piano-list-panel .client-piano-clean-table td:nth-child(1){width:24%}
+.piano-list-panel .client-piano-clean-table th:nth-child(2),.piano-list-panel .client-piano-clean-table td:nth-child(2){width:17%}
+.piano-list-panel .client-piano-clean-table th:nth-child(3),.piano-list-panel .client-piano-clean-table td:nth-child(3){width:17%}
+.piano-list-panel .client-piano-clean-table th:nth-child(4),.piano-list-panel .client-piano-clean-table td:nth-child(4){width:30%}
+.piano-list-panel .client-piano-clean-table th:nth-child(5),.piano-list-panel .client-piano-clean-table td:nth-child(5){width:12%;text-align:right}
+.piano-owner-link-wrap{display:flex;align-items:center;gap:.45rem;min-width:0}
+.piano-owner-link{color:#60A5FA!important;font-weight:650;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.piano-owner-link:hover{text-decoration:underline}
+.piano-owner-unidentified{color:#94A3B8}
+.piano-verification-warning{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;color:#F59E0B;font-size:1rem;line-height:1;cursor:help;filter:saturate(1.1)}
+.piano-info-btn{white-space:nowrap}
+.piano-verification-state{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 1rem;padding:.8rem 1rem;border-radius:8px;border:1px solid #334155;background:#0F172A}
+.piano-verification-state.pending{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.08);color:#FCD34D}
+.piano-verification-state.verified{border-color:rgba(34,197,94,.42);background:rgba(34,197,94,.08);color:#BBF7D0}
+.piano-verify-btn{background:#16A34A!important;border-color:#22C55E!important;color:#FFFFFF!important;font-weight:700!important;white-space:nowrap}
+.piano-verify-btn:hover{background:#15803D!important}
+.client-piano-card-list{display:grid;gap:.65rem;margin:.55rem 0 1rem}
+.client-piano-reference{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem .9rem;border:1px solid #334155;border-radius:8px;background:var(--bg-surface-elevated,#1E293B);min-width:0}
+.client-piano-reference>div{display:grid;gap:.25rem;min-width:0}
+.client-piano-reference>div>b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#E2E8F0}
+.client-piano-reference>div>span:not(.piano-verification-warning){color:#94A3B8;font-size:.82rem;overflow-wrap:anywhere}
+.client-piano-profile-actions{display:flex;flex-wrap:wrap;gap:.55rem;margin:.6rem 0 1rem}
+.piano-filter-grid-clean{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:.65rem;align-items:end}
+@media(max-width:760px){.piano-list-panel .client-piano-clean-table{min-width:680px!important}.piano-verification-state,.client-piano-reference{align-items:flex-start;flex-direction:column}.piano-filter-grid-clean{grid-template-columns:1fr}}
+.piano-owner-portfolio{margin:1rem 0;padding-top:.9rem;border-top:1px solid #334155}
+.piano-owner-portfolio-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin-bottom:.6rem}
+.piano-owner-portfolio-head h3{margin:0;color:#E2E8F0}
+.client-piano-reference.current{border-color:#3B82F6;background:rgba(59,130,246,.08)}
