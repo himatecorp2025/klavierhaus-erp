@@ -124,8 +124,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   }
 
   function financialRows(workflowId) {
-    return db.prepare(`SELECT f.*,s.name_snapshot_en,s.name_snapshot_hu
+    return db.prepare(`SELECT f.*,s.name_snapshot_en,s.name_snapshot_hu,p.company_name AS partner_name,i.invoice_number AS payable_invoice_number,i.status AS payable_invoice_status
       FROM workflow_financial_lines f LEFT JOIN workflow_stages s ON s.id=f.stage_id
+      LEFT JOIN partners p ON p.id=f.partner_id
+      LEFT JOIN invoices i ON i.id=f.payable_invoice_id
       WHERE f.workflow_id=? ORDER BY f.created_at,f.id`).all(workflowId);
   }
 
@@ -368,6 +370,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
 
   app.get("/api/workflows/previous", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     res.json({ workflows: workflowList({ ...req.query, status: "COMPLETED", include_closed: "1" }) });
+  });
+
+  app.get("/api/workflows-partners/options", auth, permit("ADMIN", "MANAGER"), (_req, res) => {
+    res.json(db.prepare("SELECT id,company_name,default_tax_rate FROM partners WHERE status='active' ORDER BY lower(company_name),id").all());
   });
 
   app.get("/api/workflows/:id", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
@@ -654,15 +660,28 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id); if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
-      const body = req.body || {}, lineType = "COST", category = "OTHER";
+      const body = req.body || {}, lineType = "COST";
+      const requestedCategory = String(body.category || "OTHER").toUpperCase();
+      const category = ["LABOR","MATERIAL","TRANSPORT","PURCHASE","CONTRACTOR","OTHER"].includes(requestedCategory) ? requestedCategory : "OTHER";
       const title = clean(body.title || body.description, 240), amount = Math.max(0, numeric(body.amount ?? body.unit_price));
       if (!title) throw error("FINANCIAL_LINE_TITLE_REQUIRED");
       const stage = body.stage_id ? requireStage(validId(body.stage_id), workflow.id) : null;
       const billingStatus = String(body.billing_status || "CHARGEABLE").toUpperCase();
       const status = ["CHARGEABLE", "WARRANTY", "FREE", "COMPENSATION", "CREDIT"].includes(billingStatus) ? billingStatus : "CHARGEABLE";
+      const partnerId = validId(body.partner_id), partner = partnerId ? db.prepare("SELECT * FROM partners WHERE id=? AND status='active'").get(partnerId) : null;
+      if (partnerId && !partner) throw error("WORKFLOW_PARTNER_NOT_FOUND");
+      if (category === "CONTRACTOR" && !partner) throw error("WORKFLOW_PARTNER_REQUIRED");
+      if (partner && !(amount > 0)) throw error("WORKFLOW_PARTNER_COST_REQUIRED");
       const id = rid("WFL");
-      db.prepare(`INSERT INTO workflow_financial_lines(id,workflow_id,stage_id,line_type,category,title,description,amount,billing_status,created_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, workflow.id, stage?.id || null, lineType, category, title, clean(body.description), amount, status, req.user.id);
-      directAudit(req, "WORKFLOW_FINANCIAL_LINE_ADDED", id, null, { workflow_id: workflow.id, line_type: lineType, category, amount }, "Workflow financial line added");
+      db.transaction(() => {
+        db.prepare(`INSERT INTO workflow_financial_lines(id,workflow_id,stage_id,line_type,category,title,description,amount,billing_status,partner_id,created_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id, workflow.id, stage?.id || null, lineType, category, title, clean(body.description), amount, status, partner?.id || null, req.user.id);
+        if (partner && invoiceEngine?.createWorkflowPayableInvoice) {
+          const line = db.prepare("SELECT * FROM workflow_financial_lines WHERE id=?").get(id);
+          const payable = invoiceEngine.createWorkflowPayableInvoice({ workflow, stage, line, partner, actor: req.user, now: nowISO() });
+          db.prepare("UPDATE workflow_financial_lines SET payable_invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(payable.id, id);
+        }
+        directAudit(req, "WORKFLOW_FINANCIAL_LINE_ADDED", id, null, { workflow_id: workflow.id, line_type: lineType, category, amount, partner_id: partner?.id || null }, "Workflow financial line added");
+      })();
       res.status(201).json({ line: financialRows(workflow.id).find((row) => row.id === id), summary: signedFinanceSummary(financialRows(workflow.id)) });
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
@@ -673,6 +692,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const line = db.prepare("SELECT * FROM workflow_financial_lines WHERE id=? AND workflow_id=?").get(req.params.lineId, workflow.id);
       if (!line) throw error("WORKFLOW_FINANCIAL_LINE_NOT_FOUND");
+      if (line.payable_invoice_id && ["title","description","amount","billing_status","category","partner_id"].some((field) => req.body?.[field] !== undefined)) throw error("WORKFLOW_PARTNER_LINE_IMMUTABLE");
       if (line.stage_id) {
         const stage = requireStage(line.stage_id, workflow.id);
         if (stage.financial_status === "CLOSED") throw error("WORKFLOW_STAGE_FINANCE_CLOSED");
@@ -715,20 +735,19 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (!workflow.job_id) throw error("WORKFLOW_JOB_LINK_REQUIRED");
       const stages = stageRows(workflow.id);
       if (stages.some((stage) => !["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status))) throw error("WORKFLOW_STAGES_NOT_COMPLETE");
-      if (stages.some((stage) => stage.status !== "NOT_REQUIRED" && stage.financial_status !== "CLOSED")) throw error("WORKFLOW_STAGE_FINANCE_NOT_CLOSED");
       const lines = financialRows(workflow.id), summary = signedFinanceSummary(lines), closureReason = clean(req.body?.closure_reason, 2000);
       const paymentMethod = normalizePaymentMethod(req.body?.payment_method, { allowEmpty: false });
       if (!paymentMethod) { const problem = error("INVALID_PAYMENT_METHOD"); problem.allowed = PAYMENT_METHODS; throw problem; }
       if (summary.net_total === 0 && !closureReason) throw error("ZERO_WORKFLOW_CLOSE_REASON_REQUIRED");
       const closedAt = nowISO(), closedId = rid("WCJ");
-      domain.closeoutJobOrchestration({
+      const result = domain.closeoutJobOrchestration({
         jobId: workflow.job_id,
         source: "WORKFLOW",
         actor: req.user,
         closeType: "Full",
         complete: true,
         now: closedAt,
-        financialEntries: lines.filter((line) => line.line_type === "COST").map((line) => ({
+        financialEntries: lines.filter((line) => line.line_type === "COST" && !line.payable_invoice_id).map((line) => ({
           itemDate: closedAt.slice(0, 10),
           title: line.title,
           description: line.description || "",
@@ -744,6 +763,11 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           createdBy: req.user.name
         })),
         mutate: ({ now }) => {
+          const openStages = stages.filter((stage) => stage.status !== "NOT_REQUIRED" && stage.financial_status !== "CLOSED");
+          for (const stage of openStages) {
+            db.prepare("UPDATE workflow_stages SET financial_status='CLOSED',financial_closed_at=?,financial_closed_by_user_id=?,financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+              .run(now, req.user.id, closureReason || "Auto-closed during workflow finalization", stage.id);
+          }
           for (const line of lines) {
             const existing = db.prepare("SELECT id FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=? LIMIT 1").get(`WORKFLOW_LINE:${line.id}`);
             if (existing && String(line.posted_financial_item_id || "") !== String(existing.id)) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(existing.id, line.id);
@@ -751,9 +775,9 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           db.prepare(`INSERT OR IGNORE INTO workflow_closed_jobs(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closedId, workflow.id, workflow.client_id, workflow.piano_id, workflow.final_due_at, now, req.user.id, closureReason || null, summary.revenue_total, summary.cost_total, summary.net_total, JSON.stringify({ workflow, stages, lines }));
           db.prepare("UPDATE workshop_workflows SET financial_closure_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(closureReason || null, workflow.id);
-          if (invoiceEngine?.createWorkflowInvoice) invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now, paymentMethod });
+          const draftInvoice = invoiceEngine?.createWorkflowInvoice ? invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now, paymentMethod }) : null;
           db.prepare("UPDATE jobs SET workflow_status='COMPLETED',updated_at=CURRENT_TIMESTAMP WHERE workshop_workflow_id=?").run(workflow.id);
-          return { closedId };
+          return { closedId, draftInvoiceId: draftInvoice?.id || null };
         }
       });
       const refreshedLines=financialRows(workflow.id);
@@ -762,8 +786,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         const posted=db.prepare("SELECT id FROM financial_items WHERE source_type='workflow_financial_line' AND source_id=? LIMIT 1").get(`WORKFLOW_LINE:${line.id}`);
         if(posted) db.prepare("UPDATE workflow_financial_lines SET posted_financial_item_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(posted.id,line.id);
       }
-      directAudit(req, "WORKFLOW_FINANCIAL_CLOSED", workflow.id, workflow, { status: "COMPLETED", financial_status: "CLOSED", summary }, "Workflow financially finalized through unified job closeout");
-      res.json(decorateWorkflow(workflowById(workflow.id), true));
+      directAudit(req, "WORKFLOW_FINANCIAL_CLOSED", workflow.id, workflow, { status: "COMPLETED", financial_status: "CLOSED", summary, draft_invoice_id: result.mutation?.draftInvoiceId || null }, "Workflow financially finalized through unified job closeout");
+      const payload = decorateWorkflow(workflowById(workflow.id), true);
+      payload.draft_invoice = result.mutation?.draftInvoiceId && invoiceEngine?.invoiceDetail ? invoiceEngine.invoiceDetail(result.mutation.draftInvoiceId) : null;
+      res.json(payload);
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" ? 404 : (e.status || 400)).json({ error: e.code || e.message }); }
   });
 
