@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS contacts (
   interest_budget REAL DEFAULT 0,
   interest_timeline TEXT,
   interest_notes TEXT,
+  is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
+  follow_up_date TEXT,
+  follow_up_cadence TEXT CHECK(follow_up_cadence IS NULL OR follow_up_cadence='' OR follow_up_cadence IN ('CUSTOM','3_MONTHS','6_MONTHS','1_YEAR')),
+  follow_up_reason TEXT,
+  relationship_notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -167,6 +172,8 @@ CREATE TABLE IF NOT EXISTS client_pianos (
   is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0,1)),
   verified_at TEXT,
   verified_by TEXT,
+  piano_location_address TEXT,
+  location_name TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(client_id,piano_id),
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE CASCADE,
@@ -175,6 +182,7 @@ CREATE TABLE IF NOT EXISTS client_pianos (
 CREATE INDEX IF NOT EXISTS idx_client_pianos_client ON client_pianos(client_id,piano_id);
 CREATE INDEX IF NOT EXISTS idx_client_pianos_piano ON client_pianos(piano_id,client_id);
 CREATE INDEX IF NOT EXISTS idx_client_pianos_verified ON client_pianos(is_verified,client_id,piano_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_crm_follow_up ON contacts(follow_up_date,is_vip);
 
 CREATE TABLE IF NOT EXISTS steinway_serial_registry (
   start_serial INTEGER PRIMARY KEY,
@@ -242,15 +250,19 @@ CREATE TABLE IF NOT EXISTS jobs (
   daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
   daily_rate_date TEXT,
   technician_extra_compensation REAL NOT NULL DEFAULT 0 CHECK(technician_extra_compensation >= 0),
+  is_crm_follow_up INTEGER NOT NULL DEFAULT 0 CHECK(is_crm_follow_up IN (0,1)),
+  contact_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(parent_job_id) REFERENCES jobs(id) ON DELETE SET NULL,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
+  FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
   FOREIGN KEY(workshop_workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status);
+CREATE INDEX IF NOT EXISTS idx_jobs_crm_follow_up_contact ON jobs(is_crm_follow_up,contact_id,status);
 
 CREATE TABLE IF NOT EXISTS job_logs (
   id TEXT PRIMARY KEY,
