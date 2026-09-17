@@ -186,9 +186,43 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     });
   }
 
+  function parseAuditValue(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "object") return value;
+    try { return JSON.parse(value); } catch (_error) { return String(value); }
+  }
+
+  function stageDefinitionName(code) {
+    const row = DEFAULT_STAGES.find(([stageCode]) => stageCode === code);
+    return row ? { code: row[0], name_en: row[1], name_hu: row[2] } : (code ? { code, name_en: code, name_hu: code } : null);
+  }
+
+  function structuredStageAuditEvent(row) {
+    const oldData = parseAuditValue(row.old_value), newData = parseAuditValue(row.new_value);
+    const oldSource = oldData && typeof oldData === "object" && !Array.isArray(oldData) ? (oldData.source || oldData) : null;
+    const newMoved = newData && typeof newData === "object" && !Array.isArray(newData) ? (newData.moved || newData) : null;
+    const fromCode = oldSource?.stage_code || null, toCode = newMoved?.stage_code || null;
+    const fromPhase = stageDefinitionName(fromCode), toPhase = stageDefinitionName(toCode);
+    const cardTitle = clean(newMoved?.card_title || oldSource?.card_title || "", 240) || null;
+    const responsibleName = clean(newMoved?.assigned_to || newMoved?.assigned_user_name || oldSource?.assigned_to || oldSource?.assigned_user_name || "", 240) || null;
+    let humanMessageEn = null, humanMessageHu = null;
+    if (row.action === "WORKFLOW_STAGE_MOVED" && fromPhase && toPhase) {
+      humanMessageEn = `Work phase moved: ${fromPhase.name_en} ➔ ${toPhase.name_en}`;
+      humanMessageHu = `Munkafázis áthelyezve: ${fromPhase.name_hu} ➔ ${toPhase.name_hu}`;
+    }
+    return {
+      ...row,
+      old_data: oldData,
+      new_data: newData,
+      human_message_en: humanMessageEn,
+      human_message_hu: humanMessageHu,
+      context: { from_phase: fromPhase, to_phase: toPhase, card_title: cardTitle, responsible_name: responsibleName }
+    };
+  }
+
   function stageEventRows(stageId) {
     return db.prepare(`SELECT id,action,user_name,user_role,details,event_time AS created_at,old_value,new_value
-      FROM audit_log WHERE module='workshop_workflow' AND record_id=? ORDER BY event_time DESC`).all(stageId);
+      FROM audit_log WHERE module='workshop_workflow' AND record_id=? ORDER BY event_time DESC`).all(stageId).map(structuredStageAuditEvent);
   }
 
   function financialRows(workflowId) {
@@ -245,7 +279,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       values.push(`%${search}%`);
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,
+    const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,
       p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.finish,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
       cu.name AS created_by_name,
       tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
@@ -419,7 +453,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.get("/api/workflows/calendar-deadlines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     const from = clean(req.query.from, 10), to = clean(req.query.to, 10);
     const rows = db.prepare(`SELECT s.id AS stage_id,s.workflow_id,s.card_title,s.name_snapshot_en,s.name_snapshot_hu,s.status,s.assigned_user_id,s.assigned_to,s.due_at,
-      w.workflow_key,w.title AS workflow_title,w.current_status,c.name AS client_name,p.display_name AS piano_name,p.brand,p.model,p.serial_no,p.build_year,p.size_cm,p.size_in,p.size_display,u.calendar_color AS assigned_calendar_color
+      w.workflow_key,w.title AS workflow_title,w.current_status,c.name AS client_name,c.phone AS client_phone,p.display_name AS piano_name,p.brand,p.model,p.serial_no,p.build_year,p.size_cm,p.size_in,p.size_display,u.calendar_color AS assigned_calendar_color
       FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id
       JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=s.assigned_user_id
       WHERE s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.assigned_user_id IS NOT NULL AND trim(s.assigned_user_id)<>''
@@ -428,7 +462,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     res.json(rows.map((row) => {
       const closed = row.status === "COMPLETED" || row.current_status === "COMPLETED";
       const overdue = !closed && String(row.due_at).slice(0,10) < today;
-      return { ...row, id: row.stage_id, title: row.card_title || row.name_snapshot_en || row.workflow_title, calendar_entry_type: "WORKFLOW_TASK", start_time: row.due_at, end_time: row.due_at, status: closed ? "Completed" : (overdue ? "Overdue" : "Open"), workflow_color_state: closed ? "CLOSED" : (overdue ? "OVERDUE" : "IN_PROGRESS"), billed_amount:0,planned_amount:0,service_address:"" };
+      const pianoType = [clean(row.brand, 120), clean(row.model, 120)].filter(Boolean).join(" ").trim() || clean(row.piano_name, 240);
+      const serial = clean(row.serial_no, 120);
+      const pianoContextName = `${pianoType || "Piano"}${serial ? ` (SN: #${serial.replace(/^#/, "")})` : ""}`;
+      return { ...row, id: row.stage_id, title: row.card_title || row.name_snapshot_en || row.workflow_title, piano_name: pianoType, piano_context_name: pianoContextName, calendar_entry_type: "WORKFLOW_TASK", start_time: row.due_at, end_time: row.due_at, status: closed ? "Completed" : (overdue ? "Overdue" : "Open"), workflow_color_state: closed ? "CLOSED" : (overdue ? "OVERDUE" : "IN_PROGRESS"), billed_amount:0,planned_amount:0,service_address:"" };
     }));
   });
 
@@ -700,35 +737,50 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(["WORKFLOW_NOT_FOUND","WORKFLOW_STAGE_NOT_FOUND","WORKFLOW_SUBTASK_NOT_FOUND"].includes(e.code) ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
+  function moveWorkflowStage(req, workflow, source, targetCode) {
+    if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
+    const activeDefinitions = definitions(false), targetDefinition = activeDefinitions.find((item) => item.code === targetCode), sourceDefinition = activeDefinitions.find((item) => item.code === source.stage_code);
+    if (!targetDefinition || !sourceDefinition) throw error("WORKFLOW_TARGET_STAGE_NOT_FOUND");
+    if (source.stage_code === targetCode) return decorateWorkflow(workflowById(workflow.id), true);
+    const target = db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? AND stage_code=?").get(workflow.id, targetCode);
+    if (target && target.status !== "NOT_REQUIRED") throw error("WORKFLOW_TARGET_STAGE_OCCUPIED");
+    const before = { source, target };
+    db.transaction(() => {
+      if (target) {
+        const temporaryCode = `__MOVE__${target.id}`;
+        db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(temporaryCode, sourceDefinition.sort_order, sourceDefinition.name_en, sourceDefinition.name_hu, target.id);
+        db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(targetDefinition.code, targetDefinition.sort_order, targetDefinition.name_en, targetDefinition.name_hu, targetCode === "FINAL_HANDOVER" ? workflow.final_due_at : source.due_at, source.id);
+        db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(sourceDefinition.code, sourceDefinition.sort_order, sourceDefinition.name_en, sourceDefinition.name_hu, target.id);
+      } else {
+        db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(targetDefinition.code, targetDefinition.sort_order, targetDefinition.name_en, targetDefinition.name_hu, targetCode === "FINAL_HANDOVER" ? workflow.final_due_at : source.due_at, source.id);
+      }
+      db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+    })();
+    const moved = stageById(source.id), replacement = target ? stageById(target.id) : null;
+    directAudit(req, "WORKFLOW_STAGE_MOVED", source.id, before, { moved, replacement }, `Workflow card moved horizontally from ${source.stage_code} to ${targetCode}`);
+    return decorateWorkflow(workflowById(workflow.id), true);
+  }
+
   app.post("/api/workflows/:id/stages/:stageId/move", auth, permit("ADMIN"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), source = requireStage(req.params.stageId, workflow.id);
-      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const targetCode = clean(req.body?.target_stage_code, 80).toUpperCase();
-      const activeDefinitions = definitions(false), targetDefinition = activeDefinitions.find((item) => item.code === targetCode), sourceDefinition = activeDefinitions.find((item) => item.code === source.stage_code);
-      if (!targetDefinition || !sourceDefinition) throw error("WORKFLOW_TARGET_STAGE_NOT_FOUND");
-      if (source.stage_code === targetCode) return res.json(decorateWorkflow(workflowById(workflow.id), true));
-      const target = db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? AND stage_code=?").get(workflow.id, targetCode);
-      if (target && target.status !== "NOT_REQUIRED") throw error("WORKFLOW_TARGET_STAGE_OCCUPIED");
-      const before = { source, target };
-      db.transaction(() => {
-        if (target) {
-          const temporaryCode = `__MOVE__${target.id}`;
-          db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-            .run(temporaryCode, sourceDefinition.sort_order, sourceDefinition.name_en, sourceDefinition.name_hu, target.id);
-          db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-            .run(targetDefinition.code, targetDefinition.sort_order, targetDefinition.name_en, targetDefinition.name_hu, targetCode === "FINAL_HANDOVER" ? workflow.final_due_at : source.due_at, source.id);
-          db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-            .run(sourceDefinition.code, sourceDefinition.sort_order, sourceDefinition.name_en, sourceDefinition.name_hu, target.id);
-        } else {
-          db.prepare(`UPDATE workflow_stages SET stage_code=?,stage_order=?,name_snapshot_en=?,name_snapshot_hu=?,due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-            .run(targetDefinition.code, targetDefinition.sort_order, targetDefinition.name_en, targetDefinition.name_hu, targetCode === "FINAL_HANDOVER" ? workflow.final_due_at : source.due_at, source.id);
-        }
-        db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
-      })();
-      const moved = stageById(source.id), replacement = target ? stageById(target.id) : null;
-      directAudit(req, "WORKFLOW_STAGE_MOVED", source.id, before, { moved, replacement }, `Workflow card moved horizontally from ${source.stage_code} to ${targetCode}`);
-      res.json(decorateWorkflow(workflowById(workflow.id), true));
+      res.json(moveWorkflowStage(req, workflow, source, targetCode));
+    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+  });
+
+  app.patch("/api/workshop/workflows/:id/phase", auth, permit("ADMIN"), (req, res) => {
+    try {
+      const workflow = requireWorkflow(req.params.id);
+      const sourceStageId = validId(req.body?.source_stage_id || req.body?.stage_id);
+      const source = sourceStageId ? requireStage(sourceStageId, workflow.id) : db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? AND status NOT IN ('NOT_REQUIRED','ABORTED') ORDER BY stage_order LIMIT 1").get(workflow.id);
+      if (!source) throw error("WORKFLOW_STAGE_NOT_FOUND");
+      const targetCode = clean(req.body?.target_stage_code, 80).toUpperCase();
+      res.json(moveWorkflowStage(req, workflow, source, targetCode));
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
