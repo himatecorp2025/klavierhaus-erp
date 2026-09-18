@@ -62,11 +62,13 @@ app.set("trust proxy", 1);
 const OPERATIONAL_CONTRACT_KEYS = Object.freeze(["helpdesk", "notification_audit"]);
 const PORT = process.env.PORT || 3030;
 const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V38-2-CLEAN");
 const DEPLOYMENT_COMMIT = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown";
 const VAPID_PUBLIC_KEY=process.env.VAPID_PUBLIC_KEY||"";
 const VAPID_PRIVATE_KEY=process.env.VAPID_PRIVATE_KEY||"";
 const VAPID_SUBJECT=process.env.VAPID_SUBJECT||"mailto:admin@klavierhaus.com";
 const PUSH_CONFIGURED=Boolean(webpush&&VAPID_PUBLIC_KEY&&VAPID_PRIVATE_KEY);
+console.log(`[BOOT] Klavierhaus ERP Production Engine - Build: ${BUILD_ID}`);
 if(PUSH_CONFIGURED) webpush.setVapidDetails(VAPID_SUBJECT,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY);
 
 const JWT_SECRET = process.env.JWT_SECRET;
