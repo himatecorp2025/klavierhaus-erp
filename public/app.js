@@ -5011,8 +5011,9 @@ function deadlineCardMarkup(row,{mobile=false}={}){
 function updateDeadlineTaskBadge(count){const badge=document.getElementById('pwa-tasks-badge');if(!badge)return;const safe=Math.max(0,Number(count||0));badge.textContent=safe>99?'99+':String(safe);badge.classList.toggle('hidden',safe===0);}
 function ensureDeadlineStackScaffold(){
  const stack=document.getElementById('floating-notifications-container');if(!stack)return null;
- let list=stack.querySelector('.deadline-stack-list');if(!list){stack.innerHTML='<div class="deadline-stack-list"></div>';list=stack.querySelector('.deadline-stack-list');}
- return {stack,list};
+ let toolbar=stack.querySelector('.deadline-stack-toolbar');if(!toolbar){stack.insertAdjacentHTML('afterbegin',`<div class="deadline-stack-toolbar hidden"><button type="button" class="deadline-snooze-all" data-action="snooze-all-notifications" aria-label="${htmlText(bi('Close all notifications for three hours','Összes értesítés bezárása három órára'))}">✕ ${bi('Close all','Bezárás mind')}</button></div>`);toolbar=stack.querySelector('.deadline-stack-toolbar');}
+ let list=stack.querySelector('.deadline-stack-list');if(!list){stack.insertAdjacentHTML('beforeend','<div class="deadline-stack-list"></div>');list=stack.querySelector('.deadline-stack-list');}
+ return {stack,toolbar,list};
 }
 function patchDeadlineCardElement(card,row){
  if(!card)return;['urgency-urgent_overdue','urgency-due_soon','urgency-upcoming'].forEach(name=>card.classList.remove(name));card.classList.add(`urgency-${String(row.urgency||'').toLowerCase()}`);card.dataset.entityType=row.entity_type||'';card.dataset.entityId=row.entity_id||'';
@@ -5020,7 +5021,7 @@ function patchDeadlineCardElement(card,row){
  if(type)type.textContent=deadlineTypeLabel(row.entity_type);if(title)title.textContent=row.title||'';if(subtitle)subtitle.innerHTML=deadlineSubtitleMarkup(row);if(description){description.textContent=row.description||'';description.classList.toggle('hidden',!row.description);}if(badge)badge.textContent=deadlineUrgencyLabel(row);
 }
 function renderDeadlineStack(rows=deadlineNotifications){
- const shell=ensureDeadlineStackScaffold();if(!shell)return;const wanted=new Set(rows.map(row=>String(row.id)));
+ const shell=ensureDeadlineStackScaffold();if(!shell)return;shell.toolbar?.classList.toggle('hidden',rows.length===0);const wanted=new Set(rows.map(row=>String(row.id)));
  shell.list.querySelectorAll('[data-deadline-card]').forEach(card=>{if(!wanted.has(String(card.dataset.deadlineCard))&&!card.classList.contains('is-leaving')){card.classList.add('is-leaving');setTimeout(()=>card.remove(),270);}});
  rows.forEach(row=>{let card=shell.list.querySelector(`[data-deadline-card="${CSS.escape(String(row.id))}"]`);if(card){patchDeadlineCardElement(card,row);return;}shell.list.insertAdjacentHTML('beforeend',deadlineCardMarkup(row));card=shell.list.lastElementChild;card?.classList.add('is-new');setTimeout(()=>card?.classList.remove('is-new'),280);});
 }
@@ -5049,6 +5050,16 @@ function animateDeadlineCardOut(cardId,delay=0){setTimeout(()=>document.querySel
 function removeDeadlineNotificationLocal(cardId,{animate=false,delay=0}={}){if(animate)animateDeadlineCardOut(cardId,delay);deadlineNotifications=deadlineNotifications.filter(row=>String(row.id)!==String(cardId));updateDeadlineTaskBadge(deadlineNotifications.length);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,Math.max(0,delay)+270);}
 async function snoozeDeadlineNotification(entityType,entityId,cardId){
  animateDeadlineCardOut(cardId);try{await api('/api/notifications/snooze',{method:'POST',body:JSON.stringify({entity_type:entityType,entity_id:entityId})});removeDeadlineNotificationLocal(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}
+}
+async function snoozeAllDeadlineNotifications(){
+ const current=[...deadlineNotifications];if(!current.length)return;
+ const cards=[...document.querySelectorAll('#floating-notifications-container [data-deadline-card]')];cards.forEach(card=>card.classList.add('is-leaving'));
+ try{
+  await api('/api/notifications/snooze-all',{method:'POST',body:JSON.stringify({})});
+  deadlineNotifications=[];updateDeadlineTaskBadge(0);const shell=ensureDeadlineStackScaffold();if(shell)shell.toolbar?.classList.add('hidden');setTimeout(()=>cards.forEach(card=>card.remove()),270);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,270);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);
+ }catch(error){
+  cards.forEach(card=>card.classList.remove('is-leaving'));showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});
+ }
 }
 async function completeDeadlineNotification(cardId){
  const row=findDeadlineNotification(cardId);if(!row)return;
@@ -5080,8 +5091,9 @@ function bindDeadlineNotificationDelegation(){
   root.dataset.deadlineDelegationBound='true';
   root.addEventListener('click',event=>{
    const control=event.target.closest?.('[data-action]');if(!control||!root.contains(control))return;
-   const action=control.dataset.action;if(!['complete-notification','reschedule-notification','snooze-notification'].includes(action))return;
+   const action=control.dataset.action;if(!['complete-notification','reschedule-notification','snooze-notification','snooze-all-notifications'].includes(action))return;
    event.preventDefault();event.stopPropagation();
+   if(action==='snooze-all-notifications'){void snoozeAllDeadlineNotifications();return;}
    const card=control.closest('.deadline-notification-card'),cardId=card?.dataset.deadlineCard,row=cardId?findDeadlineNotification(cardId):null;
    if(!cardId||!row)return;
    if(action==='complete-notification')void completeDeadlineNotification(cardId);
