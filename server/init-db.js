@@ -21,7 +21,7 @@ function log(message) {
   console.log(`[database] ${message}`);
 }
 
-const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V40-PHASE1");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V41-PHASE2");
 log(`Build: ${BUILD_ID}`);
 
 function fail(message, error) {
@@ -164,6 +164,7 @@ function assertPreservedBusinessCounts(before) {
 
 function migrationRequiresBackup() {
   if (tableExists("workshop_workflows")) return true;
+  if (tableExists("users") && !tableExists("wf2_workflows")) return true;
   const usersSql = tableExists("users")
     ? String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || "").toUpperCase()
     : "";
@@ -895,6 +896,7 @@ function runMigrations() {
   }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  db.exec(fs.readFileSync(path.join(__dirname, "workflow-v2-schema.sql"), "utf8"));
   // Legacy snoozes had no owner and therefore affected every user. Keep those
   // historical rows for auditability, but make all new reads and writes user
   // scoped. SQLite cannot add a NOT NULL foreign-key column in place, so the
