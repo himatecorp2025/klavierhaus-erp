@@ -1512,11 +1512,11 @@ function schedulerFilterOptions(workers=[]){
 }
 function filterJobsForScheduler(jobs=[]){
  return jobs.filter(job=>{
-  const isWorkflow=["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(job.calendar_entry_type);
+  const isWorkflow=Boolean(job.wf2_workflow_id);
   if(currentSchedulerEntryFilter==="CALENDAR" && isWorkflow)return false;
   if(currentSchedulerEntryFilter==="WORKFLOW" && !isWorkflow)return false;
   if(job.calendar_entry_type==="KLAVIERHAUS_EVENT") return true;
-  if(isWorkflow)return currentSchedulerWorker==="ALL" || currentSchedulerWorker==="COMPLETED"&&String(job.status)==="Completed" || currentSchedulerWorker==="FAILED"&&String(job.status)==="Overdue" || String(currentSchedulerWorker).startsWith("worker:")&&String(job.assigned_user_id||"")===String(currentSchedulerWorker).slice(7);
+  if(isWorkflow)return currentSchedulerWorker==="ALL" || currentSchedulerWorker==="COMPLETED"&&String(job.status)==="Completed" || currentSchedulerWorker==="FAILED"&&isOverdueJob(job) || String(currentSchedulerWorker).startsWith("worker:")&&(job.wf2_assignee_ids||[job.assigned_user_id]).includes(String(currentSchedulerWorker).slice(7));
   if(currentSchedulerWorker==="ALL") return true;
   if(currentSchedulerWorker==="COMPLETED") return String(job.status||"")==="Completed" || String(job.workflow_status||"")==="COMPLETED";
   if(currentSchedulerWorker==="FAILED") return String(job.status||"")==="Failed" || isOverdueJob(job);
@@ -1535,7 +1535,7 @@ function isClosedJobStatus(status){ return ["Completed","Partially completed","F
 function isOverdueJob(j){ return !isClosedJobStatus(j.status) && String(j.end_time||"") && String(j.end_time).slice(0,16) < nyNowLocalString(); }
 function calendarEventClass(j){
  if(j?.calendar_entry_type==="KLAVIERHAUS_EVENT") return "KlavierhausEvent";
- if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type)) return j.workflow_color_state==="CLOSED"?"Completed":j.workflow_color_state==="OVERDUE"?"Overdue":"WorkflowTask";
+ if(j?.wf2_workflow_id) return j.status==="Completed"?"Completed":isOverdueJob(j)?"Overdue":"WorkflowTask";
  const status=String(j.status||"");
  if(status==="Failed") return "Failed";
  if(isOverdueJob(j)) return "Overdue";
@@ -1573,14 +1573,14 @@ function calendarEventDensityClass(j){
  return " EventDetailed";
 }
 function calendarTypeIconMarkup(j){
- const isWorkflow=["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type);
+ const isWorkflow=Boolean(j?.wf2_workflow_id);
  const isCrm=Number(j?.is_crm_follow_up||0)===1;
  const label=isWorkflow?bi("Workshop workflow","Műhely workflow"):(isCrm?bi("CRM follow-up","CRM utánkövetés"):bi("Scheduled customer job","Ütemezett ügyfélmunka"));
  return `<span class="calendar-type-badge ${isWorkflow?'is-workflow':(isCrm?'is-crm-followup':'is-job')}" title="${htmlText(label)}" aria-label="${htmlText(label)}"><span aria-hidden="true">${isWorkflow?"🔨":(isCrm?"📞":"⚙️")}</span></span>`;
 }
 function calendarEventCardMarkup(j){
  const time=`${String(j?.start_time||"").slice(11,16)}–${String(j?.end_time||"").slice(11,16)}`;
- if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(j?.calendar_entry_type)){
+ if(j?.wf2_workflow_id){
   const pianoContext=j.piano_context_name||workflowPianoContextLabel(j)||j.piano_name||j.client_name||"";
   return `${calendarTypeIconMarkup(j)}<span class="kh-event-ribbon">${bi("WORKSHOP TASK","WORKFLOW MUNKA")}</span><strong class="event-card-time">${htmlText(String(j?.start_time||"").slice(11,16))}</strong><b class="event-card-title">${htmlText(j.title||"")}</b><small class="event-card-primary">${htmlText(pianoContext)}</small><small class="event-card-secondary">${htmlText(j.client_name||"")}${j.workflow_key?` · ${htmlText(j.workflow_key)}`:""}</small><span class="event-status">${calendarStatusIcon(j)}</span>`;
  }
@@ -1600,18 +1600,15 @@ function calendarEventCardMarkup(j){
 
 async function loadCalendarEntries(fromDate,toDateExclusive){
  const from=`${fromDate}T00:00`,to=`${toDateExclusive}T00:00`;
- const [jobs,events,workflowDeadlines]=await Promise.all([
+ const [jobs,events]=await Promise.all([
   api(jobsRangeUrl(fromDate,toDateExclusive)),
-  api(`/api/calendar-events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-  api(`/api/workshop-shell/calendar?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDateExclusive)}`).catch(()=>[])
+  api(`/api/calendar-events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
  ]);
- return [...jobs,...events,...workflowDeadlines];
+ return [...jobs,...events];
 }
 
 async function openCalendarEntry(row){
- if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(row?.calendar_entry_type)){
-  await render("workshop_workflow",{navigationActivate:true});return;
- }
+ if(row?.wf2_workflow_id)return WorkshopV2.openCalendar(row);
  if(Number(row?.is_crm_follow_up||0)===1 && (row?.contact_id||row?.client_id))return clientProfile(row.contact_id||row.client_id);
  if(row?.calendar_entry_type!=="KLAVIERHAUS_EVENT")return openJobDetails(row);
  const event=await api(`/api/calendar-events/${encodeURIComponent(row.event_id)}`);
@@ -1851,7 +1848,6 @@ function workflowCardTimeText(value){
  const hour=Number(match[1]),minute=match[2],suffix=hour>=12?"PM":"AM",displayHour=hour%12||12;
  return `${displayHour}:${minute} ${suffix} ${workflowNYZoneLabel(value)}`;
 }
-function workflowCardDueText(value){if(!value)return "—";return `${workflowCardDateText(value)} – ${workflowCardTimeText(value)}`;}
 function workflowToolbarIcon(kind){
  const paths={
   "chevron-left":'<path d="m14.5 5-7 7 7 7"/>',
@@ -2054,11 +2050,11 @@ function workflowCloseMobileDeck(){workflowMobileDeckState=null;workshopWorkflow
 function workflowBindMobileSwipe(root){
  const deck=root?.querySelector?.("[data-workflow-mobile-deck]"),viewport=deck?.querySelector?.(".workflow-mobile-deck-viewport"),track=deck?.querySelector?.(".workflow-mobile-deck-track");if(!deck||!viewport||!track||!workflowMobileDeckState)return;
  const slides=[...track.querySelectorAll(".workflow-mobile-deck-slide")];if(slides.length<2)return;
- let startX=0,currentX=0,dragging=false;
+ let startX=0,startY=0,currentX=0,dragging=false,axis="";
  const apply=(index,animate=true)=>{const safe=Math.max(0,Math.min(slides.length-1,index));workflowMobileDeckState.index=safe;track.style.transition=animate?"transform .24s cubic-bezier(.2,.7,.2,1)":"none";track.style.transform=`translate3d(${-safe*100}%,0,0)`;deck.querySelector("[data-workflow-mobile-counter]").textContent=`${safe+1} / ${slides.length}`;deck.querySelectorAll(".workflow-mobile-deck-dots i").forEach((dot,i)=>dot.classList.toggle("active",i===safe));};
  apply(workflowMobileDeckState.index||0,false);
- viewport.addEventListener("touchstart",event=>{if(event.touches.length!==1)return;startX=currentX=event.touches[0].clientX;dragging=true;track.style.transition="none";},{passive:true});
- viewport.addEventListener("touchmove",event=>{if(!dragging||event.touches.length!==1)return;currentX=event.touches[0].clientX;const delta=currentX-startX,width=Math.max(1,viewport.clientWidth),base=-Number(workflowMobileDeckState.index||0)*100;track.style.transform=`translate3d(calc(${base}% + ${delta}px),0,0)`;if(Math.abs(delta)>8)event.preventDefault();},{passive:false});
+ viewport.addEventListener("touchstart",event=>{if(event.touches.length!==1)return;startX=currentX=event.touches[0].clientX;startY=event.touches[0].clientY;axis="";dragging=true;track.style.transition="none";},{passive:true});
+ viewport.addEventListener("touchmove",event=>{if(!dragging||event.touches.length!==1)return;currentX=event.touches[0].clientX;const delta=currentX-startX,dy=event.touches[0].clientY-startY;if(!axis&&Math.max(Math.abs(delta),Math.abs(dy))>8)axis=Math.abs(delta)>Math.abs(dy)*1.2?"x":"y";if(axis!=="x"){if(axis==="y"){dragging=false;apply(workflowMobileDeckState.index||0,false);}return;}const base=-Number(workflowMobileDeckState.index||0)*100;track.style.transform=`translate3d(calc(${base}% + ${delta}px),0,0)`;if(Math.abs(delta)>8)event.preventDefault();},{passive:false});
  const finishSwipe=(cancelled=false)=>{if(!dragging)return;dragging=false;const diff=currentX-startX,current=Number(workflowMobileDeckState.index||0);if(!cancelled&&Math.abs(diff)>=45){workflowMobileSwipeSuppressClickUntil=Date.now()+350;apply(current+(diff<0?1:-1),true);}else apply(current,true);};
  viewport.addEventListener("touchend",()=>finishSwipe(false),{passive:true});
  viewport.addEventListener("touchcancel",()=>finishSwipe(true),{passive:true});
@@ -2117,7 +2113,6 @@ function workflowBindMobileSwipe(root){
 
 
 function workflowSearchText(value){return String(value||"").trim().toLocaleLowerCase();}
-function workflowPianoPrimary(p){return workflowPianoLabel(p);}
 function workflowPianoSecondary(p){const parts=[];if(p?.serial_no)parts.push(`Serial: #${p.serial_no}`);if(p?.finish)parts.push(`Finish: ${p.finish}`);return parts.join(" · ")||bi("No serial / finish recorded","Nincs rögzített sorozatszám / kivitel");}
 
 function bindWorkflowBrandCombobox(scope=document){scope.querySelectorAll('[data-workflow-brand-input]').forEach(input=>{const box=scope.querySelector(`#${CSS.escape(input.dataset.workflowBrandBox||'')}`);if(!box)return;const notify=()=>input.dispatchEvent(new Event("change",{bubbles:true}));const render=()=>{const raw=String(input.value||'').trim(),term=raw.toLocaleLowerCase(),matches=workflowPianoBrands.filter(name=>!term||String(name).toLocaleLowerCase().includes(term)).slice(0,12),exact=workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===term);box.innerHTML=matches.map(name=>`<button type="button" class="workflow-typeahead-option" data-brand-choice="${htmlText(name)}"><strong>${htmlText(name)}</strong></button>`).join('')+(!exact&&raw?`<button type="button" class="workflow-typeahead-add" data-brand-create>+ ${htmlText(bi(`Add "${raw}" as new brand`,`Új márka rögzítése: "${raw}"`))}</button>`:'');box.classList.toggle('hidden',!box.innerHTML);box.querySelectorAll('[data-brand-choice]').forEach(btn=>btn.addEventListener('mousedown',event=>{event.preventDefault();input.value=btn.dataset.brandChoice||'';box.classList.add('hidden');notify();}));box.querySelector('[data-brand-create]')?.addEventListener('mousedown',async event=>{event.preventDefault();if(!raw)return;try{const saved=await api('/api/piano-brands',{method:'POST',body:JSON.stringify({brand_name:raw})});const brandName=String(saved?.brand_name||raw).trim();if(brandName&&!workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===brandName.toLocaleLowerCase()))workflowPianoBrands.push(brandName);input.value=brandName;box.classList.add('hidden');notify();showToast(bi('Piano brand added to the reference list.','A zongoramárka bekerült a referencia-listába.'),'success');}catch(error){showError(error);}});};input.addEventListener('input',render);input.addEventListener('focus',render);input.addEventListener('blur',()=>setTimeout(()=>box.classList.add('hidden'),180));});}
@@ -2173,7 +2168,6 @@ function bindWorkflowModelCombobox(scope=document){scope.querySelectorAll('[data
 
 
 
-function workflowDateMove(days){workshopWorkflowDate=addDaysToDateKey(workshopWorkflowDate,days);renderWorkshopWorkflow();}
 
 function workflowFilterWorkerOptions(){return `<option value="ALL">${bi("All","Összes")}</option>${workshopWorkflowWorkers.map(worker=>`<option value="${htmlText(worker.id)}" ${String(workshopWorkflowAssigneeFilter)===String(worker.id)?"selected":""}>${htmlText(worker.name)}</option>`).join("")}`;}
 function workflowFilterStatusOptions(){return `<option value="ALL">${bi("All","Összes")}</option>${[["ASSIGNED","Assigned","Kiosztva"],["IN_PROGRESS","In progress","Folyamatban"],["COMPLETED","Completed","Kész"],["OVERDUE","Overdue","Lejárt"],["WAITING","Waiting","Várakozik"],["BLOCKED","Blocked","Blokkolva"]].map(([value,en,hu])=>`<option value="${value}" ${workshopWorkflowStatusFilter===value?"selected":""}>${bi(en,hu)}</option>`).join("")}`;}
@@ -2189,19 +2183,19 @@ function workflowPersistPreviousState(){
 async function renderWorkshopWorkflow(){
  const box=ensureView("workshop_workflow");
  try{
-  const [workflowPayload,definitionPayload,workers]=await Promise.all([api(workshopWorkflowPrevious?"/api/workshop-shell/history":"/api/workshop-shell"),api("/api/workshop-shell/phases"),loadSchedulerWorkers()]);
+  const [workflowPayload,definitionPayload,workers]=await Promise.all([api(`/api/workshop/v2/workflows?status=${workshopWorkflowPrevious?"COMPLETED":"ACTIVE"}`),api("/api/workshop/v2/phases"),loadSchedulerWorkers()]);
   workshopWorkflowRows=workflowPayload.workflows||[];workshopWorkflowDefinitions=definitionPayload.stages||[];workshopWorkflowWorkers=workers||[];
   if(workshopWorkflowSelectedId&&!workshopWorkflowRows.some(row=>String(row.id)===String(workshopWorkflowSelectedId))){workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";}
   const visibleRows=workshopWorkflowRows.filter(workflowMatchesBoardFilters),selected=workshopWorkflowRows.find(row=>String(row.id)===String(workshopWorkflowSelectedId));
   const stageDefinitions=workshopWorkflowDefinitions.filter(stage=>stage.active!==0).sort((a,b)=>a.sort_order-b.sort_order);
-  const stageHead=stageDefinitions.map(stage=>`<span class="workflow-stage-heading"><strong>${Number(stage.sort_order)+1}.</strong><b>${htmlText(currentLang==="hu"?stage.name_hu:stage.name_en)}</b></span>`).join("");
+  const stageHead=stageDefinitions.map(stage=>`<span class="workflow-stage-heading" style="--wf2-phase-color:${/^#[0-9a-f]{6}$/i.test(stage.color)?stage.color:'#B88A44'}"><strong>${Number(stage.sort_order)+1}.</strong><b>${htmlText(currentLang==="hu"?stage.name_hu:stage.name_en)}</b></span>`).join("");
   const board=visibleRows.map(workflowBoardRow).join("");
-  const emptyBoard=`<div class="workflow-empty"><strong>${bi("No workflows in this view.","Ebben a nézetben nincs workflow.")}</strong><p>${bi("The workflow shell is ready. Creation and details will be rebuilt in Phase II.","Az üres workflow-váz elkészült. A létrehozó és a részletező a II. fázisban készül.")}</p></div>`;
+  const emptyBoard=`<div class="workflow-empty"><strong>${bi("No workflows in this view.","Ebben a nézetben nincs workflow.")}</strong><p>${bi("Create a workflow to schedule phases and tasks.","Hozz létre munkafolyamatot a fázisok és részfeladatok ütemezéséhez.")}</p></div>`;
   const mobileList=`<div class="workflow-mobile-list">${visibleRows.map(workflowMobileListCard).join("")||emptyBoard}</div>`;
   const mobileWorkflow=workflowMobileDeckState?workshopWorkflowRows.find(row=>String(row.id)===String(workflowMobileDeckState.workflowId)):null;
   const mobileDeck=workflowMobileDeckState?workflowMobileDeckMarkup(mobileWorkflow):"";
   const mobileQuickActions=`<nav class="workflow-mobile-actionbar" aria-label="${htmlText(bi("Workflow quick actions","Workflow gyorsműveletek"))}"><button type="button" aria-label="${htmlText(bi("Choose date","Dátumválasztó"))}" title="${htmlText(bi("Choose date","Dátumválasztó"))}" onclick="document.querySelector('#workshop_workflow .workflow-date-picker-button')?.click()">${workflowToolbarIcon("date")}</button><button type="button" aria-label="${htmlText(bi("Previous works","Korábbi munkák"))}" title="${htmlText(bi("Previous works","Korábbi munkák"))}" onclick="workshopToggleArchived()">${workflowToolbarIcon("history")}</button><button type="button" aria-label="${htmlText(bi("Open calendar","Naptár megnyitása"))}" title="${htmlText(bi("Open calendar","Naptár megnyitása"))}" onclick="workshopOpenCalendar()">${workflowToolbarIcon("calendar-grid")}</button>${isAdmin()?`<button type="button" aria-label="${htmlText(bi("Stage settings","Fázisbeállítások"))}" title="${htmlText(bi("Stage settings","Fázisbeállítások"))}" onclick="openWorkflowStageSettings()">${workflowToolbarIcon("settings")}</button>`:""}</nav>`;
-  box.innerHTML=`<div class="workflow-shell workflow-phase-one"><section class="panel workflow-board-panel"><header class="workflow-toolbar"><div class="workflow-toolbar-copy"><h2>${bi("Workshop Workflow","Műhely Workflow")}</h2><p>${bi("Quality. Heritage. Forward.","Minőség. Hagyomány. Tovább.")}</p></div><div class="workflow-toolbar-clock" aria-label="${bi("New York date and time","New York-i dátum és idő")}"><strong>${htmlText(workflowBoardDateLabel(workshopWorkflowDate))}</strong><span>New York (${htmlText(workflowNYZoneLabel())}) <time data-workflow-ny-clock>${htmlText(currentNYTimeString())}</time></span></div></header>${mobileQuickActions}<div class="workflow-board-controls"><div class="workflow-day-actions"><div class="workflow-date-picker workflow-date-picker--primary" title="${bi("Choose reference date","Referencia dátum kiválasztása")}"><input class="workflow-date-text" type="text" inputmode="numeric" autocomplete="off" value="${formatAmericanDate(workshopWorkflowDate)}" placeholder="MM/DD/YYYY" aria-label="${bi("Reference date MM/DD/YYYY","Referencia dátum MM/DD/YYYY")}"><button type="button" class="workflow-date-picker-button" aria-label="${bi("Open calendar","Naptár megnyitása")}" aria-haspopup="dialog"><span class="workflow-date-picker-icon" aria-hidden="true">${workflowToolbarIcon("date")}</span></button><input class="workflow-date-input" type="hidden" value="${htmlText(workshopWorkflowDate)}" onchange="workshopWorkflowDate=this.value||nyDateKey();renderWorkshopWorkflow()"></div><button type="button" data-workflow-archive-toggle class="ghost-btn ${workshopWorkflowPrevious?"active-state-btn":""}" onclick="workshopToggleArchived()">▣ ${workshopWorkflowPrevious?bi("Back to current active works","Vissza a jelenlegi aktív munkákhoz"):bi("Previous works","Korábbi munkák")}</button><button type="button" data-workflow-open-calendar class="ghost-btn" onclick="workshopOpenCalendar()">▣ ${bi("Open calendar","Naptár megnyitása")}</button>${isAdmin()?`<button type="button" class="ghost-btn workflow-stage-settings" onclick="openWorkflowStageSettings()">⚙ ${bi("Stage settings","Fázisbeállítások")}</button>`:""}${isSuperadmin()?`<button type="button" class="danger-btn" onclick="workflowPurgeAll()">${bi("Purge All Workflows","Összes Workflow Törlése")}</button>`:""}</div><div class="workflow-board-filter-row"><label>${bi("Responsible","Felelős")}<select onchange="workshopWorkflowAssigneeFilter=this.value;renderWorkshopWorkflow()">${workflowFilterWorkerOptions()}</select></label><label>${bi("Status","Státusz")}<select onchange="workshopWorkflowStatusFilter=this.value;renderWorkshopWorkflow()">${workflowFilterStatusOptions()}</select></label><label class="workflow-overdue-toggle"><span>${bi("Overdue only","Csak lejárt")}</span><input type="checkbox" ${workshopWorkflowOverdueOnly?"checked":""} onchange="workshopWorkflowOverdueOnly=this.checked;renderWorkshopWorkflow()"><i aria-hidden="true"></i></label><button type="button" class="workflow-new-btn" disabled title="Phase II / II. fázis">＋ ${bi("New workflow","Új munkafolyamat")}</button></div></div><div class="workflow-board-scroll"><div class="workflow-board-head"><div class="workflow-piano-heading">${bi("Pianos","Zongorák")}</div><div class="workflow-stage-head">${stageHead}</div></div>${board||emptyBoard}</div>${mobileList}${mobileDeck}</section></div>`;
+  box.innerHTML=`<div class="workflow-shell workflow-phase-two${visibleRows.length?'':' is-empty'}"><section class="panel workflow-board-panel"><header class="workflow-toolbar"><div class="workflow-toolbar-copy"><h2>${bi("Workshop Workflow","Műhely Workflow")}</h2><p>${bi("Quality. Heritage. Forward.","Minőség. Hagyomány. Tovább.")}</p></div><div class="workflow-toolbar-clock" aria-label="${bi("New York date and time","New York-i dátum és idő")}"><strong>${htmlText(workflowBoardDateLabel(workshopWorkflowDate))}</strong><span>New York (${htmlText(workflowNYZoneLabel())}) <time data-workflow-ny-clock>${htmlText(currentNYTimeString())}</time></span></div></header>${mobileQuickActions}<div class="workflow-board-controls"><div class="workflow-day-actions"><div class="workflow-date-picker workflow-date-picker--primary" title="${bi("Choose reference date","Referencia dátum kiválasztása")}"><input class="workflow-date-text" type="text" inputmode="numeric" autocomplete="off" value="${formatAmericanDate(workshopWorkflowDate)}" placeholder="MM/DD/YYYY" aria-label="${bi("Reference date MM/DD/YYYY","Referencia dátum MM/DD/YYYY")}"><button type="button" class="workflow-date-picker-button" aria-label="${bi("Open calendar","Naptár megnyitása")}" aria-haspopup="dialog"><span class="workflow-date-picker-icon" aria-hidden="true">${workflowToolbarIcon("date")}</span></button><input class="workflow-date-input" type="hidden" value="${htmlText(workshopWorkflowDate)}" onchange="workshopWorkflowDate=this.value||nyDateKey();renderWorkshopWorkflow()"></div><button type="button" data-workflow-archive-toggle class="ghost-btn ${workshopWorkflowPrevious?"active-state-btn":""}" onclick="workshopToggleArchived()">▣ ${workshopWorkflowPrevious?bi("Back to current active works","Vissza a jelenlegi aktív munkákhoz"):bi("Previous works","Korábbi munkák")}</button><button type="button" data-workflow-open-calendar class="ghost-btn" onclick="workshopOpenCalendar()">▣ ${bi("Open calendar","Naptár megnyitása")}</button>${isAdmin()?`<button type="button" class="ghost-btn workflow-stage-settings" onclick="openWorkflowStageSettings()">⚙ ${bi("Stage settings","Fázisbeállítások")}</button>`:""}${isSuperadmin()?`<button type="button" class="danger-btn" onclick="workflowPurgeAll()">${bi("Purge All Workflows","Összes Workflow Törlése")}</button>`:""}</div><div class="workflow-board-filter-row"><label>${bi("Responsible","Felelős")}<select onchange="workshopWorkflowAssigneeFilter=this.value;renderWorkshopWorkflow()">${workflowFilterWorkerOptions()}</select></label><label>${bi("Status","Státusz")}<select onchange="workshopWorkflowStatusFilter=this.value;renderWorkshopWorkflow()">${workflowFilterStatusOptions()}</select></label><label class="workflow-overdue-toggle"><span>${bi("Overdue only","Csak lejárt")}</span><input type="checkbox" ${workshopWorkflowOverdueOnly?"checked":""} onchange="workshopWorkflowOverdueOnly=this.checked;renderWorkshopWorkflow()"><i aria-hidden="true"></i></label><button type="button" class="workflow-new-btn" onclick="WorkshopV2.create()">＋ ${bi("New workflow","Új munkafolyamat")}</button></div></div><div class="workflow-board-scroll"><div class="workflow-board-head"><div class="workflow-piano-heading">${bi("Pianos","Zongorák")}</div><div class="workflow-stage-head">${stageHead}</div></div>${board||emptyBoard}</div>${mobileList}${mobileDeck}</section></div>`;
   decorateWorkflowToolbar(box);
   workflowBindDatePicker(box);
   bindJobDateTimePickers(box);
@@ -2291,7 +2285,10 @@ function schedulerDragPayload(job){
  return {
   id:job.id||job.job_id,
   workflow_id:job.workflow_id||"",
-  stage_id:job.stage_id||(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(job.calendar_entry_type)?job.id:"")||"",
+  wf2_workflow_id:job.wf2_workflow_id||"",
+  wf2_entity_type:job.wf2_entity_type||"",
+  wf2_entity_id:job.wf2_entity_id||"",
+  wf2_can_edit:Boolean(job.wf2_can_edit),
   calendar_entry_type:job.calendar_entry_type||"",
   start_time:job.start_time,
   end_time:job.end_time,
@@ -2302,7 +2299,6 @@ function schedulerDragPayload(job){
 }
 function schedulerEntryDurationMinutes(payload){
  const diff=wallClockDifferenceMinutes(payload?.start_time,payload?.end_time);
- if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload?.calendar_entry_type))return Math.max(SCHEDULE_INTERVAL_MINUTES,diff||60);
  return Math.max(SCHEDULE_INTERVAL_MINUTES,diff||SCHEDULE_INTERVAL_MINUTES);
 }
 function schedulerDragDateLabel(dateKey){
@@ -2387,7 +2383,7 @@ function beginSchedulerPointerDrag(event,job){
   if(!state.started||!target)return;
   if(target.workerId){await commitSchedulerAssigneeMove(payload,target.workerId);return;}
   const duration=schedulerEntryDurationMinutes(payload),start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);
-  if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload.calendar_entry_type))workflowShellCardNotice();else await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_pointer_drag");
+  await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_pointer_drag");
  };
  const cancel=cancelEvent=>{if(!schedulerPointerDrag||cancelEvent.pointerId!==schedulerPointerDrag.pointerId)return;window.removeEventListener("pointermove",move,true);window.removeEventListener("pointerup",finish,true);window.removeEventListener("pointercancel",cancel,true);cleanupSchedulerPointerDrag();};
  window.addEventListener("pointermove",move,{capture:true,passive:false});window.addEventListener("pointerup",finish,{capture:true,once:false});window.addEventListener("pointercancel",cancel,{capture:true,once:false});
@@ -2410,7 +2406,7 @@ function moveSchedulerTouchLongPress(event){
  document.querySelectorAll(".timeline-day.is-drag-target,.scheduler-worker-drop.is-drag-target").forEach(el=>el.classList.remove("is-drag-target"));state.target=schedulerTargetFromPoint(touch.clientX,touch.clientY,state);if(state.target?.day)state.target.day.classList.add("is-drag-target");if(state.target?.workerTarget)state.target.workerTarget.classList.add("is-drag-target");updateSchedulerDragHud(state.target?.date?state.target:null);
 }
 async function finishSchedulerTouchLongPress(event){
- const state=schedulerTouchDrag;if(!state)return;if(state.timer)clearTimeout(state.timer);if(state.activated)schedulerSuppressClickUntil=Date.now()+500;const target=state.target,payload=state.payload,started=state.started;cleanupSchedulerTouchDrag();if(!started||!target)return;if(target.workerId){await commitSchedulerAssigneeMove(payload,target.workerId);return;}const duration=schedulerEntryDurationMinutes(payload),start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload.calendar_entry_type))workflowShellCardNotice();else await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_touch_long_press_drag");
+ const state=schedulerTouchDrag;if(!state)return;if(state.timer)clearTimeout(state.timer);if(state.activated)schedulerSuppressClickUntil=Date.now()+500;const target=state.target,payload=state.payload,started=state.started;cleanupSchedulerTouchDrag();if(!started||!target)return;if(target.workerId){await commitSchedulerAssigneeMove(payload,target.workerId);return;}const duration=schedulerEntryDurationMinutes(payload),start=dateTimeFromDateAndMinutes(target.date,target.minutes),end=addWallClockMinutes(start,duration);await commitSchedulerMove(payload.id,start,end,payload.assigned_user_id,"calendar_touch_long_press_drag");
 }
 function cancelSchedulerTouchLongPress(){cleanupSchedulerTouchDrag();}
 function cleanupSchedulerTouchDrag(){
@@ -2424,7 +2420,7 @@ function cleanupSchedulerPointerDrag(){
 function schedulerEventClick(event,row){event.stopPropagation();if(Date.now()<schedulerSuppressClickUntil)return;openCalendarEntry(row);}
 
 async function commitSchedulerAssigneeMove(payload,userId){
- if(["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(payload.calendar_entry_type)){workflowShellCardNotice();return false;}
+ if(payload.wf2_workflow_id){await WorkshopV2.openCalendar(payload);return false;}
  return commitSchedulerMove(payload.id,payload.start_time,payload.end_time,userId,"calendar_worker_pointer_drag");
 }
 function beginSchedulerDrag(event,job){event.preventDefault();}
@@ -2454,12 +2450,12 @@ function beginSchedulerResize(event,job,dayStart,dayEnd){
  window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true});
 }
 
-function isMovableSchedulerJob(job){return !job?.calendar_entry_type && !['Completed','Partially completed','Failed','Cancelled'].includes(String(job?.status||''));}
+function isMovableSchedulerJob(job){return !job?.wf2_workflow_id && !job?.calendar_entry_type && !['Completed','Partially completed','Failed','Cancelled'].includes(String(job?.status||''));}
 function isMovableSchedulerEntry(job){
  if(isMovableSchedulerJob(job))return true;
- if(!["WORKFLOW_DEADLINE","WORKFLOW_TASK"].includes(job?.calendar_entry_type))return false;
+ if(!job?.wf2_workflow_id)return false;
  if(["Completed","Cancelled"].includes(String(job?.status||"")))return false;
- return isAdmin()||String(user?.role||"").toUpperCase()==="MANAGER";
+ return Boolean(job.wf2_can_edit);
 }
 
 
@@ -2567,7 +2563,7 @@ function bindPredictiveInput(input,box,getItems,{search,label,secondary,onSelect
  const render=()=>{const term=String(input.value||"").trim().toLocaleLowerCase(),items=(getItems?.()||[]).filter(item=>!term||String(search?.(item)||"").toLocaleLowerCase().includes(term)).slice(0,8);const html=items.map(item=>`<button type="button" class="workflow-typeahead-option" data-predictive-id="${htmlText(item.id)}"><strong>${htmlText(label?.(item)||"")}</strong><small>${htmlText(secondary?.(item)||"—")}</small></button>`).join("");box.innerHTML=html+(!items.length&&term&&emptyAction?`<button type="button" class="workflow-typeahead-add" data-predictive-empty>+ ${htmlText(emptyAction.label)}</button>`:"");box.classList.toggle("hidden",!box.innerHTML);box.querySelectorAll('[data-predictive-id]').forEach(btn=>btn.addEventListener("mousedown",event=>{event.preventDefault();const item=(getItems?.()||[]).find(x=>String(x.id)===String(btn.dataset.predictiveId));if(item){onSelect?.(item);box.classList.add("hidden");}}));box.querySelector('[data-predictive-empty]')?.addEventListener("mousedown",event=>{event.preventDefault();emptyAction.run?.(input.value);box.classList.add("hidden");});};
  input.addEventListener("input",render);input.addEventListener("focus",render);input.addEventListener("blur",()=>setTimeout(()=>box.classList.add("hidden"),180));
 }
-function openLinkedWorkshopWorkflow(workflowId,event=null){event?.stopPropagation?.();event?.preventDefault?.();workshopWorkflowSelectedId=String(workflowId||"");workshopWorkflowSelectedStageId="__workflow__";navigationHomeNeutral=false;render("workshop_workflow",{navigationActivate:true});}
+function openLinkedWorkshopWorkflow(workflowId,event=null){event?.stopPropagation?.();event?.preventDefault?.();return WorkshopV2.open(workflowId);}
 
 async function openJob(prefill="", row=null, draft=null){
  const source=draft||row||{};
@@ -2745,6 +2741,7 @@ function renderJobDetails(j){
  $("#form").onsubmit=e=>e.preventDefault();
 }
 async function openJobDetails(summary){
+ if(summary?.wf2_workflow_id)return WorkshopV2.openCalendar(summary);
  const requestId=++jobDetailsRequestSequence;
  $("#modal").classList.remove("hidden");
  $("#modalTitle").textContent=bi('Job details','Munka részletei');
@@ -2753,6 +2750,7 @@ async function openJobDetails(summary){
  try{
   const detailed=await api(`/api/jobs/${encodeURIComponent(jobRef(summary))}`);
   if(requestId!==jobDetailsRequestSequence)return;
+  if(detailed.wf2_workflow_id){closeModal();return WorkshopV2.openCalendar(detailed);}
   renderJobDetails(detailed);
  }catch(error){
   if(requestId!==jobDetailsRequestSequence)return;
@@ -3591,7 +3589,7 @@ async function addInlinePianoToClient(clientId){
  }catch(err){showError(err)}
 }
 
-function closeModal(){if(document.getElementById("workflowPhaseSettings"))document.getElementById("form").onsubmit=null;const onCancelled=activeModalCancelHandler;activeModalCancelHandler=null;stopEventDetailsAttendanceLiveSync?.();stopDigitalAttendanceLiveSync?.();digitalAttendanceSelectedEventId='';$("#modal").classList.remove("digital-attendance-modal-shell");$("#modal").classList.add("hidden");if(typeof onCancelled==="function")setTimeout(()=>onCancelled(),0)}
+function closeModal(){const onCancelled=activeModalCancelHandler;activeModalCancelHandler=null;stopEventDetailsAttendanceLiveSync?.();stopDigitalAttendanceLiveSync?.();digitalAttendanceSelectedEventId='';$("#modal").classList.remove("digital-attendance-modal-shell");$("#modal").classList.add("hidden");if(typeof onCancelled==="function")setTimeout(()=>onCancelled(),0)}
 function exportTable(key){api("/api/"+key).then(data=>{if(!data.length){appAlert(bi("No data","Nincs adat"),"info");return}let h=Object.keys(data[0]);let csv=[h.join(","),...data.map(r=>h.map(x=>`"${String(r[x]??"").replaceAll('"','""')}"`).join(","))].join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${key}.csv`;a.click()})}
 const financialCategoryOptions={
  INCOME:[
@@ -4435,17 +4433,18 @@ async function snoozeAllDeadlineNotifications(){
 }
 async function completeDeadlineNotification(cardId){
  const row=findDeadlineNotification(cardId);if(!row)return;
- try{await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})});animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);if(currentView==='scheduler')await renderScheduler();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
+ if(row.wf2_entity_type==='FINAL')return WorkshopV2.open(row.workflow_id);
+ try{await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})});animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);await WorkshopV2.refreshViews();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
 }
 function closeQuickRescheduleScheduler(){adminDatePickerClose();document.getElementById('unified-notification-reschedule-popover')?.remove();unifiedDeadlineRescheduleContext=null;}
 function openQuickRescheduleScheduler({cardId}){
  const row=findDeadlineNotification(cardId);if(!row)return;
  closeQuickRescheduleScheduler();unifiedDeadlineRescheduleContext={cardId,entityType:row.entity_type,entityId:row.entity_id,workflowId:row.workflow_id||''};
- const value=clientFollowUpDateValue(row.target_date)||String(nyNowLocalString()||'').slice(0,16),popover=document.createElement('section');popover.id='unified-notification-reschedule-popover';popover.className='unified-notification-reschedule-popover';popover.setAttribute('role','dialog');popover.setAttribute('aria-modal','false');popover.innerHTML=`<div class="unified-notification-reschedule-card"><header><div><small>${bi('Calendar reschedule','Naptári újraütemezés')}</small><h3>${bi('Choose a new date and time','Új dátum és idő kiválasztása')}</h3></div><button type="button" class="notification-btn" data-unified-reschedule-action="close" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></header><label>${bi('Date and time','Dátum és idő')}<input id="unifiedRescheduleDate" type="datetime-local" step="900" data-date-picker-step-minutes="15" value="${htmlText(value)}" required></label><div data-unified-calendar-host></div><label>${bi('Reason for the change','Módosítás indoka')}<textarea id="unifiedRescheduleReason" maxlength="2000" rows="3" required></textarea></label><footer><button type="button" class="notification-btn" data-unified-reschedule-action="close">${bi('Cancel','Mégse')}</button><button type="button" class="notification-btn is-reschedule" data-unified-reschedule-action="save">${bi('Save new time','Új időpont mentése')}</button></footer></div>`;document.body.appendChild(popover);const anchor=document.querySelector(unifiedDeadlineCardSelector(cardId)),rect=anchor?.getBoundingClientRect();if(rect)popover.style.top=`${Math.max(12,Math.min(rect.top,window.innerHeight-560))}px`;enhanceAdminDatePickers(popover);popover.addEventListener('click',event=>{if(event.target===popover)closeQuickRescheduleScheduler();const action=event.target.closest?.('[data-unified-reschedule-action]')?.dataset.unifiedRescheduleAction;if(action==='close')closeQuickRescheduleScheduler();if(action==='save')void saveQuickRescheduleScheduler();});requestAnimationFrame(()=>{const input=popover.querySelector('#unifiedRescheduleDate'),trigger=input?.closest('.admin-date-control')?.querySelector('.admin-date-control-trigger');if(input)adminDatePickerOpen(input,trigger||input);});
+ const value=clientFollowUpDateValue(row.target_date)||String(nyNowLocalString()||'').slice(0,16),popover=document.createElement('section');popover.id='unified-notification-reschedule-popover';popover.className='unified-notification-reschedule-popover';popover.setAttribute('role','dialog');popover.setAttribute('aria-modal','false');popover.innerHTML=`<div class="unified-notification-reschedule-card"><header><div><small>${bi('Calendar reschedule','Naptári újraütemezés')}</small><h3>${bi('Choose a new date and time','Új dátum és idő kiválasztása')}</h3></div><button type="button" class="notification-btn" data-unified-reschedule-action="close" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></header><div data-unified-calendar-host></div><label>${bi('Reason for the change','Módosítás indoka')}<textarea id="unifiedRescheduleReason" maxlength="2000" rows="3" required></textarea></label><footer><button type="button" class="notification-btn" data-unified-reschedule-action="close">${bi('Cancel','Mégse')}</button><button type="button" class="notification-btn is-reschedule" data-unified-reschedule-action="save">${bi('Save new time','Új időpont mentése')}</button></footer></div>`;document.body.appendChild(popover);const anchor=document.querySelector(unifiedDeadlineCardSelector(cardId)),rect=anchor?.getBoundingClientRect();if(rect)popover.style.top=`${Math.max(12,Math.min(rect.top,window.innerHeight-560))}px`;WorkshopV2.mountDate(popover.querySelector('[data-unified-calendar-host]'),'unifiedRescheduleDate',value);popover.addEventListener('click',event=>{if(event.target===popover)closeQuickRescheduleScheduler();const action=event.target.closest?.('[data-unified-reschedule-action]')?.dataset.unifiedRescheduleAction;if(action==='close')closeQuickRescheduleScheduler();if(action==='save')void saveQuickRescheduleScheduler();});
 }
 async function saveQuickRescheduleScheduler(){
  const context=unifiedDeadlineRescheduleContext,input=document.getElementById('unifiedRescheduleDate'),reasonInput=document.getElementById('unifiedRescheduleReason');if(!context||!input)return;const targetDate=input.value||'',reason=reasonInput?.value.trim()||'';if(!targetDate||!reason)return showError(bi('Date and reason are required.','A dátum és az indoklás kötelező.'));
- try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(item=>String(item.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}closeQuickRescheduleScheduler();animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);if(currentView==='scheduler')await renderScheduler();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
+ try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(item=>String(item.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}closeQuickRescheduleScheduler();animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);await WorkshopV2.refreshViews();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
 }
 function bindDeadlineNotificationDelegation(){
  const bind=root=>{if(!root||root.dataset.unifiedNotificationDelegationBound==='true')return;root.dataset.unifiedNotificationDelegationBound='true';root.addEventListener('click',event=>{const closeControl=event.target.closest?.('[data-unified-notification-close]'),control=event.target.closest?.('[data-unified-notification-action]');if((!closeControl&&!control)||!root.contains(closeControl||control))return;event.preventDefault();if(control?.dataset.unifiedNotificationAction==='snooze-all'){void snoozeAllDeadlineNotifications();return;}const card=(closeControl||control).closest('[data-unified-notification-card]'),row=findDeadlineNotification(card?.dataset.unifiedNotificationCard||'');if(!card||!row)return;if(closeControl){void snoozeDeadlineNotification(row.entity_type,row.entity_id,row.id);return;}const action=control.dataset.unifiedNotificationAction;if(action==='snooze-all'){void snoozeAllDeadlineNotifications();return;}if(action==='complete')void completeDeadlineNotification(row.id);if(action==='reschedule')openQuickRescheduleScheduler({cardId:row.id});if(action==='snooze')void snoozeDeadlineNotification(row.entity_type,row.entity_id,row.id);});};bind(document.getElementById('floating-notifications-container'));bind(document.getElementById('tasks'));
