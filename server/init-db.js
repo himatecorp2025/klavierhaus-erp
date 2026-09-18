@@ -6,6 +6,7 @@ const { SAMPLE_VERSION_KEY } = require("./sample-content");
 const { nextTicketCode } = require("./ticket-code");
 const { parseGuestName } = require("./name-format");
 const { ensureSteinwayReferenceTables } = require("./steinway-reference");
+const { retireLegacyWorkflow, installWorkflowDeletionGuards } = require("./workflow-retirement");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -20,7 +21,7 @@ function log(message) {
   console.log(`[database] ${message}`);
 }
 
-const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V38-2-CLEAN");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V40-PHASE1");
 log(`Build: ${BUILD_ID}`);
 
 function fail(message, error) {
@@ -162,6 +163,7 @@ function assertPreservedBusinessCounts(before) {
 }
 
 function migrationRequiresBackup() {
+  if (tableExists("workshop_workflows")) return true;
   const usersSql = tableExists("users")
     ? String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || "").toUpperCase()
     : "";
@@ -176,7 +178,7 @@ function migrationRequiresBackup() {
   const jobsMissingPlannedMinutes = tableExists("jobs") && !tableColumns("jobs").has("planned_minutes");
   const jobsMissingRound5DomainColumns = tableExists("jobs") && ["notes","workflow_id","financial_status","financial_ledger_id","closed_at"].some((column) => !tableColumns("jobs").has(column));
   const round6DailyRateMissing = tableExists("users") && (!tableExists("employee_daily_rates") || (tableExists("jobs") && ["daily_rate_enabled","daily_rate_allocated_amount","daily_rate_date"].some((column) => !tableColumns("jobs").has(column))));
-  const workflowMissingJobLink = tableExists("workshop_workflows") && !tableColumns("workshop_workflows").has("job_id");
+  const workflowMissingJobLink = tableExists("workflow_finance_sources") && !tableColumns("workflow_finance_sources").has("job_id");
   const googleIntegrationMissing = tableExists("users") && !tableExists("calendar_integrations");
   const activationTablesMissing = tableExists("users") && (!tableExists("account_activations") || !tableExists("activation_email_log") || !tableExists("activation_email_events"));
   const eventTablesMissing = tableExists("users") && (!tableExists("events") || !tableExists("event_tickets") || !tableExists("event_invitations"));
@@ -188,7 +190,7 @@ function migrationRequiresBackup() {
   const sampleFlagsMissing = ["website_reviews", "website_showroom_pianos", "website_services"].some((table) => tableExists(table) && !tableColumns(table).has("is_sample"));
   const attendancePauseColumnsMissing = tableExists("event_attendance_sessions") && ["paused_at", "paused_by_user_id", "resumed_at", "resumed_by_user_id"].some((column) => !tableColumns("event_attendance_sessions").has(column));
   const sampleContentMissing = tableExists("app_settings") && !db.prepare("SELECT 1 FROM app_settings WHERE setting_key=?").get(SAMPLE_VERSION_KEY);
-  const workflowTablesMissing = tableExists("users") && (!["workflow_stage_definitions","workshop_workflows","workflow_stages","workshop_subtasks","workflow_stage_transfers","workflow_materials","workflow_financial_lines","workflow_documents","workflow_closed_jobs","workflow_audit_events"].every(tableExists));
+  const workflowTablesMissing = tableExists("users") && (!["workshop_phase_definitions","workflow_finance_sources","workflow_finance_phases","workflow_finance_lines","workflow_finance_closures"].every(tableExists));
   const inventoryMissingReservedQuantity = tableExists("inventory_items") && !tableColumns("inventory_items").has("reserved_quantity");
   const invoicePaymentSchemaOutdated = tableExists("invoices") && (!tableColumns("invoices").has("payment_link_url") || !tableColumns("invoices").has("notes") || !tableColumns("invoices").has("paid_at") || !tableColumns("invoices").has("archived_at") || !tableColumns("invoices").has("archived_period") || !tableColumns("invoices").has("revenue_recognition_status") || !tableColumns("invoices").has("revenue_recognition_date") || !tableColumns("invoices").has("deferred_event_id") || !tableSql("invoices").includes("Payment Link") || !tableSql("invoices").includes("PayPal") || !tableSql("invoices").includes("NONE / INTERNAL") || !tableSql("invoices").includes("'event'"));
   const invoiceItemSettlementMissing = tableExists("invoice_items") && ["payment_method","financial_status"].some((column) => !tableColumns("invoice_items").has(column));
@@ -842,10 +844,12 @@ function ensureInvoiceImmutability() {
 }
 
 function runMigrations() {
-  // Startup migrations must never delete existing business or sample records.
-  // Historical content is preserved; removal is an explicit administrator action.
+  // Shared business records are preserved. The approved Phase I migration retires
+  // only legacy workflow-owned operational tables; financial sources go to custody.
   const preservedCounts = preservedBusinessCounts();
   createPreMigrationBackup();
+  const retirement = retireLegacyWorkflow(db);
+  if (retirement.migrated) log(`Workflow Phase I custody migration: ${JSON.stringify(retirement)}`);
 
   // Existing databases may have the pre-Workshop-link jobs table. The schema
   // creates an index on jobs.workshop_workflow_id, so the compatibility column
@@ -880,13 +884,14 @@ function runMigrations() {
     ensureColumn("notification_snooze_log", "user_id", "TEXT");
   }
   // schema.sql creates idx_workflow_stage_calendar_job. Existing deployments
-  // already have workflow_stages, so SQLite will not replay the CREATE TABLE
+  // already have workflow_finance_phases, so SQLite will not replay the CREATE TABLE
   // statement and the indexed column must be added before schema.sql runs.
   // Keeping this migration before db.exec makes an upgrade from the pre-link
   // workflow schema safe and prevents the Render startup failure
   // "no such column: calendar_job_id".
-  if (tableExists("workflow_stages")) {
-    ensureColumn("workflow_stages", "calendar_job_id", "TEXT");
+  if (tableExists("workflow_finance_phases")) {
+    ensureColumn("workflow_finance_phases", "calendar_job_id", "TEXT");
+    ensureColumn("workflow_finance_phases", "card_title", "TEXT");
   }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
@@ -1146,91 +1151,35 @@ function runMigrations() {
     ensureColumn("knowledge_base", "effective_date", "TEXT");
     ensureColumn("knowledge_base", "original_filename", "TEXT");
     ensureColumn("knowledge_base", "mime_type", "TEXT");
-    if (tableExists("workshop_workflows")) {
-      ensureColumn("workshop_workflows", "planned_job_id", "TEXT");
-      ensureColumn("workshop_workflows", "job_id", "TEXT");
-      ensureColumn("workshop_workflows", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
-      ensureColumn("workshop_workflows", "invoice_id", "TEXT");
-      ensureColumn("workshop_workflows", "notes", "TEXT");
-      ensureColumn("workshop_workflows", "due_time", "TEXT");
-      ensureColumn("workshop_workflows", "intake_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
-      ensureColumn("workshop_workflows", "intake_pdf_path", "TEXT");
-      ensureColumn("workflow_financial_lines", "partner_id", "TEXT");
-      ensureColumn("workflow_financial_lines", "payable_invoice_id", "TEXT");
-      ensureColumn("workflow_financial_lines", "wip_journal_entry_id", "TEXT");
-      ensureColumn("workflow_financial_lines", "final_journal_entry_id", "TEXT");
-      ensureColumn("workflow_financial_lines", "writeoff_journal_entry_id", "TEXT");
-      ensureColumn("workflow_financial_lines", "accounting_status", "TEXT NOT NULL DEFAULT 'WIP'");
-      ensureColumn("workshop_workflows", "intake_photos", "TEXT NOT NULL DEFAULT '[]'");
-      ensureColumn("workshop_workflows", "intake_inspected_by", "TEXT");
-      ensureColumn("workshop_workflows", "intake_inspected_at", "TEXT");
-      ensureColumn("workshop_workflows", "dispatch_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
-      ensureColumn("workshop_workflows", "dispatch_pdf_path", "TEXT");
-      ensureColumn("workshop_workflows", "dispatch_inspected_by", "TEXT");
-      ensureColumn("workshop_workflows", "dispatch_inspected_at", "TEXT");
-      ensureIndex("idx_workflows_invoice_id", "CREATE INDEX IF NOT EXISTS idx_workflows_invoice_id ON workshop_workflows(invoice_id)");
-      db.prepare(`UPDATE workshop_workflows SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workshop_workflows.id AND i.status<>'void')`).run();
-    }
-    if (tableExists("workshop_workflows") && tableExists("jobs")) {
-      const legacyWorkflows=db.prepare("SELECT w.*,c.name AS client_name,p.display_name AS piano_display,p.brand AS piano_brand,p.model AS piano_model,u.name AS creator_name FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id LEFT JOIN users u ON u.id=COALESCE(w.transport_responsible_user_id,w.created_by_user_id) WHERE w.job_id IS NULL OR trim(w.job_id)='' ORDER BY w.created_at,w.id").all();
-      const insertLinkedJob=db.prepare(`INSERT OR IGNORE INTO jobs(id,job_key,workflow_root_id,workflow_step_no,workflow_status,workflow_id,title,job_type,client_id,client_name,piano_id,piano_name,assigned_user_id,assigned_to,created_by_user_id,created_by,priority,status,start_time,end_time,timezone,planned_amount,planned_hours,planned_minutes,travel_minutes,service_address,instructions,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-      const linkWorkflow=db.prepare("UPDATE workshop_workflows SET job_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
-      for(const workflow of legacyWorkflows){
-        const jobId=`WFJOB-${workflow.id}`;
-        const end=String(workflow.final_due_at||'').slice(0,16);
-        const endDate=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(end)?new Date(`${end}:00Z`):null;
-        const start=endDate?new Date(endDate.getTime()-15*60000).toISOString().slice(0,16):end;
-        const pianoName=workflow.piano_display||`${workflow.piano_brand||''} ${workflow.piano_model||''}`.trim()||workflow.piano_id;
-        const assigneeId=workflow.transport_responsible_user_id||workflow.created_by_user_id||null;
-        const assigneeName=workflow.transport_responsible_name||workflow.creator_name||'Workshop workflow';
-        insertLinkedJob.run(jobId,`WFJOB-${workflow.workflow_key||workflow.id}`,jobId,1,workflow.current_status==='COMPLETED'?'COMPLETED':(workflow.current_status==='ABORTED'?'FAILED':'ACTIVE'),workflow.id,workflow.title,'Workflow',workflow.client_id,workflow.client_name,workflow.piano_id,pianoName,assigneeId,assigneeName,workflow.created_by_user_id||null,workflow.creator_name||'System','Medium',workflow.current_status==='COMPLETED'?'Completed':(workflow.current_status==='ABORTED'?'Cancelled':'Open'),start,end,'America/New_York',0,0.25,15,0,workflow.transport_address||workflow.current_location||'',workflow.description||'',workflow.description||'');
-        linkWorkflow.run(jobId,workflow.id);
-      }
-    }
-    if (tableExists("workflow_stages")) {
-      ensureColumn("workflow_stages", "card_title", "TEXT");
-      ensureColumn("workflow_stages", "notes", "TEXT");
-      ensureColumn("workflow_stages", "delay_reason", "TEXT");
-      ensureColumn("workflow_stages", "financial_status", "TEXT NOT NULL DEFAULT 'OPEN'");
-      ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
-      ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
-      ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
-      ensureColumn("workflow_stages", "calendar_job_id", "TEXT");
-      ensureColumn("workflow_stages", "reopened_at", "TEXT");
-      ensureColumn("workflow_stages", "reopened_by_user_id", "TEXT");
-      ensureColumn("workflow_stages", "reopen_reason", "TEXT");
-      ensureIndex("idx_workflow_stage_calendar_job", "CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_stages(calendar_job_id)");
-      db.exec(`CREATE TABLE IF NOT EXISTS workshop_subtasks (
-        id TEXT PRIMARY KEY,
-        stage_id TEXT NOT NULL REFERENCES workflow_stages(id) ON DELETE CASCADE,
-        workflow_id TEXT NOT NULL REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-        title TEXT NOT NULL,
-        is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0,1)),
-        status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','COMPLETED','DELAYED')),
-        assigned_to_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-        delay_reason TEXT,
-        position INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        completed_at TEXT,
-        completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-        reopened_at TEXT,
-        reopened_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
-      )`);
-      ensureColumn("workshop_subtasks", "completed_by_user_id", "TEXT");
-      ensureColumn("workshop_subtasks", "reopened_at", "TEXT");
-      ensureColumn("workshop_subtasks", "reopened_by_user_id", "TEXT");
-      ensureIndex("idx_subtasks_stage", "CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id)");
-      ensureIndex("idx_subtasks_workflow", "CREATE INDEX IF NOT EXISTS idx_subtasks_workflow ON workshop_subtasks(workflow_id,stage_id)");
-    }
-
-    if (tableExists("jobs") && tableExists("workshop_workflows")) {
-      db.prepare("UPDATE jobs SET workshop_workflow_id=workflow_id WHERE (workshop_workflow_id IS NULL OR trim(workshop_workflow_id)='') AND workflow_id IS NOT NULL AND trim(workflow_id)<>''").run();
-      ensureIndex("idx_jobs_workshop_workflow", "CREATE INDEX IF NOT EXISTS idx_jobs_workshop_workflow ON jobs(workshop_workflow_id)");
+    if (tableExists("workflow_finance_sources")) {
+      ensureColumn("workflow_finance_sources", "planned_job_id", "TEXT");
+      ensureColumn("workflow_finance_sources", "job_id", "TEXT");
+      ensureColumn("workflow_finance_sources", "billing_status", "TEXT NOT NULL DEFAULT 'Unbilled'");
+      ensureColumn("workflow_finance_sources", "invoice_id", "TEXT");
+      ensureColumn("workflow_finance_sources", "notes", "TEXT");
+      ensureColumn("workflow_finance_sources", "due_time", "TEXT");
+      ensureColumn("workflow_finance_sources", "intake_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
+      ensureColumn("workflow_finance_sources", "intake_pdf_path", "TEXT");
+      ensureColumn("workflow_finance_lines", "partner_id", "TEXT");
+      ensureColumn("workflow_finance_lines", "payable_invoice_id", "TEXT");
+      ensureColumn("workflow_finance_lines", "wip_journal_entry_id", "TEXT");
+      ensureColumn("workflow_finance_lines", "final_journal_entry_id", "TEXT");
+      ensureColumn("workflow_finance_lines", "writeoff_journal_entry_id", "TEXT");
+      ensureColumn("workflow_finance_lines", "accounting_status", "TEXT NOT NULL DEFAULT 'WIP'");
+      ensureColumn("workflow_finance_sources", "intake_photos", "TEXT NOT NULL DEFAULT '[]'");
+      ensureColumn("workflow_finance_sources", "intake_inspected_by", "TEXT");
+      ensureColumn("workflow_finance_sources", "intake_inspected_at", "TEXT");
+      ensureColumn("workflow_finance_sources", "dispatch_inspection_status", "TEXT NOT NULL DEFAULT 'PENDING'");
+      ensureColumn("workflow_finance_sources", "dispatch_pdf_path", "TEXT");
+      ensureColumn("workflow_finance_sources", "dispatch_inspected_by", "TEXT");
+      ensureColumn("workflow_finance_sources", "dispatch_inspected_at", "TEXT");
+      ensureIndex("idx_workflows_invoice_id", "CREATE INDEX IF NOT EXISTS idx_workflows_invoice_id ON workflow_finance_sources(invoice_id)");
+      db.prepare(`UPDATE workflow_finance_sources SET billing_status='Billed',invoice_id=(SELECT i.id FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workflow_finance_sources.id AND i.status<>'void' ORDER BY i.created_at DESC,i.id DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM invoices i WHERE i.direction='receivable' AND i.source_type='workflow' AND i.source_id=workflow_finance_sources.id AND i.status<>'void')`).run();
     }
     db.exec(`CREATE TABLE IF NOT EXISTS piano_inspection_history (
       id TEXT PRIMARY KEY,piano_id TEXT NOT NULL,workflow_id TEXT,inspection_type TEXT NOT NULL CHECK(inspection_type IN ('INTAKE','DISPATCH','DAMAGE_PHOTO')),
       inspection_status TEXT,file_path TEXT NOT NULL,original_filename TEXT,mime_type TEXT,inspected_by TEXT,inspected_at TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
+      FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,FOREIGN KEY(workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE SET NULL
     )`);
     ensureIndex("idx_piano_inspection_history_piano", "CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_piano ON piano_inspection_history(piano_id,inspected_at DESC)");
     ensureIndex("idx_piano_inspection_history_workflow", "CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_workflow ON piano_inspection_history(workflow_id,inspection_type)");
@@ -1360,7 +1309,7 @@ function runMigrations() {
   ensureIndex("idx_planned_jobs_status", "CREATE INDEX IF NOT EXISTS idx_planned_jobs_status ON planned_jobs(status,planned_type)");
   ensureIndex("idx_jobs_workflow_root", "CREATE INDEX IF NOT EXISTS idx_jobs_workflow_root ON jobs(workflow_root_id,workflow_step_no)");
   ensureIndex("idx_jobs_workflow_id", "CREATE INDEX IF NOT EXISTS idx_jobs_workflow_id ON jobs(workflow_id)");
-  if (tableExists("workshop_workflows")) ensureIndex("idx_workshop_workflows_job_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_workflows_job_id ON workshop_workflows(job_id) WHERE job_id IS NOT NULL AND trim(job_id)<>''");
+  if (tableExists("workflow_finance_sources")) ensureIndex("idx_workshop_workflows_job_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_workflows_job_id ON workflow_finance_sources(job_id) WHERE job_id IS NOT NULL AND trim(job_id)<>''");
   ensureIndex("idx_jobs_assigned_user_id", "CREATE INDEX IF NOT EXISTS idx_jobs_assigned_user_id ON jobs(assigned_user_id)");
   ensureIndex("idx_jobs_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_time_range ON jobs(start_time,end_time)");
   ensureIndex("idx_jobs_assignee_time_range", "CREATE INDEX IF NOT EXISTS idx_jobs_assignee_time_range ON jobs(assigned_user_id,start_time,end_time)");
@@ -1382,7 +1331,6 @@ function runMigrations() {
   ensureIndex("idx_jobs_contact_id", "CREATE INDEX IF NOT EXISTS idx_jobs_contact_id ON jobs(contact_id)");
   ensureIndex("idx_jobs_parent_id", "CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_job_id)");
   ensureIndex("idx_job_logs_job_id", "CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)");
-  ensureIndex("idx_stage_transfers_wf_stg", "CREATE INDEX IF NOT EXISTS idx_stage_transfers_wf_stg ON workflow_stage_transfers(workflow_id,stage_id)");
   ensureIndex("idx_notifications_event_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL");
   ensureIndex("idx_notifications_recipient_status", "CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC)");
   ensureIndex("idx_notifications_job", "CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id)");
@@ -1476,6 +1424,7 @@ function runMigrations() {
     db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES('notification_preferences_v1_backfilled','1','SYSTEM')").run();
     log('Enabled all notification preferences for existing users');
   }
+  installWorkflowDeletionGuards(db);
   assertPreservedBusinessCounts(preservedCounts);
   // Automatic sample installation was intentionally removed. Existing rows
   // remain untouched and restarts never create new sample records.
