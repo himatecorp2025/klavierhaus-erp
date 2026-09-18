@@ -623,6 +623,8 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     }).filter((item) => item.total_price >= 0);
     let subtotal = 0;
     for (const item of normalizedItems) subtotal = money(subtotal + item.total_price);
+    // Do not allocate a number, insert a document or post a zero-value workflow.
+    if (sourceType === "workflow" && !(subtotal > 0)) return null;
     const rate = Math.max(0, money(taxRate));
     const taxAmount = money(subtotal * rate / 100);
     const total = money(subtotal + taxAmount);
@@ -689,7 +691,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       db.prepare(`UPDATE jobs SET billing_status='Billed',invoice_id=?,invoice_status='Invoiced',invoice_number=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(invoice.id, invoice.invoice_number, invoice.source_id);
     } else if (invoice.source_type === "workflow") {
-      db.prepare(`UPDATE workshop_workflows SET billing_status='Billed',invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      db.prepare(`UPDATE workflow_finance_sources SET billing_status='Billed',invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(invoice.id, invoice.source_id);
     }
   }
@@ -698,7 +700,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     if (invoice.source_type === "job" && invoice.direction === "receivable") {
       db.prepare(`UPDATE jobs SET billing_status='Unbilled',invoice_id=NULL,invoice_status='Not invoiced',invoice_number=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(invoice.source_id);
     } else if (invoice.source_type === "workflow" && invoice.direction === "receivable") {
-      db.prepare(`UPDATE workshop_workflows SET billing_status='Unbilled',invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(invoice.source_id);
+      db.prepare(`UPDATE workflow_finance_sources SET billing_status='Unbilled',invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(invoice.source_id);
     }
   }
   function createCreditMemo({ invoiceId, eventId = null, memoType = "EVENT_REFUND", sourceType, sourceId, memoDate = newYorkDateKey(), reason, subtotalAmount = null, taxAmount = null, totalAmount = null, revenueEffectDate = undefined, cashEffect = true, accountingEffect = true, actor = {} }) {
@@ -786,7 +788,8 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     if (estimated > 0 && !method) throw Object.assign(new Error("PAYMENT_METHOD_REQUIRED"), { status: 400 });
     const created = [];
     const receivableMethod = estimated > 0 ? method : "NONE / INTERNAL";
-    created.push(createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: job.client_id || null, sourceType: "job", sourceId: job.id, summary: `Job completed: ${job.title || job.job_key || job.id}`, taxRate: 0, paymentMethod: receivableMethod, status: "issued", items: [{ item_description: job.title || "Completed service", quantity: 1, unit_price: estimated, line_type: "fee" }] }));
+    const retiredWorkflowJob=Boolean(db.prepare("SELECT 1 FROM workflow_retired_calendar_jobs WHERE job_id=?").get(job.id));
+    if(estimated > 0 || !retiredWorkflowJob) created.push(createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: job.client_id || null, sourceType: "job", sourceId: job.id, summary: `Job completed: ${job.title || job.job_key || job.id}`, taxRate: 0, paymentMethod: receivableMethod, status: "issued", items: [{ item_description: job.title || "Completed service", quantity: 1, unit_price: estimated, line_type: "fee" }] }));
     if (contractorTotal > 0) {
       const partner = ensureContractorPartner(job);
       const contractorItems = [];
@@ -813,6 +816,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
 
   function createWorkflowPayableInvoice({ workflow, stage = null, line, partner, actor = {}, now = new Date().toISOString() }) {
     if (!workflow || !line || !partner) throw Object.assign(new Error("WORKFLOW_PARTNER_PAYABLE_DATA_REQUIRED"), { status: 400 });
+    if (!(money(line.amount) > 0)) return null;
     const issueDate = String(now).slice(0, 10);
     const invoice = createInvoice({
       direction: "payable", issueDate, dueDate: issueDate, partnerId: partner.id, sourceType: "workflow", sourceId: `WORKFLOW_LINE:${line.id}`,
@@ -826,8 +830,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const method = paymentMethod(requestedPaymentMethod);
-    if (!method) throw Object.assign(new Error("PAYMENT_METHOD_REQUIRED"), { status: 400 });
-    const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id)).filter((stage) => stage.status !== "NOT_REQUIRED");
+    const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_finance_phases WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id)).filter((stage) => stage.status !== "NOT_REQUIRED");
     const costLines = (lines || []).filter((row) => row.line_type === "COST" && String(row.accounting_status || "WIP") !== "WRITTEN_OFF");
     const items = phaseRows.map((stage) => {
       const phaseSubtotal = workflowBillablePhaseSubtotal(costLines.filter((row) => String(row.stage_id || "") === String(stage.id)));
@@ -835,6 +838,8 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       const phaseName = stage.name_snapshot_en || stage.card_title || stage.stage_code || `Phase ${Number(stage.stage_order || 0) + 1}`;
       return { item_description: `Phase ${Number(stage.stage_order || 0) + 1}: ${phaseName}`, quantity: 1, unit_price: phaseSubtotal, line_type: "fee" };
     }).filter((item) => money(item.unit_price) > 0);
+    if (!items.length || !(money(items.reduce((sum,item)=>sum+item.unit_price,0)) > 0)) return null;
+    if (!method) throw Object.assign(new Error("PAYMENT_METHOD_REQUIRED"), { status: 400 });
     return createInvoice({ direction: "receivable", issueDate, dueDate: due.toISOString().slice(0, 10), clientId: workflow.client_id, sourceType: "workflow", sourceId: workflow.id, summary: `Workshop workflow completed: ${workflow.title || workflow.id}`, taxRate: 0, paymentMethod: method, status: "draft", items });
   }
   function reverseLedger(invoice) {
@@ -1028,7 +1033,7 @@ function registerBusinessOperationsRoutes(options) {
 
     app.get("/api/invoices/unbilled-sources", auth, financeReader, (_req, res) => {
       const jobs = db.prepare(`SELECT id,title,client_name,start_time,planned_amount,payment_method FROM jobs WHERE status='Completed' AND COALESCE(billing_status,'Unbilled')='Unbilled' ORDER BY COALESCE(completed_at,start_time) DESC,id`).all().map((row) => ({ ...row, source_type: "job" }));
-      const workflows = db.prepare(`SELECT id,title,client_id,final_due_at FROM workshop_workflows WHERE current_status='COMPLETED' AND COALESCE(billing_status,'Unbilled')='Unbilled' ORDER BY COALESCE(financial_closed_at,updated_at) DESC,id`).all().map((row) => ({ ...row, source_type: "workflow" }));
+      const workflows = db.prepare(`SELECT id,title,client_id,final_due_at FROM workflow_finance_sources WHERE current_status='COMPLETED' AND COALESCE(billing_status,'Unbilled')='Unbilled' ORDER BY COALESCE(financial_closed_at,updated_at) DESC,id`).all().map((row) => ({ ...row, source_type: "workflow" }));
       res.json({ jobs, workflows, all: [...jobs, ...workflows] });
     });
     app.get("/api/invoices/:id", auth, financeReader, (req, res) => {
@@ -1172,12 +1177,12 @@ function registerBusinessOperationsRoutes(options) {
             if (String(job.billing_status || "Unbilled") !== "Unbilled") throw Object.assign(new Error("SOURCE_ALREADY_BILLED"), { status: 409 });
             created = invoiceEngine.createJobInvoices({ job: { ...job, payment_method: method }, actor: req.user, now: new Date().toISOString(), entries: [] });
           } else if (sourceType === "workflow") {
-            const workflow = db.prepare("SELECT * FROM workshop_workflows WHERE id=? AND current_status='COMPLETED'").get(sourceId);
+            const workflow = db.prepare("SELECT * FROM workflow_finance_sources WHERE id=? AND current_status='COMPLETED'").get(sourceId);
             if (!workflow) throw Object.assign(new Error("UNBILLED_WORKFLOW_NOT_FOUND"), { status: 404 });
             if (String(workflow.billing_status || "Unbilled") !== "Unbilled") throw Object.assign(new Error("SOURCE_ALREADY_BILLED"), { status: 409 });
-            const stages = db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(sourceId);
-            const lines = db.prepare("SELECT * FROM workflow_financial_lines WHERE workflow_id=? ORDER BY created_at,id").all(sourceId);
-            created = [invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now: new Date().toISOString(), paymentMethod: method })];
+            const stages = db.prepare("SELECT * FROM workflow_finance_phases WHERE workflow_id=? ORDER BY stage_order,id").all(sourceId);
+            const lines = db.prepare("SELECT * FROM workflow_finance_lines WHERE workflow_id=? ORDER BY created_at,id").all(sourceId);
+            created = [invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now: new Date().toISOString(), paymentMethod: method })].filter(Boolean);
           } else {
             throw Object.assign(new Error("INVALID_INVOICE_SOURCE_TYPE"), { status: 400 });
           }
