@@ -62,7 +62,7 @@ app.set("trust proxy", 1);
 const OPERATIONAL_CONTRACT_KEYS = Object.freeze(["helpdesk", "notification_audit"]);
 const PORT = process.env.PORT || 3030;
 const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
-const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V41-PHASE2");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V42-UI12-CONTRACT");
 const DEPLOYMENT_COMMIT = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown";
 const VAPID_PUBLIC_KEY=process.env.VAPID_PUBLIC_KEY||"";
 const VAPID_PRIVATE_KEY=process.env.VAPID_PRIVATE_KEY||"";
@@ -1407,7 +1407,8 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
   if(!DEADLINE_NOTIFICATION_TYPES.has(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
   if(!deadlineEntityVisibleToUser(req.user,entityType,entityId))return res.status(404).json({error:'NOTIFICATION_ENTITY_NOT_FOUND'});
   if(!targetDate)return res.status(400).json({error:'INVALID_NOTIFICATION_TARGET_DATE'});
-  if(!reason)return res.status(400).json({error:'RESCHEDULE_REASON_REQUIRED'});
+  // Workflow actions defer reason policy to the shared RBAC engine (Superadmin is exempt).
+  if(!reason&&!(entityType==='CALENDAR_JOB'&&workflowV2.link(entityId)))return res.status(400).json({error:'RESCHEDULE_REASON_REQUIRED'});
   try{
     if(entityType==='CLIENT_FOLLOWUP'){
       const before=db.prepare('SELECT * FROM contacts WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'CONTACT_NOT_FOUND'});
