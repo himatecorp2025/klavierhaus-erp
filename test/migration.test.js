@@ -42,7 +42,7 @@ test("v6.5.0 migration preserves business records and creates a backup before ca
   const migrated = new Database(dbPath, { readonly: true });
   const columns = migrated.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
   const jobColumns = migrated.prepare("PRAGMA table_info(jobs)").all().map((column) => column.name);
-  const workflowStageColumns = migrated.prepare("PRAGMA table_info(workflow_stages)").all().map((column) => column.name);
+  const workflowStageColumns = migrated.prepare("PRAGMA table_info(workflow_finance_phases)").all().map((column) => column.name);
   assert.ok(columns.includes("calendar_color"));
   assert.ok(columns.includes("google_calendar_email"));
   assert.ok(columns.includes("contact_email"));
