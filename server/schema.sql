@@ -2066,10 +2066,16 @@ CREATE INDEX IF NOT EXISTS idx_workflow_status_due ON workshop_workflows(current
 CREATE INDEX IF NOT EXISTS idx_workflow_client_piano ON workshop_workflows(client_id,piano_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_stage_workflow_order ON workflow_stages(workflow_id,stage_order);
 CREATE INDEX IF NOT EXISTS idx_workflow_stage_assignee ON workflow_stages(assigned_user_id,status,due_at);
+CREATE INDEX IF NOT EXISTS idx_stage_transfers_wf_stg ON workflow_stage_transfers(workflow_id,stage_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_material_inventory ON workflow_materials(inventory_item_id,status);
 CREATE INDEX IF NOT EXISTS idx_workflow_financial_workflow ON workflow_financial_lines(workflow_id,stage_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_documents_workflow ON workflow_documents(workflow_id,stage_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_audit_workflow ON workflow_audit_events(workflow_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_piano_id ON jobs(piano_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_contact_id ON jobs(contact_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_job_id);
+CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id);
 
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -2102,12 +2108,14 @@ CREATE TABLE IF NOT EXISTS backup_log (
 -- Notification and PWA push infrastructure
 CREATE TABLE IF NOT EXISTS notification_snooze_log (
   id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   entity_type TEXT NOT NULL CHECK(entity_type IN ('CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB')),
   entity_id TEXT NOT NULL,
   snoozed_until TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(entity_type,entity_id,snoozed_until);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_snooze_user_entity ON notification_snooze_log(user_id,entity_type,entity_id);
+CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(user_id,entity_type,entity_id,snoozed_until);
 
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
