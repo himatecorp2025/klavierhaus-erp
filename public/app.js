@@ -185,7 +185,7 @@ function roundFinancial(value){const number=Number(value||0);return Number.isFin
 
 const schemas={
 contacts:{api:"contacts",title:"Clients / Ügyfelek",fields:[["name","Client name / Ügyfél neve *"],["company","Company / Cég"],["type","Type / Típus"],["email","Email"],["phone","Phone / Telefonszám"],["address","Address / Cím"],["billing_address","Billing address / Számlázási cím"],["tax_id","Tax ID / Adószám"],["has_piano","Has piano? / Van zongorája?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interested_buying","Interested in buying? / Vásárlási érdeklődő?","select",[["0","No / Nem"],["1","Yes / Igen"]]],["interest_brand","Interested brand / Érdeklődött márka"],["interest_model","Interested model / Érdeklődött modell"],["interest_budget","Budget / Keretösszeg","number"],["interest_timeline","Timeline / Várható vásárlási idő"],["interest_notes","Purchase interest notes / Vásárlási érdeklődés megjegyzés","textarea"],["owner","Relationship owner / Kapcsolattartó gazda"],["last_contact","Last contact / Utolsó kapcsolat","date"],["next_step","Next step / Következő lépés"],["notes","Notes / Megjegyzés","textarea"]],cols:["customer_status_icon","name","phone","email","address","last_contact"]},
-pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["owner_contact_id","Client / owner * / Ügyfél / tulajdonos *"],["brand","Brand * / Márka *"],["model","Model * / Modell *"],["serial_no","Serial number (optional) / Gyári szám (opcionális)"],["build_year","Year built (optional) / Gyártási év (opcionális)","number"],["size_length","Size / length (optional) / Méret / hosszméret (opcionális)"],["finish","Finish (optional) / Kivitel (opcionális)"],["location","Location / Helyszín"],["notes","Notes / Megjegyzések","textarea"]],cols:["owner_name","brand","model","location"]},
+pianos:{api:"pianos",title:"Pianos / Zongorák",fields:[["owner_contact_id","Client / owner * / Ügyfél / tulajdonos *"],["brand","Brand * / Márka *"],["model","Model * / Modell *"],["serial_no","Serial number (optional) / Gyári szám (opcionális)"],["build_year","Year built (optional) / Gyártási év (opcionális)","number"],["size_length","Length (optional) / Hosszméret (opcionális)"],["finish","Finish (optional) / Kivitel (opcionális)"],["location_name","Location name / Helyszín neve"],["piano_location_address","Piano physical address / Zongora fizikai címe"],["external_reference","External reference (optional) / Külső azonosító (opcionális)"],["notes","Notes / Megjegyzések","textarea"]],cols:["owner_name","brand","model","location"]},
 knowledge_base:{api:"knowledge_base",title:"Invoices / Számlák",fields:[["title","Title / Cím"],["category","Category / Kategória"],["content_type","Content type / Tartalomtípus"],["body","Body / Tartalom","textarea"],["stored_path","Attachment path / Melléklet útvonal"],["owner","Relationship owner / Kapcsolattartó gazda"],["amount","Amount / Összeg","number"],["payment_method","Payment method / Fizetési mód","select",["",...STANDARD_PAYMENT_METHODS]],["invoice_number","Invoice number / Számlaszám"],],cols:["id","title","category","owner","amount","payment_method","invoice_number","stored_path","created_at"]}
 };
 
@@ -919,14 +919,14 @@ const sessionActivity=createSessionActivityController({
   onStateChange:()=>updateCountdownDisplay()
 });
 sessionActivity.observer=null;
-sessionActivity.visibleModalCount=function(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;};
+sessionActivity.visibleModalCount=function(){const roots=[...document.querySelectorAll('#modal:not(.hidden), .nested-modal-overlay, .system-dialog-overlay, dialog[open]')];const extras=[...document.querySelectorAll('[role="dialog"]')].filter(el=>!el.closest('#modal,.nested-modal-overlay,.system-dialog-overlay,dialog[open]'));const visible=el=>{const style=getComputedStyle(el);return style.display!=="none"&&style.visibility!=="hidden"&&!el.classList.contains("hidden");};return new Set([...roots,...extras].filter(visible)).size;};
 sessionActivity.syncModalState=function(){this.setModalCount(this.visibleModalCount());};
 sessionActivity.install=function(){
  if(this.observer||!document.body)return;
  let syncQueued=false;
  const scheduleSync=()=>{if(syncQueued)return;syncQueued=true;queueMicrotask(()=>{syncQueued=false;this.syncModalState();});};
  this.observer=new MutationObserver(scheduleSync);
- this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden']});
+ this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-hidden','open']});
  this.syncModalState();
 };
 window.sessionActivity=sessionActivity;
@@ -1950,7 +1950,15 @@ function adminDatePickerOpen(input,anchor){
  if(activeAdminDatePicker?.input===input){adminDatePickerClose();return;}
  adminDatePickerClose();
  const popover=document.createElement("div");popover.className="admin-date-picker-popover";popover.id=`adminDatePicker_${Date.now()}`;
- const inlineHost=input.closest?.('.unified-notification-reschedule-card')?.querySelector('[data-unified-calendar-host]')||input.closest?.('.reschedule-popover-panel')||null;(inlineHost||document.body).appendChild(popover);
+ let inlineHost=input.closest?.('.unified-notification-reschedule-card')?.querySelector('[data-unified-calendar-host]')||input.closest?.('.reschedule-popover-panel')||null;
+ // Native modal dialogs occupy a separate top layer: a body-mounted popover
+ // cannot receive input above them, regardless of its z-index.
+ if(!inlineHost&&input.closest?.('dialog[open]')){
+  const control=input.closest('.admin-date-control')||input.parentElement;
+  inlineHost=control.querySelector('[data-native-calendar-host]');
+  if(!inlineHost){inlineHost=document.createElement('span');inlineHost.dataset.nativeCalendarHost='';control.appendChild(inlineHost);}
+ }
+ (inlineHost||document.body).appendChild(popover);
  const state={input,anchor:anchor||input.closest(".admin-date-control"),popover,inlineHost,monthKey:adminDatePickerMonthKey(input.value)};activeAdminDatePicker=state;
  state.anchor?.setAttribute("aria-controls",popover.id);state.anchor?.setAttribute("aria-expanded","true");adminDatePickerRender(state);adminDatePickerSync(input);
 }
@@ -1983,7 +1991,7 @@ function initAdminDatePickerSystem(){
  adminDatePickerObserver=new MutationObserver(mutations=>mutations.forEach(mutation=>mutation.addedNodes.forEach(node=>{if(node.nodeType===1)enhanceAdminDatePickers(node);})));
  adminDatePickerObserver.observe(document.body,{childList:true,subtree:true});
  document.addEventListener("pointerdown",event=>{if(!activeAdminDatePicker)return;if(activeAdminDatePicker.popover?.contains(event.target)||activeAdminDatePicker.anchor?.contains(event.target))return;adminDatePickerClose();},true);
- document.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeAdminDatePicker)adminDatePickerClose();},true);
+ document.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeAdminDatePicker){event.preventDefault();event.stopPropagation();adminDatePickerClose();}},true);
  window.addEventListener("resize",()=>{if(activeAdminDatePicker)adminDatePickerPosition(activeAdminDatePicker);});
  document.addEventListener("scroll",event=>{if(activeAdminDatePicker&&!activeAdminDatePicker.inlineHost&&!activeAdminDatePicker.popover?.contains(event.target))adminDatePickerClose();},true);
 }
@@ -2145,9 +2153,9 @@ function workflowBindMobileSwipe(root) {
 function workflowSearchText(value){return String(value||"").trim().toLocaleLowerCase();}
 function workflowPianoSecondary(p){const parts=[];if(p?.serial_no)parts.push(`Serial: #${p.serial_no}`);if(p?.finish)parts.push(`Finish: ${p.finish}`);return parts.join(" · ")||bi("No serial / finish recorded","Nincs rögzített sorozatszám / kivitel");}
 
-function bindWorkflowBrandCombobox(scope=document){scope.querySelectorAll('[data-workflow-brand-input]').forEach(input=>{const box=scope.querySelector(`#${CSS.escape(input.dataset.workflowBrandBox||'')}`);if(!box)return;const notify=()=>input.dispatchEvent(new Event("change",{bubbles:true}));const render=()=>{const raw=String(input.value||'').trim(),term=raw.toLocaleLowerCase(),matches=workflowPianoBrands.filter(name=>!term||String(name).toLocaleLowerCase().includes(term)).slice(0,12),exact=workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===term);box.innerHTML=matches.map(name=>`<button type="button" class="workflow-typeahead-option" data-brand-choice="${htmlText(name)}"><strong>${htmlText(name)}</strong></button>`).join('')+(!exact&&raw?`<button type="button" class="workflow-typeahead-add" data-brand-create>+ ${htmlText(bi(`Add "${raw}" as new brand`,`Új márka rögzítése: "${raw}"`))}</button>`:'');box.classList.toggle('hidden',!box.innerHTML);box.querySelectorAll('[data-brand-choice]').forEach(btn=>btn.addEventListener('mousedown',event=>{event.preventDefault();input.value=btn.dataset.brandChoice||'';box.classList.add('hidden');notify();}));box.querySelector('[data-brand-create]')?.addEventListener('mousedown',async event=>{event.preventDefault();if(!raw)return;try{const saved=await api('/api/piano-brands',{method:'POST',body:JSON.stringify({brand_name:raw})});const brandName=String(saved?.brand_name||raw).trim();if(brandName&&!workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===brandName.toLocaleLowerCase()))workflowPianoBrands.push(brandName);input.value=brandName;box.classList.add('hidden');notify();showToast(bi('Piano brand added to the reference list.','A zongoramárka bekerült a referencia-listába.'),'success');}catch(error){showError(error);}});};input.addEventListener('input',render);input.addEventListener('focus',render);input.addEventListener('blur',()=>setTimeout(()=>box.classList.add('hidden'),180));});}
+function bindWorkflowBrandCombobox(scope=document){scope.querySelectorAll('[data-workflow-brand-input]').forEach(input=>{const box=scope.querySelector(`#${CSS.escape(input.dataset.workflowBrandBox||'')}`);if(!box)return;const notify=()=>input.dispatchEvent(new Event("change",{bubbles:true}));const render=()=>{if(document.activeElement!==input){box.classList.add('hidden');return;}const raw=String(input.value||'').trim(),term=raw.toLocaleLowerCase(),matches=workflowPianoBrands.filter(name=>!term||String(name).toLocaleLowerCase().includes(term)).slice(0,12),exact=workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===term);box.innerHTML=matches.map(name=>`<button type="button" class="workflow-typeahead-option" data-brand-choice="${htmlText(name)}"><strong>${htmlText(name)}</strong></button>`).join('')+(!exact&&raw?`<button type="button" class="workflow-typeahead-add" data-brand-create>+ ${htmlText(bi(`Add "${raw}" as new brand`,`Új márka rögzítése: "${raw}"`))}</button>`:'');box.classList.toggle('hidden',!box.innerHTML);box.querySelectorAll('[data-brand-choice]').forEach(btn=>btn.addEventListener('mousedown',event=>{event.preventDefault();input.value=btn.dataset.brandChoice||'';box.classList.add('hidden');notify();}));box.querySelector('[data-brand-create]')?.addEventListener('mousedown',async event=>{event.preventDefault();if(!raw)return;try{const saved=await api('/api/piano-brands',{method:'POST',body:JSON.stringify({brand_name:raw})});const brandName=String(saved?.brand_name||raw).trim();if(brandName&&!workflowPianoBrands.some(name=>String(name).toLocaleLowerCase()===brandName.toLocaleLowerCase()))workflowPianoBrands.push(brandName);input.value=brandName;box.classList.add('hidden');notify();showToast(bi('Piano brand added to the reference list.','A zongoramárka bekerült a referencia-listába.'),'success');}catch(error){showError(error);}});};input.addEventListener('input',render);input.addEventListener('focus',render);input.addEventListener('blur',()=>box.classList.add('hidden'));});}
 
-function bindWorkflowModelCombobox(scope=document){scope.querySelectorAll('[data-workflow-model-input]').forEach(input=>{const box=scope.querySelector(`#${CSS.escape(input.dataset.workflowModelBox||'')}`),brandInput=scope.querySelector(`[name="${CSS.escape(input.dataset.workflowModelBrandName||'brand')}"]`);if(!box||!brandInput)return;const render=()=>{const brand=String(brandInput.value||'').trim(),raw=String(input.value||'').trim(),term=raw.toLocaleLowerCase(),models=workflowPianoModels.filter(row=>String(row.brand_name||'').toLocaleLowerCase()===brand.toLocaleLowerCase()),matches=models.filter(row=>!term||String(row.model_name||'').toLocaleLowerCase().includes(term)).slice(0,12),exact=models.some(row=>String(row.model_name||'').toLocaleLowerCase()===term);box.innerHTML=matches.map(row=>`<button type="button" class="workflow-typeahead-option" data-model-choice="${htmlText(row.model_name)}"><strong>${htmlText(row.model_name)}</strong><small>${htmlText(row.brand_name)}</small></button>`).join('')+(brand&&!exact&&raw?`<button type="button" class="workflow-typeahead-add" data-model-create>+ ${htmlText(bi(`Add "${raw}" model to ${brand}`,`Új modell rögzítése a márkához: "${raw}" · ${brand}`))}</button>`:'');box.classList.toggle('hidden',!box.innerHTML);box.querySelectorAll('[data-model-choice]').forEach(btn=>btn.addEventListener('mousedown',event=>{event.preventDefault();input.value=btn.dataset.modelChoice||'';box.classList.add('hidden');}));box.querySelector('[data-model-create]')?.addEventListener('mousedown',async event=>{event.preventDefault();if(!brand||!raw)return;try{const saved=await api('/api/piano-models',{method:'POST',body:JSON.stringify({brand_name:brand,model_name:raw})}),row={brand_name:String(saved?.brand_name||brand),model_name:String(saved?.model_name||raw)};if(!workflowPianoModels.some(item=>workflowSearchText(item.brand_name)===workflowSearchText(row.brand_name)&&workflowSearchText(item.model_name)===workflowSearchText(row.model_name)))workflowPianoModels.push(row);input.value=row.model_name;box.classList.add('hidden');showToast(bi('Piano model added to the reference list.','A zongoramodell bekerült a referencia-listába.'),'success');}catch(error){showError(error);}});};input.addEventListener('input',render);input.addEventListener('focus',render);input.addEventListener('blur',()=>setTimeout(()=>box.classList.add('hidden'),180));brandInput.addEventListener('change',()=>{if(input.value&&!workflowPianoModels.some(row=>workflowSearchText(row.brand_name)===workflowSearchText(brandInput.value)&&workflowSearchText(row.model_name)===workflowSearchText(input.value)))input.value='';render();});});}
+function bindWorkflowModelCombobox(scope=document){scope.querySelectorAll('[data-workflow-model-input]').forEach(input=>{const box=scope.querySelector(`#${CSS.escape(input.dataset.workflowModelBox||'')}`),brandInput=scope.querySelector(`[name="${CSS.escape(input.dataset.workflowModelBrandName||'brand')}"]`);if(!box||!brandInput)return;const render=()=>{if(document.activeElement!==input){box.classList.add('hidden');return;}const brand=String(brandInput.value||'').trim(),raw=String(input.value||'').trim(),term=raw.toLocaleLowerCase(),models=workflowPianoModels.filter(row=>String(row.brand_name||'').toLocaleLowerCase()===brand.toLocaleLowerCase()),matches=models.filter(row=>!term||String(row.model_name||'').toLocaleLowerCase().includes(term)).slice(0,12),exact=models.some(row=>String(row.model_name||'').toLocaleLowerCase()===term);box.innerHTML=matches.map(row=>`<button type="button" class="workflow-typeahead-option" data-model-choice="${htmlText(row.model_name)}"><strong>${htmlText(row.model_name)}</strong><small>${htmlText(row.brand_name)}</small></button>`).join('')+(brand&&!exact&&raw?`<button type="button" class="workflow-typeahead-add" data-model-create>+ ${htmlText(bi(`Add "${raw}" model to ${brand}`,`Új modell rögzítése a márkához: "${raw}" · ${brand}`))}</button>`:'');box.classList.toggle('hidden',!box.innerHTML);box.querySelectorAll('[data-model-choice]').forEach(btn=>btn.addEventListener('mousedown',event=>{event.preventDefault();input.value=btn.dataset.modelChoice||'';box.classList.add('hidden');}));box.querySelector('[data-model-create]')?.addEventListener('mousedown',async event=>{event.preventDefault();if(!brand||!raw)return;try{const saved=await api('/api/piano-models',{method:'POST',body:JSON.stringify({brand_name:brand,model_name:raw})}),row={brand_name:String(saved?.brand_name||brand),model_name:String(saved?.model_name||raw)};if(!workflowPianoModels.some(item=>workflowSearchText(item.brand_name)===workflowSearchText(row.brand_name)&&workflowSearchText(item.model_name)===workflowSearchText(row.model_name)))workflowPianoModels.push(row);input.value=row.model_name;box.classList.add('hidden');showToast(bi('Piano model added to the reference list.','A zongoramodell bekerült a referencia-listába.'),'success');}catch(error){showError(error);}});};input.addEventListener('input',render);input.addEventListener('focus',render);input.addEventListener('blur',()=>box.classList.add('hidden'));brandInput.addEventListener('change',()=>{if(input.value&&!workflowPianoModels.some(row=>workflowSearchText(row.brand_name)===workflowSearchText(brandInput.value)&&workflowSearchText(row.model_name)===workflowSearchText(input.value)))input.value='';render();});});}
 
 
 
@@ -2319,6 +2327,7 @@ function schedulerDragPayload(job){
   wf2_entity_type:job.wf2_entity_type||"",
   wf2_entity_id:job.wf2_entity_id||"",
   wf2_can_edit:Boolean(job.wf2_can_edit),
+  wf2_can_reschedule:job.wf2_can_reschedule!==false,
   calendar_entry_type:job.calendar_entry_type||"",
   start_time:job.start_time,
   end_time:job.end_time,
@@ -2492,7 +2501,7 @@ function isMovableSchedulerEntry(job){
  if(isMovableSchedulerJob(job))return true;
  if(!job?.wf2_workflow_id)return false;
  if(["Completed","Cancelled"].includes(String(job?.status||"")))return false;
- return Boolean(job.wf2_can_edit);
+ return Boolean(job.wf2_can_edit && job.wf2_can_reschedule!==false);
 }
 
 
@@ -2542,24 +2551,13 @@ setInterval(async()=>{
 },15000);
 
 async function openJobPianoCreate(client,draft){
- const suggested=String(draft?.piano_name||"").trim();
- $("#modal").classList.remove("hidden");
- $("#modalTitle").textContent=bi("Add piano for job","Zongora hozzáadása a munkához");
- $("#form").innerHTML=`<div class="form-grid"><div class="field full"><p class="muted">${bi("The client exists, but the selected piano is not in the ERP yet. Create it now; the job draft will be preserved.","Az ügyfél létezik, de a kiválasztott zongora még nincs az ERP-ben. Hozd létre most; a munka piszkozata megmarad.")}</p></div><div class="field"><label>${bi("Piano name / description","Zongora neve / leírás")}</label><input name="display_name" value="${htmlText(suggested)}" required></div><div class="field"><label>${bi("Brand","Márka")}</label><input name="brand"></div><div class="field"><label>${bi("Model","Típus")}</label><input name="model"></div><div class="field"><label>${bi("Serial No.","Gyári szám")}</label><input name="serial_no"></div><div class="field"><label>${bi("Location","Helyszín")}</label><input name="location" value="${htmlText(draft?.service_address||client?.address||"")}"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="openJob('${htmlText(draft?.start_time||"")}',null,${esc(draft||{})})">${bi("Back","Vissza")}</button><button>${bi("Create piano and continue","Zongora létrehozása és folytatás")}</button></div>`;
- $("#form").onsubmit=async event=>{event.preventDefault();try{const body=Object.fromEntries(new FormData(event.target));body.owner_contact_id=client.id;body.ownership_type="Customer owned";const piano=await api("/api/pianos",{method:"POST",body:JSON.stringify(body)});await openJob(draft.start_time,null,{...draft,client_id:client.id,client_name:client.name,client_phone:client.phone||draft.client_phone,piano_id:piano.id,piano_name:piano.display_name||`${piano.brand||""} ${piano.model||""}`.trim()});}catch(error){showError(error)}};
- applyLanguageToDOM(document.getElementById("modal"));
+ const piano=await MasterData.open('pianos',null,{prefill:{owner_contact_id:client?.id||''}});
+ if(piano)await openJob(draft.start_time,null,{...draft,client_id:client.id,client_name:client.name,client_phone:client.phone||draft.client_phone,piano_id:piano.id,piano_name:piano.display_name});
 }
 
 function closeNestedPianoModal(){document.querySelector(".nested-modal-overlay[data-nested-piano]")?.remove();}
 function openNestedJobPianoModal({client,draft={},onSaved}={}){
- if(!client?.id){showError("CLIENT_REQUIRED_FOR_PIANO");return null;}
- closeNestedPianoModal();
- const overlay=document.createElement("div");overlay.className="nested-modal-overlay";overlay.dataset.nestedPiano="1";
- const suggested=String(draft?.piano_name||"").trim();
- overlay.innerHTML=`<section class="nested-modal-card nested-piano-card" role="dialog" aria-modal="true" aria-labelledby="nestedPianoTitle"><div class="modal-header"><h3 id="nestedPianoTitle">${bi("Register New Piano for this Client","Új zongora rögzítése ehhez az ügyfélhez")}</h3><button type="button" class="modal-close" data-piano-cancel aria-label="${bi("Close","Bezárás")}">×</button></div><form class="nested-piano-form"><p class="muted">${htmlText(client.name||"")}</p><div class="form-grid"><div class="field"><label>${req(bi("Brand","Márka"))}</label><input name="brand" required autocomplete="off"></div><div class="field"><label>${req(bi("Model","Típus / Modell"))}</label><input name="model" value="${htmlText(suggested)}" required autocomplete="off"></div><div class="field"><label>${req(bi("Serial Number","Sorozatszám"))}</label><input name="serial_no" required autocomplete="off"></div><div class="field"><label>${bi("Finish / Color","Kivitel / Szín")}</label><input name="finish" autocomplete="off"></div></div><div class="actions"><button type="button" class="ghost-btn" data-piano-cancel>${bi("Cancel","Mégse")}</button><button type="submit">${bi("Register piano","Zongora rögzítése")}</button></div></form></section>`;
- const cancel=()=>closeNestedPianoModal();overlay.querySelectorAll("[data-piano-cancel]").forEach(button=>button.addEventListener("click",cancel));overlay.addEventListener("click",event=>{if(event.target===overlay)cancel();});
- overlay.querySelector("form").addEventListener("submit",async event=>{event.preventDefault();try{const body=Object.fromEntries(new FormData(event.currentTarget));body.display_name=`${String(body.brand||"").trim()} ${String(body.model||"").trim()}`.trim();body.location=String(draft?.service_address||client.address||"").trim();const piano=await api(`/api/contacts/${encodeURIComponent(client.id)}/pianos`,{method:"POST",body:JSON.stringify(body)});closeNestedPianoModal();if(typeof onSaved==="function")await onSaved(piano);}catch(error){showError(error);}});
- document.body.appendChild(overlay);applyLanguageToDOM(overlay);setTimeout(()=>overlay.querySelector('[name="brand"]')?.focus(),20);return overlay;
+ return MasterData.open('pianos',null,{prefill:{owner_contact_id:client?.id||'',model:draft.piano_name||''},onSaved});
 }
 
 function createNestedClientStateMachine(initialDraft={}){
@@ -2575,24 +2573,16 @@ function createNestedClientStateMachine(initialDraft={}){
 }
 function entityFormFieldsMarkup(key,row=null,initial={}){const s=schemas[key],pianoId=key==="pianos"&&row?`<div class="field"><label>Piano ID</label><input value="${htmlText(row.id||'')}" readonly></div>`:"";return `<div class="form-grid">${pianoId}${s.fields.map(f=>field(f,initial?.[f[0]])).join("")}</div>${key==="contacts"?'<div id="contactPianoSection"></div>':''}`;}
 function collectEntityFormBody(key,form){const s=schemas[key],body=Object.fromEntries(new FormData(form));s.fields.forEach(f=>{if(f[2]==="number")body[f[0]]=Number(body[f[0]]||0)});if(key==="contacts"){body.has_piano=Number(body.has_piano||0);body.interested_buying=Number(body.interested_buying||0);}if(key==="pianos"){const year=String(form.querySelector('[name="build_year"]')?.value||'').trim();body.build_year=year?Number(year):null;["brand","model","serial_no","size_length","finish","location","notes","owner_contact_id"].forEach(field=>{if(body[field]!==undefined)body[field]=String(body[field]??'').trim();});}return body;}
-async function saveEntityFormRecord(key,row,form){const s=schemas[key],body=collectEntityFormBody(key,form);let saved;if(row)saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});if(key==="contacts"){const clientId=(row&&row.id)||saved.id,scope=form.closest('.nested-modal-overlay,#modal')||document,allPianoChecks=[...scope.querySelectorAll('input[name="client_piano_ids"]')],ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value);if(clientId&&allPianoChecks.length)await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}return saved;}
+async function saveEntityFormRecord(key,row,form){const s=schemas[key],body=collectEntityFormBody(key,form);let saved;if(row)saved=await api(`/api/${s.api}/${row.id}`,{method:"PUT",body:JSON.stringify(body)});else saved=await api(`/api/${s.api}`,{method:"POST",body:JSON.stringify(body)});if(key==="contacts"){const clientId=(row&&row.id)||saved.id,scope=form,allPianoChecks=[...scope.querySelectorAll('input[name="client_piano_ids"]')],ids=allPianoChecks.filter(x=>x.checked).map(x=>x.value);if(clientId&&allPianoChecks.length)await api(`/api/contacts/${clientId}/pianos`,{method:"PUT",body:JSON.stringify({piano_ids:ids})});}return saved;}
 
 function captureJobDraftFromForm(){const form=document.getElementById("form");if(!form)return jobDraftState?{...jobDraftState}:{};const body=Object.fromEntries(new FormData(form));const start=document.getElementById("jobStart")?.value,end=document.getElementById("jobEnd")?.value;if(start)body.start_time=start;if(end)body.end_time=end;body.daily_rate_enabled=Boolean(document.getElementById("jobDailyRateEnabled")?.checked);body.daily_rate_allocated_amount=Number(document.getElementById("jobDailyRateAmount")?.value||0);return body;}
 function closeNestedClientModal(result=null){const overlay=document.querySelector(".nested-modal-overlay[data-nested-client]");if(overlay)overlay.remove();return result;}
 function openNestedClientModal({prefillName="",draft,onSaved,onCancelled,stateMachine=null}={}){
- const overlay=document.createElement("div"),initial={name:prefillName};
- overlay.className="nested-modal-overlay";overlay.dataset.nestedClient="1";
- overlay.innerHTML=`<section class="nested-modal-card" role="dialog" aria-modal="true" aria-labelledby="nestedClientTitle"><div class="modal-header"><h3 id="nestedClientTitle">${bi("Add Client","Új ügyfél")}</h3><button type="button" class="modal-close" data-nested-cancel aria-label="${bi("Close","Bezárás")}">×</button></div><form class="nested-client-form">${entityFormFieldsMarkup("contacts",null,initial)}<div class="actions"><button type="button" class="ghost-btn" data-nested-cancel>${bi("Cancel","Mégse")}</button><button type="submit">${bi("Save","Mentés")}</button></div></form></section>`;
- let onKey=null,finished=false;
- const cleanup=()=>{if(onKey)document.removeEventListener('keydown',onKey,true);closeNestedClientModal();};
- const cancel=()=>{if(finished)return;finished=true;const restored=stateMachine?stateMachine.cancelled():(draft||{});cleanup();if(typeof onCancelled==="function")onCancelled(restored);};
- overlay.querySelectorAll('[data-nested-cancel]').forEach(btn=>btn.addEventListener('click',cancel));
- overlay.addEventListener('click',e=>{if(e.target===overlay)cancel();});
- overlay.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();if(finished)return;try{const saved=await saveEntityFormRecord('contacts',null,e.target);finished=true;const restored=stateMachine?stateMachine.saved(saved):(draft||{});cleanup();if(typeof onSaved==="function")await onSaved(saved,restored);}catch(error){showError(error);}});
- document.body.appendChild(overlay);setupContactFormBehavior(null);applyLanguageToDOM(overlay);
- onKey=e=>{if(e.key==='Escape'){e.preventDefault();cancel();}};document.addEventListener('keydown',onKey,true);
- setTimeout(()=>overlay.querySelector('[name="name"]')?.focus(),20);return overlay;
+ return MasterData.open('contacts',null,{prefill:{name:prefillName},
+  onSaved:client=>onSaved?.(client,stateMachine?stateMachine.saved(client):(draft||{})),
+  onCancelled:()=>onCancelled?.(stateMachine?stateMachine.cancelled():(draft||{}))});
 }
+
 function ensureInlineClientPrompt(clientInput,{contacts,onYes,onNo}){let box=document.getElementById('inlineUnknownClientPrompt');if(!box){box=document.createElement('div');box.id='inlineUnknownClientPrompt';box.className='inline-client-prompt hidden';clientInput.closest('.field')?.appendChild(box);}const refresh=()=>{const term=String(clientInput.value||'').trim(),matched=contacts.some(c=>String(c.name||'').trim().toLowerCase()===term.toLowerCase());if(term.length<=2||matched||clientInput.dataset.declinedClientTerm===term){box.classList.add('hidden');box.innerHTML='';return;}box.classList.remove('hidden');box.innerHTML=`<span>${bi('Client not found in the list. Create as a new client?','Ügyfél nem található a listában. Létrehozod új ügyfélként?')}</span><div><button type="button" class="small" data-client-create-yes>${bi('Yes','Igen')}</button><button type="button" class="ghost-btn small" data-client-create-no>${bi('No','Nem')}</button></div>`;box.querySelector('[data-client-create-yes]').onclick=()=>{clientInput.dataset.declinedClientTerm='';onYes(term);};box.querySelector('[data-client-create-no]').onclick=()=>{clientInput.dataset.declinedClientTerm=term;box.classList.add('hidden');onNo(term);};};clientInput.addEventListener('input',()=>{if(clientInput.dataset.declinedClientTerm&&clientInput.dataset.declinedClientTerm!==String(clientInput.value||'').trim())clientInput.dataset.declinedClientTerm='';refresh();});clientInput.addEventListener('blur',()=>setTimeout(refresh,120));refresh();return box;}
 
 function bindPredictiveInput(input,box,getItems,{search,label,secondary,onSelect,emptyAction}={}){
@@ -3120,24 +3110,42 @@ async function openPianoEdit(id,focusOwner=false){
  openForm('pianos',p);
  if(focusOwner)setTimeout(()=>document.getElementById('pianoOwnerFilter')?.focus(),150);
 }
-async function setupPianoFormBehavior(row,initial={}){
- const form=document.getElementById('form'),ownerField=form?.querySelector('[data-field="owner_contact_id"]');if(!form||!ownerField)return;
+async function setupPianoFormBehavior(row,initial={},scope=null){
+ const form=scope||document.getElementById('form'),ownerField=form?.querySelector('[data-field="owner_contact_id"]');if(!form||!ownerField)return;
  const current=String(row?.owner_contact_id||initial?.owner_contact_id||'');
- try{pianoOwnerContactsCache=await api('/api/contacts');}catch(_error){pianoOwnerContactsCache=[];}
- ownerField.innerHTML=`<label>${req(bi("Client / owner","Ügyfél / tulajdonos"))}</label><input id="pianoOwnerFilter" type="search" placeholder="${bi("Search by client name, email, phone or address","Keresés ügyfélnév, e-mail, telefon vagy cím alapján")}" oninput="filterPianoOwnerOptions(this.value)"><select id="pianoOwnerSelect" name="owner_contact_id" required><option value="">${bi("Select client","Válassz ügyfelet")}</option>${pianoOwnerContactsCache.map(c=>`<option value="${htmlText(c.id)}" ${String(c.id)===current?'selected':''}>${htmlText(c.name||'')} · ${htmlText(c.address||c.email||c.phone||'')}</option>`).join('')}</select>`;
- const brandField=form.querySelector('[data-field="brand"]'),modelField=form.querySelector('[data-field="model"]'),brandInput=brandField?.querySelector('input[name="brand"]'),modelInput=modelField?.querySelector('input[name="model"]');
- if(brandInput&&brandField){brandInput.required=true;brandInput.autocomplete='off';brandInput.dataset.workflowBrandInput='1';brandInput.dataset.workflowBrandBox='pianoEditorBrandSuggestions';if(!brandField.querySelector('#pianoEditorBrandSuggestions'))brandField.insertAdjacentHTML('beforeend','<div id="pianoEditorBrandSuggestions" class="workflow-typeahead-results hidden"></div>');}
- if(modelInput&&modelField){modelInput.required=true;modelInput.autocomplete='off';modelInput.dataset.workflowModelInput='1';modelInput.dataset.workflowModelBrandName='brand';modelInput.dataset.workflowModelBox='pianoEditorModelSuggestions';if(!modelField.querySelector('#pianoEditorModelSuggestions'))modelField.insertAdjacentHTML('beforeend','<div id="pianoEditorModelSuggestions" class="workflow-typeahead-results workflow-model-results hidden"></div>');}
- const buildYear=form.querySelector('[name="build_year"]');if(buildYear){buildYear.min='1700';buildYear.max='2100';buildYear.step='1';}
- try{const [brands,models]=await Promise.all([api('/api/piano-brands',{masterCache:false}),api('/api/piano-models',{masterCache:false})]);workflowPianoBrands=Array.isArray(brands)?brands:[];workflowPianoModels=Array.isArray(models)?models:[];}catch(_error){}
+ const brandField=form.querySelector('[data-field="brand"]'),modelField=form.querySelector('[data-field="model"]');
+ const brandInput=brandField?.querySelector('[name="brand"]'),modelInput=modelField?.querySelector('[name="model"]');
+ const uid='piano-'+Math.random().toString(36).slice(2);
+ for(const control of [brandInput,modelInput])if(control){control.required=true;control.autocomplete='off';}
+ if(brandInput){brandInput.dataset.workflowBrandInput='1';brandInput.dataset.workflowBrandBox=uid+'-brands';brandField.insertAdjacentHTML('beforeend',`<div id="${uid}-brands" class="workflow-typeahead-results hidden"></div>`);}
+ if(modelInput){modelInput.dataset.workflowModelInput='1';modelInput.dataset.workflowModelBrandName='brand';modelInput.dataset.workflowModelBox=uid+'-models';modelField.insertAdjacentHTML('beforeend',`<div id="${uid}-models" class="workflow-typeahead-results hidden"></div>`);}
+ const year=form.querySelector('[name="build_year"]');if(year){year.min='1700';year.max='2100';year.step='1';if(!row?.build_year&&!initial.build_year)year.value='';}
+ const address=form.querySelector('[name="piano_location_address"]');
+ if(address){address.value=initial.piano_location_address||initial.location||'';address.parentElement.insertAdjacentHTML('beforeend',`<label class="md-same-address"><input type="checkbox" data-same-client-address>${bi('Same as client address','Megegyezik az \u00fcgyf\u00e9l c\u00edm\u00e9vel')}</label>`);}
+ let selected=null;
+ const same=form.querySelector('[data-same-client-address]');
+ const applyAddress=()=>{if(same?.checked&&selected){address.value=selected.address||'';}if(address)address.readOnly=Boolean(same?.checked);};
+ same?.addEventListener('change',applyAddress);
+ ownerField.innerHTML=`<p role="status">${bi('Loading clients...','\u00dcgyfelek bet\u00f6lt\u00e9se...')}</p>`;
+ const loadClients=async()=>{
+  try{
+   const clients=await api('/api/contacts',{masterCache:false});
+   if(!Array.isArray(clients))throw new Error('CLIENT_LOOKUP_INVALID_RESPONSE');
+   const picker=MasterData.clientPicker(ownerField,{name:'owner_contact_id',label:bi('Client / owner *','\u00dcgyf\u00e9l / tulajdonos *'),items:clients,value:current,onSelect:client=>{selected=client;applyAddress();}});
+   selected=picker.selected;form.masterClientPicker=picker;
+  }catch(error){
+   ownerField.innerHTML=`<p role="alert">${bi('Client lookup failed. This is not an empty client list.','Az \u00fcgyf\u00e9lkeres\u00e9s nem siker\u00fclt. Ez nem \u00fcres \u00fcgyf\u00e9llista.')} ${htmlText(error.message)}</p><button type="button">${bi('Retry','\u00dajrapr\u00f3b\u00e1l\u00e1s')}</button>`;
+   ownerField.querySelector('button').onclick=loadClients;
+  }
+ };
+ await loadClients();
+ try{const [brands,models]=await Promise.all([api('/api/piano-brands',{masterCache:false}),api('/api/piano-models',{masterCache:false})]);workflowPianoBrands=Array.isArray(brands)?brands:[];workflowPianoModels=Array.isArray(models)?models:[];}
+ catch(error){modelField.insertAdjacentHTML('beforeend',`<small role="status">${bi('Reference suggestions unavailable. Enter brand and model manually.','A referenciajavaslatok nem el\u00e9rhet\u0151k. A m\u00e1rka \u00e9s a modell k\u00e9zzel megadhat\u00f3.')}</small>`);}
  bindWorkflowBrandCombobox(form);bindWorkflowModelCombobox(form);
- const grid=form.querySelector('.form-grid');if(grid&&!grid.querySelector('[data-steinway-reference-status]'))grid.insertAdjacentHTML('beforeend',`<div class="field full steinway-reference-status"><small data-steinway-reference-status></small></div>`);
+ let previousBrand=String(brandInput?.value||'').trim();
+ brandInput?.addEventListener('input',()=>{if(String(brandInput.value).trim()!==previousBrand){modelInput.value='';previousBrand=String(brandInput.value).trim();}});
+ const grid=form.querySelector('.form-grid');if(grid)grid.insertAdjacentHTML('beforeend','<div class="field full steinway-reference-status"><small data-steinway-reference-status></small></div>');
  bindSteinwayReferenceForm(form);applyLanguageToDOM(form);
-}
-function filterPianoOwnerOptions(value){
- const select=document.getElementById('pianoOwnerSelect');if(!select)return;
- const q=String(value||'').trim().toLowerCase();
- [...select.options].forEach((o,i)=>{if(i===0){o.hidden=false;return;}const c=pianoOwnerContactsCache.find(x=>String(x.id)===String(o.value));const hay=[c?.name,c?.email,c?.phone,c?.address].join(' ').toLowerCase();o.hidden=!!q&&!hay.includes(q);});
 }
 
 async function renderTable(key){
@@ -3425,12 +3433,6 @@ async function completeClientFollowUp(id,cadence=""){
 async function refreshClientProfilePianos(clientId){
  const fresh=await api(`/api/client-profile/${encodeURIComponent(clientId)}`);activeClientProfileData={...(activeClientProfileData||{}),...fresh};const list=document.getElementById('clientProfilePianoList');if(list)list.innerHTML=clientProfilePianosMarkup(fresh.pianos||[]);
 }
-function toggleClientPianoInlineForm(){const form=document.getElementById('clientProfilePianoAddForm');if(!form)return;form.classList.toggle('hidden');if(!form.classList.contains('hidden'))form.querySelector('input[name="brand"]')?.focus();}
-async function addClientProfilePiano(clientId){
- const form=document.getElementById('clientProfilePianoAddForm');if(!form)return;const body={};form.querySelectorAll('[name]').forEach(input=>{body[input.name]=input.value;});if(!String(body.brand||"").trim()&&!String(body.model||"").trim()){appAlert(bi("Enter at least a brand or model.","Legalább márkát vagy modellt adj meg."),"warning");return;}
- body.location=body.piano_location_address||"";
- try{await api(`/api/contacts/${encodeURIComponent(clientId)}/pianos`,{method:"POST",body:JSON.stringify(body)});form.querySelectorAll('input,textarea').forEach(input=>{input.value="";});form.classList.add('hidden');await refreshClientProfilePianos(clientId);appAlert(bi("Piano added to client.","Zongora rögzítve az ügyfélhez."),"success");}catch(error){showError(error)}
-}
 async function clientProfile(id){
  const p=await api(`/api/client-profile/${encodeURIComponent(id)}`);activeClientProfileData=p;
  $("#modal").classList.remove("hidden");$("#modalTitle").textContent=bi("Client profile","Ügyfélprofil");
@@ -3441,7 +3443,7 @@ async function clientProfile(id){
 async function addPianoToClient(clientId){
  const form=document.getElementById("pianoAddForm");if(!form)return;const body=Object.fromEntries(new FormData(form));if(!(body.brand||body.model)){appAlert(bi("Enter at least a brand or model.","Legalább márkát vagy típust adj meg."),"warning");return}try{await api(`/api/contacts/${clientId}/pianos`,{method:"POST",body:JSON.stringify(body)});await refreshClientProfilePianos(clientId)}catch(err){showError(err)}
 }
-function openPianoCreateForClient(clientId){closeModal();openForm('pianos',null,{prefill:{owner_contact_id:clientId},onSaved:async()=>clientProfile(clientId)});}
+function openPianoCreateForClient(clientId){return MasterData.open('pianos',null,{prefill:{owner_contact_id:clientId},onSaved:async()=>{const form=document.querySelector('dialog.md-dialog[open][data-master-kind=contacts] form');if(form)await attachClientPianoSelector({id:clientId,has_piano:1},form);else if(document.querySelector('.client-profile-shell'))await refreshClientProfilePianos(clientId);else await clientProfile(clientId);}});}
 
 let currentClientImportAnalysis=null;
 function clientImportReasonLabel(code){
@@ -3546,33 +3548,37 @@ async function commitPianoImport(){
 }
 function renderPianoImportCompleted(result){const box=document.getElementById('pianoImportResult');if(!box)return;box.innerHTML=`<div class="import-completed"><div class="import-completed-icon">✓</div><h3>${bi('Piano import completed','A zongoraimport befejeződött')}</h3><div class="import-summary-grid"><div class="import-stat newClients"><span>${bi('Imported pianos','Importált zongorák')}</span><strong>${Number(result.importedPianos||0)}</strong></div><div class="import-stat"><span>${bi('Clients updated as owners','Owner státuszra frissített ügyfelek')}</span><strong>${Number(result.updatedClients||0)}</strong></div><div class="import-stat missingDataClients"><span>${bi('Unidentified owner','Ismeretlen tulajdonos')}</span><strong>${Number(result.unidentifiedOwnerPianos||0)}</strong></div><div class="import-stat possibleDuplicates"><span>${bi('Skipped duplicates','Kihagyott duplikációk')}</span><strong>${Number(result.skippedAlreadyImported||0)+Number(result.skippedPossibleDuplicates||0)}</strong></div><div class="import-stat"><span>${bi('Client not found','Ügyfél nem található')}</span><strong>${Number(result.clientNotFound||0)}</strong></div><div class="import-stat invalidRows"><span>${bi('Invalid/failed rows','Hibás sorok')}</span><strong>${Number(result.invalidRows||0)+Number(result.failedRows||0)}</strong></div></div><div class="actions"><button type="button" onclick="closeModal();render('pianos')">${bi('View pianos','Zongorák megtekintése')}</button></div></div>`;}
 
-function openForm(key,row=null,options={}){let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};activeModalCancelHandler=typeof options.onCancelled==="function"?options.onCancelled:null;$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`${entityFormFieldsMarkup(key,row,initial)}<div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
+function openForm(key,row=null,options={}){
+ if(key==="contacts"||key==="pianos")return MasterData.open(key,row,{...options,onSaved:async saved=>{if(typeof options.onSaved==="function")await options.onSaved(saved);else await render(key);}});
+ let s=schemas[key];const initial={...(options.prefill||{}),...(row||{})};activeModalCancelHandler=typeof options.onCancelled==="function"?options.onCancelled:null;$("#modal").classList.remove("hidden");$("#modalTitle").textContent=(row?bi("Edit","Szerkesztés")+" ":bi("Add","Új")+" ")+splitBilingualText(s.title);$("#form").innerHTML=`${entityFormFieldsMarkup(key,row,initial)}<div class="actions"><button type="button" class="ghost-btn" onclick="closeModal()">${bi("Cancel","Mégse")}</button><button>${bi("Save","Mentés")}</button></div>`;
  if(key==="contacts") setupContactFormBehavior(row);
  if(key==="pianos") setupPianoFormBehavior(row,initial);
  applyLanguageToDOM(document.getElementById("modal"));
  $("#form").onsubmit=async e=>{e.preventDefault();try{const saved=await saveEntityFormRecord(key,row,e.target);activeModalCancelHandler=null;closeModal();if(typeof options.onSaved==="function")await options.onSaved(saved);else render(key)}catch(err){showError(err)}}}
 
-function field(f,val=""){let[name,label,type,opts]=f;const cls=`field field-${name} ${type==="textarea"?"full":""}`;if(type==="textarea")return `<div class="${cls}" data-field="${name}"><label>${label}</label><textarea name="${name}">${val||""}</textarea></div>`;if(type==="select")return `<div class="${cls}" data-field="${name}"><label>${label}</label><select name="${name}" onchange="if(typeof updateContactConditionalUI==='function')updateContactConditionalUI()">${opts.map(o=>{const value=Array.isArray(o)?o[0]:o;const text=Array.isArray(o)?o[1]:o;return `<option value="${value}" ${String(value)===String(val??"")?"selected":""}>${text}</option>`}).join("")}</select></div>`;return `<div class="${cls}" data-field="${name}"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${val??""}"></div>`}
+function field(f,val=""){let[name,label,type,opts]=f;const cls=`field field-${name} ${type==="textarea"?"full":""}`;if(type==="textarea")return `<div class="${cls}" data-field="${name}"><label>${label}</label><textarea name="${name}">${htmlText(val||"")}</textarea></div>`;if(type==="select")return `<div class="${cls}" data-field="${name}"><label>${label}</label><select data-native-select="true" name="${name}" onchange="if(typeof updateContactConditionalUI==='function')updateContactConditionalUI()">${opts.map(o=>{const value=Array.isArray(o)?o[0]:o;const text=Array.isArray(o)?o[1]:o;return `<option value="${value}" ${String(value)===String(val??"")?"selected":""}>${text}</option>`}).join("")}</select></div>`;return `<div class="${cls}" data-field="${name}"><label>${label}</label><input name="${name}" type="${type||"text"}" value="${htmlText(val??"")}"></div>`}
 
-function updateContactConditionalUI(){
- const has=String(document.querySelector('[name="has_piano"]')?.value||"0")==="1";
- const interested=String(document.querySelector('[name="interested_buying"]')?.value||"0")==="1";
- ["interest_brand","interest_model","interest_budget","interest_timeline","interest_notes"].forEach(n=>{const el=document.querySelector(`[data-field="${n}"]`); if(el) el.classList.toggle("hidden",!interested);});
- const ps=document.getElementById("contactPianoSection"); if(ps) ps.classList.toggle("hidden",!has);
+function updateContactConditionalUI(scope=null){
+ const form=scope?.querySelector?scope:(document.querySelector('dialog.md-dialog[open][data-master-kind="contacts"] form')||document.getElementById('form'));
+ if(!form)return;
+ const has=String(form.querySelector('[name="has_piano"]')?.value||'0')==='1',interested=String(form.querySelector('[name="interested_buying"]')?.value||'0')==='1';
+ ['interest_brand','interest_model','interest_budget','interest_timeline','interest_notes'].forEach(name=>form.querySelector(`[data-field="${name}"]`)?.classList.toggle('hidden',!interested));
+ form.querySelector('#contactPianoSection')?.classList.toggle('hidden',!has);
 }
-function setupContactFormBehavior(row){
- const has=document.querySelector('[name="has_piano"]');
- const interested=document.querySelector('[name="interested_buying"]');
- if(has) has.addEventListener("change",updateContactConditionalUI);
- if(interested) interested.addEventListener("change",updateContactConditionalUI);
- if(row?.id) attachClientPianoSelector(row);
- else { const ps=document.getElementById("contactPianoSection"); if(ps) ps.innerHTML=`<div class="panel inline-piano-form"><p class="muted">${bi("Save the client first, then edit the client to link or add owned pianos.","Előbb mentsd az ügyfelet, utána szerkesztésben lehet birtokolt zongorát kapcsolni vagy hozzáadni.")}</p></div>`; }
- updateContactConditionalUI();
+function setupContactFormBehavior(row,scope=null){
+ const form=scope||document.getElementById('form');if(!form)return;
+ const name=form.querySelector('[name="name"]');if(name)name.required=true;
+ ['has_piano','interested_buying'].forEach(name=>form.querySelector(`[name="${name}"]`)?.addEventListener('change',()=>updateContactConditionalUI(form)));
+ const mount=form.querySelector('#contactPianoSection');
+ if(row?.id)attachClientPianoSelector(row,form);
+ else if(mount)mount.innerHTML=`<p class="muted">${bi('Save the client first, then add a piano.','El\u0151bb mentsd az \u00fcgyfelet, ut\u00e1na adj hozz\u00e1 zongor\u00e1t.')}</p>`;
+ updateContactConditionalUI(form);
 }
 
 async function renderClientPianoProfileTools(clientId){
  const box=document.getElementById("clientPianoProfileTools");if(!box)return;
- box.innerHTML=`<div class="client-piano-profile-tools"><div class="client-piano-profile-actions"><button type="button" onclick="toggleClientPianoInlineForm()">+ ${bi("Add new piano to this client","Új zongora rögzítése ehhez az ügyfélhez")}</button></div><div id="clientProfilePianoAddForm" class="client-profile-inline-piano-form hidden"><div class="form-grid"><div class="field"><label>${bi("Brand","Márka")}</label><input name="brand"></div><div class="field"><label>${bi("Model","Modell")}</label><input name="model"></div><div class="field"><label>${bi("Serial number","Gyári szám")}</label><input name="serial_no"></div><div class="field"><label>${bi("Year","Évjárat")}</label><input name="build_year" type="number" min="1700" max="2100"></div><div class="field"><label>${bi("Location name","Helyszín neve")}</label><input name="location_name" placeholder="${bi("e.g. Hamptons Estate","pl. Hamptons Estate")}"></div><div class="field full"><label>${bi("Piano physical address","Zongora fizikai címe")}</label><input name="piano_location_address" placeholder="${bi("Address independent from the client's billing address","Az ügyfél számlázási címétől független cím")}"></div></div><div class="actions"><button type="button" class="ghost-btn" onclick="toggleClientPianoInlineForm()">${bi("Cancel","Mégse")}</button><button type="button" onclick="addClientProfilePiano('${htmlText(clientId)}')">${bi("Save piano","Zongora mentése")}</button></div></div></div>`;
+ box.innerHTML=`<div class="client-piano-profile-tools"><button type="button" data-profile-new-piano>+ ${bi("Add new piano to this client","\u00daj zongora r\u00f6gz\u00edt\u00e9se ehhez az \u00fcgyf\u00e9lhez")}</button></div>`;
+ box.querySelector('[data-profile-new-piano]').onclick=()=>MasterData.open('pianos',null,{prefill:{owner_contact_id:clientId},onSaved:()=>refreshClientProfilePianos(clientId)});
 }
 async function showClientPianoManagement(clientId){
  const box=document.getElementById("clientPianoProfileTools");
@@ -3582,16 +3588,16 @@ async function showClientPianoManagement(clientId){
  updateContactConditionalUI();
 }
 
-async function attachClientPianoSelector(row){
- const mount=document.getElementById("contactPianoSection");
+async function attachClientPianoSelector(row,scope=document){
+ const mount=scope.querySelector("#contactPianoSection");
  const container=document.createElement("div"); container.className="field full";
  container.innerHTML=`<label>${bi("Owned pianos","Birtokolt zongorák")}</label><div id="clientPianoSelector" class="multi-box"><p class="muted">${bi("Loading pianos...","Zongorák betöltése...")}</p></div>`;
  const target=mount || $("#form .form-grid"); if(target){ target.innerHTML=""; target.appendChild(container); }
  const renderAddForm = () => row?.id?`<div class="inline-piano-form"><button type="button" onclick="openPianoCreateForClient('${htmlText(row.id)}')">+ ${bi("Add new piano to this client","Új zongora rögzítése ehhez az ügyfélhez")}</button></div>`:"";
- if(!row?.id){$("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Save the client first, then edit the client to choose pianos.","Új ügyfélnél előbb mentsd az ügyfelet, utána szerkesztésben választható zongora.")}</p>`;return}
- try{const all=await api("/api/pianos"); const selected=all.filter(p=>p.owner_contact_id===row.id).map(p=>p.id); $("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Select existing pianos or add a new owned piano. Purchase interests are not added here.","Válassz meglévő zongorát, vagy adj hozzá új birtokolt zongorát. A vásárlási érdeklődés nem kerül ide.")}</p><div class="dropdown-checks">${all.map(p=>`<label class="check-row"><input type="checkbox" name="client_piano_ids" value="${p.id}" ${selected.includes(p.id)?"checked":""}> ${p.display_name||`${p.brand||""} ${p.model||""}`} · ${p.serial_no||""} · ${p.ownership_type||p.ownership||""} ${p.owner_name?`· ${p.owner_name}`:""}</label>`).join("") || `<p class='muted'>${bi("No pianos in database","Nincs zongora az adatbázisban")}</p>`}</div>${renderAddForm()}`;}catch(e){$("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Could not load pianos","Nem sikerült betölteni a zongorákat")}</p>${renderAddForm()}`}
+ if(!row?.id){scope.querySelector("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Save the client first, then edit the client to choose pianos.","Új ügyfélnél előbb mentsd az ügyfelet, utána szerkesztésben választható zongora.")}</p>`;return}
+ try{const all=await api("/api/pianos"); const selected=all.filter(p=>p.owner_contact_id===row.id).map(p=>p.id); scope.querySelector("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Select existing pianos or add a new owned piano. Purchase interests are not added here.","Válassz meglévő zongorát, vagy adj hozzá új birtokolt zongorát. A vásárlási érdeklődés nem kerül ide.")}</p><div class="dropdown-checks">${all.filter(p=>p.owner_contact_id===row.id).map(p=>`<label class="check-row"><input type="checkbox" name="client_piano_ids" value="${p.id}" ${selected.includes(p.id)?"checked":""}> ${p.display_name||`${p.brand||""} ${p.model||""}`} · ${p.serial_no||""} · ${p.ownership_type||p.ownership||""} ${p.owner_name?`· ${p.owner_name}`:""}</label>`).join("") || `<p class='muted'>${bi("No pianos in database","Nincs zongora az adatbázisban")}</p>`}</div>${renderAddForm()}`;}catch(e){scope.querySelector("#clientPianoSelector").innerHTML=`<p class="muted">${bi("Could not load pianos","Nem sikerült betölteni a zongorákat")}</p>${renderAddForm()}`}
  bindInlineClientPianoReference();
- applyLanguageToDOM(document.getElementById("clientPianoSelector"));
+ applyLanguageToDOM(scope.querySelector("#clientPianoSelector"));
 }
 async function lookupInlineClientPianoReference(){
  const brand=$("#newPianoBrand")?.value||"",model=$("#newPianoModel")?.value||"",serial=$("#newPianoSerial")?.value||"";
@@ -4427,7 +4433,7 @@ function unifiedDeadlineCardMarkup(row,{mobile=false}={}){
   <dl class="unified-notification-context"><div><dt>${bi('Instrument','Hangszer')}</dt><dd>${htmlText(row.instrument_context||'')}</dd></div><div><dt>${bi('Client','Ügyfél')}</dt><dd>${htmlText(row.client_context||'')}${phone?` <a href="tel:${htmlText(String(row.phone).replace(/[^+0-9*#,;]/g,''))}">${phone}</a>`:''}</dd></div><div><dt>${bi('Responsible','Felelős')}</dt><dd>${htmlText(row.responsible_name||'')}</dd></div></dl>
   ${row.description?`<p class="unified-notification-description">${htmlText(row.description)}</p>`:''}
   <p class="unified-notification-due">${htmlText(unifiedDeadlineDueText(row))}</p>
-  <div class="unified-notification-actions" aria-label="${htmlText(bi('Notification actions','Értesítési műveletek'))}"><button type="button" class="notification-btn is-complete" data-unified-notification-action="complete">${bi('Done','Kész')}</button><button type="button" class="notification-btn is-reschedule" data-unified-notification-action="reschedule">${bi('Reschedule','Újraütemezés')}</button><button type="button" class="notification-btn is-snooze" data-unified-notification-action="snooze">${bi('Later','Később')}</button></div>
+  <div class="unified-notification-actions" aria-label="${htmlText(bi('Notification actions','Értesítési műveletek'))}"><button type="button" class="notification-btn is-complete" data-unified-notification-action="complete">${bi('Done','Kész')}</button><button type="button" class="notification-btn is-reschedule" data-unified-notification-action="reschedule" ${row.can_reschedule===false?'disabled':''}>${bi('Reschedule','Újraütemezés')}</button><button type="button" class="notification-btn is-snooze" data-unified-notification-action="snooze">${bi('Later','Később')}</button></div>
  </article>`;
 }
 function ensureUnifiedDeadlineStack(){
