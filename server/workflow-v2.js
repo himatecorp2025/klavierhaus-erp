@@ -3,6 +3,7 @@
 // One operational workflow domain for details, calendar and notifications.
 // No caller can gain rights merely by having created a workflow or a calendar job.
 const crypto = require("node:crypto");
+const taskCatalog = require("./workflow-task-catalog");
 const { createWorkflowFinance } = require("./workflow-finance");
 const id = prefix => `${prefix}-${crypto.randomUUID()}`;
 const text = (value, max = 5000) => String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -124,15 +125,16 @@ function createWorkflowV2({ db, invoiceEngine }) {
     localTime(w.start_at, false, true); localTime(w.final_due_at, false, true);
     if (w.start_at > w.final_due_at) throw fault("WORKFLOW_DATE_ORDER");
     for (const p of all("SELECT * FROM wf2_phases WHERE workflow_id=?", w.id)) {
-      if (p.due_at && (p.due_at < w.start_at || p.due_at > w.final_due_at)) throw fault("WORKFLOW_PHASE_OUTSIDE_DATES", 409, { phase_id: p.id });
+      if (p.due_at && (p.due_at < w.start_at || p.due_at > w.final_due_at)) throw fault("WORKFLOW_PHASE_OUTSIDE_DATES", 409, { phase_id: p.id, title: p.title, limit: w.final_due_at });
       for (const t of all("SELECT * FROM workshop_subtasks WHERE phase_id=?", p.id)) {
-        if (t.due_at && (t.due_at < w.start_at || t.due_at > (p.due_at || w.final_due_at))) throw fault("WORKFLOW_TASK_OUTSIDE_DATES", 409, { task_id: t.id });
+        if (t.due_at && (t.due_at < w.start_at || t.due_at > (p.due_at || w.final_due_at))) throw fault("WORKFLOW_TASK_OUTSIDE_DATES", 409, { task_id: t.id, title: t.title, phase_title: p.title, limit: p.due_at || w.final_due_at });
       }
     }
   }
   function permissions(u, w, p = null, t = null) {
     const live = active(w), phaseOpen = !p || !["COMPLETED", "NOT_REQUIRED"].includes(p.status);
     return {
+      edit_final_deadline: live && admin(u),
       edit_workflow: live && owns(u, w), close_workflow: live && owns(u, w),
       edit_phase: Boolean(live && phaseOpen && p && ownsPhase(u, w, p)), assign_phase: live && owns(u, w),
       edit_task: Boolean(live && phaseOpen && t && t.status !== "COMPLETED" && ownsTask(u, w, p, t)),
@@ -257,6 +259,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       validPiano(body.client_id, body.piano_id);
       const title = text(body.title, 200);
       if (!title) throw fault("WORKFLOW_TITLE_REQUIRED");
+      const location = one("SELECT cp.location_name,cp.piano_location_address,p.location FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=? WHERE p.id=?", body.client_id, body.piano_id);
       const key = id("WF2"), start = localTime(body.start_at), due = localTime(body.final_due_at), mode = body.mode || "INBOUND";
       if (!["INBOUND", "ON_SITE"].includes(mode)) throw fault("WORKFLOW_MODE_INVALID");
       if (start > due) throw fault("WORKFLOW_DATE_ORDER");
@@ -265,6 +268,9 @@ function createWorkflowV2({ db, invoiceEngine }) {
       if (body.phases !== undefined && (!Array.isArray(body.phases) || body.phases.length > 7 || new Set(body.phases.map(p => p?.stage_code)).size !== body.phases.length || body.phases.some(p => !codes.has(p?.stage_code)))) throw fault("WORKFLOW_PHASE_SELECTION_INVALID");
       run("INSERT INTO wf2_workflows(id,workflow_key,title,client_id,piano_id,creator_user_id,main_responsible_user_id,mode,start_at,final_due_at,description,request_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         key, key, title, body.client_id, body.piano_id, u.id, owner.id, mode, start, due, text(body.description), requestKey);
+      run("UPDATE wf2_workflows SET piano_location_name=?,piano_location_address=?,service_address=? WHERE id=?",
+        text(location?.location_name,500), text(location?.piano_location_address || location?.location,2000), mode === "ON_SITE" ? text(body.service_address,2000) : "", key);
+      if (mode === "ON_SITE" && !text(body.service_address)) throw fault("WORKFLOW_SERVICE_ADDRESS_REQUIRED");
       for (const d of defs) {
         const item = (body.phases || []).find(p => p.stage_code === d.code);
         const enabled = body.phases === undefined ? Boolean(d.enabled) : Boolean(item && flag(item.enabled, true));
@@ -273,6 +279,18 @@ function createWorkflowV2({ db, invoiceEngine }) {
         const phaseDue = item?.due_at ? localTime(item.due_at) : due;
         run("INSERT INTO wf2_phases(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,responsible_user_id,title,due_at,required,status) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           id("WP"), key, d.code, d.sort_order, d.name_en, d.name_hu, responsible.id, text(item?.title || d.name_hu, 200), phaseDue, d.required ? 1 : 0, d.default_status);
+        const phase = one("SELECT * FROM wf2_phases WHERE workflow_id=? AND stage_code=?",key,d.code);
+        const tasks = item?.tasks ?? [];
+        if (!Array.isArray(tasks) || tasks.length > 200) throw fault("WORKFLOW_TASK_SELECTION_INVALID");
+        const used = new Set();
+        for (const task of tasks) {
+          if (!task || typeof task !== "object" || Array.isArray(task)) throw fault("WORKFLOW_TASK_SELECTION_INVALID");
+          if (task.template_id) {
+            if (used.has(task.template_id) || !(taskCatalog[d.code] || []).some(t=>t.id === task.template_id)) throw fault("WORKFLOW_TASK_SELECTION_INVALID");
+            used.add(task.template_id);
+          }
+          insertTask(getWorkflow(key), phase, task, u, body.reason);
+        }
       }
       const w = getWorkflow(key); validateDates(w); syncCalendar(w);
       for (const p of all("SELECT * FROM wf2_phases WHERE workflow_id=?", key)) audit(w, u, "PHASE_CREATE", "PHASE", p.id, null, p, body.reason);
@@ -292,7 +310,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       }
       validPiano(next.client_id, next.piano_id);
       if (next.start_at !== w.start_at) localTime(next.start_at);
-      if (next.final_due_at !== w.final_due_at) localTime(next.final_due_at);
+      if (next.final_due_at !== w.final_due_at) { requireRight(admin(u)); localTime(next.final_due_at); }
       if (!["INBOUND", "ON_SITE"].includes(next.mode)) throw fault("WORKFLOW_MODE_INVALID");
       run("UPDATE wf2_workflows SET title=?,description=?,mode=?,client_id=?,piano_id=?,main_responsible_user_id=?,start_at=?,final_due_at=? WHERE id=?",
         text(next.title, 200), text(next.description), next.mode, next.client_id, next.piano_id, next.main_responsible_user_id, next.start_at, next.final_due_at, key);
@@ -309,10 +327,36 @@ function createWorkflowV2({ db, invoiceEngine }) {
       if (body.required !== undefined) { requireRight(owns(u, w)); next.required = flag(body.required) ? 1 : 0; }
       if (!text(next.title, 200)) throw fault("WORKFLOW_TITLE_REQUIRED");
       if (!["WAITING", "IN_PROGRESS", "BLOCKED"].includes(next.status)) throw fault("WORKFLOW_USE_PHASE_CLOSE_OR_DELETE", 409);
-      if (next.due_at !== p.due_at) next.due_at = localTime(next.due_at, true);
+      if (next.due_at !== p.due_at) next.due_at = localTime(next.due_at);
       run("UPDATE wf2_phases SET title=?,description=?,responsible_user_id=?,due_at=?,required=?,status=? WHERE id=?",
         text(next.title, 200), text(next.description), next.responsible_user_id, next.due_at, next.required, next.status, p.id);
       audit(w, u, next.responsible_user_id !== p.responsible_user_id ? "PHASE_HANDOVER" : "PHASE_EDIT", "PHASE", p.id, p, getPhase(p.id), body.transfer_reason || body.reason);
+    });
+  }
+  function updateSchedule(key, body, u) {
+    return command(key,u,body,"SCHEDULE_UPDATE",w=>{
+      if (body.version === undefined) throw fault("WORKFLOW_VERSION_REQUIRED",409);
+      requireRight(owns(u,w) || Boolean(one("SELECT 1 FROM wf2_phases WHERE workflow_id=? AND responsible_user_id=?",key,u.id)) || Boolean(one("SELECT 1 FROM workshop_subtasks t JOIN wf2_phases p ON p.id=t.phase_id JOIN wf2_task_assignees a ON a.task_id=t.id WHERE p.workflow_id=? AND a.user_id=?",key,u.id)));
+      if (body.start_at !== undefined && body.start_at !== w.start_at) {
+        requireRight(owns(u,w)); run("UPDATE wf2_workflows SET start_at=? WHERE id=?",localTime(body.start_at),key);
+      }
+      if (body.final_due_at !== undefined && body.final_due_at !== w.final_due_at) {
+        requireRight(admin(u)); run("UPDATE wf2_workflows SET final_due_at=? WHERE id=?",localTime(body.final_due_at),key);
+      }
+      for (const [kind,items] of [["PHASE",body.phases ?? []],["TASK",body.tasks ?? []]]) {
+        if (!Array.isArray(items) || items.length > 1400 || new Set(items.map(x=>x?.id)).size !== items.length) throw fault("WORKFLOW_TASK_SELECTION_INVALID");
+        for (const item of items) {
+          const entity = kind === "PHASE" ? phaseContext(key,item.id) : getTask(item.id);
+          const phase = kind === "PHASE" ? entity : phaseContext(key,entity.phase_id);
+          requireRight(kind === "PHASE" ? ownsPhase(u,w,phase) : ownsTask(u,w,phase,entity));
+          if (item.due_at === entity.due_at) continue;
+          requirePhaseOpen(phase);
+          if (kind === "TASK" && entity.status === "COMPLETED") throw fault("WORKFLOW_TASK_CLOSED",409);
+          const due = localTime(item.due_at);
+          run(`UPDATE ${kind === "PHASE" ? "wf2_phases" : "workshop_subtasks"} SET due_at=? WHERE id=?`,due,entity.id);
+          audit(w,u,"SCHEDULE_ITEM_UPDATE",kind,entity.id,{due_at:entity.due_at},{due_at:due},body.reason);
+        }
+      }
     });
   }
   function addPhase(key, code, body, u) {
@@ -335,22 +379,32 @@ function createWorkflowV2({ db, invoiceEngine }) {
     run("DELETE FROM wf2_task_assignees WHERE task_id=?", taskId);
     for (const uid of new Set(ids)) run("INSERT INTO wf2_task_assignees(task_id,user_id) VALUES(?,?)", taskId, uid);
   }
+  function insertTask(w, phase, body, u, reason) {
+    const title = text(body.title,200);
+    if (!title) throw fault("WORKFLOW_TITLE_REQUIRED");
+    const taskId = id("WT"), due = localTime(body.due_at || phase.due_at || w.final_due_at);
+    run("INSERT INTO workshop_subtasks(id,phase_id,title,description,due_at,required) VALUES(?,?,?,?,?,?)",
+      taskId,phase.id,title,text(body.description),due,flag(body.required,true)?1:0);
+    setAssignees(taskId,phase,body.assignee_ids);
+    audit(w,u,"TASK_CREATE","TASK",taskId,null,taskSnapshot(getTask(taskId)),reason);
+    return getTask(taskId);
+  }
   function saveTask(key, phaseId, taskId, body, u) {
     return command(key, u, body, "TASK_SAVE", w => {
       const p = phaseContext(key, phaseId), t = taskId ? taskContext(p, taskId) : null;
       requireRight(t ? ownsTask(u, w, p, t) : ownsPhase(u, w, p)); requirePhaseOpen(p);
       if (t?.status === "COMPLETED") throw fault("WORKFLOW_USE_TASK_REOPEN", 409);
+      if (!t) { insertTask(w,p,body,u,body.reason); return; }
       const manager = ownsPhase(u, w, p);
       if (!manager && ["title", "description", "assignee_ids", "required", "status"].some(field => body[field] !== undefined)) throw fault("WORKFLOW_FORBIDDEN", 403);
       if (body.status !== undefined) throw fault("WORKFLOW_USE_TASK_COMPLETE", 409);
-      const title = text(body.title ?? t?.title, 200);
+      const title = text(body.title ?? t.title, 200);
       if (!title) throw fault("WORKFLOW_TITLE_REQUIRED");
-      const due = body.due_at === undefined ? (t?.due_at || p.due_at || null) : body.due_at === t?.due_at ? t.due_at : localTime(body.due_at, true);
-      const tid = t?.id || id("WT"), before = t ? taskSnapshot(t) : null, required = flag(body.required, Boolean(t?.required ?? 1)) ? 1 : 0;
-      if (t) run("UPDATE workshop_subtasks SET title=?,description=?,due_at=?,required=? WHERE id=?", title, text(body.description ?? t.description), due, required, tid);
-      else run("INSERT INTO workshop_subtasks(id,phase_id,title,description,due_at,required) VALUES(?,?,?,?,?,?)", tid, p.id, title, text(body.description), due, required);
-      if (!t || body.assignee_ids !== undefined) setAssignees(tid, p, body.assignee_ids);
-      audit(w, u, t ? "TASK_UPDATE" : "TASK_CREATE", "TASK", tid, before, taskSnapshot(getTask(tid)), body.reason);
+      const due = body.due_at === undefined ? (t.due_at || p.due_at || null) : body.due_at === t.due_at ? t.due_at : localTime(body.due_at);
+      const tid = t.id, before = taskSnapshot(t), required = flag(body.required, Boolean(t.required)) ? 1 : 0;
+      run("UPDATE workshop_subtasks SET title=?,description=?,due_at=?,required=? WHERE id=?", title, text(body.description ?? t.description), due, required, tid);
+      if (body.assignee_ids !== undefined) setAssignees(tid, p, body.assignee_ids);
+      audit(w, u, "TASK_UPDATE", "TASK", tid, before, taskSnapshot(getTask(tid)), body.reason);
     });
   }
   function markTaskComplete(w, p, t, u, reason, override = false) {
@@ -630,6 +684,10 @@ function createWorkflowV2({ db, invoiceEngine }) {
     if (linked.entity_type === "TASK") { const t = getTask(linked.entity_id), p = getPhase(t.phase_id); return t.status !== "COMPLETED" && !["COMPLETED", "NOT_REQUIRED"].includes(p.status) && ownsTask(u, w, p, t); }
     return owns(u, w);
   }
+  function canReschedule(jobId, u) {
+    const linked = link(jobId);
+    return Boolean(linked && jobRights(jobId,u) && (linked.entity_type !== "FINAL" || admin(u)));
+  }
   function calendarRow(row, u) {
     const retired = retiredJob(row.id);
     if (retired && one("SELECT 1 FROM wf2_workflows WHERE id=?", retired.workflow_id)) return { ...row, calendar_entry_type: "WORKFLOW_V2", wf2_workflow_id: retired.workflow_id, wf2_entity_type: "RETIRED", wf2_can_edit: false };
@@ -637,11 +695,11 @@ function createWorkflowV2({ db, invoiceEngine }) {
     const t = linked.entity_type === "TASK" ? getTask(linked.entity_id) : null;
     return { ...row, calendar_entry_type: "WORKFLOW_V2", wf2_workflow_id: linked.workflow_id, wf2_entity_type: linked.entity_type,
       wf2_entity_id: linked.entity_id, wf2_phase_id: t?.phase_id || (linked.entity_type === "PHASE" ? linked.entity_id : null),
-      wf2_can_edit: Boolean(jobRights(row.id, u)), wf2_assignee_ids: t ? taskSnapshot(t).assignee_ids : [row.assigned_user_id] };
+      wf2_can_edit: Boolean(jobRights(row.id, u)), wf2_can_reschedule: canReschedule(row.id,u), wf2_assignee_ids: t ? taskSnapshot(t).assignee_ids : [row.assigned_user_id] };
   }
   function rescheduleJob(jobId, body, u) {
     const linked = link(jobId); if (!linked) throw fault("WORKFLOW_CALENDAR_LINK_NOT_FOUND", 404);
-    requireRight(jobRights(jobId, u)); const due = localTime(body.target_date || body.start_time);
+    requireRight(canReschedule(jobId, u)); const due = localTime(body.target_date || body.start_time);
     const oldJob = one("SELECT * FROM jobs WHERE id=?", jobId);
     if (body.assigned_user_id !== undefined && body.assigned_user_id !== oldJob.assigned_user_id) throw fault("WORKFLOW_ASSIGN_IN_DETAILS", 409);
     return command(linked.workflow_id, u, body, "RESCHEDULE", w => {
@@ -697,11 +755,11 @@ function createWorkflowV2({ db, invoiceEngine }) {
     })();
   }
   function options() {
-    return { users: all("SELECT id,name,role FROM users WHERE status='Active' ORDER BY name"), clients: all("SELECT id,name FROM contacts ORDER BY name"),
-      pianos: all("SELECT id,owner_contact_id,brand,model,serial_no,display_name FROM pianos ORDER BY brand,model"),
-      client_pianos: all("SELECT client_id,piano_id FROM client_pianos"), partners: all("SELECT id,company_name FROM partners WHERE status='active' ORDER BY company_name"), stages: definitions(), interval_minutes: 30, time_zone: "America/New_York", ui_contract: "UI12" };
+    return { users: all("SELECT id,name,role FROM users WHERE status='Active' ORDER BY name"), clients: all("SELECT id,name,email,phone,address FROM contacts ORDER BY name"),
+      pianos: all("SELECT p.id,p.owner_contact_id,p.brand,p.model,p.serial_no,p.display_name,p.location,cp.location_name,cp.piano_location_address FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id ORDER BY p.brand,p.model,p.id"),
+      client_pianos: all("SELECT client_id,piano_id FROM client_pianos"), partners: all("SELECT id,company_name FROM partners WHERE status='active' ORDER BY company_name"), stages: definitions(), task_catalog: taskCatalog, interval_minutes: 30, time_zone: "America/New_York", ui_contract: "UI12" };
   }
-  return { create, update, detail, definitions, saveDefinitions, updatePhase, addPhase, saveTask, completeTask, reopenTask, deleteTask,
+  return { create, update, updateSchedule, canReschedule, detail, definitions, saveDefinitions, updatePhase, addPhase, saveTask, completeTask, reopenTask, deleteTask,
     saveCost, approveCost, checklist, closePhase, reopenPhase, closeWorkflow, reopenWorkflow, abandonWorkflow, deletePhase,
     addDocument, removeDocument, canDocument, link, retiredJob, jobRights, calendarRow, rescheduleJob, completeJob, purge, purgePreview, list, options };
 }
