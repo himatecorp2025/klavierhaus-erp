@@ -20,6 +20,9 @@ function log(message) {
   console.log(`[database] ${message}`);
 }
 
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V38-2-CLEAN");
+log(`Build: ${BUILD_ID}`);
+
 function fail(message, error) {
   console.error(`[database] ${message}`);
   if (error) console.error(error.stack || error.message || error);
