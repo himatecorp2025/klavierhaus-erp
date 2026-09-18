@@ -4,7 +4,7 @@
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
   "engines": {
-    "node": ">=20.18.0 <21.0.0",
+    "node": "20.18.0",
     "npm": ">=10.0.0 <11.0.0"
   },
   "scripts": {
@@ -19,7 +19,8 @@
     "check": "npm run check:schema && node --check server/job-domain.js && node --check server/client-import.js && node --check server/index.js && node --check server/init-db.js && node --check server/system-integrations.js && node --check server/workshop-workflow.js && node --check server/sample-content.js && node --check server/calendar-colors.js && node --check server/google-calendar.js && node --check server/upload-middleware.js && node --check server/account-activation.js && node --check server/transactional-email.js && node --check server/events.js && node --check server/event-attendance.js && node --check server/guest-data.js && node --check server/guest-list-pdf.js && node --check server/stripe-sandbox.js && node --check server/website-content.js && node --check server/website-catalog.js && node --check server/website-platform.js && node --check public/app.js && node --check public/service-worker.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "generate-vapid": "web-push generate-vapid-keys",
-    "check:schema": "node test/helpers/check-schema.js"
+    "check:schema": "node test/helpers/check-schema.js",
+    "test:workflow-contract": "node --test --test-concurrency=1 test/workflow-v2.test.js test/workflow-contract-migration.test.js"
   },
   "dependencies": {
     "adm-zip": "0.6.0",
