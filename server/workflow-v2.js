@@ -266,6 +266,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       const location = one("SELECT cp.location_name,cp.piano_location_address,p.location FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=? WHERE p.id=?", body.client_id, body.piano_id);
       const key = id("WF2"), start = localTime(body.start_at), due = localTime(body.final_due_at), mode = body.mode || "INBOUND";
       if (!["INBOUND", "ON_SITE"].includes(mode)) throw fault("WORKFLOW_MODE_INVALID");
+      if (start.slice(0, 10) < nowLocal().slice(0, 10)) throw fault("WORKFLOW_START_BEFORE_TODAY");
       if (start > due) throw fault("WORKFLOW_DATE_ORDER");
       const defs = definitions(), codes = new Set(defs.map(d => d.code));
       if (defs.length !== 7) throw fault("WORKFLOW_SEVEN_PHASES_REQUIRED", 409);
