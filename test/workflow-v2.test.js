@@ -1,186 +1,215 @@
 "use strict";
-const {test,before,after}=require('node:test'),assert=require('node:assert/strict');
-const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawnSync}=require('node:child_process'),{once}=require('node:events');
-const Database=require('better-sqlite3'),jwt=require('jsonwebtoken');
-const root=path.resolve(__dirname,'..'),temp=fs.mkdtempSync(path.join(os.tmpdir(),'kh-wf2-'));
-const secret='workflow-phase-two-isolated-test-secret-123456789';let db,server,base;const tokens={};
-const nowDay=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-const day=offset=>new Date(Date.parse(nowDay+'T12:00:00Z')+offset*86400000).toISOString().slice(0,10);
-async function req(url,{actor='A',method='GET',body,raw=false}={}){const response=await fetch(base+url,{method,headers:{Authorization:'Bearer '+(tokens[actor]||''),...(body instanceof FormData?{}:body?{'Content-Type':'application/json'}:{})},body:body instanceof FormData?body:body?JSON.stringify(body):undefined});const data=raw?await response.text():await response.json();return {status:response.status,data};}
-const url='/api/workshop/v2';
-before(async()=>{
- Object.assign(process.env,{DB_PATH:path.join(temp,'db.sqlite'),BACKUP_DIR:path.join(temp,'backups'),UPLOAD_DIR:path.join(temp,'uploads'),JWT_SECRET:secret,PORT:'0'});
- const init=spawnSync(process.execPath,['server/init-db.js'],{cwd:root,env:process.env,encoding:'utf8'});assert.equal(init.status,0,init.stderr||init.stdout);
- const setup=new Database(process.env.DB_PATH);for(const [key,role,flag] of [['SA','ADMIN',1],['A','ADMIN',0],['M','MANAGER',0],['W','WORKER',0],['W2','WORKER',0]]){setup.prepare("INSERT INTO users(id,name,email,password_hash,role,status,is_superadmin) VALUES(?,?,?,'not-a-password',?,'Active',?)").run(key,key,key+'@example.invalid',role,flag);tokens[key]=jwt.sign({id:key,role,session_version:0},secret,{expiresIn:'2h'});}
- setup.exec("INSERT INTO contacts(id,name) VALUES('C','Client');INSERT INTO pianos(id,brand,model,owner_contact_id) VALUES('P','Steinway','B','C');INSERT INTO jobs(id,title,assigned_user_id,assigned_to,start_time,end_time) VALUES('NORMAL','Protected job','A','A','2026-10-10T09:00','2026-10-10T10:00')");setup.close();
- const app=require('../server/index');db=app.db;server=app.startServer(0);await once(server,'listening');base=`http://127.0.0.1:${server.address().port}`;
+// UI12 domain integration: real schema, real SQLite transactions and invoice engine.
+// Run with Node 20.18.0 and the lockfile-installed better-sqlite3 dependency.
+const {test,before,after}=require('node:test');
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+const {spawnSync}=require('node:child_process'),Database=require('better-sqlite3');
+const root=path.resolve(__dirname,'..'),temp=fs.mkdtempSync(path.join(os.tmpdir(),'kh-ui12-'));
+let db,engine;
+const day=n=>'2027-10-'+String(n).padStart(2,'0');
+const user=id=>db.prepare('SELECT * FROM users WHERE id=?').get(id);
+const one=(sql,...args)=>db.prepare(sql).get(...args);
+const all=(sql,...args)=>db.prepare(sql).all(...args);
+const error=(fn,code)=>assert.throws(fn,e=>e.code===code||e.message===code,code);
+const total=(account,w)=>Number(one(`SELECT COALESCE(SUM(j.debit-j.credit),0) n FROM journal_lines j JOIN workflow_finance_lines l ON j.entry_id IN(l.wip_journal_entry_id,l.final_journal_entry_id,l.writeoff_journal_entry_id) WHERE l.workflow_id=? AND j.account_code=?`,w.id,account).n.toFixed(2));
+const wip=w=>total('1400-WIP-INVENTORY',w),loss=w=>total('6900-LOSS-ON-ABANDONED-WORK',w);
+const create=(extra={},actor='C0')=>engine.create({title:'UI12 isolated workflow',client_id:'C',piano_id:'P',main_responsible_user_id:'M',start_at:day(1)+'T09:00',final_due_at:day(30)+'T17:00',phases:[{stage_code:'INBOUND',enabled:true}],...extra},user(actor));
+const task=(w,extra={},actor='M')=>engine.saveTask(w.id,w.stages[0].id,null,{title:'Tune piano',assignee_ids:['W','W2'],...extra},user(actor)).stages[0].tasks.at(-1);
+const cost=(w,extra={},actor='M')=>engine.saveCost(w.id,w.stages[0].id,null,{title:'Material',category:'MATERIAL',amount:123.45,...extra},user(actor)).stages[0].costs.at(-1);
+const state=()=>JSON.stringify(Object.fromEntries(['wf2_workflows','wf2_phases','workshop_subtasks','wf2_costs','wf2_audit','jobs','wf2_calendar_links','workflow_finance_lines','journal_entries','journal_lines','invoices','financial_items'].map(table=>[table,all('SELECT * FROM '+table+' ORDER BY rowid')])));
+before(()=>{
+ const file=path.join(temp,'db.sqlite');
+ const r=spawnSync(process.execPath,['server/init-db.js'],{cwd:root,env:{...process.env,DB_PATH:file,BACKUP_DIR:path.join(temp,'backups')},encoding:'utf8'});
+ assert.equal(r.status,0,r.stderr||r.stdout);
+ db=new Database(file);db.pragma('foreign_keys=ON');db.pragma('journal_mode=WAL');
+ for(const [id,role,sa] of [['SA','ADMIN',1],['A','ADMIN',0],['M','MANAGER',0],['W','WORKER',0],['W2','WORKER',0],['X','WORKER',0],['C0','WORKER',0]])db.prepare("INSERT INTO users(id,name,email,password_hash,role,status,is_superadmin) VALUES(?,?,?,'test-only',?,'Active',?)").run(id,id,id+'@example.invalid',role,sa);
+ db.exec("INSERT INTO contacts(id,name,phone) VALUES('C','Owner Client','+12125550100'),('C2','Other Client','+12125550200');INSERT INTO pianos(id,brand,model,owner_contact_id) VALUES('P','Steinway & Sons','Model B-211','C');INSERT INTO client_pianos(client_id,piano_id) VALUES('C2','P');INSERT INTO jobs(id,title,assigned_user_id,assigned_to,start_time,end_time) VALUES('NORMAL','Protected normal job','W','W','2027-10-10T09:00','2027-10-10T10:00')");
+ require('../server/workshop-workflow').registerWorkshopWorkflowRoutes({app:new Proxy({},{get:()=>()=>{}}),db,auth:()=>{},permit:()=>()=>{}});
+ engine=require('../server/workflow-v2').createWorkflowV2({db,invoiceEngine:require('../server/business-operations').createInvoiceEngine({db})});
 });
-after(async()=>{if(server)await new Promise(resolve=>server.close(resolve));if(db?.open)db.close();});
-async function create(actor='W',extra={}){const response=await req(url+'/workflows',{actor,method:'POST',body:{title:'New workflow',client_id:'C',piano_id:'P',mode:'INBOUND',main_responsible_user_id:'M',start_at:day(0)+'T08:00',final_due_at:day(7)+'T17:00',...extra}});assert.equal(response.status,200,JSON.stringify(response.data));return response.data;}
-const phasePath=(w,p)=>`${url}/workflows/${w.id}/phases/${p.id}`;
-test('01: Phase I retirement is present; new schema, seven phases, protected records and old routes',async()=>{
- for(const table of ['workshop_workflows','workflow_stages','workshop_subtasks','workflow_documents','workflow_materials'])assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table),undefined);
- const result=await req(url+'/options',{actor:'W'});assert.equal(result.status,200);assert.equal(result.data.stages.length,7);assert.ok(result.data.users.some(u=>u.id==='W'));
- assert.equal((await req('/api/workflows/old')).status,410);assert.equal((await req(url+'/options',{actor:'NONE'})).status,401);assert.equal(db.pragma('journal_mode',{simple:true}),'wal');assert.equal(db.pragma('foreign_keys',{simple:true}),1);
+after(()=>{if(db?.open)db.close();fs.rmSync(temp,{recursive:true,force:true});});
+
+test('01 real initialization: WAL, FK, canonical task table, exact seven definitions',()=>{
+ assert.equal(db.pragma('foreign_keys',{simple:true}),1);assert.equal(db.pragma('journal_mode',{simple:true}),'wal');
+ assert.ok(one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workshop_subtasks'"));assert.equal(one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wf2_tasks'"),undefined);
+ assert.equal(engine.definitions().length,7);assert.equal(engine.options().interval_minutes,30);assert.equal(engine.options().ui_contract,'UI12');
+ for(const name of ['creator_user_id','main_responsible_user_id'])assert.equal(db.pragma('table_info(wf2_workflows)').find(c=>c.name===name).notnull,1);
+ assert.deepEqual(db.pragma('foreign_key_check'),[]);
 });
-test('02: worker creates for another main owner; creator has no implicit management rights',async()=>{
- const w=await create();assert.equal(w.creator_user_id,'W');assert.equal(w.main_responsible_user_id,'M');assert.equal(w.stages.length,7);assert.equal(w.calendar.length,2);assert.equal(w.permissions.edit_workflow,false);assert.ok(w.stages.every(p=>p.responsible_user_id==='M'));
- assert.equal((await req(url+'/workflows/'+w.id,{actor:'W',method:'PUT',body:{title:'Forbidden'}})).status,403);assert.equal((await req(url+'/workflows/'+w.id+'/close',{actor:'W',method:'POST',body:{}})).status,403);
- const own=await create('W',{main_responsible_user_id:'W'});assert.equal(own.permissions.close_workflow,true);
+test('02 creator and main owner are distinct; creator has no implicit editing/closing rights',()=>{
+ const w=create();assert.equal(w.creator_user_id,'C0');assert.equal(w.main_responsible_user_id,'M');assert.equal(w.permissions.edit_workflow,false);
+ error(()=>engine.update(w.id,{title:'Forbidden'},user('C0')),'WORKFLOW_FORBIDDEN');error(()=>engine.closeWorkflow(w.id,{},user('C0')),'WORKFLOW_FORBIDDEN');
+ assert.equal(engine.detail(w.id,user('M')).permissions.close_workflow,true);
 });
-test('03: main owner changes phase responsibility; exactly one responsible is enforced',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{responsible_user_id:'W'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.stages[0].responsible_user_id,'W');
- r=await req(phasePath(w,p),{actor:'W',method:'PUT',body:{responsible_user_id:'W2'}});assert.equal(r.status,403);
- r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{responsible_user_id:''}});assert.equal(r.status,400);
- assert.equal((await req(phasePath(w,w.stages[1]),{actor:'W',method:'PUT',body:{title:'Other phase'}})).status,403);
+test('03 seven independent phase selections create only enabled rows and calendar links',()=>{
+ const defs=engine.definitions(),w=create({phases:defs.map((d,i)=>({stage_code:d.code,enabled:i%2===0}))});
+ assert.equal(w.stages.length,4);assert.equal(w.calendar.length,6);assert.deepEqual(w.stages.map(p=>p.stage_code),defs.filter((_,i)=>i%2===0).map(d=>d.code));
+ const full=create({phases:undefined});assert.equal(full.stages.length,7);assert.equal(full.calendar.length,9);
+ const empty=create({phases:[]});assert.equal(empty.stages.length,0);assert.equal(empty.calendar.length,2);
 });
-test('04: task multi-assignment, default owner and restricted subresponsible editing',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p)+'/tasks',{actor:'M',method:'POST',body:{title:'Strings',due_at:day(1)+'T10:00',assignee_ids:['W','W2','W']}});assert.equal(r.status,200);let t=r.data.stages[0].tasks[0];assert.deepEqual(t.assignee_ids,['W','W2']);
- assert.equal((await req(phasePath(w,p)+'/tasks/'+t.id,{actor:'W',method:'PUT',body:{title:'Strings updated',due_at:day(2)+'T10:00'}})).status,200);
- assert.equal((await req(phasePath(w,p)+'/tasks/'+t.id,{actor:'W',method:'PUT',body:{assignee_ids:['W']}})).status,403);
- r=await req(phasePath(w,p)+'/tasks',{actor:'M',method:'POST',body:{title:'Default'}});assert.equal(r.status,200);assert.deepEqual(r.data.stages[0].tasks[1].assignee_ids,['M']);
- assert.equal((await req(phasePath(w,p)+'/tasks',{actor:'W',method:'POST',body:{title:'No creation'}})).status,403);
+test('04 creation is atomic and idempotent; invalid final phase leaves no partial workflow',()=>{
+ const before=state();error(()=>create({phases:[{stage_code:'INBOUND',enabled:true},{stage_code:'ASSESSMENT',enabled:true,responsible_user_id:'MISSING'}]}),'WORKFLOW_ACTIVE_USER_REQUIRED');assert.equal(state(),before);
+ error(()=>create({phases:[{stage_code:'INBOUND'},{stage_code:'INBOUND'}]}),'WORKFLOW_PHASE_SELECTION_INVALID');
+ const first=create({request_key:'idempotent-42'}),second=create({request_key:'idempotent-42'});assert.equal(first.id,second.id);assert.equal(second.calendar.length,3);
 });
-test('05: invalid wall dates, DST gap, deadline hierarchy and transaction rollback',async()=>{
- const w=await create(),p=w.stages[0];const before=db.prepare('SELECT COUNT(*) n FROM wf2_calendar_links WHERE workflow_id=?').get(w.id).n;
- let r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{due_at:day(9)+'T09:00'}});assert.equal(r.status,409);assert.equal(db.prepare('SELECT due_at FROM wf2_phases WHERE id=?').get(p.id).due_at,null);assert.equal(db.prepare('SELECT COUNT(*) n FROM wf2_calendar_links WHERE workflow_id=?').get(w.id).n,before);
- for(const value of ['2027-02-30T10:00','2027-03-14T02:30',day(1)+'T10:07'])assert.equal((await req(phasePath(w,p),{actor:'M',method:'PUT',body:{due_at:value}})).status,400);
- assert.equal((await req(phasePath(w,p),{actor:'M',method:'PUT',body:{due_at:day(2)+'T10:00'}})).status,200);
- assert.equal((await req(phasePath(w,p)+'/tasks',{actor:'M',method:'POST',body:{title:'Too late',due_at:day(3)+'T10:00'}})).status,409);
+test('05 phase owner is exactly one; only main owner can hand over, with reason',()=>{
+ const w=create({phases:undefined}),p=w.stages[0];
+ error(()=>engine.updatePhase(w.id,p.id,{responsible_user_id:'W'},user('M')),'WORKFLOW_HANDOVER_REASON_REQUIRED');
+ const d=engine.updatePhase(w.id,p.id,{responsible_user_id:'W',transfer_reason:'Assigned to technician'},user('M'));assert.equal(d.stages[0].responsible_user_id,'W');
+ error(()=>engine.updatePhase(w.id,p.id,{responsible_user_id:'W2',transfer_reason:'Another technician'},user('W')),'WORKFLOW_FORBIDDEN');
+ error(()=>engine.updatePhase(w.id,w.stages[1].id,{title:'Other phase'},user('W')),'WORKFLOW_FORBIDDEN');
+ assert.throws(()=>db.prepare('UPDATE wf2_phases SET responsible_user_id=NULL WHERE id=?').run(p.id),/NOT NULL/);
 });
-test('06: optimistic concurrency rejects stale saves without lost updates',async()=>{
- const w=await create();assert.equal((await req(url+'/workflows/'+w.id,{actor:'M',method:'PUT',body:{version:w.version,title:'First'}})).status,200);
- const r=await req(url+'/workflows/'+w.id,{actor:'M',method:'PUT',body:{version:w.version,title:'Stale'}});assert.equal(r.status,409);assert.equal(db.prepare('SELECT title FROM wf2_workflows WHERE id=?').get(w.id).title,'First');
+test('06 task assignees are multiple, deduplicated, nonempty and default to phase owner',()=>{
+ const w=create(),t=task(w,{assignee_ids:['W','W2','W']});assert.deepEqual(t.assignee_ids,['W','W2']);
+ const defaultTask=task(w,{assignee_ids:undefined});assert.deepEqual(defaultTask.assignee_ids,['M']);
+ error(()=>task(w,{assignee_ids:[]}),'WORKFLOW_ASSIGNEES_REQUIRED');assert.equal(one('SELECT count(*) n FROM workshop_subtasks WHERE phase_id=?',w.stages[0].id).n,2);
 });
-test('07: calendar → phase and notification → task synchronization use ownership, no duplicates',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{responsible_user_id:'W',due_at:day(3)+'T10:00'}});assert.equal(r.status,200);const job=r.data.calendar.find(l=>l.entity_id===p.id).job_id;
- assert.equal((await req('/api/jobs/'+job+'/schedule',{actor:'W2',method:'PATCH',body:{start_time:day(4)+'T10:00'}})).status,403);
- r=await req('/api/jobs/'+job+'/schedule',{actor:'W',method:'PATCH',body:{start_time:day(4)+'T10:00',end_time:day(4)+'T10:15'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(db.prepare('SELECT due_at FROM wf2_phases WHERE id=?').get(p.id).due_at,day(4)+'T10:00');
- r=await req(phasePath(w,p)+'/tasks',{actor:'W',method:'POST',body:{title:'Tuning',due_at:day(1)+'T09:00',assignee_ids:['W2']}});assert.equal(r.status,200);const t=r.data.stages[0].tasks[0],tj=r.data.calendar.find(l=>l.entity_id===t.id).job_id;
- r=await req('/api/notifications/reschedule',{actor:'W2',method:'POST',body:{entity_type:'CALENDAR_JOB',entity_id:tj,target_date:day(2)+'T09:00',reason:'Task moved'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(db.prepare('SELECT due_at FROM wf2_tasks WHERE id=?').get(t.id).due_at,day(2)+'T09:00');
- assert.equal(db.prepare('SELECT count(*) n FROM wf2_calendar_links WHERE entity_id=?').get(t.id).n,1);assert.ok(db.prepare("SELECT count(*) n FROM wf2_audit WHERE workflow_id=? AND action='RESCHEDULE'").get(w.id).n>=2);
- const jobRead=await req('/api/jobs/'+tj,{actor:'W2'});assert.equal(jobRead.data.wf2_workflow_id,w.id);
+test('07 subresponsible can change own due date but cannot change content or assignees',()=>{
+ const w=create(),p=w.stages[0],t=task(w,{due_at:day(5)+'T10:00'});
+ engine.saveTask(w.id,p.id,t.id,{due_at:day(6)+'T10:30'},user('W'));
+ assert.equal(one('SELECT due_at FROM workshop_subtasks WHERE id=?',t.id).due_at,day(6)+'T10:30');
+ for(const body of [{title:'Wrong'},{assignee_ids:['X']},{required:false}])error(()=>engine.saveTask(w.id,p.id,t.id,body,user('W')),'WORKFLOW_FORBIDDEN');
+ error(()=>engine.completeTask(w.id,p.id,t.id,{},user('X')),'WORKFLOW_FORBIDDEN');
+ error(()=>engine.closePhase(w.id,p.id,{},user('W')),'WORKFLOW_FORBIDDEN');
 });
-test('08: mandatory task/checklist gates and approving another assignee preserve assignment',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p)+'/tasks',{actor:'M',method:'POST',body:{title:'Misi work',assignee_ids:['W']}});const t=r.data.stages[0].tasks[0];
- r=await req(phasePath(w,p)+'/checklist',{actor:'M',method:'POST',body:{title:'Inspect',task_id:t.id,required:true}});const c=r.data.stages[0].checklist[0];
- assert.equal((await req(phasePath(w,p)+'/close',{actor:'M',method:'POST',body:{}})).status,409);
- assert.equal((await req(phasePath(w,p)+'/tasks/'+t.id+'/complete',{actor:'W',method:'POST',body:{}})).status,409);
- assert.equal((await req(phasePath(w,p)+'/checklist/'+c.id,{actor:'W',method:'PUT',body:{checked:true}})).status,200);
- assert.equal((await req(phasePath(w,p)+'/tasks/'+t.id+'/complete',{actor:'A',method:'POST',body:{}})).status,400);
- r=await req(phasePath(w,p)+'/tasks/'+t.id+'/complete',{actor:'A',method:'POST',body:{reason:'I verified completion'}});assert.equal(r.status,200);const approved=r.data.stages[0].tasks[0];assert.equal(approved.approved_by,'A');assert.deepEqual(approved.assignee_ids,['W']);assert.ok(r.data.audit.some(a=>a.action==='TASK_APPROVED_FOR_ASSIGNEES'));
- assert.equal((await req(phasePath(w,p)+'/close',{actor:'W',method:'POST',body:{}})).status,403);
+test('08 all cross-workflow and cross-phase IDs are rejected without side effects',()=>{
+ const a=create(),b=create(),t=task(a),before=state();
+ error(()=>engine.updatePhase(b.id,a.stages[0].id,{title:'IDOR'},user('M')),'WORKFLOW_PHASE_NOT_FOUND');
+ error(()=>engine.saveTask(b.id,b.stages[0].id,t.id,{title:'IDOR'},user('M')),'WORKFLOW_TASK_NOT_FOUND');assert.equal(state(),before);
 });
-test('09: manual phase costs post balanced WIP, closeout invoices positive charges once',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p)+'/costs',{actor:'M',method:'POST',body:{title:'Labor',category:'LABOR',amount:100,charge_amount:175}});assert.equal(r.status,200,JSON.stringify(r.data));
- r=await req(phasePath(w,p)+'/close',{actor:'M',method:'POST',body:{}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.stages[0].financial_status,'CLOSED');assert.equal(r.data.status,'ACTIVE');
- for(const row of db.prepare('SELECT entry_id,sum(debit) d,sum(credit) c FROM journal_lines GROUP BY entry_id').all())assert.equal(row.d,row.c);
- for(const other of w.stages.slice(1))assert.equal((await req(phasePath(w,other)+'/close',{actor:'M',method:'POST',body:{}})).status,200);
- r=await req(url+'/workflows/'+w.id+'/close',{actor:'M',method:'POST',body:{payment_method:'Cash'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.status,'COMPLETED');assert.ok(r.data.invoice_id);
- const bill=db.prepare('SELECT * FROM invoices WHERE id=?').get(r.data.invoice_id);assert.equal(bill.subtotal,175);assert.equal(bill.tax_amount,0);assert.equal(db.prepare("SELECT amount FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=?").get('WORKFLOW_INVOICE_REVENUE:'+w.id).amount,175);
- const before=db.prepare('SELECT count(*) n FROM invoices').get().n;assert.equal((await req(url+'/workflows/'+w.id+'/close',{actor:'M',method:'POST',body:{payment_method:'Cash'}})).status,200);assert.equal(db.prepare('SELECT count(*) n FROM invoices').get().n,before);
+test('09 admin mutations require a reason; override audit is itemized',()=>{
+ const w=create(),p=w.stages[0],t=task(w),c=engine.checklist(w.id,p.id,null,{title:'Required inspection',task_id:t.id},user('M')).stages[0].checklist[0];
+ error(()=>engine.update(w.id,{title:'Admin change'},user('A')),'WORKFLOW_OVERRIDE_REASON_REQUIRED');
+ error(()=>engine.closeWorkflow(w.id,{reason:'Emergency override'},user('A')),'WORKFLOW_OVERRIDE_CONFIRMATION_REQUIRED');
+ const result=engine.closeWorkflow(w.id,{reason:'Emergency override',override:true},user('A'));assert.equal(result.status,'COMPLETED');
+ const entries=all("SELECT * FROM wf2_audit WHERE workflow_id=? AND actor_user_id='A'",w.id);
+ assert.ok(entries.some(a=>a.entity_id===t.id));assert.ok(entries.some(a=>a.entity_id===c.id));assert.ok(entries.every(a=>a.reason==='Emergency override'));
 });
-test('10: zero-valued workflow closes without invoice number or financial item',async()=>{
- const w=await create('W',{main_responsible_user_id:'W'}),count=db.prepare('SELECT count(*) n FROM invoices').get().n;
- for(const p of w.stages)assert.equal((await req(phasePath(w,p)+'/close',{actor:'W',method:'POST',body:{}})).status,200);
- const r=await req(url+'/workflows/'+w.id+'/close',{actor:'W',method:'POST',body:{}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.invoice_id,null);assert.equal(db.prepare('SELECT count(*) n FROM invoices').get().n,count);
+test('10 superadmin overrides without required reason or business audit',()=>{
+ const w=create();task(w);const before=one('SELECT count(*) n FROM wf2_audit WHERE workflow_id=?',w.id).n;
+ assert.equal(engine.closeWorkflow(w.id,{},user('SA')).status,'COMPLETED');assert.equal(one('SELECT count(*) n FROM wf2_audit WHERE workflow_id=?',w.id).n,before);
 });
-test('11: Admin override requires reason and confirmation; Superadmin needs neither',async()=>{
- const w=await create();const blocked=await req(url+'/workflows/'+w.id+'/close',{actor:'M',method:'POST',body:{}});assert.equal(blocked.status,409);assert.equal(blocked.data.error,'WORKFLOW_INCOMPLETE');assert.equal(blocked.data.details.phases[0].responsible,'M');
- assert.equal((await req(url+'/workflows/'+w.id+'/close',{actor:'A',method:'POST',body:{override:true}})).status,400);
- let r=await req(url+'/workflows/'+w.id+'/close',{actor:'A',method:'POST',body:{override:true,reason:'Accepted by administrator'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.data.audit.some(a=>a.action==='WORKFLOW_OVERRIDE_CLOSE'));
- const s=await create();r=await req(url+'/workflows/'+s.id+'/close',{actor:'SA',method:'POST',body:{}});assert.equal(r.status,200);assert.ok(!r.data.audit.some(a=>a.actor_user_id==='SA'));
+test('11 strict half-hour validation rejects quarter-hours, invalid dates and DST gaps',()=>{
+ const {localTime}=require('../server/workflow-v2');
+ for(const value of ['2027-02-30T10:00','2027-10-02T09:15','2027-10-02T09:45','2027-10-02T24:00'])error(()=>localTime(value),'WORKFLOW_TIME_INVALID');
+ error(()=>localTime('2027-03-14T02:30'),'WORKFLOW_TIME_DST_GAP');assert.equal(localTime('2027-10-02T09:30'),'2027-10-02T09:30');
+ const before=state();error(()=>create({start_at:day(1)+'T09:15'}),'WORKFLOW_TIME_INVALID');assert.equal(state(),before);
 });
-test('12: document upload/download, checklist deletion and unauthorized writes',async()=>{
- const w=await create(),p=w.stages[0],form=new FormData();form.append('file',new Blob(['%PDF-1.4\nDocument'],{type:'application/pdf'}),'inspection.pdf');
- let r=await req(phasePath(w,p)+'/documents',{actor:'W2',method:'POST',body:form});assert.equal(r.status,403);
- r=await req(phasePath(w,p)+'/documents',{actor:'M',method:'POST',body:form});assert.equal(r.status,200,JSON.stringify(r.data));const d=r.data.stages[0].documents[0];assert.equal(d.original_name,'inspection.pdf');
- const download=await req(url+'/documents/'+d.id,{actor:'W',raw:true});assert.equal(download.status,200);assert.ok(download.data.startsWith('%PDF-'));
- assert.equal((await req(phasePath(w,p)+'/documents/'+d.id,{actor:'W2',method:'DELETE',body:{}})).status,403);
- assert.equal((await req(phasePath(w,p)+'/documents/'+d.id,{actor:'M',method:'DELETE',body:{}})).status,200);
+test('12 phase/task date hierarchy rollback includes data, calendar and audit',()=>{
+ const w=create(),p=w.stages[0],before=state();
+ error(()=>engine.updatePhase(w.id,p.id,{due_at:'2027-11-01T09:00'},user('M')),'WORKFLOW_PHASE_OUTSIDE_DATES');assert.equal(state(),before);
+ engine.updatePhase(w.id,p.id,{due_at:day(8)+'T10:00'},user('M'));const second=state();
+ error(()=>task(w,{due_at:day(9)+'T09:00'}),'WORKFLOW_TASK_OUTSIDE_DATES');assert.equal(state(),second);
 });
-test('13: Admin single-card delete, owner restoration and Superadmin purge preserve shared data',async()=>{
- const w=await create(),p=w.stages[0];assert.equal((await req(phasePath(w,p),{actor:'M',method:'DELETE',body:{reason:'Delete card'}})).status,403);
- let r=await req(phasePath(w,p),{actor:'A',method:'DELETE',body:{reason:'Obsolete phase'}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.stages.length,6);
- r=await req(`${url}/workflows/${w.id}/phases/${p.stage_code}/create`,{actor:'M',method:'POST',body:{}});assert.equal(r.status,200);assert.equal(r.data.stages.length,7);
- assert.equal((await req(url+'/purge',{actor:'A',method:'POST',body:{workflow_id:w.id,confirmation:'DELETE WORKFLOW '+w.id}})).status,403);
- r=await req(url+'/purge',{actor:'SA',method:'POST',body:{workflow_id:w.id,confirmation:'DELETE WORKFLOW '+w.id}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(db.prepare('SELECT * FROM wf2_workflows WHERE id=?').get(w.id),undefined);assert.ok(db.prepare("SELECT id FROM jobs WHERE id='NORMAL'").get());assert.ok(db.prepare("SELECT id FROM contacts WHERE id='C'").get());assert.ok(db.prepare("SELECT id FROM pianos WHERE id='P'").get());assert.deepEqual(db.pragma('foreign_key_check'),[]);
+test('13 optimistic version rejects stale changes and preserves first save',()=>{
+ const w=create();engine.update(w.id,{version:w.version,title:'First edit'},user('M'));const before=state();
+ error(()=>engine.update(w.id,{version:w.version,title:'Lost edit'},user('M')),'WORKFLOW_VERSION_CONFLICT');assert.equal(state(),before);
 });
-test('14: phase settings bilingual names, order, colors, required flag and persisted restart',async()=>{
- const stages=(await req(url+'/phases')).data.stages;stages[0]={...stages[0],name_hu:'Beérkezés új',color:'#123456',required:0,enabled:1,default_status:'IN_PROGRESS'};
- assert.equal((await req(url+'/phases',{actor:'W',method:'PUT',body:{stages}})).status,403);
- assert.equal((await req(url+'/phases',{actor:'A',method:'PUT',body:{stages}})).status,200);
- const init=spawnSync(process.execPath,['server/init-db.js'],{cwd:root,env:process.env,encoding:'utf8'});assert.equal(init.status,0,init.stderr);
- const after=(await req(url+'/phases')).data.stages[0];assert.equal(after.color,'#123456');assert.equal(after.name_hu,'Beérkezés új');assert.equal(after.required,0);
+test('14 calendar rescheduling obeys all three responsibility levels without duplicate jobs',()=>{
+ const w=create({phases:undefined}),p=w.stages[0];engine.updatePhase(w.id,p.id,{responsible_user_id:'W',transfer_reason:'Technician assignment'},user('M'));
+ let detail=engine.detail(w.id,user('M')),phaseJob=detail.calendar.find(j=>j.entity_id===p.id).job_id;
+ error(()=>engine.rescheduleJob(phaseJob,{start_time:day(9)+'T10:00'},user('W2')),'WORKFLOW_FORBIDDEN');
+ engine.rescheduleJob(phaseJob,{start_time:day(9)+'T10:30'},user('W'));assert.equal(one('SELECT due_at FROM wf2_phases WHERE id=?',p.id).due_at,day(9)+'T10:30');
+ const t=task(w,{due_at:day(5)+'T10:00',assignee_ids:['W2']},'W'),tj=engine.detail(w.id,user('M')).calendar.find(j=>j.entity_id===t.id).job_id;
+ engine.rescheduleJob(tj,{target_date:day(6)+'T10:30'},user('W2'));
+ assert.equal(one('SELECT due_at FROM workshop_subtasks WHERE id=?',t.id).due_at,day(6)+'T10:30');
+ assert.equal(one('SELECT COUNT(*) n FROM wf2_calendar_links WHERE entity_id=?',t.id).n,1);
+ const row=engine.calendarRow(one('SELECT * FROM jobs WHERE id=?',tj),user('W2'));assert.equal(row.wf2_phase_id,p.id);assert.equal(row.wf2_can_edit,true);
+ error(()=>engine.rescheduleJob(tj,{target_date:day(7)+'T10:15'},user('W2')),'WORKFLOW_TIME_INVALID');
+ error(()=>engine.rescheduleJob(tj,{target_date:day(7)+'T10:00',assigned_user_id:'X'},user('W2')),'WORKFLOW_ASSIGN_IN_DETAILS');
 });
-test('15: workflow notification snooze is user-specific, close-all and exact expiry',async()=>{
- const w=await create(),job=w.calendar.find(l=>l.entity_type==='FINAL').job_id;
- let r=await req('/api/notifications/active',{actor:'M'});assert.equal(r.status,200);assert.ok(r.data.notifications.some(n=>n.entity_id===job));
- const now=Date.now();r=await req('/api/notifications/snooze-all',{actor:'M',method:'POST',body:{}});assert.equal(r.status,200);assert.ok(Date.parse(r.data.snoozed_until)>=now+10800000);assert.ok(Date.parse(r.data.snoozed_until)<=Date.now()+10800000);
- assert.ok(!(await req('/api/notifications/active',{actor:'M'})).data.notifications.some(n=>n.entity_id===job));assert.ok((await req('/api/notifications/active',{actor:'A'})).data.notifications.some(n=>n.entity_id===job));
+test('15 checklist gates task and phase; progress uses completed task rows',()=>{
+ const w=create(),p=w.stages[0],t=task(w),d=engine.checklist(w.id,p.id,null,{title:'Inspect',task_id:t.id},user('M')),check=d.stages[0].checklist[0];
+ error(()=>engine.completeTask(w.id,p.id,t.id,{},user('W')),'WORKFLOW_CHECKLIST_INCOMPLETE');
+ engine.checklist(w.id,p.id,check.id,{checked:true},user('W'));const done=engine.completeTask(w.id,p.id,t.id,{},user('W'));
+ assert.equal(done.stages[0].progress.completed,1);assert.equal(done.stages[0].progress.total,1);assert.deepEqual(done.stages[0].tasks[0].assignee_ids,['W','W2']);
+ assert.equal(engine.closePhase(w.id,p.id,{},user('M')).status,'ACTIVE');assert.equal(engine.closeWorkflow(w.id,{},user('M')).status,'COMPLETED');
 });
-test('16: notifications complete task/phase without auto-closing workflow',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{due_at:day(1)+'T10:00'}});const j=r.data.calendar.find(l=>l.entity_id===p.id).job_id;
- r=await req('/api/notifications/complete',{actor:'M',method:'POST',body:{entity_type:'CALENDAR_JOB',entity_id:j}});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(db.prepare('SELECT status FROM wf2_phases WHERE id=?').get(p.id).status,'COMPLETED');assert.equal(db.prepare('SELECT status FROM jobs WHERE id=?').get(j).status,'Completed');assert.equal(db.prepare('SELECT status FROM wf2_workflows WHERE id=?').get(w.id).status,'ACTIVE');
- const start=w.calendar.find(l=>l.entity_type==='START').job_id;assert.equal((await req('/api/notifications/complete',{actor:'M',method:'POST',body:{entity_type:'CALENDAR_JOB',entity_id:start}})).status,200);assert.equal(db.prepare('SELECT status FROM jobs WHERE id=?').get(start).status,'Completed');
+test('16 reopen is admin-only, reasoned and visible in checklist/phase state',()=>{
+ const w=create(),p=w.stages[0],t=task(w);engine.completeTask(w.id,p.id,t.id,{},user('W'));engine.closePhase(w.id,p.id,{},user('M'));
+ error(()=>engine.reopenTask(w.id,p.id,t.id,{},user('M')),'WORKFLOW_FORBIDDEN');error(()=>engine.reopenTask(w.id,p.id,t.id,{},user('A')),'WORKFLOW_OVERRIDE_REASON_REQUIRED');
+ const d=engine.reopenTask(w.id,p.id,t.id,{reason:'Quality control recheck'},user('A'));assert.equal(d.stages[0].status,'IN_PROGRESS');assert.equal(d.stages[0].tasks[0].status,'OPEN');
 });
-test('17: real DOM forms, date grid, role-specific controls, API writes and calendar editor reuse (no visual layout)',{skip:!process.env.HAPPY_DOM_MODULE},async()=>{
- const result=await require('./helpers/workflow-v2-ui.cjs').verifyWorkflowUI({base,tokens,day});assert.ok(result.http_calls>10);assert.equal(result.dom,true);
+test('17 cost is posted immediately to WIP, not delayed until phase closure',()=>{
+ const w=create(),c=cost(w);assert.equal(c.approval_status,'APPROVED');assert.ok(c.finance_line_id);assert.equal(wip(w),123.45);
+ const line=one('SELECT * FROM workflow_finance_lines WHERE id=?',c.finance_line_id);assert.ok(line.wip_journal_entry_id);assert.equal(line.final_journal_entry_id,null);
+ assert.equal(one('SELECT status FROM wf2_phases WHERE id=?',w.stages[0].id).status,'WAITING');
 });
-test('18: positive financial closeout rollback, rebill uses client price, targeted purge preserves unrelated money',async()=>{
- const w=await create(),p=w.stages[0];
- assert.equal((await req(phasePath(w,p)+'/costs',{actor:'M',method:'POST',body:{title:'Internal 70, client 190',amount:70,charge_amount:190}})).status,200);
- const before=db.prepare('SELECT COUNT(*) n FROM invoices').get().n;
- let r=await req(url+'/workflows/'+w.id+'/close',{actor:'A',method:'POST',body:{override:true,reason:'Validated administrator override'}});
- assert.equal(r.status,400);assert.equal(db.prepare('SELECT status FROM wf2_workflows WHERE id=?').get(w.id).status,'ACTIVE');
- assert.equal(db.prepare('SELECT COUNT(*) n FROM invoices').get().n,before);assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_finance_lines WHERE workflow_id=?').get(w.id).n,0);
- r=await req(url+'/workflows/'+w.id+'/close',{actor:'A',method:'POST',body:{override:true,reason:'Validated administrator override',payment_method:'Cash'}});assert.equal(r.status,200,JSON.stringify(r.data));const invoiceId=r.data.invoice_id;
- r=await req('/api/invoices/'+invoiceId+'/void',{actor:'A',method:'POST',body:{reason:'Correct payment method'}});assert.equal(r.status,200,JSON.stringify(r.data));
- r=await req('/api/invoices/rebill-source',{actor:'A',method:'POST',body:{source_type:'workflow',source_id:w.id,payment_method:'Cash'}});assert.equal(r.status,409,'A void invoice remains a billed historical source under the protected invoice rules');
- // A legitimately unbilled completed source must use client charges, not internal costs.
- const unbilled=await create(),up=unbilled.stages[0];
- assert.equal((await req(phasePath(unbilled,up)+'/costs',{actor:'M',method:'POST',body:{title:'Imported unbilled source',amount:70,charge_amount:190}})).status,200);
- assert.equal((await req(phasePath(unbilled,up)+'/close',{actor:'M',method:'POST',body:{}})).status,200);
- db.prepare("UPDATE workflow_finance_sources SET current_status='COMPLETED' WHERE id=?").run(unbilled.id);
- db.prepare("UPDATE wf2_workflows SET status='COMPLETED' WHERE id=?").run(unbilled.id);
- r=await req('/api/invoices/rebill-source',{actor:'A',method:'POST',body:{source_type:'workflow',source_id:unbilled.id,payment_method:'Cash'}});assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.invoices[0].subtotal,190);
- const unrelated=db.prepare("SELECT id,amount,source_id FROM financial_items WHERE source_id<>? ORDER BY id").all('WORKFLOW_INVOICE_REVENUE:'+w.id);
- r=await req(url+'/purge',{actor:'SA',method:'POST',body:{workflow_id:w.id,confirmation:'DELETE WORKFLOW '+w.id}});assert.equal(r.status,200,JSON.stringify(r.data));
- assert.equal(db.prepare('SELECT COUNT(*) n FROM invoices WHERE source_id=?').get(w.id).n,0);assert.deepEqual(db.prepare("SELECT id,amount,source_id FROM financial_items ORDER BY id").all(),unrelated);assert.deepEqual(db.pragma('foreign_key_check'),[]);
+test('18 phase-owner cost requires main approval; subresponsible cannot post costs',()=>{
+ const w=create(),p=w.stages[0];engine.updatePhase(w.id,p.id,{responsible_user_id:'W',transfer_reason:'Delegate phase responsibility'},user('M'));
+ const c=cost(w,{},'W');assert.equal(c.approval_status,'PENDING');assert.equal(wip(w),123.45);
+ error(()=>engine.closePhase(w.id,p.id,{},user('W')),'WORKFLOW_COST_APPROVAL_REQUIRED');error(()=>engine.approveCost(w.id,p.id,c.id,{},user('W')),'WORKFLOW_FORBIDDEN');
+ engine.approveCost(w.id,p.id,c.id,{},user('M'));engine.closePhase(w.id,p.id,{},user('W'));assert.equal(wip(w),123.45);
 });
-test('19: deleting a task/phase cleans its own document files; approval notifies assignees',async()=>{
- const w=await create(),p=w.stages[0];let r=await req(phasePath(w,p)+'/tasks',{actor:'M',method:'POST',body:{title:'Documented work',assignee_ids:['W']}});
- const t=r.data.stages[0].tasks[0],form=new FormData();form.append('task_id',t.id);form.append('file',new Blob(['proof']), 'proof.txt');
- r=await req(phasePath(w,p)+'/documents',{actor:'W',method:'POST',body:form});assert.equal(r.status,200);
- const stored=db.prepare('SELECT stored_name FROM wf2_documents WHERE task_id=?').get(t.id).stored_name,file=path.join(temp,'workflow-documents-v2',stored);assert.ok(fs.existsSync(file));
- r=await req(phasePath(w,p)+'/tasks/'+t.id+'/complete',{actor:'A',method:'POST',body:{reason:'Completion verified by admin'}});assert.equal(r.status,200);
- assert.ok(db.prepare("SELECT 1 FROM notifications WHERE recipient_user_id='W' AND notification_type='WORKFLOW_APPROVAL' AND json_extract(metadata_json,'$.task_id')=?").get(t.id));
- assert.equal((await req(phasePath(w,p)+'/tasks/'+t.id,{actor:'M',method:'DELETE',body:{}})).status,200);assert.equal(fs.existsSync(file),false);
- const phaseFile=new FormData();phaseFile.append('file',new Blob(['phase proof']),'phase.txt');r=await req(phasePath(w,p)+'/documents',{actor:'M',method:'POST',body:phaseFile});assert.equal(r.status,200);
- const saved=db.prepare('SELECT stored_name FROM wf2_documents WHERE phase_id=?').get(p.id).stored_name;
- r=await req(phasePath(w,p),{actor:'A',method:'DELETE',body:{reason:'Remove test phase'}});assert.equal(r.status,200);assert.equal(fs.existsSync(path.join(temp,'workflow-documents-v2',saved)),false);
+test('19 injected ledger failure atomically rolls back cost, sources, audit and calendar',()=>{
+ const w=create(),before=state();db.exec("CREATE TEMP TRIGGER ui12_fail_post BEFORE INSERT ON journal_lines BEGIN SELECT RAISE(ABORT,'TEST_LEDGER_FAILURE'); END");
+ try{assert.throws(()=>cost(w),/TEST_LEDGER_FAILURE/);}finally{db.exec('DROP TRIGGER ui12_fail_post');}assert.equal(state(),before);
 });
-test('20: historical custody is read-only; calendar metadata and reassignment cannot bypass responsibility',async()=>{
- db.prepare("INSERT INTO workflow_finance_sources(id,workflow_key,client_id,piano_id,mode,title,final_due_at,current_status,created_by_user_id) VALUES('HISTORY','HISTORY','C','P','INBOUND','Preserved history',?,'COMPLETED','A')").run(day(0)+'T17:00');
- db.exec("INSERT INTO workflow_finance_phases(id,workflow_id,stage_code,stage_order,name_snapshot_en,name_snapshot_hu,assigned_user_id,status) VALUES('HISTORY-P','HISTORY','INBOUND',0,'Intake','Beérkezés','A','COMPLETED')");
- let r=await req(url+'/workflows?status=COMPLETED',{actor:'W'});assert.ok(r.data.workflows.some(w=>w.id==='HISTORY'&&w.historical));
- r=await req(url+'/workflows/HISTORY',{actor:'A'});assert.equal(r.status,200);assert.equal(r.data.permissions.edit_workflow,false);assert.equal((await req(url+'/workflows/HISTORY',{actor:'A',method:'PUT',body:{title:'No rewrite'}})).status,404);
- const w=await create(),p=w.stages[0];r=await req(phasePath(w,p),{actor:'M',method:'PUT',body:{due_at:day(3)+'T10:00',responsible_user_id:'W'}});const jid=r.data.calendar.find(c=>c.entity_id===p.id).job_id;
- r=await req('/api/jobs/'+jid,{actor:'W2'});assert.equal(r.data.wf2_can_edit,false);assert.equal(r.data.calendar_entry_type,'WORKFLOW_V2');
- assert.equal((await req('/api/jobs/'+jid,{actor:'W'})).data.wf2_can_edit,true);
- r=await req('/api/jobs/'+jid+'/schedule',{actor:'W',method:'PATCH',body:{start_time:day(4)+'T10:00',assigned_user_id:'W2'}});assert.equal(r.status,409);assert.equal(db.prepare('SELECT responsible_user_id,due_at FROM wf2_phases WHERE id=?').get(p.id).responsible_user_id,'W');assert.equal(db.prepare('SELECT due_at FROM wf2_phases WHERE id=?').get(p.id).due_at,day(3)+'T10:00');
- assert.equal(db.pragma('integrity_check',{simple:true}),'ok');assert.deepEqual(db.pragma('foreign_key_check'),[]);
+test('20 abandonment needs confirmation; posts balanced loss once, retaining all history',()=>{
+ const w=create();cost(w);const before=state();error(()=>engine.abandonWorkflow(w.id,{},user('M')),'WORKFLOW_DELETE_CONFIRMATION_REQUIRED');assert.equal(state(),before);
+ let d=engine.abandonWorkflow(w.id,{confirmed:true,reason:'Customer cancelled restoration'},user('M'));assert.equal(d.status,'ABORTED');assert.equal(wip(w),0);assert.equal(loss(w),123.45);
+ const n=one('SELECT count(*) n FROM journal_entries').n;engine.abandonWorkflow(w.id,{confirmed:true},user('M'));assert.equal(one('SELECT count(*) n FROM journal_entries').n,n);
+ assert.ok(one('SELECT * FROM wf2_workflows WHERE id=?',w.id));assert.ok(d.calendar.every(j=>j.status==='Cancelled'));
 });
-test('21: close-all survives identical timestamp/random values without snooze primary-key collisions',async()=>{
- const w=await create('W2',{main_responsible_user_id:'W2'}),p=w.stages[0];
- for(let i=0;i<5;i++)assert.equal((await req(phasePath(w,p)+'/tasks',{actor:'W2',method:'POST',body:{title:'Bulk '+i,due_at:day(2)+'T10:00'}})).status,200);
- const clock=Date.now,random=Math.random,fixed=Date.now();
- try{
-  Date.now=()=>fixed;Math.random=()=>0;
-  const r=await req('/api/notifications/snooze-all',{actor:'W2',method:'POST',body:{}});
-  assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.data.count>=7);assert.equal(Date.parse(r.data.snoozed_until),fixed+10800000);
- }finally{Date.now=clock;Math.random=random;}
- assert.equal((await req('/api/notifications/active',{actor:'W2'})).data.notifications.length,0);
- const ids=db.prepare("SELECT id FROM notification_snooze_log WHERE user_id='W2'").all().map(r=>r.id);
- assert.equal(new Set(ids).size,ids.length);assert.ok(ids.every(id=>/^NSZ-[0-9a-f-]{36}$/.test(id)));
+test('21 deleting workflow is loss-posting soft delete; unrelated job survives',()=>{
+ const w=create();cost(w,{amount:64.75});const protectedRow=JSON.stringify(one("SELECT * FROM jobs WHERE id='NORMAL'"));
+ const d=engine.abandonWorkflow(w.id,{confirmed:true,reason:'Delete cancelled workflow'},user('M'),true);assert.equal(d.status,'DELETED');assert.equal(loss(w),64.75);assert.equal(wip(w),0);
+ assert.equal(JSON.stringify(one("SELECT * FROM jobs WHERE id='NORMAL'")),protectedRow);assert.ok(one('SELECT * FROM workflow_finance_sources WHERE id=?',w.id));
+ assert.equal(engine.list(user('M')).some(x=>x.id===w.id),false);
+});
+test('22 phase deletion writes loss, removes task/calendar ownership and permits reactivation',()=>{
+ const w=create(),p=w.stages[0];cost(w);task(w);const d=engine.deletePhase(w.id,p.id,{confirmed:true,reason:'Phase no longer required'},user('M'));
+ assert.equal(d.stages.length,0);assert.equal(d.calendar.length,2);assert.equal(loss(w),123.45);assert.equal(one('SELECT count(*) n FROM workshop_subtasks WHERE phase_id=?',p.id).n,0);
+ assert.equal(engine.addPhase(w.id,'INBOUND',{},user('M')).stages.length,1);assert.deepEqual(db.pragma('foreign_key_check'),[]);
+});
+test('23 posted cost cannot be silently edited; confirmed void writes loss and is excluded at closure',()=>{
+ const w=create(),p=w.stages[0],c=cost(w);error(()=>engine.saveCost(w.id,p.id,c.id,{amount:99},user('M')),'WORKFLOW_POSTED_COST_REQUIRES_ADJUSTMENT');
+ engine.saveCost(w.id,p.id,c.id,{confirmed:true,reason:'Incorrect purchase voided'},user('M'),true);assert.equal(wip(w),0);assert.equal(loss(w),123.45);
+ engine.closePhase(w.id,p.id,{},user('M'));const d=engine.closeWorkflow(w.id,{},user('M'));assert.equal(d.invoice_id,null);assert.equal(loss(w),123.45);
+});
+test('24 workflow close releases WIP once; missing payment method rolls back invoice and journal',()=>{
+ const w=create(),p=w.stages[0];cost(w,{billing_status:'CHARGEABLE',charge_amount:200});engine.closePhase(w.id,p.id,{},user('M'));const before=state();
+ error(()=>engine.closeWorkflow(w.id,{},user('M')),'PAYMENT_METHOD_REQUIRED');assert.equal(state(),before);
+ const d=engine.closeWorkflow(w.id,{payment_method:'Bank Transfer / ACH'},user('M'));assert.equal(d.status,'COMPLETED');assert.ok(d.invoice_id);assert.equal(wip(w),0);assert.equal(total('5000',w),123.45);
+ const n=one('SELECT count(*) n FROM journal_entries').n;engine.closeWorkflow(w.id,{},user('M'));assert.equal(one('SELECT count(*) n FROM journal_entries').n,n);
+ assert.equal(one("SELECT count(*) n FROM invoices WHERE source_type='workflow' AND source_id=?",w.id).n,1);
+});
+test('25 operational reopen cannot duplicate invoice, release or allow writeoff of released costs',()=>{
+ const w=create(),p=w.stages[0];cost(w,{billing_status:'CHARGEABLE',charge_amount:150});engine.closePhase(w.id,p.id,{},user('M'));const closed=engine.closeWorkflow(w.id,{payment_method:'Cash'},user('M'));
+ engine.reopenWorkflow(w.id,{reason:'Operational inspection retry'},user('A'));engine.reopenPhase(w.id,p.id,{reason:'Operational inspection retry'},user('A'));
+ error(()=>cost(w),'WORKFLOW_PHASE_FINANCE_CLOSED');error(()=>engine.abandonWorkflow(w.id,{confirmed:true},user('M')),'WORKFLOW_RELEASED_COST_REQUIRES_ADJUSTMENT');
+ engine.closePhase(w.id,p.id,{},user('M'));const n=one('SELECT count(*) n FROM journal_entries').n;const again=engine.closeWorkflow(w.id,{},user('M'));assert.equal(again.invoice_id,closed.invoice_id);assert.equal(one('SELECT count(*) n FROM journal_entries').n,n);
+});
+test('26 owner/client identity and actual piano model are returned without duplicate labels',()=>{
+ const a=create(),b=create({client_id:'C2'});assert.equal(a.brand,'Steinway & Sons');assert.equal(a.model,'Model B-211');assert.equal(a.owner_is_client,true);assert.equal(b.owner_is_client,false);assert.equal(b.owner_name,'Owner Client');assert.equal(b.client_name,'Other Client');
+});
+test('27 main transfer changes calendar ownership but never creator identity',()=>{
+ const w=create();const d=engine.update(w.id,{main_responsible_user_id:'W',transfer_reason:'Transfer overall responsibility'},user('M'));assert.equal(d.creator_user_id,'C0');assert.equal(d.main_responsible_user_id,'W');
+ for(const j of d.calendar.filter(j=>['START','FINAL'].includes(j.entity_type)))assert.equal(one('SELECT assigned_user_id FROM jobs WHERE id=?',j.job_id).assigned_user_id,'W');
+ error(()=>engine.update(w.id,{title:'Former owner'},user('M')),'WORKFLOW_FORBIDDEN');
+});
+test('28 calendar completion delegates task and final closure to the same domain',()=>{
+ const w=create(),p=w.stages[0],t=task(w),d=engine.detail(w.id,user('M')),taskJob=d.calendar.find(j=>j.entity_id===t.id).job_id,finalJob=d.calendar.find(j=>j.entity_type==='FINAL').job_id;
+ engine.completeJob(taskJob,{},user('W2'));assert.equal(one('SELECT status FROM workshop_subtasks WHERE id=?',t.id).status,'COMPLETED');
+ error(()=>engine.completeJob(finalJob,{},user('W2')),'WORKFLOW_FORBIDDEN');engine.closePhase(w.id,p.id,{},user('M'));assert.equal(engine.completeJob(finalJob,{},user('M')).status,'COMPLETED');
+});
+test('29 active migration is idempotent and never rewrites legacy quarter-hour appointments',()=>{
+ const w=create();db.prepare('UPDATE wf2_workflows SET start_at=? WHERE id=?').run(day(1)+'T09:15',w.id);
+ const migrate=require('../server/workflow-contract-migration').migrateWorkflowContract;migrate(db);migrate(db);
+ assert.equal(one('SELECT start_at FROM wf2_workflows WHERE id=?',w.id).start_at,day(1)+'T09:15');assert.equal(db.pragma('foreign_keys',{simple:true}),1);assert.deepEqual(db.pragma('foreign_key_check'),[]);
+});
+test('30 complete integration database has balanced entries and no orphan keys',()=>{
+ const bad=all('SELECT entry_id,ROUND(SUM(debit-credit),2) delta FROM journal_lines GROUP BY entry_id HAVING ABS(SUM(debit-credit))>0.0001');assert.deepEqual(bad,[]);assert.deepEqual(db.pragma('foreign_key_check'),[]);assert.equal(db.pragma('integrity_check',{simple:true}),'ok');assert.equal(one("SELECT title FROM jobs WHERE id='NORMAL'").title,'Protected normal job');
+});
+
+test('31 deleted task appointments are retired and cannot fall through to ordinary job authorization',()=>{
+ const w=create(),t=task(w),before=engine.detail(w.id,user('M')),j=before.calendar.find(j=>j.entity_id===t.id);
+ engine.deleteTask(w.id,w.stages[0].id,t.id,{confirmed:true},user('M'));
+ assert.equal(engine.link(j.job_id),undefined);assert.ok(engine.retiredJob(j.job_id));assert.equal(engine.jobRights(j.job_id,user('SA')),false);
+ assert.equal(one('SELECT status FROM jobs WHERE id=?',j.job_id).status,'Cancelled');assert.equal(engine.calendarRow(one('SELECT * FROM jobs WHERE id=?',j.job_id),user('M')).wf2_can_edit,false);
+ error(()=>engine.rescheduleJob(j.job_id,{start_time:day(10)+'T12:00'},user('M')),'WORKFLOW_CALENDAR_LINK_NOT_FOUND');
+});
+test('32 half-hour event duration crosses the New York spring gap without nonexistent local end time',()=>{
+ const w=create({start_at:'2027-03-14T01:30',final_due_at:'2027-03-15T17:00',phases:[]});const start=w.calendar.find(j=>j.entity_type==='START');assert.equal(start.end_time,'2027-03-14T03:00');
 });
