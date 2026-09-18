@@ -1910,12 +1910,16 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   preliminary_quote_amount REAL DEFAULT 0,
   started_at TEXT,
   completed_at TEXT,
+  reopened_at TEXT,
+  reopened_by_user_id TEXT,
+  reopen_reason TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(workflow_id,stage_code),
   FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS workshop_subtasks (
@@ -1929,7 +1933,10 @@ CREATE TABLE IF NOT EXISTS workshop_subtasks (
   delay_reason TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
+  completed_at TEXT,
+  completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reopened_at TEXT,
+  reopened_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id);
@@ -1987,6 +1994,10 @@ CREATE TABLE IF NOT EXISTS workflow_financial_lines (
   partner_id TEXT,
   payable_invoice_id TEXT,
   posted_financial_item_id TEXT,
+  wip_journal_entry_id TEXT,
+  final_journal_entry_id TEXT,
+  writeoff_journal_entry_id TEXT,
+  accounting_status TEXT NOT NULL DEFAULT 'WIP' CHECK(accounting_status IN ('WIP','RELEASED','WRITTEN_OFF')),
   created_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -1995,6 +2006,9 @@ CREATE TABLE IF NOT EXISTS workflow_financial_lines (
   FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
   FOREIGN KEY(payable_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
   FOREIGN KEY(posted_financial_item_id) REFERENCES financial_items(id) ON DELETE SET NULL,
+  FOREIGN KEY(wip_journal_entry_id) REFERENCES journal_entries(id) ON DELETE SET NULL,
+  FOREIGN KEY(final_journal_entry_id) REFERENCES journal_entries(id) ON DELETE SET NULL,
+  FOREIGN KEY(writeoff_journal_entry_id) REFERENCES journal_entries(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
