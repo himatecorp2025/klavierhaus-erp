@@ -383,6 +383,21 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       .run(assignee.id, assignee.name, workflow.job_id);
   }
 
+  function syncLinkedWorkflowJobDeadline(workflow, dueAt) {
+    if (!workflow?.job_id || !dueAt) return null;
+    const job = db.prepare("SELECT id,start_time,end_time FROM jobs WHERE id=?").get(workflow.job_id);
+    if (!job) return null;
+    const parseMinutes = (value) => {
+      const text=localDateTime(value),match=text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+      return match ? Math.floor(Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]),Number(match[4]),Number(match[5]))/60000) : null;
+    };
+    const startMinutes=parseMinutes(job.start_time),endMinutes=parseMinutes(job.end_time);
+    const duration=(startMinutes!=null&&endMinutes!=null&&endMinutes>startMinutes)?Math.max(SCHEDULE_INTERVAL_MINUTES,endMinutes-startMinutes):SCHEDULE_INTERVAL_MINUTES;
+    const nextEnd=localDateTime(dueAt),nextStart=shiftLocalMinutes(nextEnd,-duration);
+    db.prepare("UPDATE jobs SET start_time=?,end_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nextStart,nextEnd,job.id);
+    return { id:job.id,start_time:nextStart,end_time:nextEnd };
+  }
+
   function activateNextStage(workflow, completedStage, req) {
     const next = nextStageFor(workflow.id, completedStage.stage_order);
     if (!next || !stageCanStart(workflow, next)) return null;
@@ -630,8 +645,9 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.patch("/api/workflows/:id/stages/:stageId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
-      if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
-      if (stage.status === "ABORTED") throw error("WORKFLOW_STAGE_ABORTED");
+      const suppliedKeys=Object.keys(body).filter((key)=>body[key]!==undefined),deadlineOnly=suppliedKeys.length>0&&suppliedKeys.every((key)=>key==="due_at");
+      if (workflow.current_status !== "ACTIVE" && !(isAdmin(req.user) && deadlineOnly)) throw error("WORKFLOW_NOT_ACTIVE");
+      if (stage.status === "ABORTED" && !(isAdmin(req.user) && deadlineOnly)) throw error("WORKFLOW_STAGE_ABORTED");
       const changes = [], values = [];
       if (body.status !== undefined) {
         const status = clean(body.status, 30).toUpperCase();
@@ -653,11 +669,11 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       if (body.notes !== undefined) { changes.push("notes=?"); values.push(clean(body.notes)); }
       if (body.card_title !== undefined) { changes.push("card_title=?"); values.push(clean(body.card_title, 240)); }
       if (body.block_reason !== undefined) { changes.push("block_reason=?"); values.push(clean(body.block_reason, 2000)); }
+      let validatedDue = null;
       if (body.due_at !== undefined) {
         if (!isAdmin(req.user)) throw error("STAGE_DEADLINE_NOT_ALLOWED");
-        const due = localDateTime(body.due_at); if (!due) throw error("INVALID_STAGE_DEADLINE");
-        if (stage.stage_code === "FINAL_HANDOVER") throw error("FINAL_DEADLINE_IMMUTABLE");
-        changes.push("due_at=?"); values.push(due);
+        validatedDue = localDateTime(body.due_at); if (!validatedDue) throw error("INVALID_STAGE_DEADLINE");
+        changes.push("due_at=?"); values.push(validatedDue);
       }
       if (body.assigned_user_id !== undefined) {
         const assignee = userById(validId(body.assigned_user_id));
@@ -678,15 +694,20 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         if (body.preliminary_quote_amount !== undefined) { changes.push("preliminary_quote_amount=?"); values.push(Math.max(0, numeric(body.preliminary_quote_amount))); }
       }
       if (!changes.length) return res.json(decorateWorkflow(workflowById(workflow.id), true));
-      values.push(stage.id);
-      db.prepare(`UPDATE workflow_stages SET ${changes.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...values);
-      db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
-      const updatedStage = stageById(stage.id);
-      if (updatedStage.status === "IN_PROGRESS" || body.assigned_user_id !== undefined) syncLinkedJobAssignee(workflow, updatedStage);
-      directAudit(req, "WORKFLOW_STAGE_UPDATED", stage.id, stage, updatedStage, "Workshop stage updated");
-      notifyAssigned(updatedStage, workflow, req.user);
-      const response = decorateWorkflow(workflowById(workflow.id), true);
-      if (body.status && clean(body.status, 30).toUpperCase() === "COMPLETED") response.next_stage_activation = activateNextStage(workflow, updatedStage, req);
+      let linkedJobSchedule = null;
+      db.transaction(() => {
+        db.prepare(`UPDATE workflow_stages SET ${changes.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...values,stage.id);
+        if (validatedDue && stage.stage_code === "FINAL_HANDOVER") {
+          db.prepare("UPDATE workshop_workflows SET final_due_at=?,due_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(validatedDue,validatedDue.slice(11,16),workflow.id);
+          linkedJobSchedule=syncLinkedWorkflowJobDeadline(workflow,validatedDue);
+        } else db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+      })();
+      const updatedStage = stageById(stage.id),updatedWorkflow=workflowById(workflow.id);
+      if (updatedStage.status === "IN_PROGRESS" || body.assigned_user_id !== undefined) syncLinkedJobAssignee(updatedWorkflow, updatedStage);
+      directAudit(req, "WORKFLOW_STAGE_UPDATED", stage.id, stage, { ...updatedStage, linked_job_schedule:linkedJobSchedule }, "Workshop stage updated");
+      notifyAssigned(updatedStage, updatedWorkflow, req.user);
+      const response = decorateWorkflow(updatedWorkflow, true);
+      if (body.status && clean(body.status, 30).toUpperCase() === "COMPLETED") response.next_stage_activation = activateNextStage(updatedWorkflow, updatedStage, req);
       res.json(response);
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message, ...(e.pendingSubtasks ? { pending_subtasks: e.pendingSubtasks } : {}) }); }
   });
