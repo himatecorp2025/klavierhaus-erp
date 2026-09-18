@@ -418,6 +418,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     return /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate >= issueDate ? eventDate : issueDate;
   }
   function ensureTicketInvoice(ticket, event, { status = null } = {}) {
+    if(ticket?.finance_reset)throw Object.assign(new Error("FINANCIAL_SOURCE_RESET"),{status:409});
     if (!ticket || Number(ticket.price_cents || 0) <= 0) return null;
     const invoiceEngine = engine();
     let invoice = ticket.invoice_id ? invoiceEngine.invoiceDetail(ticket.invoice_id) : null;
@@ -459,6 +460,7 @@ function createBusinessDocumentService({ db, uploadDir, transactionalEmail, webs
     return invoice;
   }
   function ensurePaymentInvoice(payment, event, tickets) {
+    if(payment?.finance_reset)throw Object.assign(new Error("FINANCIAL_SOURCE_RESET"),{status:409});
     const invoiceEngine = engine();
     let invoice = payment.invoice_id ? invoiceEngine.invoiceDetail(payment.invoice_id) : null;
     if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`payment:${payment.id}`);
@@ -650,11 +652,11 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       p.company_name AS partner_name,p.tax_id AS partner_tax_id,p.billing_address AS partner_billing_address,p.contact_person AS partner_contact_person,p.contact_email AS partner_contact_email,p.contact_phone AS partner_contact_phone,p.default_tax_rate AS partner_default_tax_rate
       FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id WHERE i.id=?`).get(id);
     if (!invoice) return null;
-    const partnerCounterparty = Boolean(invoice.partner_id);
+    const partnerCounterparty = Boolean(invoice.partner_id) || invoice.direction === "payable";
     return {
       ...invoice,
       counterparty_type: partnerCounterparty ? "partner" : "client",
-      counterparty_name: partnerCounterparty ? (invoice.partner_name || "Partner") : (invoice.client_company || invoice.client_name || "Client"),
+      counterparty_name: partnerCounterparty ? (invoice.partner_name || "Supplier not specified") : (invoice.client_company || invoice.client_name || "Client"),
       counterparty_address: partnerCounterparty ? (invoice.partner_billing_address || "") : (invoice.client_billing_address || invoice.client_address || ""),
       counterparty_tax_id: partnerCounterparty ? (invoice.partner_tax_id || "") : (invoice.client_tax_id || ""),
       counterparty_contact: partnerCounterparty ? (invoice.partner_contact_person || "") : (invoice.client_name || ""),
@@ -778,6 +780,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
   }
   function createJobInvoices({ job, actor = {}, now = new Date().toISOString(), entries = [] }) {
+    if (Number(job.finance_reset) === 1) throw Object.assign(new Error("FINANCIAL_SOURCE_RESET"), {status:409});
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const method = paymentMethod(entries.find((entry) => entry.mainType !== "EXPENSE")?.paymentMethod || job.payment_method || null);
@@ -814,25 +817,29 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     return db.prepare("SELECT * FROM financial_items WHERE id=?").get(id);
   }
 
-  function createWorkflowPayableInvoice({ workflow, stage = null, line, partner, actor = {}, now = new Date().toISOString() }) {
-    if (!workflow || !line || !partner) throw Object.assign(new Error("WORKFLOW_PARTNER_PAYABLE_DATA_REQUIRED"), { status: 400 });
+  function createWorkflowPayableInvoice({ workflow, stage = null, line, partner, actor = {}, now = new Date().toISOString(), internalSettlement = false, aborted = false, reason = "" }) {
+    if (!workflow || !line || (!partner && !internalSettlement)) throw Object.assign(new Error("WORKFLOW_PARTNER_PAYABLE_DATA_REQUIRED"), { status: 400 });
     if (!(money(line.amount) > 0)) return null;
     const issueDate = String(now).slice(0, 10);
     const invoice = createInvoice({
-      direction: "payable", issueDate, dueDate: issueDate, partnerId: partner.id, sourceType: "workflow", sourceId: `WORKFLOW_LINE:${line.id}`,
-      summary: `${stage?.name_snapshot_en || line.title || "Workflow phase"} · ${workflow.title || workflow.id}`, taxRate: Number(partner.default_tax_rate || 0),
+      direction: "payable", issueDate, dueDate: issueDate, partnerId: partner?.id || null, sourceType: "workflow", sourceId: `WORKFLOW_LINE:${line.id}`,
+      summary: `${stage?.name_snapshot_en || line.title || "Workflow phase"} · ${workflow.title || workflow.id}${aborted ? " | Workflow aborted: " + clean(reason,1000) : ""}`, taxRate: internalSettlement ? 0 : Number(partner?.default_tax_rate || 0),
       paymentMethod: null, status: "issued", items: [{ item_description: line.title || line.description || "Workflow partner cost", quantity: 1, unit_price: Number(line.amount || 0), line_type: "fee" }]
     });
+    if (invoice && internalSettlement) db.prepare("UPDATE invoices SET document_status='MISSING',workflow_outcome=? WHERE id=?").run(aborted?'ABORTED':'COMPLETED',invoice.id);
     return invoice;
   }
 
-  function createWorkflowInvoice({ workflow, stages = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null }) {
+  function createWorkflowInvoice({ workflow, stages = [], lines = [], actor = {}, now = new Date().toISOString(), paymentMethod: requestedPaymentMethod = null, revenueTotal = null }) {
+    const operational=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wf2_workflows'").get()?db.prepare("SELECT * FROM wf2_workflows WHERE id=?").get(workflow.id):null;
+    if (operational?.finance_reset) throw Object.assign(new Error("WORKFLOW_FINANCE_RESET_LOCKED"),{status:409});
+    if (operational && !operational.finance_locked && revenueTotal === null) throw Object.assign(new Error("WORKFLOW_NOT_FINANCIALLY_FINALIZED"),{status:409});
     const issueDate = String(now).slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00Z`); due.setUTCDate(due.getUTCDate() + 30);
     const method = paymentMethod(requestedPaymentMethod);
     const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_finance_phases WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id)).filter((stage) => stage.status !== "NOT_REQUIRED");
     const costLines = (lines || []).filter((row) => row.line_type === "COST" && String(row.accounting_status || "WIP") !== "WRITTEN_OFF");
-    const items = phaseRows.map((stage) => {
+    const items = revenueTotal !== null ? (money(revenueTotal)>0 ? [{item_description:workflow.title || "Completed workflow",quantity:1,unit_price:money(revenueTotal),line_type:"fee"}] : []) : phaseRows.map((stage) => {
       const phaseSubtotal = workflowBillablePhaseSubtotal(costLines.filter((row) => String(row.stage_id || "") === String(stage.id)));
       if (phaseSubtotal < 0) throw Object.assign(new Error("WORKFLOW_PHASE_CREDIT_EXCEEDS_CHARGEABLE_TOTAL"), { status: 409 });
       const phaseName = stage.name_snapshot_en || stage.card_title || stage.stage_code || `Phase ${Number(stage.stage_order || 0) + 1}`;
@@ -882,7 +889,7 @@ function registerBusinessOperationsRoutes(options) {
   }
   if (invoiceEngine) {
     const invoiceSelect = `SELECT i.*,c.name AS client_name,p.company_name AS partner_name,
-      CASE WHEN i.partner_id IS NOT NULL THEN COALESCE(p.company_name,i.summary,'Partner') ELSE COALESCE(c.company,c.name,i.summary,'Client') END AS counterparty_name
+      CASE WHEN i.partner_id IS NOT NULL OR i.direction='payable' THEN COALESCE(NULLIF(p.company_name,''),'Supplier not specified') ELSE COALESCE(NULLIF(c.company,''),c.name,i.summary,'Client') END AS counterparty_name
       FROM invoices i LEFT JOIN contacts c ON c.id=i.client_id LEFT JOIN partners p ON p.id=i.partner_id`;
     function adjustmentStamp() {
       const adjustedAt = new Date();
