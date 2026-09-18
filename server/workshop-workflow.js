@@ -11,6 +11,11 @@ const DEFAULT_STAGES=Object.freeze([
  ['FINAL_HANDOVER','Final Quality Control & Delivery','Végső Minőségellenőrzés és Kiszállítás']
 ]);
 function registerWorkshopWorkflowRoutes({app,db,auth,permit,requireSuperadmin,rid}) {
+ // Prevent the temporary Phase I mutation routes from bypassing the new domain.
+ app.use('/api/workshop-shell',auth,(req,res,next)=>{
+  if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&db.prepare('SELECT 1 FROM wf2_workflows LIMIT 1').get())return res.status(409).json({error:'WORKFLOW_USE_V2_API'});
+  next();
+ });
  const seed=db.prepare('INSERT OR IGNORE INTO workshop_phase_definitions(id,code,name_en,name_hu,sort_order,active,is_system) VALUES(?,?,?,?,?,1,1)');
  db.transaction(()=>DEFAULT_STAGES.forEach(([code,en,hu],i)=>{seed.run(`WSD-${code}`,code,en,hu,i);db.prepare('UPDATE workshop_phase_definitions SET active=1 WHERE code=?').run(code);}))();
  const definitions=()=>db.prepare(`SELECT * FROM workshop_phase_definitions WHERE code IN (${DEFAULT_STAGES.map(()=>'?').join(',')}) ORDER BY sort_order,id`).all(...DEFAULT_STAGES.map(([code])=>code));
