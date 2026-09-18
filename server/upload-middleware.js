@@ -206,7 +206,12 @@ function uploadErrorHandler(err,req,res,next){
   if(err.message==="Unexpected end of form"||err.message==="Unexpected end of multipart data"){
     return res.status(400).json({error:"INVALID_MULTIPART_FORM"});
   }
-  return res.status(400).json({error:err.message||"UPLOAD_ERROR"});
+  // File filters deliberately raise stable validation codes. Everything else
+  // is an application fault and must reach the central 500 handler without
+  // exposing its internal message to the client.
+  const code=String(err?.code||err?.message||"");
+  if(/^(?:INVALID_|FILE_TOO_|UPLOAD_)/.test(code)) return res.status(400).json({error:code});
+  return next(err);
 }
 
 module.exports={
