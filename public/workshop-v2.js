@@ -38,6 +38,7 @@ window.WorkshopV2 = (() => {
     WORKFLOW_TIME_INVALID: ['Choose a valid date and a 30-minute time slot.', 'V\u00e1lassz \u00e9rv\u00e9nyes d\u00e1tumot \u00e9s 30 perces id\u0151s\u00e1vot.'],
     WORKFLOW_TIME_DST_GAP: ['That New York time does not exist due to the clock change.', 'Ez a New York-i id\u0151pont az \u00f3ra\u00e1t\u00e1ll\u00edt\u00e1s miatt nem l\u00e9tezik.'],
     WORKFLOW_DATE_ORDER: ['The deadline cannot precede the start.', 'A hat\u00e1rid\u0151 nem el\u0151zheti meg a kezd\u00e9st.'],
+    WORKFLOW_START_BEFORE_TODAY: ['A new workflow cannot start before today.', 'Az \u00faj workflow kezdete nem lehet a mai napn\u00e1l kor\u00e1bbi.'],
     WORKFLOW_PHASE_OUTSIDE_DATES: ['The phase must stay within the workflow dates.', 'A f\u00e1zis hat\u00e1ridej\u00e9nek a workflow id\u0151hat\u00e1rain bel\u00fcl kell maradnia.'],
     WORKFLOW_TASK_OUTSIDE_DATES: ['The task must stay within its phase deadline.', 'A r\u00e9szfeladat nem l\u00e9pheti t\u00fal a f\u00e1zis hat\u00e1ridej\u00e9t.'],
     WORKFLOW_OVERRIDE_CONFIRMATION_REQUIRED: ['Confirm the administrative override.', 'Er\u0151s\u00edtsd meg az adminisztr\u00e1tori fel\u00fclb\u00edr\u00e1l\u00e1st.'],
@@ -255,7 +256,7 @@ window.WorkshopV2 = (() => {
     const form=state.dialog?.querySelector('[data-wf-form=create]');
     if(form){
       const start=form.querySelector('[name=start_at]').value,final=form.querySelector('[name=final_due_at]').value;
-      bounds(form.querySelector('[data-date-name=start_at]'),'',final);bounds(form.querySelector('[data-date-name=final_due_at]'),start,'');
+      bounds(form.querySelector('[data-date-name=start_at]'),nyDay()+'T00:00','');bounds(form.querySelector('[data-date-name=final_due_at]'),start,'');
       for(const phase of form.querySelectorAll('[data-create-phase]')){
         const phaseDate=phase.querySelector('.wf2-date');if(phaseDate.dataset.inherited==='1')writeDate(phaseDate,final);bounds(phaseDate,start,final);
         for(const task of phase.querySelectorAll('.wf2-plan-task')){const date=task.querySelector('.wf2-date');if(date.dataset.inherited==='1')writeDate(date,phaseDate.querySelector('input').value);bounds(date,start,phaseDate.querySelector('input').value||final);}
@@ -449,7 +450,7 @@ window.WorkshopV2 = (() => {
     for (const result of results) if (result.status === 'rejected') console.warn('Workflow view refresh:', result.reason);
     document.dispatchEvent(new CustomEvent('workflow-changed', { detail: { workflowId: state.workflow?.id || null } }));
   }
-  async function mutate(path, method, payload = {}, formData = null) {
+  async function mutate(path, method, payload = {}, formData = null, openResult = true) {
     if (state.busy) return null;
     const reason = await adminReason(); if (reason === null || state.busy) return null;
     if (reason) payload.reason = reason;
@@ -461,7 +462,7 @@ window.WorkshopV2 = (() => {
       else request.body = JSON.stringify(payload);
       const result = await api(path, request);
       if (sequence !== state.sequence) return result;
-      if (result?.id && Array.isArray(result.stages)) { state.workflow = result; state.mode = 'details'; state.dirty = false; renderDetails(); }
+      if (result?.id && Array.isArray(result.stages)) { state.workflow = result; state.dirty = false; if (openResult) { state.mode = 'details'; renderDetails(); } }
       await refreshViews(); return result;
     } finally { if (sequence === state.sequence) setBusy(false); }
   }
@@ -487,7 +488,9 @@ window.WorkshopV2 = (() => {
         })
       }));
       for(const key of Object.keys(body))if(key.startsWith('phase_due_')||key.startsWith('task_')||['assignee_ids','piano_choice'].includes(key))delete body[key];
-      await mutate(base + '/workflows', 'POST', body); return;
+      const created = await mutate(base + '/workflows', 'POST', body, null, false);
+      if (created) { state.dirty = false; await close(true); }
+      return;
     }
     if (kind === 'settings') {
       const stages = [...form.querySelectorAll('[data-setting-code]')].map(section => ({ code: section.dataset.settingCode, name_en: section.querySelector('[name=name_en]').value.trim(), name_hu: section.querySelector('[name=name_hu]').value.trim(), sort_order: Number(section.querySelector('[name=sort_order]').value), color: section.querySelector('[name=color]').value, enabled: section.querySelector('[name=enabled]').checked, required: section.querySelector('[name=required]').checked, default_status: section.querySelector('[name=default_status]').value }));
