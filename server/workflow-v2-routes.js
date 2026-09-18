@@ -16,9 +16,13 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
  app.get(`${base}/workflows/:id`,wrap(req=>engine.detail(req.params.id,req.user)));
  app.put(`${base}/workflows/:id`,wrap(req=>engine.update(req.params.id,body(req),req.user)));
  app.post(`${base}/workflows/:id/close`,wrap(req=>engine.closeWorkflow(req.params.id,body(req),req.user)));
+ app.post(`${base}/workflows/:id/reopen`,wrap(req=>engine.reopenWorkflow(req.params.id,body(req),req.user)));
+ app.post(`${base}/workflows/:id/abort`,wrap(req=>engine.abandonWorkflow(req.params.id,body(req),req.user,false)));
+ app.delete(`${base}/workflows/:id`,wrap(req=>engine.abandonWorkflow(req.params.id,body(req),req.user,true)));
  app.post(`${base}/workflows/:id/phases/:code/create`,wrap(req=>engine.addPhase(req.params.id,req.params.code,body(req),req.user)));
  app.put(`${base}/workflows/:id/phases/:phaseId`,wrap(req=>engine.updatePhase(...p(req),body(req),req.user)));
  app.post(`${base}/workflows/:id/phases/:phaseId/close`,wrap(req=>engine.closePhase(...p(req),body(req),req.user)));
+ app.post(`${base}/workflows/:id/phases/:phaseId/reopen`,wrap(req=>engine.reopenPhase(...p(req),body(req),req.user)));
  app.delete(`${base}/workflows/:id/phases/:phaseId`,wrap(req=>{
   const files=db.prepare('SELECT stored_name FROM wf2_documents WHERE phase_id=?').all(req.params.phaseId);
   const result=engine.deletePhase(...p(req),body(req),req.user);
@@ -27,12 +31,14 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
  app.post(`${base}/workflows/:id/phases/:phaseId/tasks`,wrap(req=>engine.saveTask(...p(req),null,body(req),req.user)));
  app.put(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId`,wrap(req=>engine.saveTask(...p(req),req.params.taskId,body(req),req.user)));
  app.post(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId/complete`,wrap(req=>engine.completeTask(...p(req),req.params.taskId,body(req),req.user)));
+ app.post(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId/reopen`,wrap(req=>engine.reopenTask(...p(req),req.params.taskId,body(req),req.user)));
  app.delete(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId`,wrap(req=>{
   const files=db.prepare('SELECT stored_name FROM wf2_documents WHERE task_id=? AND phase_id=?').all(req.params.taskId,req.params.phaseId);
   const result=engine.deleteTask(...p(req),req.params.taskId,body(req),req.user);
   for(const f of files)fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
  }));
  app.post(`${base}/workflows/:id/phases/:phaseId/costs`,wrap(req=>engine.saveCost(...p(req),null,body(req),req.user)));
+ app.post(`${base}/workflows/:id/phases/:phaseId/costs/:costId/approve`,wrap(req=>engine.approveCost(...p(req),req.params.costId,body(req),req.user)));
  app.put(`${base}/workflows/:id/phases/:phaseId/costs/:costId`,wrap(req=>engine.saveCost(...p(req),req.params.costId,body(req),req.user)));
  app.delete(`${base}/workflows/:id/phases/:phaseId/costs/:costId`,wrap(req=>engine.saveCost(...p(req),req.params.costId,body(req),req.user,true)));
  app.post(`${base}/workflows/:id/phases/:phaseId/checklist`,wrap(req=>engine.checklist(...p(req),null,body(req),req.user)));
@@ -60,20 +66,20 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
   const result=engine.removeDocument(...p(req),req.params.docId,body(req),req.user);if(doc)fs.rmSync(path.join(documentsDir,path.basename(doc.stored_name)),{force:true});return result;
  }));
  app.get(`${base}/purge-preview`,wrap(req=>engine.purgePreview(req.query.id||null,req.user)));
- app.post(`${base}/purge`,wrap(req=>{
-  const key=req.body.workflow_id||null;
-  const files=db.prepare('SELECT d.stored_name FROM wf2_documents d JOIN wf2_phases p ON p.id=d.phase_id WHERE (? IS NULL OR p.workflow_id=?)').all(key,key);
-  const result=engine.purge(key,body(req),req.user);for(const f of files)fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
- }));
+ // Compatibility endpoint is now a loss-posting soft delete. Retain attachments,
+ // invoices, journals and the audit trail along with the retained workflow rows.
+ app.post(`${base}/purge`,wrap(req=>engine.purge(req.body.workflow_id||null,body(req),req.user)));
  // Calendar writes must use the same per-entity authorization as the details UI.
  app.use('/api/jobs',auth,(req,res,next)=>{
   if(!['POST','PUT','PATCH','DELETE'].includes(req.method))return next();
   const match=req.path.match(/^\/([^/]+)(?:\/(.*))?$/);if(!match)return next();
-  const job=db.prepare('SELECT id FROM jobs WHERE id=? OR job_key=?').get(match[1],match[1]);if(!job||!engine.link(job.id))return next();
+  const job=db.prepare('SELECT id FROM jobs WHERE id=? OR job_key=?').get(match[1],match[1]);if(!job)return next();
+  if(engine.retiredJob(job.id))return res.status(409).json({error:'WORKFLOW_RETIRED_CALENDAR_JOB'});
+  if(!engine.link(job.id))return next();
   wrap(()=>{
    if((req.method==='PATCH'&&match[2]==='schedule')||(req.method==='PUT'&&!match[2])){
     if(!req.body.start_time)throw new Error('WORKFLOW_USE_DETAILS');
-    const result=engine.rescheduleJob(job.id,body(req),req.user);return {...db.prepare('SELECT * FROM jobs WHERE id=?').get(job.id),wf2_workflow_id:result.id};
+    engine.rescheduleJob(job.id,body(req),req.user);return engine.calendarRow(db.prepare('SELECT * FROM jobs WHERE id=?').get(job.id),req.user);
    }
    if(req.method==='POST'&&match[2]==='close')return engine.completeJob(job.id,body(req),req.user);
    return res.status(409).json({error:'WORKFLOW_USE_DETAILS'});
