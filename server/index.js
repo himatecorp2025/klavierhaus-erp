@@ -859,7 +859,7 @@ registerBusinessOperationsRoutes({
   jobDomain,
   invoiceEngine
 });
-registerWorkshopWorkflowRoutes({
+const workshopWorkflowNotificationService = registerWorkshopWorkflowRoutes({
   app,
   db,
   auth,
@@ -1345,15 +1345,8 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
       const updated=run();audit(req,'RESCHEDULE','contacts',entityId,before,updated,1,reason,'TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
     }
     if(entityType==='WORKFLOW_STAGE'){
-      const before=db.prepare(`SELECT s.*,w.current_status,w.created_by_user_id FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.id=?`).get(entityId);if(!before)return res.status(404).json({error:'WORKFLOW_STAGE_NOT_FOUND'});
-      if(before.current_status!=='ACTIVE'||['COMPLETED','NOT_REQUIRED','ABORTED'].includes(String(before.status||'')))return res.status(400).json({error:'WORKFLOW_STAGE_NOT_ACTIVE'});
-      if(!canManageWorkflowStage(req.user,before))return res.status(403).json({error:'WORKFLOW_STAGE_RESCHEDULE_FORBIDDEN'});
-      const updated=db.transaction(()=>{
-        db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(before.delay_reason,reason,'Rescheduled / Újraütemezve'),entityId);
-        db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(before.workflow_id);
-        return db.prepare('SELECT * FROM workflow_stages WHERE id=?').get(entityId);
-      })();
-      audit(req,'RESCHEDULE','workshop_workflow',entityId,before,updated,1,reason,'WORK');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
+      const result=workshopWorkflowNotificationService.rescheduleStageFromNotification({stageId:entityId,actor:req.user,targetDate,reason});
+      return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:result.target_date,calendar_job_id:result.calendar_job?.id||null});
     }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
     if(!canEditJob(req.user,before))return res.status(403).json({error:'JOB_EDIT_FORBIDDEN'});
@@ -1361,23 +1354,27 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
     if(!isScheduleTime(targetDate))return res.status(400).json({error:'INVALID_SCHEDULE_TIME',interval_minutes:SCHEDULE_INTERVAL_MINUTES});
     const duration=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(before.start_time,before.end_time)||SCHEDULE_INTERVAL_MINUTES),endTime=notificationJobEnd(targetDate,duration);
     const assigned=resolveActiveUser(before.assigned_user_id,before.assigned_to);
+    const linkedStage=db.prepare(`SELECT s.*,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.calendar_job_id=?`).get(before.id);
     let assigneeChanged=false;
-    if(assigned){
-      const result=jobDomain.patchJobSchedule({jobId:before.id,startTime:targetDate,endTime,assignedUser:assigned,actor:req.user,reassignmentNote:reason,findConflicts:findScheduleConflicts});
-      assigneeChanged=result.assigneeChanged;
-    }else{
-      const minutes=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(targetDate,endTime)||duration);
-      const moveUnassigned=db.transaction(()=>{
+    db.transaction(()=>{
+      if(assigned){
+        const result=jobDomain.patchJobSchedule({jobId:before.id,startTime:targetDate,endTime,assignedUser:assigned,actor:req.user,reassignmentNote:reason,findConflicts:findScheduleConflicts});
+        assigneeChanged=result.assigneeChanged;
+      }else{
+        const minutes=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(targetDate,endTime)||duration);
         db.prepare(`UPDATE jobs SET start_time=?,end_time=?,planned_minutes=?,planned_hours=?,timezone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetDate,endTime,minutes,minutes/60,JOB_TIMEZONE,before.id);
-        if(before.workflow_id){
-          db.prepare('UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(endTime,before.workflow_id);
-          db.prepare(`UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'`).run(endTime,before.workflow_id);
-        }
-      });
-      moveUnassigned();
-    }
+      }
+      if(linkedStage){
+        db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(linkedStage.delay_reason,reason,'Rescheduled from calendar / Naptárból újraütemezve'),linkedStage.id);
+        db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(linkedStage.workflow_id);
+      }else if(before.workflow_id){
+        db.prepare('UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(endTime,before.workflow_id);
+        db.prepare(`UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'`).run(endTime,before.workflow_id);
+      }
+    })();
     const completionNotes=appendNotificationNote(before.completion_notes,reason,'Rescheduled / Újraütemezve');db.prepare('UPDATE jobs SET completion_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(completionNotes,before.id);
     const updated=db.prepare(jobsSelectSql('WHERE j.id=?')).get(before.id);workAudit(req,'NOTIFICATION_RESCHEDULE',before.id,before,updated,1,reason);
+    if(linkedStage)audit(req,'NOTIFICATION_RESCHEDULE_SYNC', 'workflow_stages', linkedStage.id, linkedStage, db.prepare('SELECT * FROM workflow_stages WHERE id=?').get(linkedStage.id),1,reason,'WORK');
     if(assigneeChanged)notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
     return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate,end_date:endTime});
   }catch(error){if(error.code==='SCHEDULE_CONFLICT')return rejectScheduleConflict(req,res,null,error.details?.conflicts||[]);res.status(error.status||400).json({error:error.code||error.message});}
@@ -1385,7 +1382,7 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
 
 app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim(),note=String(req.body?.note||'').replace(/\u0000/g,'').trim().slice(0,2000);
-  if(!['CLIENT_FOLLOWUP','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
   try{
     if(entityType==='CLIENT_FOLLOWUP'){
       const before=db.prepare('SELECT * FROM contacts WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'CONTACT_NOT_FOUND'});
@@ -1394,6 +1391,10 @@ app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(
         return jobDomain.completeCrmFollowUp({contactId:entityId,cadence:'',nextFollowUpDate:'',actor:req.user});
       });
       const result=run();audit(req,'CRM_FOLLOW_UP_COMPLETE','contacts',entityId,before,result.contact,1,note||'CRM follow-up completed from global task notification','TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId});
+    }
+    if(entityType==='WORKFLOW_STAGE'){
+      const result=workshopWorkflowNotificationService.completeStageFromNotification({stageId:entityId,actor:req.user,note});
+      return res.json({ok:true,entity_type:entityType,entity_id:entityId,calendar_job_id:result.calendar_job?.id||null,financial_item_ids:(result.financial_items||[]).map(item=>item.id),already_completed:Boolean(result.already_completed)});
     }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
     if(!canCloseJob(req.user,before))return res.status(403).json({error:'JOB_CLOSE_FORBIDDEN'});
