@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE SET NULL,
   FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
-  FOREIGN KEY(workshop_workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
+  FOREIGN KEY(workshop_workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_daily_rate_capacity ON jobs(assigned_user_id,daily_rate_date,daily_rate_enabled,status);
@@ -1814,7 +1814,7 @@ CREATE TABLE IF NOT EXISTS planned_jobs (
 -- Workshop workflow: new operational work is intentionally separate from the
 -- legacy jobs table. Existing jobs remain historical records and are not
 -- retroactively classified as workshop workflows.
-CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
+CREATE TABLE IF NOT EXISTS workshop_phase_definitions (
   id TEXT PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
   name_en TEXT NOT NULL,
@@ -1830,7 +1830,7 @@ CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS workshop_workflows (
+CREATE TABLE IF NOT EXISTS workflow_finance_sources (
   id TEXT PRIMARY KEY,
   workflow_key TEXT NOT NULL UNIQUE,
   client_id TEXT NOT NULL,
@@ -1882,7 +1882,7 @@ CREATE TABLE IF NOT EXISTS workshop_workflows (
   FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS workflow_stages (
+CREATE TABLE IF NOT EXISTS workflow_finance_phases (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,
   stage_code TEXT NOT NULL,
@@ -1916,72 +1916,20 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(workflow_id,stage_code),
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE CASCADE,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(financial_closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS workshop_subtasks (
-  id TEXT PRIMARY KEY,
-  stage_id TEXT NOT NULL REFERENCES workflow_stages(id) ON DELETE CASCADE,
-  workflow_id TEXT NOT NULL REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0,1)),
-  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','COMPLETED','DELAYED')),
-  assigned_to_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  delay_reason TEXT,
-  position INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT,
-  completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  reopened_at TEXT,
-  reopened_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
-);
 
-CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id);
-CREATE INDEX IF NOT EXISTS idx_subtasks_workflow ON workshop_subtasks(workflow_id,stage_id);
 
-CREATE TABLE IF NOT EXISTS workflow_stage_transfers (
-  id TEXT PRIMARY KEY,
-  workflow_id TEXT NOT NULL,
-  stage_id TEXT NOT NULL,
-  from_user_id TEXT,
-  to_user_id TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  transferred_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY(stage_id) REFERENCES workflow_stages(id) ON DELETE CASCADE,
-  FOREIGN KEY(from_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(to_user_id) REFERENCES users(id) ON DELETE RESTRICT,
-  FOREIGN KEY(transferred_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
 
-CREATE TABLE IF NOT EXISTS workflow_materials (
-  id TEXT PRIMARY KEY,
-  workflow_id TEXT NOT NULL,
-  stage_id TEXT,
-  source_type TEXT NOT NULL CHECK(source_type IN ('CENTRAL_INVENTORY','OWN_STOCK','EXTERNAL_PURCHASE','CLIENT_SUPPLIED','NO_MATERIAL_COST')),
-  inventory_item_id TEXT,
-  item_name TEXT NOT NULL,
-  requested_quantity REAL NOT NULL DEFAULT 0,
-  consumed_quantity REAL NOT NULL DEFAULT 0,
-  unit TEXT,
-  unit_cost REAL NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK(status IN ('REQUESTED','RESERVED','CONSUMED','RELEASED')),
-  notes TEXT,
-  document_path TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY(stage_id) REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  FOREIGN KEY(inventory_item_id) REFERENCES inventory_items(id) ON DELETE SET NULL,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
 
-CREATE TABLE IF NOT EXISTS workflow_financial_lines (
+
+
+
+CREATE TABLE IF NOT EXISTS workflow_finance_lines (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,
   stage_id TEXT,
@@ -2001,8 +1949,8 @@ CREATE TABLE IF NOT EXISTS workflow_financial_lines (
   created_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY(stage_id) REFERENCES workflow_stages(id) ON DELETE SET NULL,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE CASCADE,
+  FOREIGN KEY(stage_id) REFERENCES workflow_finance_phases(id) ON DELETE SET NULL,
   FOREIGN KEY(partner_id) REFERENCES partners(id) ON DELETE SET NULL,
   FOREIGN KEY(payable_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
   FOREIGN KEY(posted_financial_item_id) REFERENCES financial_items(id) ON DELETE SET NULL,
@@ -2012,21 +1960,9 @@ CREATE TABLE IF NOT EXISTS workflow_financial_lines (
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE TABLE IF NOT EXISTS workflow_documents (
-  id TEXT PRIMARY KEY,
-  workflow_id TEXT NOT NULL,
-  stage_id TEXT,
-  document_path TEXT NOT NULL,
-  document_name TEXT,
-  document_type TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY(stage_id) REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
 
-CREATE TABLE IF NOT EXISTS workflow_closed_jobs (
+
+CREATE TABLE IF NOT EXISTS workflow_finance_closures (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL UNIQUE,
   client_id TEXT NOT NULL,
@@ -2039,7 +1975,7 @@ CREATE TABLE IF NOT EXISTS workflow_closed_jobs (
   cost_total REAL NOT NULL DEFAULT 0,
   net_total REAL NOT NULL DEFAULT 0,
   snapshot_json TEXT NOT NULL DEFAULT '{}',
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE CASCADE,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE CASCADE,
   FOREIGN KEY(client_id) REFERENCES contacts(id) ON DELETE RESTRICT,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
   FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
@@ -2059,34 +1995,20 @@ CREATE TABLE IF NOT EXISTS piano_inspection_history (
   inspected_at TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL
+  FOREIGN KEY(workflow_id) REFERENCES workflow_finance_sources(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_piano ON piano_inspection_history(piano_id,inspected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_piano_inspection_history_workflow ON piano_inspection_history(workflow_id,inspection_type);
 CREATE INDEX IF NOT EXISTS idx_jobs_workshop_workflow ON jobs(workshop_workflow_id);
 
-CREATE TABLE IF NOT EXISTS workflow_audit_events (
-  id TEXT PRIMARY KEY,
-  workflow_id TEXT,
-  action TEXT NOT NULL,
-  reason TEXT,
-  actor_user_id TEXT,
-  snapshot_json TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(workflow_id) REFERENCES workshop_workflows(id) ON DELETE SET NULL,
-  FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
 
-CREATE INDEX IF NOT EXISTS idx_workflow_status_due ON workshop_workflows(current_status,final_due_at);
-CREATE INDEX IF NOT EXISTS idx_workflow_client_piano ON workshop_workflows(client_id,piano_id,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_stage_workflow_order ON workflow_stages(workflow_id,stage_order);
-CREATE INDEX IF NOT EXISTS idx_workflow_stage_assignee ON workflow_stages(assigned_user_id,status,due_at);
-CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_stages(calendar_job_id);
-CREATE INDEX IF NOT EXISTS idx_stage_transfers_wf_stg ON workflow_stage_transfers(workflow_id,stage_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_material_inventory ON workflow_materials(inventory_item_id,status);
-CREATE INDEX IF NOT EXISTS idx_workflow_financial_workflow ON workflow_financial_lines(workflow_id,stage_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_documents_workflow ON workflow_documents(workflow_id,stage_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_audit_workflow ON workflow_audit_events(workflow_id,created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_status_due ON workflow_finance_sources(current_status,final_due_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_client_piano ON workflow_finance_sources(client_id,piano_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_workflow_order ON workflow_finance_phases(workflow_id,stage_order);
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_assignee ON workflow_finance_phases(assigned_user_id,status,due_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_finance_phases(calendar_job_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_financial_workflow ON workflow_finance_lines(workflow_id,stage_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_piano_id ON jobs(piano_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_contact_id ON jobs(contact_id);
@@ -2213,3 +2135,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(r
 CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_notification_devices_user_status ON notification_devices(user_id,status);
+
+-- Phase I custody only. No operational workflow records can be created here.
+CREATE TABLE IF NOT EXISTS workflow_retired_calendar_jobs (job_id TEXT PRIMARY KEY,workflow_id TEXT NOT NULL,snapshot_json TEXT NOT NULL,retired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS workflow_financial_delete_scope (entity_table TEXT NOT NULL,entity_id TEXT NOT NULL,PRIMARY KEY(entity_table,entity_id));
