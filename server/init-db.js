@@ -876,6 +876,15 @@ function runMigrations() {
   if (tableExists("notification_snooze_log")) {
     ensureColumn("notification_snooze_log", "user_id", "TEXT");
   }
+  // schema.sql creates idx_workflow_stage_calendar_job. Existing deployments
+  // already have workflow_stages, so SQLite will not replay the CREATE TABLE
+  // statement and the indexed column must be added before schema.sql runs.
+  // Keeping this migration before db.exec makes an upgrade from the pre-link
+  // workflow schema safe and prevents the Render startup failure
+  // "no such column: calendar_job_id".
+  if (tableExists("workflow_stages")) {
+    ensureColumn("workflow_stages", "calendar_job_id", "TEXT");
+  }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   // Legacy snoozes had no owner and therefore affected every user. Keep those
@@ -1145,6 +1154,10 @@ function runMigrations() {
       ensureColumn("workshop_workflows", "intake_pdf_path", "TEXT");
       ensureColumn("workflow_financial_lines", "partner_id", "TEXT");
       ensureColumn("workflow_financial_lines", "payable_invoice_id", "TEXT");
+      ensureColumn("workflow_financial_lines", "wip_journal_entry_id", "TEXT");
+      ensureColumn("workflow_financial_lines", "final_journal_entry_id", "TEXT");
+      ensureColumn("workflow_financial_lines", "writeoff_journal_entry_id", "TEXT");
+      ensureColumn("workflow_financial_lines", "accounting_status", "TEXT NOT NULL DEFAULT 'WIP'");
       ensureColumn("workshop_workflows", "intake_photos", "TEXT NOT NULL DEFAULT '[]'");
       ensureColumn("workshop_workflows", "intake_inspected_by", "TEXT");
       ensureColumn("workshop_workflows", "intake_inspected_at", "TEXT");
@@ -1180,6 +1193,9 @@ function runMigrations() {
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
       ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
       ensureColumn("workflow_stages", "calendar_job_id", "TEXT");
+      ensureColumn("workflow_stages", "reopened_at", "TEXT");
+      ensureColumn("workflow_stages", "reopened_by_user_id", "TEXT");
+      ensureColumn("workflow_stages", "reopen_reason", "TEXT");
       ensureIndex("idx_workflow_stage_calendar_job", "CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_stages(calendar_job_id)");
       db.exec(`CREATE TABLE IF NOT EXISTS workshop_subtasks (
         id TEXT PRIMARY KEY,
@@ -1192,8 +1208,14 @@ function runMigrations() {
         delay_reason TEXT,
         position INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        completed_at TEXT
+        completed_at TEXT,
+        completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        reopened_at TEXT,
+        reopened_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
       )`);
+      ensureColumn("workshop_subtasks", "completed_by_user_id", "TEXT");
+      ensureColumn("workshop_subtasks", "reopened_at", "TEXT");
+      ensureColumn("workshop_subtasks", "reopened_by_user_id", "TEXT");
       ensureIndex("idx_subtasks_stage", "CREATE INDEX IF NOT EXISTS idx_subtasks_stage ON workshop_subtasks(stage_id,position,id)");
       ensureIndex("idx_subtasks_workflow", "CREATE INDEX IF NOT EXISTS idx_subtasks_workflow ON workshop_subtasks(workflow_id,stage_id)");
     }
@@ -1429,14 +1451,14 @@ function runMigrations() {
   const accounts = [
     ["1000","Cash","Készpénz","ASSET","DEBIT"],["1010","Bank","Bank","ASSET","DEBIT"],
     ["1020","Undeposited Checks","Befizetés előtti csekkek","ASSET","DEBIT"],
-    ["1200","Accounts Receivable","Vevőkövetelés","ASSET","DEBIT"],["1300","Inventory","Készlet","ASSET","DEBIT"],
+    ["1200","Accounts Receivable","Vevőkövetelés","ASSET","DEBIT"],["1300","Inventory","Készlet","ASSET","DEBIT"],["1310","Work in Progress Inventory","Befejezetlen termelés (WIP)","ASSET","DEBIT"],
     ["1500","Fixed Assets","Befektetett eszközök","ASSET","DEBIT"],["2000","Accounts Payable","Szállítói tartozás","LIABILITY","CREDIT"],["2010","Sales Tax Payable","Fizetendő forgalmi adó","LIABILITY","CREDIT"],["2020","Deferred Revenue","Halasztott bevétel","LIABILITY","CREDIT"],
     ["2100","SBA Loan","SBA hitel","LIABILITY","CREDIT"],["3000","Owner Equity","Saját tőke","EQUITY","CREDIT"],
     ["4000","Sales Revenue","Árbevétel","REVENUE","CREDIT"],["4100","Restoration Revenue","Felújítási bevétel","REVENUE","CREDIT"],
     ["4200","Tuning Revenue","Hangolási bevétel","REVENUE","CREDIT"],["4300","Concert Service Revenue","Koncertszerviz bevétel","REVENUE","CREDIT"],["4390","Ticket Refund Contra Revenue","Jegy-visszatérítés bevételcsökkentés","REVENUE","DEBIT"],
     ["5000","Cost of Goods Sold","Eladott áruk költsége","EXPENSE","DEBIT"],["6100","Rent Expense","Bérleti díj","EXPENSE","DEBIT"],
     ["6200","Transport Expense","Szállítási költség","EXPENSE","DEBIT"],["6300","Payroll Expense","Bérköltség","EXPENSE","DEBIT"],
-    ["6400","Interest Expense","Kamatköltség","EXPENSE","DEBIT"]
+    ["6400","Interest Expense","Kamatköltség","EXPENSE","DEBIT"],["6990","Loss on Abandoned Work","Megszakított munka vesztesége","EXPENSE","DEBIT"]
   ];
   const insertAccount = db.prepare("INSERT OR IGNORE INTO accounts(code,name_en,name_hu,category,normal_side) VALUES(?,?,?,?,?)");
   db.transaction(() => accounts.forEach((account) => insertAccount.run(...account)))();
