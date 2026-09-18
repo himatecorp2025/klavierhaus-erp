@@ -1,4 +1,4 @@
--- New operational workflow model. Historical financial custody remains separate.
+-- UI12 workflow contract. One operational model; immutable financial custody is separate.
 CREATE TABLE IF NOT EXISTS wf2_workflows (
  id TEXT PRIMARY KEY, workflow_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
  client_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS wf2_workflows (
  mode TEXT NOT NULL CHECK(mode IN ('INBOUND','ON_SITE')),
  start_at TEXT NOT NULL, final_due_at TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','COMPLETED')),
+ request_key TEXT,
+ aborted_at TEXT, deleted_at TEXT, abandonment_reason TEXT NOT NULL DEFAULT '',
+ finance_locked INTEGER NOT NULL DEFAULT 0 CHECK(finance_locked IN(0,1)),
  version INTEGER NOT NULL DEFAULT 1, invoice_id TEXT REFERENCES invoices(id) ON DELETE SET NULL,
  completed_at TEXT, completed_by TEXT REFERENCES users(id) ON DELETE RESTRICT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -31,7 +34,7 @@ CREATE TABLE IF NOT EXISTS wf2_phases (
  completed_at TEXT, completed_by TEXT REFERENCES users(id) ON DELETE RESTRICT,
  UNIQUE(workflow_id,stage_code), UNIQUE(id,workflow_id)
 );
-CREATE TABLE IF NOT EXISTS wf2_tasks (
+CREATE TABLE IF NOT EXISTS workshop_subtasks (
  id TEXT PRIMARY KEY, phase_id TEXT NOT NULL REFERENCES wf2_phases(id) ON DELETE CASCADE,
  title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', due_at TEXT,
  required INTEGER NOT NULL DEFAULT 1 CHECK(required IN(0,1)),
@@ -40,7 +43,7 @@ CREATE TABLE IF NOT EXISTS wf2_tasks (
  approved_by TEXT REFERENCES users(id) ON DELETE RESTRICT, approval_reason TEXT
 );
 CREATE TABLE IF NOT EXISTS wf2_task_assignees (
- task_id TEXT NOT NULL REFERENCES wf2_tasks(id) ON DELETE CASCADE,
+ task_id TEXT NOT NULL REFERENCES workshop_subtasks(id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT, PRIMARY KEY(task_id,user_id)
 );
 CREATE TABLE IF NOT EXISTS wf2_costs (
@@ -50,18 +53,21 @@ CREATE TABLE IF NOT EXISTS wf2_costs (
  billing_status TEXT NOT NULL DEFAULT 'CHARGEABLE' CHECK(billing_status IN('CHARGEABLE','WARRANTY','FREE','COMPENSATION','CREDIT')),
  partner_id TEXT REFERENCES partners(id) ON DELETE RESTRICT,
  finance_line_id TEXT REFERENCES workflow_finance_lines(id) ON DELETE SET NULL,
- created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT
+ created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+ approval_status TEXT NOT NULL DEFAULT 'APPROVED' CHECK(approval_status IN('PENDING','APPROVED')),
+ approved_by TEXT REFERENCES users(id) ON DELETE RESTRICT, approved_at TEXT,
+ voided_at TEXT, void_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS wf2_checklist (
  id TEXT PRIMARY KEY, phase_id TEXT NOT NULL REFERENCES wf2_phases(id) ON DELETE CASCADE,
- task_id TEXT REFERENCES wf2_tasks(id) ON DELETE CASCADE, title TEXT NOT NULL,
+ task_id TEXT REFERENCES workshop_subtasks(id) ON DELETE CASCADE, title TEXT NOT NULL,
  required INTEGER NOT NULL DEFAULT 1 CHECK(required IN(0,1)),
  checked INTEGER NOT NULL DEFAULT 0 CHECK(checked IN(0,1)),
  checked_by TEXT REFERENCES users(id) ON DELETE RESTRICT, checked_at TEXT
 );
 CREATE TABLE IF NOT EXISTS wf2_documents (
  id TEXT PRIMARY KEY, phase_id TEXT NOT NULL REFERENCES wf2_phases(id) ON DELETE CASCADE,
- task_id TEXT REFERENCES wf2_tasks(id) ON DELETE CASCADE,
+ task_id TEXT REFERENCES workshop_subtasks(id) ON DELETE CASCADE,
  original_name TEXT NOT NULL, stored_name TEXT NOT NULL UNIQUE, mime_type TEXT NOT NULL,
  size_bytes INTEGER NOT NULL CHECK(size_bytes>0), sha256 TEXT NOT NULL,
  uploaded_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -87,7 +93,7 @@ CREATE TABLE IF NOT EXISTS wf2_closeouts (
  snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_wf2_phases_owner ON wf2_phases(responsible_user_id,workflow_id);
-CREATE INDEX IF NOT EXISTS idx_wf2_tasks_phase ON wf2_tasks(phase_id,status);
+CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_phase ON workshop_subtasks(phase_id,status);
 CREATE INDEX IF NOT EXISTS idx_wf2_assignees_user ON wf2_task_assignees(user_id,task_id);
 CREATE INDEX IF NOT EXISTS idx_wf2_calendar_workflow ON wf2_calendar_links(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_wf2_audit_workflow ON wf2_audit(workflow_id,created_at);
