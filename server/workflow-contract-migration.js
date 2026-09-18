@@ -1,6 +1,7 @@
 "use strict";
 
-// Additive upgrade from the supplied 42 archive. Never disable foreign keys,
+// Additive UI12 planner upgrade of the supplied 44 archive, retaining prior migrations.
+// Never disable foreign keys,
 // rewrite appointments, drop posted journals, or manufacture a responsible user.
 function migrateWorkflowContract(db) {
   const exists = name => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
@@ -17,6 +18,9 @@ function migrateWorkflowContract(db) {
       db.exec("DROP INDEX IF EXISTS idx_wf2_tasks_phase");
     }
     for (const [name, type] of [
+      ["piano_location_name", "TEXT NOT NULL DEFAULT ''"],
+      ["piano_location_address", "TEXT NOT NULL DEFAULT ''"],
+      ["service_address", "TEXT NOT NULL DEFAULT ''"],
       ["request_key", "TEXT"], ["aborted_at", "TEXT"], ["deleted_at", "TEXT"],
       ["abandonment_reason", "TEXT NOT NULL DEFAULT ''"],
       ["finance_locked", "INTEGER NOT NULL DEFAULT 0 CHECK(finance_locked IN(0,1))"]
