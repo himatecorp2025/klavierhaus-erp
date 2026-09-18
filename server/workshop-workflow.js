@@ -530,7 +530,10 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const existing = db.prepare("SELECT * FROM jobs WHERE id=?").get(existingId);
       if (existing) return existing;
     }
-    const endTime = localDateTime(stage.due_at || workflow.final_due_at);
+    // A phase receives a calendar job only when it has its own real deadline.
+    // Falling back to the workflow deadline hides missing phase scheduling and
+    // creates duplicate calendar entries at the same timestamp.
+    const endTime = localDateTime(stage.due_at);
     if (!endTime) return null;
     const jobId = rid("J"), rootId = validId(workflow.job_id) || jobId;
     const startTime = shiftLocalMinutes(endTime, -SCHEDULE_INTERVAL_MINUTES);
@@ -1147,6 +1150,9 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           .run(nextStatus, assignee?.id || null, assignee?.name || null, due || null, nextStatus, nowISO(), stage.id);
         db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
         updated = stageById(stage.id);
+        const linkedWorkflow = workflowById(workflow.id), linkedStage = stageById(stage.id);
+        if (linkedStage.due_at) syncStageCalendarJobDeadline(linkedWorkflow, linkedStage, linkedStage.due_at);
+        if (linkedStage.assigned_user_id) syncStageCalendarJobAssignee(linkedWorkflow, linkedStage);
         if (inheritedAssignee) directAudit(req, "WORKFLOW_STAGE_ASSIGNEE_INHERITED", stage.id, stage, updated, "Previous completed phase responsible was inherited automatically");
         directAudit(req, "WORKFLOW_STAGE_ACTIVATED", stage.id, stage, updated, startNow ? "Workflow stage activated and started" : "Workflow stage activated");
       })();
