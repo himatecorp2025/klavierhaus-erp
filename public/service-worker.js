@@ -1,5 +1,5 @@
-const CACHE_NAME="klavierhaus-shell-v42-ui12-contract";
-const APP_SHELL=["/","/index.html","/styles.css","/app.js","/workshop-shell.js","/workshop-v2.js","/workshop-v2.css","/icons/icon-192.png","/icons/icon-512.png"];
+const CACHE_NAME="klavierhaus-shell-v44-ui12-planner";
+const APP_SHELL=["/","/index.html","/styles.css","/app.js","/workshop-shell.js","/master-data.js","/master-data.css","/workshop-v2.js","/workshop-v2.css","/icons/icon-192.png","/icons/icon-512.png"];
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener("fetch",event=>{
@@ -7,7 +7,7 @@ self.addEventListener("fetch",event=>{
   const url=new URL(request.url);
   if(request.method!=="GET"||url.pathname.startsWith("/api/")||url.pathname.startsWith("/uploads/")||url.pathname==="/manifest.webmanifest") return;
   event.respondWith((async()=>{
-    const isCriticalShell=["/app.js","/workshop-shell.js","/workshop-v2.js","/workshop-v2.css","/styles.css","/index.html","/"].includes(url.pathname);
+    const isCriticalShell=["/app.js","/workshop-shell.js","/master-data.js","/master-data.css","/workshop-v2.js","/workshop-v2.css","/styles.css","/index.html","/"].includes(url.pathname);
     const cached=await caches.match(request);
     const network=fetch(request).then(async response=>{
       if(response.ok){const cache=await caches.open(CACHE_NAME);await cache.put(request,response.clone());}
