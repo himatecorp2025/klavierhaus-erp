@@ -1,11 +1,26 @@
 
-function safeStoredJson(key,fallback=null){
-  try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):fallback;}
-  catch(error){console.warn(`Invalid localStorage JSON for ${key}; clearing stale value.`,error);localStorage.removeItem(key);return fallback;}
+function authenticationStorage(){return isStandalonePWA()?localStorage:sessionStorage;}
+function clearStoredAuthentication(){
+  [localStorage,sessionStorage].forEach(storage=>{try{storage.removeItem("kh_token");storage.removeItem("kh_user");}catch(_error){}});
 }
-let token=localStorage.getItem("kh_token");
+function persistAuthenticatedSession(nextToken,nextUser){
+  const storage=authenticationStorage();
+  try{storage.setItem("kh_token",String(nextToken||""));storage.setItem("kh_user",JSON.stringify(nextUser||null));}catch(_error){}
+  const other=storage===localStorage?sessionStorage:localStorage;
+  try{other.removeItem("kh_token");other.removeItem("kh_user");}catch(_error){}
+}
+function safeStoredJson(key,fallback=null,storage=localStorage){
+  try{const raw=storage.getItem(key);return raw?JSON.parse(raw):fallback;}
+  catch(error){console.warn(`Invalid stored JSON for ${key}; clearing stale value.`,error);storage.removeItem(key);return fallback;}
+}
+// A desktop browser session is deliberately tab-scoped. Only an installed PWA
+// may retain the session between launches; a legacy desktop local token is
+// removed before the application bootstraps.
+if(!isStandalonePWA()){try{localStorage.removeItem("kh_token");localStorage.removeItem("kh_user");}catch(_error){}}
+const initialAuthenticationStorage=authenticationStorage();
+let token=initialAuthenticationStorage.getItem("kh_token");
 if(token)document.documentElement?.classList?.add("session-restoring");
-let user=safeStoredJson("kh_user",null);
+let user=safeStoredJson("kh_user",null,initialAuthenticationStorage);
 let pendingAccountActivation=null;
 let currentWeekStart=startOfWeek(new Date());
 let currentView="workshop_workflow";
@@ -393,7 +408,8 @@ function showCleanLoginState(message=""){
 function clearAuthenticationState(message=""){
   token=null;user=null;userPermissions={all:false,permissions:[]};
   apiResponseCache.clear();schedulerWorkersCache=null;
-  localStorage.removeItem("kh_token");localStorage.removeItem("kh_user");
+  clearStoredAuthentication();
+  removeOfflineSecurityLock();
   try{sessionActivity?.destroy?.();}catch(_error){}
   if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
   applicationBooting=false;applicationBootPromise=null;
@@ -405,7 +421,7 @@ async function validateAuthenticatedSession(){
   try{
     const freshUser=await apiRequest("/api/me",{masterCache:false,timeoutMs:8000,skipAuthReset:true});
     if(!freshUser||!freshUser.id){const error=new Error("INVALID_SESSION_USER");error.code="AUTH_EXPIRED";error.status=401;throw error;}
-    user=freshUser;localStorage.setItem("kh_user",JSON.stringify(user));return user;
+    user=freshUser;persistAuthenticatedSession(token,user);return user;
   }catch(error){
     if(isAuthenticationError(error)){clearAuthenticationState();error.code="AUTH_EXPIRED";}
     throw error;
@@ -785,8 +801,7 @@ function completeLoginSession(result,email=""){
  apiResponseCache.clear();schedulerWorkersCache=null;
  token=String(result?.token||"");user=result?.user||null;
  if(!token||!user?.id)return showError("INVALID_LOGIN");
- localStorage.setItem("kh_token",token);
- localStorage.setItem("kh_user",JSON.stringify(user));
+ persistAuthenticatedSession(token,user);
  if(email)localStorage.setItem("kh_last_login_email",email);
  pendingAccountActivation=null;
  navigationHomeNeutral=true;
@@ -845,8 +860,8 @@ let countdownInterval = null;
 function logoutNow(){
   stopDigitalAttendanceLiveSync?.();
   if(token){try{fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token},keepalive:true});}catch(e){}}
-  localStorage.removeItem("kh_token");
-  localStorage.removeItem("kh_user");
+  clearStoredAuthentication();
+  removeOfflineSecurityLock();
   location.reload();
 }
 function createSessionActivityController({timeoutMs=10*60*1000,setTimer=setTimeout,clearTimer=clearTimeout,now=Date.now,onTimeout=()=>{},canRun=()=>true,onStateChange=()=>{}}={}){
@@ -924,6 +939,59 @@ function resetInactivityTimer({force=false}={}){
 document.addEventListener("click",()=>sessionActivity.touch(),true);
 document.addEventListener("keydown",()=>sessionActivity.touch(),true);
 document.addEventListener("input",()=>sessionActivity.touch(),true);
+document.addEventListener("pointerdown",()=>sessionActivity.touch(),true);
+document.addEventListener("touchstart",()=>sessionActivity.touch(),{capture:true,passive:true});
+document.addEventListener("mousemove",()=>sessionActivity.touch(),{capture:true,passive:true});
+
+let offlineSecurityLocked=false;
+function offlineSecurityLockRoot(){return document.getElementById("offlineSecurityLock");}
+function removeOfflineSecurityLock(){
+ const root=offlineSecurityLockRoot();root?.remove();offlineSecurityLocked=false;
+ document.body?.classList.remove("offline-security-locked");
+}
+function renderOfflineSecurityLock({online=navigator.onLine}={}){
+ let root=offlineSecurityLockRoot();
+ if(!root){
+  root=document.createElement("section");root.id="offlineSecurityLock";root.className="offline-security-lock-screen";root.setAttribute("role","dialog");root.setAttribute("aria-modal","true");
+  root.innerHTML=`<div class="offline-security-lock-card"><span class="offline-security-lock-icon" aria-hidden="true">⌁</span><h1></h1><p class="offline-security-lock-copy"></p><form class="offline-security-unlock-form hidden"><label>${bi("Password","Jelszó")}<input type="password" name="password" autocomplete="current-password" required></label><p class="offline-security-unlock-error" aria-live="polite"></p><button type="submit">${bi("Verify and continue","Ellenőrzés és folytatás")}</button></form><p class="offline-security-lock-status" aria-live="polite"></p></div>`;
+  root.querySelector(".offline-security-unlock-form")?.addEventListener("submit",unlockOfflineSecuritySession);
+  document.body.appendChild(root);
+ }
+ const title=root.querySelector("h1"),copy=root.querySelector(".offline-security-lock-copy"),form=root.querySelector(".offline-security-unlock-form"),status=root.querySelector(".offline-security-lock-status");
+ if(title)title.textContent=online?bi("Connection restored","A kapcsolat helyreállt"):bi("Workshop Wi-Fi connection lost","A műhely Wi-Fi kapcsolata megszakadt");
+ if(copy)copy.textContent=online?bi("For data protection, enter your password to continue exactly where you left off.","Az adatok védelmében add meg a jelszavad a munka pontos folytatásához."):bi("The interface is locked to protect your data. Your session remains active and no work has been discarded.","A felület az adatok védelmében zárolva van. A munkamenet aktív marad, semmilyen munka nem veszett el.");
+ form?.classList.toggle("hidden",!online);if(status)status.textContent=online?bi("Password verification is required.","Jelszó-ellenőrzés szükséges."):bi("Waiting for a secure connection…","Biztonságos kapcsolat helyreállására vár…");
+ if(online)setTimeout(()=>form?.querySelector("input")?.focus({preventScroll:true}),30);
+}
+function lockOfflineSecurity(){
+ if(!token)return;offlineSecurityLocked=true;document.body?.classList.add("offline-security-locked");renderOfflineSecurityLock({online:false});
+}
+function promptOfflineSecurityUnlock(){
+ if(!offlineSecurityLocked||!token)return;document.body?.classList.add("offline-security-locked");renderOfflineSecurityLock({online:true});
+}
+async function unlockOfflineSecuritySession(event){
+ event.preventDefault();if(!offlineSecurityLocked||!navigator.onLine)return;
+ const form=event.currentTarget,password=String(new FormData(form).get("password")||""),error=form.querySelector(".offline-security-unlock-error"),submit=form.querySelector("button[type=submit]");
+ if(!password){if(error)error.textContent=bi("Enter your password.","Add meg a jelszavad.");return;}
+ if(submit)submit.disabled=true;if(error)error.textContent="";
+ try{
+  const result=await api("/api/auth/verify-session",{method:"POST",body:JSON.stringify({password}),skipAuthReset:true});
+  if(result?.user){user=result.user;persistAuthenticatedSession(token,user);}
+  form.reset();removeOfflineSecurityLock();resetInactivityTimer({force:true});showToast(bi("Session verified. You can continue safely.","A munkamenet ellenőrizve. Biztonságosan folytathatod."),"success");
+ }catch(requestError){if(error)error.textContent=bi("Password verification failed. Please try again.","A jelszó ellenőrzése sikertelen. Próbáld újra.");}
+ finally{if(submit?.isConnected)submit.disabled=false;}
+}
+function initOfflineSecurityLock(){
+ if(window.__khOfflineSecurityLockBound){if(!navigator.onLine)lockOfflineSecurity();return;}
+ window.__khOfflineSecurityLockBound=true;
+ window.addEventListener("offline",lockOfflineSecurity);
+ window.addEventListener("online",promptOfflineSecurityUnlock);
+ window.addEventListener("pageshow",event=>{
+  if(event.persisted&&!token){history.replaceState({},"",location.pathname);showCleanLoginState(bi("Please sign in to continue.","A folytatáshoz jelentkezz be."));}
+  else if(!navigator.onLine&&token)lockOfflineSecurity();
+ });
+ if(!navigator.onLine)lockOfflineSecurity();
+}
 
 async function deleteEverything(){
   if(!isSuperadmin()) return showError("PERMISSION_DENIED");
@@ -1165,6 +1233,7 @@ async function boot(){
    if(danger)danger.classList.toggle("hidden",!isSuperadmin());
    resetInactivityTimer();
    sessionActivity.install();
+   initOfflineSecurityLock();
    initViewHistory();
    const nav=document.getElementById("nav");
    if(nav)nav.onclick=e=>{
@@ -1956,16 +2025,17 @@ function workflowOpenStageCard(event,workflowId,stageId){
  if(Date.now()<workflowSuppressClickUntil){event?.preventDefault?.();event?.stopPropagation?.();return;}
  openWorkshopWorkflow(workflowId,stageId);
 }
-function workflowStageCard(stage){
+function workflowStageCard(stage,{mobileWorkflow=null}={}){
  const effective=workflowEffectiveStatus(stage);
  if(effective==="NOT_REQUIRED")return `<button type="button" class="workflow-stage-empty workflow-stage-empty--inactive" aria-label="${bi("Activate phase","Fázis aktiválása")}" onclick="workflowOpenStageCard(event,'${htmlText(stage.workflow_id)}','${htmlText(stage.id)}')">—</button>`;
  const title=workflowSafeText(stage?.card_title||stage?.custom_title||stage?.title,workflowStageLabel(stage)),assignee=workflowSafeText(stage?.assigned_to,bi("Unassigned","Nincs felelős")),dateText=stage?.due_at?workflowCardDateText(stage.due_at):"—",timeText=stage?.due_at?workflowCardTimeText(stage.due_at):"—",shortDescription=workflowSafeText(stage?.details),notes=workflowSafeText(stage?.notes);
  const noteText=[shortDescription,notes].filter(Boolean).join(" · "),activeBell=!['COMPLETED','NOT_REQUIRED','ABORTED'].includes(String(stage.status||""));
  const bell=activeBell&&noteText?`<span class="workflow-note-bell" title="${htmlText(noteText)}" aria-label="${bi("Card notes","Kártyamegjegyzés")}: ${htmlText(noteText)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>`:"";
  const avatars=workflowSubtaskAvatarMarkup(stage),progress=workflowSubtaskProgressMarkup(stage);
+ const mobileFacts=mobileWorkflow?`<span class="workflow-mobile-card-client">${htmlText(workflowSafeText(mobileWorkflow.client_name,"—"))}</span><span class="workflow-mobile-card-piano">${htmlText(workflowPianoLabel(mobileWorkflow)||workflowSafeText(mobileWorkflow.piano_display_name||mobileWorkflow.piano_id,bi("Unknown piano","Ismeretlen hangszer")))}</span>`:"";
  const icon=effective==="COMPLETED"?'<span class="workflow-status-icon workflow-status-icon--complete" aria-hidden="true">✓</span>':effective==="OVERDUE"?'<span class="workflow-status-icon workflow-status-icon--overdue" aria-hidden="true">!</span>':'<span class="workflow-status-dot" aria-hidden="true"></span>';
  const dragAttrs=isAdmin()?` draggable="true" data-workflow-draggable="1"`:"";
- return `<button type="button" class="workflow-stage-card workflow-card status-${workflowStatusClass(effective)}${stage.is_overdue?" is-overdue":""}" data-workflow-id="${htmlText(stage.workflow_id)}" data-stage-id="${htmlText(stage.id)}" data-stage-code="${htmlText(stage.stage_code)}"${dragAttrs} onclick="workflowOpenStageCard(event,'${htmlText(stage.workflow_id)}','${htmlText(stage.id)}')"><span class="workflow-stage-card-inner">${bell}<span class="workflow-stage-status card-badge">${icon}<em>${htmlText(workflowStatusLabel(effective))}</em></span><span class="workflow-card-date${effective==="OVERDUE"?" is-overdue":""}">${htmlText(dateText)}</span><span class="workflow-card-time">${htmlText(timeText)}</span><b class="workflow-stage-title">${htmlText(title)}</b>${progress}<span class="workflow-stage-card-footer">${avatars}<span class="workflow-stage-assignee">${htmlText(assignee)}</span><span class="workflow-stage-document" aria-hidden="true">▤</span></span></span></button>`;
+ return `<button type="button" class="workflow-stage-card workflow-card status-${workflowStatusClass(effective)}${stage.is_overdue?" is-overdue":""}" data-workflow-id="${htmlText(stage.workflow_id)}" data-stage-id="${htmlText(stage.id)}" data-stage-code="${htmlText(stage.stage_code)}"${dragAttrs} onclick="workflowOpenStageCard(event,'${htmlText(stage.workflow_id)}','${htmlText(stage.id)}')"><span class="workflow-stage-card-inner">${bell}<span class="workflow-stage-status card-badge">${icon}<em>${htmlText(workflowStatusLabel(effective))}</em></span><span class="workflow-card-date${effective==="OVERDUE"?" is-overdue":""}">${htmlText(dateText)}</span><span class="workflow-card-time">${htmlText(timeText)}</span>${mobileFacts}<b class="workflow-stage-title">${htmlText(title)}</b>${progress}<span class="workflow-stage-card-footer">${avatars}<span class="workflow-stage-assignee">${htmlText(assignee)}</span><span class="workflow-stage-document" aria-hidden="true">▤</span></span></span></button>`;
 }
 
 function workflowBoardRow(workflow){
@@ -1987,13 +2057,13 @@ function workflowMobileActiveStages(workflow){
 function workflowMobileListCard(workflow){
  const piano=workflowPianoLabel(workflow)||workflowSafeText(workflow?.piano_display_name)||workflowSafeText(workflow?.piano_id,bi("Unknown piano","Ismeretlen hangszer"));
  const finalDue=workflow.final_due_at?workflowCardDateTimeText(workflow.final_due_at):"—",client=workflowSafeText(workflow.client_name,"—"),serial=workflowSafeText(workflow.serial_no||workflow.workflow_key,"—");
- return `<article class="workflow-mobile-list-card" data-mobile-workflow-id="${htmlText(workflow.id)}"><span class="workflow-mobile-list-deadline">${htmlText(finalDue)}</span><strong>${htmlText(client)}</strong><b>${htmlText(piano)}</b><small>${htmlText(serial)}</small><button type="button" onclick="workflowOpenResponsiveDetails('${htmlText(workflow.id)}')">${bi("Workflow details","Workflow részletei")} →</button></article>`;
+ return `<button type="button" class="workflow-mobile-list-card" data-mobile-workflow-id="${htmlText(workflow.id)}" onclick="workflowOpenResponsiveDetails('${htmlText(workflow.id)}')"><span class="workflow-mobile-list-deadline">${htmlText(finalDue)}</span><strong>${htmlText(client)}</strong><b>${htmlText(piano)}</b><small>${htmlText(serial)}</small><span class="workflow-mobile-list-open">${bi("Open workflow details","Workflow részleteinek megnyitása")} →</span></button>`;
 }
 function workflowMobileDeckMarkup(workflow){
  if(!workflow)return "";
  const stages=workflowMobileActiveStages(workflow);if(!stages.length)return `<section class="workflow-mobile-deck"><header><button type="button" class="ghost-btn" onclick="workflowCloseMobileDeck()">← ${bi("Back to workflows","Vissza a munkafolyamatokhoz")}</button></header><p class="muted">${bi("This workflow has no active phase cards.","Ehhez a workflow-hoz nincs aktív fáziskártya.")}</p></section>`;
  const maxIndex=stages.length-1,index=Math.max(0,Math.min(maxIndex,Number(workflowMobileDeckState?.index||0)));if(workflowMobileDeckState)workflowMobileDeckState.index=index;
- const slides=stages.map((stage,slideIndex)=>`<div class="workflow-mobile-deck-slide" data-mobile-stage-index="${slideIndex}">${workflowStageCard(stage)}</div>`).join("");
+ const slides=stages.map((stage,slideIndex)=>`<div class="workflow-mobile-deck-slide" data-mobile-stage-index="${slideIndex}">${workflowStageCard(stage,{mobileWorkflow:workflow})}</div>`).join("");
  return `<section class="workflow-mobile-deck" data-workflow-mobile-deck="${htmlText(workflow.id)}"><header class="workflow-mobile-deck-head"><button type="button" class="ghost-btn workflow-mobile-deck-back" onclick="workflowCloseMobileDeck()">← ${bi("Back to workflows","Vissza a munkafolyamatokhoz")}</button><span data-workflow-mobile-counter>${index+1} / ${stages.length}</span></header><div class="workflow-mobile-deck-viewport"><div class="workflow-mobile-deck-track" style="--workflow-mobile-index:${index}">${slides}</div></div><div class="workflow-mobile-deck-dots">${stages.map((_,dotIndex)=>`<i class="${dotIndex===index?"active":""}"></i>`).join("")}</div></section>`;
 }
 function workflowOpenResponsiveDetails(workflowId){
@@ -2213,10 +2283,16 @@ function workflowOverviewDrawerMarkup(workflow){
  const stages=workflow.stages||[],canFinalize=isAdmin(),canDelete=isAdmin()&&workflow.financial_status!=="CLOSED",canSuperDelete=isSuperadmin();
  return `<div class="workflow-summary-grid"><div><span>${bi("Status","Állapot")}</span><b>${htmlText(sanitizeSafeText(workflow.current_status,""))}</b></div><div><span>${bi("Mode","Munkamód")}</span><b>${workflow.mode==="ON_SITE"?bi("Klavierhaus workshop","Klavierhaus műhely"):bi("Inbound piano","Beszállítandó zongora")}</b></div><div><span>${bi("Final customer deadline","Végső ügyfélhatáridő")}</span><b class="${workflow.is_overdue?"danger-text":""}">${htmlText(workflowDateText(workflow.final_due_at))}</b></div><div><span>${bi("Main responsible","Fő felelős")}</span><b>${htmlText(sanitizeSafeText(workflow.workflow_owner_name,"—"))}</b></div></div>${workflowInspectionPanelMarkup(workflow)}<div class="workflow-detail-block"><h3>${bi("Workflow description","Workflow leírása")}</h3><p>${htmlText(sanitizeSafeText(workflow.description,bi("No description yet.","Még nincs leírás.")))}</p><p class="muted">${workflow.transport_address?htmlText(sanitizeSafeText(workflow.transport_address,"")):""}</p></div><div class="workflow-detail-block"><div class="workflow-block-head"><h3>${bi("Phases overview","Fázisáttekintés")}</h3><span>${stages.filter(stage=>stage.status!=="NOT_REQUIRED").length} ${bi("active","aktív")}</span></div><div class="workflow-overview-stages">${stages.map(stage=>`<button type="button" class="workflow-overview-stage status-${workflowStatusClass(workflowEffectiveStatus(stage))}" onclick="openWorkshopWorkflow('${htmlText(workflow.id)}','${htmlText(stage.id)}')"><b>${Number(stage.stage_order)+1}. ${htmlText(workflowStageLabel(stage))}</b><span>${htmlText(workflowStatusLabel(workflowEffectiveStatus(stage)))}</span><small>${bi("Responsible","Felelős")}: ${htmlText(sanitizeSafeText(stage.assigned_to,bi("Unassigned","Nincs kiosztva")))} · ${bi("Deadline","Határidő")}: ${htmlText(workflowDateText(stage.due_at||"—"))}</small></button>`).join("")}</div></div><div class="workflow-detail-block"><div class="workflow-block-head"><h3>${bi("Financial summary","Pénzügyi összesítés")}</h3><span>${money(workflow.finance_summary?.net_total||0)}</span></div><p>${bi("Revenue","Bevétel")}: ${money(workflow.finance_summary?.revenue_total||0)} · ${bi("Costs","Költségek")}: ${money(workflow.finance_summary?.cost_total||0)}</p></div><div class="workflow-drawer-actions">${canFinalize?`<button type="button" onclick="workflowFinalize('${htmlText(workflow.id)}')">${bi("Financially close workflow","Workflow pénzügyi lezárása")}</button>`:""}${canDelete?`<button type="button" class="danger-btn" onclick="workflowSecondaryDelete('${htmlText(workflow.id)}')">${bi("Scrap / close workflow","Workflow selejtezése / lezárása")}</button>`:""}${canSuperDelete?`<button type="button" class="danger-btn" onclick="workflowSuperDelete('${htmlText(workflow.id)}')">${bi("Delete Workflow","Workflow Törlése")}</button>`:""}</div>`;
 }
+function workflowDetailsPianoHeaderMarkup(workflow,stage=null){
+ const piano=workflowPianoLabel(workflow)||workflowSafeText(workflow?.piano_display_name)||workflowSafeText(workflow?.piano_id,bi("Unknown piano","Ismeretlen hangszer"));
+ const client=workflowSafeText(workflow?.client_name,"—"),owner=workflowSafeText(workflow?.owner_name||workflow?.client_name,"—");
+ const phase=stage?workflowStageLabel(stage):workflowSafeText(workflow?.current_status,bi("Workflow overview","Workflow áttekintése"));
+ return `<section class="workflow-details-piano-header"><div class="workflow-details-piano-icon" aria-hidden="true">♬</div><div class="workflow-details-piano-copy"><span>${bi("Piano in workshop","Műhelyben lévő hangszer")}</span><strong>${htmlText(piano)}</strong><p><b>${bi("Owner","Tulajdonos")}:</b> ${htmlText(owner)} <i aria-hidden="true">•</i> <b>${bi("Client","Ügyfél")}:</b> ${htmlText(client)}</p></div><span class="workflow-details-phase-chip">${htmlText(phase)}</span></section>`;
+}
 function workflowDrawerMarkup(workflow, selectedStageId=""){
  if(!workflow)return "";
  const stage=selectedStageId&&selectedStageId!=="__workflow__"?(workflow.stages||[]).find(item=>String(item.id)===String(selectedStageId)):null;
- return `<aside class="workflow-drawer workflow-details-modal-content" data-workflow-drawer-key="${htmlText(`${workflow.id}:${selectedStageId||"__workflow__"}`)}" role="dialog" aria-label="${bi("Workflow details","Workflow részletei")}"><div class="workflow-drawer-head"><button type="button" class="workflow-drawer-back ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Back","Vissza")}">‹</button><div class="workflow-drawer-head-copy"><p class="event-kicker">${stage?`${Number(stage.stage_order)+1}. ${htmlText(workflowStageLabel(stage))}`:htmlText(sanitizeSafeText(workflow.workflow_key,""))}</p><h2>${stage?bi("Workflow details","Munkafolyamat részletei"):bi("Workflow details","Workflow részletei")}</h2>${stage?"":`<p class="muted">${htmlText(workflowPianoLabel(workflow)||workflowSafeText(workflow?.piano_display_name)||workflowSafeText(workflow?.piano_id,bi("Unknown piano","Ismeretlen hangszer")))} · ${htmlText(workflowSafeText(workflow?.client_name,"—"))}</p>`}</div><button type="button" class="modal-close ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Close","Bezárás")}">×</button></div><div class="workflow-drawer-scroll">${stage?workflowPhaseDrawerMarkup(workflow,stage):workflowOverviewDrawerMarkup(workflow)}</div></aside>`;
+ return `<aside class="workflow-drawer workflow-details-modal-content" data-workflow-drawer-key="${htmlText(`${workflow.id}:${selectedStageId||"__workflow__"}`)}" role="dialog" aria-label="${bi("Workflow details","Workflow részletei")}"><div class="workflow-drawer-head"><button type="button" class="workflow-drawer-back ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Back","Vissza")}">‹</button><div class="workflow-drawer-head-copy"><p class="event-kicker">${stage?`${Number(stage.stage_order)+1}. ${htmlText(workflowStageLabel(stage))}`:htmlText(sanitizeSafeText(workflow.workflow_key,""))}</p><h2>${stage?bi("Workflow details","Munkafolyamat részletei"):bi("Workflow details","Workflow részletei")}</h2></div><button type="button" class="modal-close ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Close","Bezárás")}">×</button></div><div class="workflow-drawer-scroll">${workflowDetailsPianoHeaderMarkup(workflow,stage)}${stage?workflowPhaseDrawerMarkup(workflow,stage):workflowOverviewDrawerMarkup(workflow)}</div></aside>`;
 }
 
 function workflowBindDrawerDirtyState(root,workflow,stageId){
@@ -2591,7 +2667,7 @@ function workflowTouchStagePointerDown(event,card,root){
  const lane=card.closest(".workflow-swimlane"),state={pointerId:event.pointerId,card,lane,root,startX:event.clientX,startY:event.clientY,lastX:event.clientX,lastY:event.clientY,active:false,target:null,timer:null,moveHandler:null,finishHandler:null,cancel:null};
  const detach=()=>{clearTimeout(state.timer);state.card?.classList.remove("is-long-press-active");state.lane?.classList.remove("is-touch-dragging");if(state.moveHandler)state.card?.removeEventListener("pointermove",state.moveHandler);if(state.finishHandler){state.card?.removeEventListener("pointerup",state.finishHandler);state.card?.removeEventListener("pointercancel",state.finishHandler);}try{if(state.card?.hasPointerCapture?.(state.pointerId))state.card.releasePointerCapture(state.pointerId);}catch(_error){}workflowClearDropTargets(root);if(workflowTouchDragState===state)workflowTouchDragState=null;};
  state.cancel=detach;workflowTouchDragState=state;
- state.timer=setTimeout(()=>{if(workflowTouchDragState!==state)return;state.active=true;workflowSuppressClickUntil=Date.now()+2000;card.classList.add("is-long-press-active");lane?.classList.add("is-touch-dragging");try{card.setPointerCapture?.(state.pointerId);}catch(_error){}},1500);
+ state.timer=setTimeout(()=>{if(workflowTouchDragState!==state)return;state.active=true;workflowSuppressClickUntil=Date.now()+2000;card.classList.add("is-long-press-active");lane?.classList.add("is-touch-dragging");navigator.vibrate?.(50);try{card.setPointerCapture?.(state.pointerId);}catch(_error){}},1500);
  const move=moveEvent=>{if(workflowTouchDragState!==state||moveEvent.pointerId!==state.pointerId)return;state.lastX=moveEvent.clientX;state.lastY=moveEvent.clientY;const distance=Math.hypot(state.lastX-state.startX,state.lastY-state.startY);if(!state.active){if(distance>10)detach();return;}moveEvent.preventDefault();workflowClearDropTargets(root);const point=document.elementFromPoint(state.lastX,state.lastY),zone=point?.closest?.(".workflow-stage-dropzone");state.target=zone||null;if(!zone)return;const target=workflowDropTargetState(zone,{...state,stageCode:card.dataset.stageCode});zone.classList.add(target.available?"is-drop-target":"is-invalid-drop");};
  const finish=finishEvent=>{if(finishEvent.pointerId!==state.pointerId)return;const active=state.active,target=workflowDropTargetState(state.target,{...state,stageCode:card.dataset.stageCode});detach();workflowSuppressClickUntil=Date.now()+500;if(active&&target.available&&!target.sameStage)workflowMoveStageCard(card.dataset.workflowId,card.dataset.stageId,target.targetCode);};
  state.moveHandler=move;state.finishHandler=finish;card.addEventListener("pointermove",move,{passive:false});card.addEventListener("pointerup",finish);card.addEventListener("pointercancel",finish);
@@ -2859,7 +2935,7 @@ function beginSchedulerTouchLongPress(event,job){
  const card=event.currentTarget,touch=event.touches[0],rect=card.getBoundingClientRect();
  cleanupSchedulerTouchDrag();
  schedulerTouchDrag={payload:schedulerDragPayload(job),card,startX:touch.clientX,startY:touch.clientY,lastClientX:touch.clientX,lastClientY:touch.clientY,grabOffsetY:touch.clientY-rect.top,activated:false,started:false,cancelled:false,ghost:null,target:null,timer:null};
- schedulerTouchDrag.timer=setTimeout(()=>{const state=schedulerTouchDrag;if(!state||state.cancelled)return;state.activated=true;state.card.classList.add("is-touch-drag-ready");},1500);
+ schedulerTouchDrag.timer=setTimeout(()=>{const state=schedulerTouchDrag;if(!state||state.cancelled)return;state.activated=true;state.card.classList.add("is-touch-drag-ready");navigator.vibrate?.(50);},1500);
 }
 function moveSchedulerTouchLongPress(event){
  const state=schedulerTouchDrag;if(!state||event.touches?.length!==1)return;const touch=event.touches[0];
@@ -4877,14 +4953,14 @@ function deadlineCardMarkup(row,{mobile=false}={}){
   <p class="deadline-card-subtitle">${deadlineSubtitleMarkup(row)}</p>
   <p class="deadline-card-description ${row.description?'':'hidden'}">${htmlText(row.description||'')}</p>
   <span class="deadline-time-badge">${htmlText(deadlineUrgencyLabel(row))}</span>
-  <div class="deadline-card-actions"><button type="button" class="deadline-action-complete" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','complete',event)">✔ ${bi('Done','Kész')}</button><button type="button" class="deadline-action-reschedule" onclick="toggleDeadlineActionPanel('${htmlText(row.id)}','reschedule',event)">↻ ${bi('Reschedule','Újraütemezés')}</button><button type="button" class="deadline-action-snooze" onclick="snoozeDeadlineNotification('${htmlText(row.entity_type)}','${htmlText(row.entity_id)}','${htmlText(row.id)}')">◷ ${bi('Remind later','Később')}</button></div>
+  <div class="deadline-card-actions"><button type="button" class="deadline-action-complete" data-action="complete-notification">✔ ${bi('Done','Kész')}</button><button type="button" class="deadline-action-reschedule" data-action="reschedule-notification">↻ ${bi('Reschedule','Újraütemezés')}</button><button type="button" class="deadline-action-snooze" data-action="snooze-notification">◷ ${bi('Remind later','Később')}</button></div>
   <div class="deadline-inline-panel hidden" data-deadline-panel="${htmlText(row.id)}"></div>
  </article>`;
 }
 function updateDeadlineTaskBadge(count){const badge=document.getElementById('pwa-tasks-badge');if(!badge)return;const safe=Math.max(0,Number(count||0));badge.textContent=safe>99?'99+':String(safe);badge.classList.toggle('hidden',safe===0);}
 function ensureDeadlineStackScaffold(){
  const stack=document.getElementById('global-notification-stack');if(!stack)return null;
- let list=stack.querySelector('.deadline-stack-list');if(!list){stack.innerHTML=`<div class="deadline-stack-toolbar"><button type="button" class="deadline-snooze-all" onclick="snoozeAllDeadlineNotifications()">◷ ${bi('Snooze all notifications','Összes értesítés későbbre')}</button></div><div class="deadline-stack-list"></div>`;list=stack.querySelector('.deadline-stack-list');}
+ let list=stack.querySelector('.deadline-stack-list');if(!list){stack.innerHTML=`<div class="deadline-stack-toolbar"><button type="button" class="deadline-snooze-all" data-action="snooze-all-notifications">◷ ${bi('Snooze all notifications','Összes értesítés későbbre')}</button></div><div class="deadline-stack-list"></div>`;list=stack.querySelector('.deadline-stack-list');}
  return {stack,list,toolbar:stack.querySelector('.deadline-stack-toolbar')};
 }
 function patchDeadlineCardElement(card,row){
@@ -4922,7 +4998,7 @@ function toggleDeadlineActionPanel(cardId,mode,event=null){
  }
  if(!panel)return;closeQuickRescheduleScheduler();document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
  const open=panel.dataset.mode===mode&&!panel.classList.contains('hidden');if(open){panel.classList.add('hidden');panel.innerHTML='';panel.dataset.mode='';return;}
- panel.dataset.mode=mode;panel.classList.remove('hidden');panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" onclick="completeDeadlineNotification('${htmlText(cardId)}')">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" onclick="toggleDeadlineActionPanel('${htmlText(cardId)}','complete',event)">${bi('Cancel','Mégse')}</button></div>`;
+ panel.dataset.mode=mode;panel.classList.remove('hidden');panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" data-action="confirm-complete-notification">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" data-action="cancel-complete-notification">${bi('Cancel','Mégse')}</button></div>`;
 }
 function animateDeadlineCardOut(cardId,delay=0){setTimeout(()=>document.querySelectorAll(`[data-deadline-card="${CSS.escape(String(cardId))}"]`).forEach(card=>{card.classList.add('is-leaving');setTimeout(()=>card.remove(),270);}),delay);}
 function removeDeadlineNotificationLocal(cardId,{animate=false,delay=0}={}){if(animate)animateDeadlineCardOut(cardId,delay);deadlineNotifications=deadlineNotifications.filter(row=>String(row.id)!==String(cardId));updateDeadlineTaskBadge(deadlineNotifications.length);const shell=ensureDeadlineStackScaffold();shell?.toolbar?.classList.toggle('hidden',deadlineNotifications.length===0);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,Math.max(0,delay)+270);}
@@ -4933,8 +5009,8 @@ async function snoozeAllDeadlineNotifications(){
  const rows=[...deadlineNotifications];if(!rows.length)return;rows.forEach((row,index)=>animateDeadlineCardOut(row.id,index*55));
  try{await Promise.all(rows.map(row=>api('/api/notifications/snooze',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})})));deadlineNotifications=[];updateDeadlineTaskBadge(0);ensureDeadlineStackScaffold()?.toolbar?.classList.add('hidden');setTimeout(()=>{renderDeadlineStack([]);if(currentView==='tasks')renderDeadlineTasksFromState();},rows.length*55+280);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),rows.length*55+360);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}
 }
-async function completeDeadlineNotification(cardId){
- const row=findDeadlineNotification(cardId),panel=document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;const note=panel.querySelector('[data-deadline-note]')?.value||'';
+async function completeDeadlineNotification(cardId,sourcePanel=null){
+ const row=findDeadlineNotification(cardId),panel=sourcePanel||document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;const note=panel.querySelector('[data-deadline-note]')?.value||'';
  try{
   if(row.entity_type==='WORKFLOW_STAGE'){const existing=String(row.existing_note||'').trim(),merged=[existing,note.trim()?`[${new Date().toISOString()}] ${bi('Completed from Tasks','Teendőkből lezárva')}: ${note.trim()}`:''].filter(Boolean).join('\n');await api(`/api/workflows/${encodeURIComponent(row.workflow_id)}/stages/${encodeURIComponent(row.entity_id)}`,{method:'PATCH',body:JSON.stringify({status:'COMPLETED',notes:merged})});}
   else await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id,note})});
@@ -4958,9 +5034,30 @@ async function saveQuickRescheduleScheduler(){
  try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(row=>String(row.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}if(context.cardId){animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);closeQuickRescheduleScheduler({deferRemoval:270});}else closeQuickRescheduleScheduler();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);}catch(error){showError(error);}
 }
 async function rescheduleDeadlineNotification(cardId){const row=findDeadlineNotification(cardId),card=document.querySelector(`[data-deadline-card="${CSS.escape(String(cardId))}"]`),panel=card?.querySelector?.(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!card||!panel)return;openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:'',anchorCard:card,hostPanel:panel});}
+function bindDeadlineNotificationDelegation(){
+ const bind=root=>{
+  if(!root||root.dataset.deadlineDelegationBound==='true')return;
+  root.dataset.deadlineDelegationBound='true';
+  root.addEventListener('click',event=>{
+   const control=event.target.closest?.('[data-action]');if(!control||!root.contains(control))return;
+   const action=control.dataset.action;if(!['complete-notification','reschedule-notification','snooze-notification','confirm-complete-notification','cancel-complete-notification','snooze-all-notifications'].includes(action))return;
+   event.preventDefault();event.stopPropagation();
+   if(action==='snooze-all-notifications'){void snoozeAllDeadlineNotifications();return;}
+   const card=control.closest('.deadline-notification-card'),cardId=card?.dataset.deadlineCard,row=cardId?findDeadlineNotification(cardId):null;
+   if(!cardId||!row)return;
+   if(action==='complete-notification')toggleDeadlineActionPanel(cardId,'complete',{currentTarget:control});
+   else if(action==='reschedule-notification')toggleDeadlineActionPanel(cardId,'reschedule',{currentTarget:control});
+   else if(action==='snooze-notification')void snoozeDeadlineNotification(row.entity_type,row.entity_id,cardId);
+   else if(action==='confirm-complete-notification')void completeDeadlineNotification(cardId,card.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`));
+   else if(action==='cancel-complete-notification')toggleDeadlineActionPanel(cardId,'complete',{currentTarget:control});
+  });
+ };
+ bind(document.getElementById('global-notification-stack'));
+ bind(document.getElementById('tasks'));
+}
 function initDeadlineNotificationEngine(){
  if(deadlineNotificationPollTimer)clearInterval(deadlineNotificationPollTimer);
- ensureDeadlineStackScaffold();refreshDeadlineNotifications();deadlineNotificationPollTimer=setInterval(()=>{if(document.visibilityState!=="hidden")refreshDeadlineNotifications({renderMobile:currentView==='tasks'});},60000);
+ ensureDeadlineStackScaffold();bindDeadlineNotificationDelegation();refreshDeadlineNotifications();deadlineNotificationPollTimer=setInterval(()=>{if(document.visibilityState!=="hidden")refreshDeadlineNotifications({renderMobile:currentView==='tasks'});},60000);
  if(!window.__khDeadlineVisibilityBound){document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&token)refreshDeadlineNotifications({renderMobile:currentView==='tasks'});});window.__khDeadlineVisibilityBound=true;}
 }
 
@@ -5115,7 +5212,7 @@ function openUser(row=null, selfProfile=false){
    else saved=await api("/api/users",{method:"POST",body:JSON.stringify(body)});
    const {password_updated:_passwordUpdated,email_delivery_error:_deliveryError,activation_delivery_status:_deliveryStatus,...savedUser}=saved;
    if(isEdit&&row.id===user.id){
-    user={...user,...savedUser};localStorage.setItem("kh_user",JSON.stringify(user));document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;
+    user={...user,...savedUser};persistAuthenticatedSession(token,user);document.getElementById("userInfo").textContent=`${user.name} · ${user.role}`;
     if(selfProfile&&selectedLanguage)setLanguage(selectedLanguage);
    }
    schedulerWorkersCache=null;currentSchedulerWorker=null;closeModal();
