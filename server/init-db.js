@@ -7,6 +7,7 @@ const { nextTicketCode } = require("./ticket-code");
 const { parseGuestName } = require("./name-format");
 const { ensureSteinwayReferenceTables } = require("./steinway-reference");
 const { retireLegacyWorkflow, installWorkflowDeletionGuards } = require("./workflow-retirement");
+const { migrateWorkflowContract } = require("./workflow-contract-migration");
 require("dotenv").config();
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
@@ -21,7 +22,7 @@ function log(message) {
   console.log(`[database] ${message}`);
 }
 
-const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V41-PHASE2");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V42-UI12-CONTRACT");
 log(`Build: ${BUILD_ID}`);
 
 function fail(message, error) {
@@ -163,6 +164,7 @@ function assertPreservedBusinessCounts(before) {
 }
 
 function migrationRequiresBackup() {
+  if (tableExists("wf2_tasks") || (tableExists("wf2_workflows") && !tableColumns("wf2_workflows").has("finance_locked"))) return true;
   if (tableExists("workshop_workflows")) return true;
   if (tableExists("users") && !tableExists("wf2_workflows")) return true;
   const usersSql = tableExists("users")
@@ -896,7 +898,9 @@ function runMigrations() {
   }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  migrateWorkflowContract(db);
   db.exec(fs.readFileSync(path.join(__dirname, "workflow-v2-schema.sql"), "utf8"));
+  migrateWorkflowContract(db);
   // Legacy snoozes had no owner and therefore affected every user. Keep those
   // historical rows for auditability, but make all new reads and writes user
   // scoped. SQLite cannot add a NOT NULL foreign-key column in place, so the
