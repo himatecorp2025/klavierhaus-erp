@@ -1179,6 +1179,8 @@ function runMigrations() {
       ensureColumn("workflow_stages", "financial_closed_at", "TEXT");
       ensureColumn("workflow_stages", "financial_closed_by_user_id", "TEXT");
       ensureColumn("workflow_stages", "financial_closure_reason", "TEXT");
+      ensureColumn("workflow_stages", "calendar_job_id", "TEXT");
+      ensureIndex("idx_workflow_stage_calendar_job", "CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_stages(calendar_job_id)");
       db.exec(`CREATE TABLE IF NOT EXISTS workshop_subtasks (
         id TEXT PRIMARY KEY,
         stage_id TEXT NOT NULL REFERENCES workflow_stages(id) ON DELETE CASCADE,
