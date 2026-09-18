@@ -1284,43 +1284,102 @@ app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prep
 app.get('/api/notifications/acknowledgements',auth,(req,res)=>{res.json(db.prepare("SELECT id,notification_type,title_en,title_hu,body_en,body_hu,acknowledged_at,created_at FROM notifications WHERE recipient_user_id=? AND status='ACKNOWLEDGED' ORDER BY acknowledged_at DESC,created_at DESC").all(req.user.id));});
 app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
-function activeDeadlineNotifications(userId){
+const DEADLINE_NOTIFICATION_TYPES=new Set(['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB']);
+function deadlineUserCanSeeAll(user){return Boolean(user&&(isSuperadminUser(user)||user.role==='ADMIN'||user.role==='MANAGER'));}
+function deadlineRow({entityType,entityId,category,title,instrumentContext,clientContext,responsibleName,targetDate,description='',phone='',workflowId='',calendarJobId='',existingNote='',delayReason='',isVip=false}){
+  return {
+    id:`${entityType.toLowerCase()}-${entityId}`,
+    entity_type:entityType,
+    entity_id:String(entityId),
+    category,
+    title:String(title||''),
+    instrument_context:String(instrumentContext||'No instrument linked / Nincs kapcsolt hangszer'),
+    client_context:String(clientContext||'No client linked / Nincs kapcsolt ügyfél'),
+    responsible_name:String(responsibleName||'Unassigned / Nincs felelős'),
+    target_date:targetDate,
+    description:String(description||''),
+    phone:String(phone||''),
+    workflow_id:String(workflowId||''),
+    calendar_job_id:String(calendarJobId||''),
+    existing_note:String(existingNote||''),
+    delay_reason:String(delayReason||''),
+    is_vip:Boolean(isVip),
+    source:'UNIFIED_DEADLINE_ENGINE'
+  };
+}
+function deadlineEntityVisibleToUser(user,entityType,entityId){
+  if(!user?.id||!DEADLINE_NOTIFICATION_TYPES.has(entityType))return false;
+  const unrestricted=deadlineUserCanSeeAll(user);
+  if(entityType==='WORKFLOW_STAGE'){
+    const row=db.prepare(`SELECT s.id,s.assigned_user_id,w.created_by_user_id,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.id=?`).get(entityId);
+    return Boolean(row&&row.current_status==='ACTIVE'&&(unrestricted||String(row.assigned_user_id||'')===String(user.id)||String(row.created_by_user_id||'')===String(user.id)));
+  }
+  if(entityType==='CALENDAR_JOB'){
+    const job=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);
+    return Boolean(job&&(unrestricted||canEditJob(user,job)));
+  }
+  const contact=db.prepare('SELECT id FROM contacts WHERE id=?').get(entityId);
+  if(!contact)return false;
+  if(unrestricted)return true;
+  return Boolean(db.prepare(`SELECT 1 FROM jobs WHERE COALESCE(is_crm_follow_up,0)=1 AND COALESCE(contact_id,client_id)=? AND assigned_user_id=? AND COALESCE(status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') LIMIT 1`).get(entityId,user.id));
+}
+function activeDeadlineNotifications(user){
+  if(!user?.id)return [];
   const now=new Date(),nowIso=now.toISOString(),limit14=nyLocalDateTime(new Date(now.getTime()+14*86400000));
-  const activeSnoozes=db.prepare(`SELECT entity_type,entity_id FROM notification_snooze_log WHERE user_id=? AND snoozed_until>?`).all(userId,nowIso);
+  const activeSnoozes=db.prepare(`SELECT entity_type,entity_id FROM notification_snooze_log WHERE user_id=? AND snoozed_until>?`).all(user.id,nowIso);
   const snoozed=new Set(activeSnoozes.map(row=>`${row.entity_type}:${row.entity_id}`));
   const notifications=[];
-  const push=(row)=>{
+  const push=row=>{
     if(!row?.entity_id||snoozed.has(`${row.entity_type}:${row.entity_id}`))return;
     const urgency=notificationUrgency(row.target_date,now);
-    if(!urgency)return;
-    notifications.push({...row,urgency});
+    if(urgency)notifications.push({...row,urgency});
   };
-  const contacts=db.prepare(`SELECT id,name,phone,follow_up_date,follow_up_reason,is_vip,relationship_notes FROM contacts WHERE follow_up_date IS NOT NULL AND trim(follow_up_date)<>'' AND follow_up_date<=? ORDER BY follow_up_date,id`).all(limit14);
-  contacts.forEach(contact=>push({
-    id:`contact-${contact.id}`,entity_type:'CLIENT_FOLLOWUP',entity_id:String(contact.id),title:`${Number(contact.is_vip||0)===1?'⭐ ':''}${contact.name||'Client'}`,subtitle:contact.phone||'Nincs telefonszám',description:contact.follow_up_reason||'Ügyfél utánkövetés',target_date:contact.follow_up_date,phone:contact.phone||'',is_vip:Number(contact.is_vip||0)===1,existing_note:contact.relationship_notes||''
-  }));
-  const stages=db.prepare(`SELECT s.id,s.workflow_id,s.name_snapshot_en,s.name_snapshot_hu,s.card_title,s.status,s.assigned_to,s.due_at,s.delay_reason,s.notes,w.title workflow_title,w.piano_id,p.brand,p.model,p.display_name,p.serial_no,c.name client_name
-    FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id LEFT JOIN pianos p ON p.id=w.piano_id LEFT JOIN contacts c ON c.id=w.client_id
-    WHERE w.current_status='ACTIVE' AND s.status NOT IN ('COMPLETED','NOT_REQUIRED','ABORTED') AND s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.due_at<=? ORDER BY s.due_at,s.id`).all(limit14);
+  const unrestricted=deadlineUserCanSeeAll(user)?1:0;
+  const contacts=db.prepare(`SELECT c.id,c.name,c.phone,c.follow_up_date,c.follow_up_reason,c.is_vip,c.relationship_notes,
+      j.assigned_to AS responsible_name,j.assigned_user_id
+    FROM contacts c LEFT JOIN jobs j ON COALESCE(j.is_crm_follow_up,0)=1 AND COALESCE(j.contact_id,j.client_id)=c.id
+      AND COALESCE(j.status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled')
+    WHERE c.follow_up_date IS NOT NULL AND trim(c.follow_up_date)<>'' AND c.follow_up_date<=?
+      AND (?=1 OR j.assigned_user_id=?) ORDER BY c.follow_up_date,c.id`).all(limit14,unrestricted,user.id);
+  contacts.forEach(contact=>push(deadlineRow({
+    entityType:'CLIENT_FOLLOWUP',entityId:contact.id,category:'CLIENT_FOLLOWUP',title:`${Number(contact.is_vip||0)===1?'⭐ ':''}${contact.name||'Client follow-up / Ügyfélkövetés'}`,
+    instrumentContext:'Client relationship follow-up / Ügyfélkapcsolati utánkövetés',clientContext:contact.name||'Client / Ügyfél',responsibleName:contact.responsible_name||contact.name||'',
+    targetDate:contact.follow_up_date,description:contact.follow_up_reason||'Client follow-up / Ügyfél utánkövetés',phone:contact.phone||'',existingNote:contact.relationship_notes||'',isVip:Number(contact.is_vip||0)===1
+  })));
+  const stages=db.prepare(`SELECT s.id,s.workflow_id,s.name_snapshot_en,s.name_snapshot_hu,s.card_title,s.status,s.assigned_to,s.assigned_user_id,s.due_at,s.delay_reason,s.notes,s.calendar_job_id,
+      w.title AS workflow_title,w.created_by_user_id,p.brand,p.model,p.display_name,p.serial_no,c.name AS client_name,c.phone AS client_phone
+    FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id
+      LEFT JOIN pianos p ON p.id=w.piano_id LEFT JOIN contacts c ON c.id=w.client_id
+    WHERE w.current_status='ACTIVE' AND s.status NOT IN ('COMPLETED','NOT_REQUIRED','ABORTED') AND s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.due_at<=?
+      AND (?=1 OR s.assigned_user_id=? OR w.created_by_user_id=?) ORDER BY s.due_at,s.id`).all(limit14,unrestricted,user.id,user.id);
   stages.forEach(stage=>{
-    const piano=[stage.brand,stage.model].filter(Boolean).join(' ').trim()||stage.display_name||stage.serial_no||stage.workflow_title||'Műhely hangszer';
-    const stageName=stage.card_title||stage.name_snapshot_hu||stage.name_snapshot_en||'Munkafázis';
-    push({id:`stage-${stage.id}`,entity_type:'WORKFLOW_STAGE',entity_id:String(stage.id),workflow_id:String(stage.workflow_id),title:piano,subtitle:`${stageName}${stage.assigned_to?` (${stage.assigned_to})`:''}`,description:'Munkafázis határidő esedékes',target_date:stage.due_at,existing_note:stage.notes||'',delay_reason:stage.delay_reason||'',client_name:stage.client_name||''});
+    const piano=[stage.brand,stage.model].filter(Boolean).join(' ').trim()||stage.display_name||stage.serial_no||stage.workflow_title||'Workshop piano / Műhelyhangszer';
+    const stageName=stage.card_title||stage.name_snapshot_hu||stage.name_snapshot_en||'Workflow stage / Munkafázis';
+    push(deadlineRow({entityType:'WORKFLOW_STAGE',entityId:stage.id,category:'WORKFLOW_STAGE',title:stageName,instrumentContext:piano,clientContext:stage.client_name||'',responsibleName:stage.assigned_to||'',targetDate:stage.due_at,description:'Workshop phase deadline / Munkafázis határidő',phone:stage.client_phone||'',workflowId:stage.workflow_id,calendarJobId:stage.calendar_job_id||'',existingNote:stage.notes||'',delayReason:stage.delay_reason||''}));
   });
-  const jobs=db.prepare(`SELECT id,title,start_time,end_time,client_name,client_phone,instructions,notes,completion_notes,status,is_crm_follow_up,contact_id FROM jobs WHERE COALESCE(status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') AND start_time IS NOT NULL AND trim(start_time)<>'' AND start_time<=? ORDER BY start_time,id`).all(limit14);
-  jobs.forEach(job=>push({id:`job-${job.id}`,entity_type:'CALENDAR_JOB',entity_id:String(job.id),title:job.title||'Naptári esemény',subtitle:job.client_name||'Naptári esemény',description:job.instructions||job.notes||'',target_date:job.start_time,end_date:job.end_time||'',phone:job.client_phone||'',existing_note:job.completion_notes||'',is_crm_follow_up:Number(job.is_crm_follow_up||0)===1,contact_id:job.contact_id||''}));
+  const jobs=db.prepare(`SELECT j.id,j.title,j.start_time,j.end_time,j.client_name,j.client_phone,j.piano_name,j.instructions,j.notes,j.completion_notes,j.status,j.assigned_to,j.assigned_user_id,
+      j.is_crm_follow_up,j.contact_id,j.workshop_workflow_id,p.brand,p.model,p.display_name,p.serial_no
+    FROM jobs j LEFT JOIN pianos p ON p.id=j.piano_id
+    WHERE COALESCE(j.status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') AND j.start_time IS NOT NULL AND trim(j.start_time)<>'' AND j.start_time<=?
+      AND NOT EXISTS(SELECT 1 FROM workflow_stages s WHERE s.calendar_job_id=j.id)
+      AND (?=1 OR j.assigned_user_id=?) ORDER BY j.start_time,j.id`).all(limit14,unrestricted,user.id);
+  jobs.forEach(job=>{
+    const piano=[job.brand,job.model].filter(Boolean).join(' ').trim()||job.piano_name||job.serial_no||'Calendar appointment / Naptári időpont';
+    push(deadlineRow({entityType:'CALENDAR_JOB',entityId:job.id,category:'CALENDAR_JOB',title:job.title||'Calendar job / Naptári munka',instrumentContext:piano,clientContext:job.client_name||'',responsibleName:job.assigned_to||'',targetDate:job.start_time,description:job.instructions||job.notes||'',phone:job.client_phone||'',workflowId:job.workshop_workflow_id||'',existingNote:job.completion_notes||''}));
+  });
   notifications.sort((a,b)=>String(a.target_date).localeCompare(String(b.target_date))||String(a.id).localeCompare(String(b.id)));
   return notifications;
 }
 
 app.get('/api/notifications/active',auth,(req,res)=>{
-  try{res.json({ok:true,notifications:activeDeadlineNotifications(req.user.id)});}
+  try{res.json({ok:true,notifications:activeDeadlineNotifications(req.user),source:'UNIFIED_DEADLINE_ENGINE'});}
   catch(error){console.error('Active deadline notification aggregation failed:',error);res.status(500).json({error:'NOTIFICATION_AGGREGATION_FAILED'});}
 });
 
 app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim();
-  if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!DEADLINE_NOTIFICATION_TYPES.has(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!deadlineEntityVisibleToUser(req.user,entityType,entityId))return res.status(404).json({error:'NOTIFICATION_ENTITY_NOT_FOUND'});
   const snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString(),id=rid('NSZ');
   db.prepare(`INSERT INTO notification_snooze_log(id,user_id,entity_type,entity_id,snoozed_until)
     VALUES(?,?,?,?,?)
@@ -1331,7 +1390,7 @@ app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(re
 
 app.post('/api/notifications/snooze-all',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   try{
-    const activeNotifications=activeDeadlineNotifications(req.user.id),snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString();
+    const activeNotifications=activeDeadlineNotifications(req.user),snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString();
     const run=db.transaction(()=>{
       const insert=db.prepare(`INSERT INTO notification_snooze_log(id,user_id,entity_type,entity_id,snoozed_until)
         VALUES(?,?,?,?,?)
@@ -1356,7 +1415,8 @@ app.post('/api/notifications/snooze-all',auth,permit('ADMIN','MANAGER','WORKER')
 
 app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim(),targetDate=notificationLocalDateTime(req.body?.target_date),reason=String(req.body?.reason||'').replace(/\u0000/g,'').trim().slice(0,2000);
-  if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!DEADLINE_NOTIFICATION_TYPES.has(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!deadlineEntityVisibleToUser(req.user,entityType,entityId))return res.status(404).json({error:'NOTIFICATION_ENTITY_NOT_FOUND'});
   if(!targetDate)return res.status(400).json({error:'INVALID_NOTIFICATION_TARGET_DATE'});
   if(!reason)return res.status(400).json({error:'RESCHEDULE_REASON_REQUIRED'});
   try{
@@ -1382,13 +1442,8 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
     const linkedStage=db.prepare(`SELECT s.*,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.calendar_job_id=?`).get(before.id);
     let assigneeChanged=false;
     db.transaction(()=>{
-      if(assigned){
-        const result=jobDomain.patchJobSchedule({jobId:before.id,startTime:targetDate,endTime,assignedUser:assigned,actor:req.user,reassignmentNote:reason,findConflicts:findScheduleConflicts});
-        assigneeChanged=result.assigneeChanged;
-      }else{
-        const minutes=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(targetDate,endTime)||duration);
-        db.prepare(`UPDATE jobs SET start_time=?,end_time=?,planned_minutes=?,planned_hours=?,timezone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(targetDate,endTime,minutes,minutes/60,JOB_TIMEZONE,before.id);
-      }
+      const result=jobDomain.patchJobSchedule({jobId:before.id,startTime:targetDate,endTime,assignedUser:assigned,allowUnassigned:!assigned,actor:req.user,reassignmentNote:reason,findConflicts:findScheduleConflicts});
+      assigneeChanged=result.assigneeChanged;
       if(linkedStage){
         db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(linkedStage.delay_reason,reason,'Rescheduled from calendar / Naptárból újraütemezve'),linkedStage.id);
         db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(linkedStage.workflow_id);
@@ -1407,7 +1462,8 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
 
 app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim(),note=String(req.body?.note||'').replace(/\u0000/g,'').trim().slice(0,2000);
-  if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!DEADLINE_NOTIFICATION_TYPES.has(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
+  if(!deadlineEntityVisibleToUser(req.user,entityType,entityId))return res.status(404).json({error:'NOTIFICATION_ENTITY_NOT_FOUND'});
   try{
     if(entityType==='CLIENT_FOLLOWUP'){
       const before=db.prepare('SELECT * FROM contacts WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'CONTACT_NOT_FOUND'});
