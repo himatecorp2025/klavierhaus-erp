@@ -870,8 +870,20 @@ function runMigrations() {
     ensureColumn("client_pianos", "piano_location_address", "TEXT");
     ensureColumn("client_pianos", "location_name", "TEXT");
   }
+  // schema.sql now creates user-scoped snooze indexes. Add the compatibility
+  // column first when upgrading an existing ownerless snooze table, otherwise
+  // SQLite would try to create the index before the column exists.
+  if (tableExists("notification_snooze_log")) {
+    ensureColumn("notification_snooze_log", "user_id", "TEXT");
+  }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  // Legacy snoozes had no owner and therefore affected every user. Keep those
+  // historical rows for auditability, but make all new reads and writes user
+  // scoped. SQLite cannot add a NOT NULL foreign-key column in place, so the
+  // fresh schema enforces it while existing databases receive the compatible
+  // nullable migration column.
+  ensureColumn("notification_snooze_log", "user_id", "TEXT");
   ensureColumn("system_integration_health", "enabled", "INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))");
   ensureColumn("system_integration_backups", "backup_file_path", "TEXT NOT NULL DEFAULT ''");
   ensureColumn("system_integration_backups", "backup_sha256", "TEXT NOT NULL DEFAULT ''");
@@ -1336,7 +1348,14 @@ function runMigrations() {
   ensureColumn("push_subscriptions", "device_id", "TEXT");
   ensureColumn("push_subscriptions", "last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP");
   ensureColumn("push_subscriptions", "verified_at", "TEXT");
-    ensureIndex("idx_notification_snooze_active", "CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(entity_type,entity_id,snoozed_until)");
+  ensureIndex("idx_snooze_user_entity", "CREATE UNIQUE INDEX IF NOT EXISTS idx_snooze_user_entity ON notification_snooze_log(user_id,entity_type,entity_id)");
+  ensureIndex("idx_notification_snooze_active", "CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(user_id,entity_type,entity_id,snoozed_until)");
+  ensureIndex("idx_jobs_client_id", "CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id)");
+  ensureIndex("idx_jobs_piano_id", "CREATE INDEX IF NOT EXISTS idx_jobs_piano_id ON jobs(piano_id)");
+  ensureIndex("idx_jobs_contact_id", "CREATE INDEX IF NOT EXISTS idx_jobs_contact_id ON jobs(contact_id)");
+  ensureIndex("idx_jobs_parent_id", "CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_job_id)");
+  ensureIndex("idx_job_logs_job_id", "CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)");
+  ensureIndex("idx_stage_transfers_wf_stg", "CREATE INDEX IF NOT EXISTS idx_stage_transfers_wf_stg ON workflow_stage_transfers(workflow_id,stage_id)");
   ensureIndex("idx_notifications_event_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key) WHERE event_key IS NOT NULL");
   ensureIndex("idx_notifications_recipient_status", "CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(recipient_user_id,status,created_at DESC)");
   ensureIndex("idx_notifications_job", "CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(related_job_id)");
