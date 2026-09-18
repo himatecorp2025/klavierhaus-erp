@@ -27,7 +27,7 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
  app.delete(`${base}/workflows/:id/phases/:phaseId`,wrap(req=>{
   const files=db.prepare('SELECT stored_name FROM wf2_documents WHERE phase_id=?').all(req.params.phaseId);
   const result=engine.deletePhase(...p(req),body(req),req.user);
-  for(const f of files)fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
+  for(const f of files)if(!db.prepare("SELECT 1 FROM wf2_documents WHERE stored_name=?").get(f.stored_name))fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
  }));
  app.post(`${base}/workflows/:id/phases/:phaseId/tasks`,wrap(req=>engine.saveTask(...p(req),null,body(req),req.user)));
  app.put(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId`,wrap(req=>engine.saveTask(...p(req),req.params.taskId,body(req),req.user)));
@@ -36,7 +36,7 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
  app.delete(`${base}/workflows/:id/phases/:phaseId/tasks/:taskId`,wrap(req=>{
   const files=db.prepare('SELECT stored_name FROM wf2_documents WHERE task_id=? AND phase_id=?').all(req.params.taskId,req.params.phaseId);
   const result=engine.deleteTask(...p(req),req.params.taskId,body(req),req.user);
-  for(const f of files)fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
+  for(const f of files)if(!db.prepare("SELECT 1 FROM wf2_documents WHERE stored_name=?").get(f.stored_name))fs.rmSync(path.join(documentsDir,path.basename(f.stored_name)),{force:true});return result;
  }));
  app.post(`${base}/workflows/:id/phases/:phaseId/costs`,wrap(req=>engine.saveCost(...p(req),null,body(req),req.user)));
  app.post(`${base}/workflows/:id/phases/:phaseId/costs/:costId/approve`,wrap(req=>engine.approveCost(...p(req),req.params.costId,body(req),req.user)));
