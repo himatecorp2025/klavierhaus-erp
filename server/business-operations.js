@@ -1181,7 +1181,10 @@ function registerBusinessOperationsRoutes(options) {
             if (!workflow) throw Object.assign(new Error("UNBILLED_WORKFLOW_NOT_FOUND"), { status: 404 });
             if (String(workflow.billing_status || "Unbilled") !== "Unbilled") throw Object.assign(new Error("SOURCE_ALREADY_BILLED"), { status: 409 });
             const stages = db.prepare("SELECT * FROM workflow_finance_phases WHERE workflow_id=? ORDER BY stage_order,id").all(sourceId);
-            const lines = db.prepare("SELECT * FROM workflow_finance_lines WHERE workflow_id=? ORDER BY created_at,id").all(sourceId);
+            const hasNewSource = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wf2_workflows'").get() && db.prepare("SELECT 1 FROM wf2_workflows WHERE id=?").get(sourceId);
+            const lines = hasNewSource
+              ? db.prepare("SELECT c.*,p.id stage_id,'COST' line_type,c.charge_cents/100.0 amount,'RELEASED' accounting_status FROM wf2_costs c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? ORDER BY c.id").all(sourceId)
+              : db.prepare("SELECT * FROM workflow_finance_lines WHERE workflow_id=? ORDER BY created_at,id").all(sourceId);
             created = [invoiceEngine.createWorkflowInvoice({ workflow, stages, lines, actor: req.user, now: new Date().toISOString(), paymentMethod: method })].filter(Boolean);
           } else {
             throw Object.assign(new Error("INVALID_INVOICE_SOURCE_TYPE"), { status: 400 });
