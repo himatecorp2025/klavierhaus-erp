@@ -1329,6 +1329,31 @@ app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(re
   res.json({ok:true,entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil,hours:3});
 });
 
+app.post('/api/notifications/snooze-all',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
+  try{
+    const activeNotifications=activeDeadlineNotifications(req.user.id),snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString();
+    const run=db.transaction(()=>{
+      const insert=db.prepare(`INSERT INTO notification_snooze_log(id,user_id,entity_type,entity_id,snoozed_until)
+        VALUES(?,?,?,?,?)
+        ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET snoozed_until=excluded.snoozed_until,created_at=CURRENT_TIMESTAMP`);
+      for(const notification of activeNotifications){
+        insert.run(rid('NSZ'),req.user.id,notification.entity_type,String(notification.entity_id),snoozedUntil);
+      }
+      audit(req,'SNOOZE_ALL','notification_snooze_log',req.user.id,null,{
+        user_id:req.user.id,
+        notification_count:activeNotifications.length,
+        entities:activeNotifications.map(notification=>({entity_type:notification.entity_type,entity_id:String(notification.entity_id)})),
+        snoozed_until:snoozedUntil
+      },1,'All active deadline notifications snoozed for exactly three hours','TECHNICAL');
+    });
+    run();
+    res.json({ok:true,snoozed_until:snoozedUntil,hours:3,count:activeNotifications.length});
+  }catch(error){
+    console.error('Bulk deadline notification snooze failed:',error);
+    res.status(500).json({error:'NOTIFICATION_SNOOZE_ALL_FAILED'});
+  }
+});
+
 app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim(),targetDate=notificationLocalDateTime(req.body?.target_date),reason=String(req.body?.reason||'').replace(/\u0000/g,'').trim().slice(0,2000);
   if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
