@@ -15,6 +15,7 @@ const failure = (code, details) => Object.assign(new Error(code), { code, status
 
 function retireLegacyWorkflow(db) {
   if (!exists(db, "workshop_workflows") && !Object.keys(ARCHIVE_TABLES).some(name => exists(db, name))) return { migrated:false };
+  if (exists(db, "wf2_workflows") && exists(db, "workshop_subtasks")) throw failure("WORKFLOW_MIGRATION_MIXED_GENERATIONS");
   return db.transaction(() => {
     for (const [oldName, newName] of Object.entries(ARCHIVE_TABLES)) {
       if (exists(db, oldName) && exists(db, newName)) throw failure("WORKFLOW_MIGRATION_AMBIGUOUS_TABLES", {oldName,newName});
