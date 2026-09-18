@@ -29,18 +29,23 @@ test("client phone/address edits persist to the central contact without stale fo
 });
 
 test("inline piano registration writes pianos plus client_pianos and immediately selects the new instrument", () => {
-  assert.match(schema, /CREATE TABLE IF NOT EXISTS client_pianos/);
-  assert.match(schema, /UNIQUE\(client_id,piano_id\)/);
-  assert.match(initDb, /INSERT OR IGNORE INTO client_pianos/);
-  assert.match(initDb, /SELECT 'CP-' \|\| lower\(hex\(randomblob\(12\)\)\), owner_contact_id, id FROM pianos/);
-  assert.match(server, /function linkClientPiano\(clientId,pianoId\)/);
-  assert.match(server, /app\.post\("\/api\/contacts\/:id\/pianos"/);
-  assert.match(server, /linkClientPiano\(client\.id,id\)/);
-  assert.match(app, /Register New Piano for this Client/);
-  assert.match(app, /name="brand" required/);
-  assert.match(app, /name="model"[^>]*required/);
-  assert.match(app, /name="serial_no" required/);
-  assert.match(app, /pianoInput\.dataset\.pianoId=piano\.id/);
+  // This contract used to require a serial and a specific inline SQL call.
+  // The approved 44 contract uses the shared transactional writer with optional serial.
+  const f = require('./helpers/workflow-planner-fixture').fixture();
+  try {
+    const saved=f.piano.create({owner_contact_id:'CL',brand:'Steinway & Sons',model:'B-211',serial_no:''});
+    assert.equal(f.db.prepare('SELECT owner_contact_id FROM pianos WHERE id=?').get(saved.id).owner_contact_id,'CL');
+    assert.equal(f.db.prepare('SELECT piano_id FROM client_pianos WHERE client_id=? AND piano_id=?').get('CL',saved.id).piano_id,saved.id);
+    let selected=null;
+    const open=require('./helpers/master-data-entry-fixture').entry('openNestedJobPianoModal',(kind,row,options)=>{
+      assert.equal(kind,'pianos');assert.equal(row,null);assert.equal(options.prefill.owner_contact_id,'CL');
+      options.onSaved(saved);return saved;
+    });
+    open({client:{id:'CL'},onSaved:piano=>{selected=piano.id;}});
+    assert.equal(selected,saved.id);
+    assert.throws(()=>f.piano.create({owner_contact_id:'CL',brand:'',model:'B-211'}),/PIANO_CORE_FIELDS_REQUIRED/);
+    assert.throws(()=>f.piano.create({owner_contact_id:'CL',brand:'Steinway & Sons',model:''}),/PIANO_CORE_FIELDS_REQUIRED/);
+  } finally {f.close();}
 });
 
 test("daily rate is fixed at $300 per technician/day, duplicates remain enabled at $0, and moves/deletes rebalance", () => {
