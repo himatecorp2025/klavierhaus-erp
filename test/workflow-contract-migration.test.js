@@ -40,7 +40,10 @@ test('migration 02 real startup creates pre-migration backup; repeated startup p
  const run=()=>spawnSync(process.execPath,['server/init-db.js'],{cwd:root,env:{...process.env,DB_PATH:filename,BACKUP_DIR:path.join(temp,'backups')},encoding:'utf8'});
  for(let i=0;i<2;i++){const r=run();assert.equal(r.status,0,r.stderr+'\n'+r.stdout);}
  db=new Database(filename);db.pragma('foreign_keys=ON');try{
- assert.deepEqual(db.prepare('SELECT * FROM workshop_subtasks WHERE id=?').get('T'),originalTask);
+ const upgradedTask=db.prepare('SELECT * FROM workshop_subtasks WHERE id=?').get('T');
+ assert.equal(upgradedTask.planned_cost_cents,null);assert.equal(upgradedTask.planned_cost_category,'OTHER');
+ const preservedColumns=Object.fromEntries(Object.keys(originalTask).map(key=>[key,upgradedTask[key]]));
+ assert.deepEqual(preservedColumns,{...originalTask});
  assert.equal(db.prepare('SELECT start_at FROM wf2_workflows WHERE id=?').get('WF').start_at,'2027-10-01T09:15');
  assert.equal(db.prepare('SELECT start_time FROM jobs WHERE id=?').get('J').start_time,'2027-10-18T10:45');
  assert.equal(JSON.stringify(db.prepare('SELECT * FROM journal_lines ORDER BY id').all()),journal);
