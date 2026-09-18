@@ -269,10 +269,6 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         if (bucketChanged && job.assigned_user_id && previousDate) rebalanceDailyRateAllocations({ userId: job.assigned_user_id, dateStr: previousDate });
         if (nextAssigneeId) rebalanceDailyRateAllocations({ userId: nextAssigneeId, dateStr: targetDate });
       }
-      if (job.workflow_id) {
-        db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(endTime, job.workflow_id);
-        db.prepare("UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'").run(endTime, job.workflow_id);
-      }
       return db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id);
     });
     return { job: update(), previous: job, assigneeChanged: changedAssignee, conflicts: [] };
@@ -294,7 +290,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
       if (complete && String(job.status || "") === "Completed" && String(job.financial_status || "") === "POSTED") {
         return { job, financialItems: [], idempotent: true, mutation: null };
       }
-      const workflow = job.workflow_id ? db.prepare("SELECT * FROM workshop_workflows WHERE id=?").get(job.workflow_id) : null;
+      const workflow = null; // Phase I: calendar jobs no longer mutate retired workshop workflows.
       const mutation = typeof mutate === "function" ? mutate({ job, workflow, now, source, closeType }) : null;
       const posted = [];
       const entries = typeof financialEntries === "function" ? (financialEntries({ job, mutation, now, source, closeType }) || []) : (financialEntries || []);
@@ -351,11 +347,6 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         db.prepare(`UPDATE jobs SET status='Completed',workflow_status='COMPLETED',finalized_at=COALESCE(finalized_at,?),completed_at=COALESCE(completed_at,?),
           financial_status='POSTED',financial_ledger_id=COALESCE(financial_ledger_id,?),closed_at=COALESCE(closed_at,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(now, now, primary?.id || null, now, job.id);
-        if (job.workflow_id) {
-          db.prepare(`UPDATE workshop_workflows SET current_status='COMPLETED',financial_status='CLOSED',financial_closed_at=COALESCE(financial_closed_at,?),
-            financial_closed_by_user_id=COALESCE(financial_closed_by_user_id,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-            .run(now, actor.id || null, job.workflow_id);
-        }
       } else if (posted.length) {
         db.prepare("UPDATE jobs SET financial_status='POSTED',financial_ledger_id=COALESCE(financial_ledger_id,?),updated_at=CURRENT_TIMESTAMP WHERE id=?")
           .run(primary?.id || null, job.id);
