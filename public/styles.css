@@ -1586,9 +1586,6 @@ body.sidebar-collapsed .nav-item-btn .nav-icon{margin:0}
 .timeline-event.WorkflowTask{min-height:56px!important;padding-top:7px;padding-bottom:7px;overflow:hidden}
 .timeline-event.WorkflowTask .event-card-title{font-size:.78rem;font-weight:900}
 .timeline-event.WorkflowTask .event-card-primary,.timeline-event.WorkflowTask .event-card-secondary{display:block!important;font-size:.67rem;line-height:1.2}
-.scheduler-workflow-drawer-host{position:fixed;z-index:10010;inset:0;display:none;pointer-events:none;background:transparent}
-.scheduler-workflow-drawer-host.is-open{display:block}
-.scheduler-workflow-drawer-host .scheduler-workflow-shell{position:absolute;inset:0;min-height:0;pointer-events:none}
 @media(max-width:900px){.scheduler-drag-hud{top:auto;right:12px;bottom:18px;left:12px;max-width:none;min-width:0}.timeline-event.WorkflowTask{min-height:56px!important}}
 
 /* Calendar and New Job refinement: US date + half-hour selectors, Daily Rate toggle, readable scheduler cards */
@@ -2492,18 +2489,7 @@ html.session-restoring #app{visibility:visible;}
   .workflow-mobile-card-client{display:block!important;margin-top:8px!important;color:#F8FAFC!important;font-weight:900!important}.workflow-mobile-card-piano{display:block!important;margin-top:3px!important;color:#B8C8D9!important;font-weight:750!important}
 }
 
-.scheduler-workflow-drawer-host{
-  position:fixed!important;
-  inset:0!important;
-  z-index:10010!important;
-  background:rgba(2,8,18,.62)!important;
-  backdrop-filter:blur(2px);
-  pointer-events:none;
-}
-.scheduler-workflow-drawer-host.is-open{display:flex!important;align-items:center!important;justify-content:center!important;padding:2.5vh 2.5vw!important;pointer-events:auto!important}
-.scheduler-workflow-drawer-host .scheduler-workflow-shell{position:absolute!important;inset:0!important;min-height:0!important;pointer-events:auto!important}
 @media(max-width:900px){
-  .scheduler-workflow-drawer-host.is-open{padding:2vh 2.5vw!important}
 }
 .workflow-mobile-actionbar{display:none}
 @media(max-width:1023.98px){
@@ -2555,10 +2541,6 @@ body.sidebar-collapsed #floating-notifications-container.global-notification-sta
 @media(max-width:900px){#floating-notifications-container.global-notification-stack{display:none!important}}
 
 /* Phase I: scoped shell and notification corrections; other modules unchanged. */
-.workflow-phase-one .workflow-new-btn:disabled{opacity:.45;cursor:not-allowed}
-#workflowPhaseSettings .workflow-config-row{display:grid;grid-template-columns:1fr 1fr 80px;gap:12px;align-items:end;margin-bottom:12px}
-#workflowPhaseSettings label{min-width:0}
-#workflowPhaseSettings input{width:100%;box-sizing:border-box}
 #floating-notifications-container .unified-notification-card{display:flex;flex-direction:column;flex:0 0 320px;min-height:320px!important;cursor:default;pointer-events:auto!important}
 #floating-notifications-container .unified-notification-card-head{flex:0 0 auto;min-height:46px}
 #floating-notifications-container .unified-notification-card-head strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -2574,4 +2556,4 @@ body.sidebar-collapsed #floating-notifications-container.global-notification-sta
 .unified-notification-reschedule-card [data-unified-calendar-host]{min-width:0}
 .unified-notification-reschedule-card .admin-date-picker-popover{position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;box-sizing:border-box;box-shadow:none}
 .unified-notification-reschedule-card .admin-date-picker-panel{width:100%;min-width:0;box-sizing:border-box}
-@media(max-width:1023.98px){.workflow-phase-one .workflow-board-scroll{display:block!important;overflow-x:auto!important;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}.workflow-phase-one .workflow-board-head{display:flex!important;min-width:1720px}.workflow-phase-one .workflow-stage-head{display:grid!important;grid-template-columns:repeat(7,minmax(190px,1fr))!important;flex:1}.workflow-phase-one .workflow-piano-heading{min-width:240px}.workflow-phase-one .workflow-mobile-list{display:none!important}.workflow-phase-one .workflow-mobile-deck:not(:empty)+.workflow-board-scroll{display:none}.unified-notification-reschedule-popover{right:12px;width:min(380px,calc(100vw - 24px))}#workflowPhaseSettings .workflow-config-row{grid-template-columns:1fr}#workflowPhaseSettings .workflow-config-row label:nth-child(3){grid-column:auto}}
+@media(max-width:1023.98px){.unified-notification-reschedule-popover{right:12px;width:min(380px,calc(100vw - 24px))}}
