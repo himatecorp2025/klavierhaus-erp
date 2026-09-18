@@ -133,12 +133,14 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   const error = (code, message = code) => { const e = new Error(message); e.code = code; return e; };
   const userById = (id) => id ? db.prepare("SELECT id,name,role,status FROM users WHERE id=? AND status='Active'").get(id) : null;
   const workflowDetailById = (id) => db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,
+    owner.name AS owner_name,owner.email AS owner_email,owner.phone AS owner_phone,
     p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.brand AS piano_brand,p.model AS piano_model,p.serial_no AS piano_serial,
     p.finish,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
     cu.name AS created_by_name,tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
     FROM workshop_workflows w
     LEFT JOIN contacts c ON c.id=w.client_id
     LEFT JOIN pianos p ON p.id=w.piano_id
+    LEFT JOIN contacts owner ON owner.id=p.owner_contact_id
     LEFT JOIN users cu ON cu.id=w.created_by_user_id
     LEFT JOIN users tu ON tu.id=w.transport_responsible_user_id
     LEFT JOIN users u ON u.id=w.financial_closed_by_user_id
@@ -302,10 +304,12 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,
+      owner.name AS owner_name,owner.email AS owner_email,owner.phone AS owner_phone,
       p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.finish,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
       cu.name AS created_by_name,
       tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
       FROM workshop_workflows w JOIN contacts c ON c.id=w.client_id JOIN pianos p ON p.id=w.piano_id
+      LEFT JOIN contacts owner ON owner.id=p.owner_contact_id
       LEFT JOIN users cu ON cu.id=w.created_by_user_id
       LEFT JOIN users tu ON tu.id=w.transport_responsible_user_id
       LEFT JOIN users u ON u.id=w.financial_closed_by_user_id ${where}
@@ -944,7 +948,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     try { const workflow = requireWorkflow(req.params.id); res.json({ lines: financialRows(workflow.id), summary: signedFinanceSummary(financialRows(workflow.id)) }); } catch (e) { res.status(404).json({ error: e.code || e.message }); }
   });
 
-  app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER"), (req, res) => {
+  app.post("/api/workflows/:id/financial-lines", auth, permit("ADMIN"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id); if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const body = req.body || {}, lineType = "COST";
@@ -973,7 +977,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
   });
 
-  app.patch("/api/workflows/:id/financial-lines/:lineId", auth, permit("ADMIN", "MANAGER"), (req, res) => {
+  app.patch("/api/workflows/:id/financial-lines/:lineId", auth, permit("ADMIN"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
