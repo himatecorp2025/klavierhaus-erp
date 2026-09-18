@@ -1,6 +1,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const { seedAccountingDefaults } = require("./accounting-defaults");
 const crypto = require("crypto");
 const AdmZip = require("adm-zip");
 const express = require("express");
@@ -31,6 +32,9 @@ const { buildAccountingSnapshot, expandFinancialItemsAsOf, isInvoiceDerivedFinan
 const { generateFinancialStatementPdf } = require("./document-pdf");
 const { registerWorkshopWorkflowRoutes } = require("./workshop-workflow");
 const { registerWorkflowV2 } = require("./workflow-v2-routes");
+const {createCardNotifications,decorateDeadline}=require('./workflow-card-notifications');
+const {registerFinanceResetRoutes}=require('./finance-reset');
+const {registerInvoiceSupportRoutes}=require('./invoice-support');
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const {
@@ -87,6 +91,7 @@ const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavi
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 hydrateRuntimeSecrets(db, process.env);
+const cardNotifications=createCardNotifications({db});
 const FINANCIAL_HISTORY_START = "2026-08";
 const ticketService = createTicketService({ db });
 const transactionalEmail=createTransactionalEmail(process.env);
@@ -168,6 +173,7 @@ function audit(req, action, module, recordId, oldValue=null, newValue=null, succ
   }catch(e){console.warn('audit log failed:',e.message)}
 }
 function workAudit(req, action, recordId, oldValue=null, newValue=null, success=1, details=''){
+  if(success&&oldValue&&newValue&&oldValue.status!==newValue.status)cardNotifications.calendarChanged(oldValue,newValue,req.user);
   audit(req,action,'jobs',recordId,oldValue,newValue,success,details,'WORK');
 }
 
@@ -616,13 +622,13 @@ function inventoryRowsActive(){
 
 const invoiceEngine=createInvoiceEngine({db,balanceAccountFromPaymentMethod});
 function reconcileCentralEventInvoices(){
-  const payments=db.prepare("SELECT * FROM event_payments WHERE status='PAID' AND amount_total>0 ORDER BY created_at,id").all();
+  const payments=db.prepare("SELECT * FROM event_payments WHERE status='PAID' AND COALESCE(finance_reset,0)=0 AND amount_total>0 ORDER BY created_at,id").all();
   for(const payment of payments){
     const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
     const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
     if(event&&tickets.length)businessDocuments.ensurePaymentInvoice(payment,event,tickets);
   }
-  const standaloneTickets=db.prepare(`SELECT * FROM event_tickets WHERE event_payment_id IS NULL AND price_cents>0 AND payment_status IN ('PENDING','PAID') ORDER BY created_at,id`).all();
+  const standaloneTickets=db.prepare(`SELECT * FROM event_tickets WHERE event_payment_id IS NULL AND COALESCE(finance_reset,0)=0 AND price_cents>0 AND payment_status IN ('PENDING','PAID') ORDER BY created_at,id`).all();
   for(const ticket of standaloneTickets){
     const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
     if(event)businessDocuments.ensureTicketInvoice(ticket,event,{status:ticket.payment_status==='PAID'?'paid':'issued'});
@@ -877,6 +883,8 @@ registerWorkshopWorkflowRoutes({
   invoiceEngine
 });
 const workflowV2=registerWorkflowV2({app,db,auth,permit,invoiceEngine});
+const financeReset=registerFinanceResetRoutes({app,db,auth,requireSuperadmin,uploadDir:UPLOAD_DIR});
+registerInvoiceSupportRoutes({app,db,auth,permit,uploadDir:UPLOAD_DIR,invoiceEngine,companyData:businessDocuments.companyData});
 setInterval(()=>{
   try{stripeSandbox.expireStaleHolds();}catch(error){console.warn('Stripe Sandbox hold cleanup failed:',error.message);}
 },60*1000).unref();
@@ -1326,11 +1334,12 @@ function activeDeadlineNotifications(user){
   const now=new Date(),nowIso=now.toISOString(),limit14=nyLocalDateTime(new Date(now.getTime()+14*86400000));
   const activeSnoozes=db.prepare(`SELECT entity_type,entity_id FROM notification_snooze_log WHERE user_id=? AND snoozed_until>?`).all(user.id,nowIso);
   const snoozed=new Set(activeSnoozes.map(row=>`${row.entity_type}:${row.entity_id}`));
-  const notifications=[];
+  const notifications=[],logicalKeys=new Set();
   const push=row=>{
     if(!row?.entity_id||snoozed.has(`${row.entity_type}:${row.entity_id}`))return;
-    const urgency=notificationUrgency(row.target_date,now);
-    if(urgency)notifications.push({...row,urgency});
+    const key=row.logical_key||`${row.entity_type}:${row.entity_id}`;if(logicalKeys.has(key))return;
+    const urgency=row.import_pending_review?'REVIEW':notificationUrgency(row.target_date,now);
+    if(urgency){logicalKeys.add(key);notifications.push({...row,urgency});}
   };
   const unrestricted=deadlineUserCanSeeAll(user)?1:0;
   const contacts=db.prepare(`SELECT c.id,c.name,c.phone,c.follow_up_date,c.follow_up_reason,c.is_vip,c.relationship_notes,
@@ -1347,15 +1356,16 @@ function activeDeadlineNotifications(user){
   const jobs=db.prepare(`SELECT j.id,j.title,j.start_time,j.end_time,j.client_name,j.client_phone,j.piano_name,j.instructions,j.notes,j.completion_notes,j.status,j.assigned_to,j.assigned_user_id,
       j.is_crm_follow_up,j.contact_id,j.workshop_workflow_id,p.brand,p.model,p.display_name,p.serial_no
     FROM jobs j LEFT JOIN pianos p ON p.id=j.piano_id
-    WHERE COALESCE(j.status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') AND j.start_time IS NOT NULL AND trim(j.start_time)<>'' AND j.start_time<=?
+    WHERE COALESCE(j.status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') AND j.start_time IS NOT NULL AND trim(j.start_time)<>'' AND (j.start_time<=? OR j.status='PENDING_REVIEW')
       AND NOT EXISTS(SELECT 1 FROM workflow_retired_calendar_jobs retired WHERE retired.job_id=j.id)
       AND (?=1 OR j.assigned_user_id=? OR EXISTS(SELECT 1 FROM wf2_calendar_links wl WHERE wl.job_id=j.id)) ORDER BY j.start_time,j.id`).all(limit14,unrestricted,user.id);
   jobs.forEach(job=>{
     const link=workflowV2.link(job.id);
     if(link&&!workflowV2.jobRights(job.id,user))return;
     const piano=[job.brand,job.model].filter(Boolean).join(' ').trim()||job.piano_name||job.serial_no||'Calendar appointment / Naptári időpont';
-    push({...deadlineRow({entityType:'CALENDAR_JOB',entityId:job.id,category:'CALENDAR_JOB',title:job.title||'Calendar job / Naptári munka',instrumentContext:piano,clientContext:job.client_name||'',responsibleName:job.assigned_to||'',targetDate:job.start_time,description:job.instructions||job.notes||'',phone:job.client_phone||'',workflowId:link?.workflow_id||job.workshop_workflow_id||'',existingNote:job.completion_notes||''}),wf2_entity_type:link?.entity_type||null,wf2_entity_id:link?.entity_id||null,can_reschedule:!link||workflowV2.canReschedule(job.id,user)});
+    push(decorateDeadline(job,link,{...deadlineRow({entityType:'CALENDAR_JOB',entityId:job.id,category:'CALENDAR_JOB',title:job.title||'Calendar job / Naptári munka',instrumentContext:piano,clientContext:job.client_name||'',responsibleName:job.assigned_to||'',targetDate:job.start_time,description:job.instructions||job.notes||'',phone:job.client_phone||'',workflowId:link?.workflow_id||job.workshop_workflow_id||'',existingNote:job.completion_notes||''}),wf2_entity_type:link?.entity_type||null,wf2_entity_id:link?.entity_id||null,can_reschedule:!link||workflowV2.canReschedule(job.id,user)}));
   });
+  notifications.unshift(...cardNotifications.list(user));
   notifications.sort((a,b)=>String(a.target_date).localeCompare(String(b.target_date))||String(a.id).localeCompare(String(b.id)));
   return notifications;
 }
@@ -1367,6 +1377,7 @@ app.get('/api/notifications/active',auth,(req,res)=>{
 
 app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(req,res)=>{
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim();
+  if(entityType==='CARD_STATUS'){try{cardNotifications.dismiss(req.user,entityId);return res.json({ok:true,dismissed:true});}catch(e){return res.status(e.status||400).json({error:e.message});}}
   if(!DEADLINE_NOTIFICATION_TYPES.has(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
   if(!deadlineEntityVisibleToUser(req.user,entityType,entityId))return res.status(404).json({error:'NOTIFICATION_ENTITY_NOT_FOUND'});
   const snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString(),id=`NSZ-${crypto.randomUUID()}`;
@@ -1385,6 +1396,7 @@ app.post('/api/notifications/snooze-all',auth,permit('ADMIN','MANAGER','WORKER')
         VALUES(?,?,?,?,?)
         ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET snoozed_until=excluded.snoozed_until,created_at=CURRENT_TIMESTAMP`);
       for(const notification of activeNotifications){
+        if(notification.entity_type==='CARD_STATUS'){cardNotifications.dismiss(req.user,notification.entity_id);continue;}
         insert.run(`NSZ-${crypto.randomUUID()}`,req.user.id,notification.entity_type,String(notification.entity_id),snoozedUntil);
       }
       audit(req,'SNOOZE_ALL','notification_snooze_log',req.user.id,null,{
@@ -2029,8 +2041,10 @@ function incomeStatementPayload(month,{forceFullMonth=false}={}){
   addPnl('CONCERT_SERVICE_REVENUE','Concert Service Revenue','Koncertbevétel','REVENUE',eventInvoiceRevenue,'OPERATING_REVENUE');
   addPnl('TICKET_REFUND_CONTRA_REVENUE','Ticket Refunds — Contra Revenue','Jegy-visszatérítés — bevételcsökkentés','REVENUE',-eventContraRevenue,'OPERATING_REVENUE');
   const activeMonthPayables=monthInvoices.filter(row=>row.status!=='void'&&row.direction==='payable');
-  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>['job','workflow'].includes(String(row.source_type||''))).reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
-  const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense);
+  const abandonedExpense=roundMoney(activeMonthPayables.filter(row=>row.workflow_outcome==='ABORTED').reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
+  const subcontractorExpense=roundMoney(activeMonthPayables.filter(row=>row.workflow_outcome!=='ABORTED'&&['job','workflow'].includes(String(row.source_type||''))).reduce((sum,row)=>roundMoney(sum+Number(row.total_amount||0)),0));
+  const vendorExpense=roundMoney(snapshot.pnl.invoiceExpenses-subcontractorExpense-abandonedExpense);
+  addPnl('6900-LOSS-ON-ABANDONED-WORK','Loss on abandoned work','Megszakított munka vesztesége','EXPENSE',abandonedExpense,'EXPENSE');
   addPnl('SUBCONTRACTOR_EXPENSE','Subcontractor / Transport Expense','Alvállalkozói / szállítási közvetlen költség','EXPENSE',subcontractorExpense,'EXPENSE');
   addPnl('OTHER_VENDOR_EXPENSE','Other Vendor / Partner Expense','Egyéb partneri / szállítói költség','EXPENSE',vendorExpense,'EXPENSE');
   for(const item of monthDirect){
@@ -3355,26 +3369,9 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
   const clear=(table)=>{ if(exists(table)) db.prepare(`DELETE FROM ${table}`).run(); };
   const superadminId=String(req.user.id||"");
   if(!superadminId) return res.status(400).json({error:"Superadmin identity is missing"});
-  const immutableFinancialCount=exists("invoices")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoices").get()?.c||0):0;
-  const immutableAdjustmentCount=exists("invoice_adjustments")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_adjustments").get()?.c||0):0;
-  const immutableCreditMemoCount=exists("invoice_credit_memos")?Number(db.prepare("SELECT COUNT(*) AS c FROM invoice_credit_memos").get()?.c||0):0;
-  const immutableFinancialItemAdjustmentCount=exists("financial_item_adjustments")?Number(db.prepare("SELECT COUNT(*) AS c FROM financial_item_adjustments").get()?.c||0):0;
-  const immutableFinancialItemVoidCount=exists("financial_item_voids")?Number(db.prepare("SELECT COUNT(*) AS c FROM financial_item_voids").get()?.c||0):0;
-  const immutableDirectFinancialItemCount=exists("financial_items")?Number(db.prepare(`SELECT COUNT(*) AS c FROM financial_items WHERE COALESCE(source_type,'') NOT IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','MANUAL_INVOICE','WORKFLOW_INVOICE_REVENUE','WORKFLOW_INVOICE_MATERIAL','event_payment_refund','event_manual_ticket_refund','event_manual_ticket','event_payment','closed_job','job_close_revenue')`).get()?.c||0):0;
-  if(immutableFinancialCount||immutableAdjustmentCount||immutableCreditMemoCount||immutableFinancialItemAdjustmentCount||immutableFinancialItemVoidCount||immutableDirectFinancialItemCount){
-    return res.status(409).json({
-      error:"IMMUTABLE_FINANCIAL_RECORDS",
-      message:"System reset is blocked while issued financial records exist. Financial documents must remain preserved and may only be voided with an audit reason.",
-      invoices:immutableFinancialCount,
-      adjustments:immutableAdjustmentCount,
-      credit_memos:immutableCreditMemoCount,
-      financial_item_adjustments:immutableFinancialItemAdjustmentCount,
-      financial_item_voids:immutableFinancialItemVoidCount,
-      direct_financial_items:immutableDirectFinancialItemCount
-    });
-  }
-
   const tx=db.transaction(()=>{
+    const guards=db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql IS NOT NULL").all();
+    for(const guard of guards)db.exec('DROP TRIGGER "'+guard.name.replace(/"/g,'""')+'"');
     // Delete every business, import, audit, backup and configurable record.
     // Only the currently authenticated hidden superadmin account survives.
     [
@@ -3383,10 +3380,10 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "website_integration_oauth_states","website_integration_settings","website_preview_tokens","website_content_versions","website_tracking_events","website_contact_leads","website_media","website_artists","website_services","website_showroom_pianos","website_reviews","website_content_pages","landing_sections","marketing_campaigns",
       "event_attendance_exports","event_attendance_actions","event_attendance_entries","event_attendance_sessions","event_checkins","event_ticket_documents","event_refund_requests","event_checkout_holds","stripe_webhook_events","event_payments","event_tickets","event_invitations","event_repeat_requests","event_closures","events","event_categories",
       "customer_message_attachments","customer_messages","customer_conversation_events","customer_conversations","communication_deliveries",
-      "wf2_workflows","wf2_phase_options",
+      "notification_snooze_log","wf_card_event_recipients","wf_card_events","wf2_workflows","wf2_phase_options",
       "workflow_finance_closures","workflow_finance_lines","workflow_finance_phases","workflow_finance_sources","workflow_retired_calendar_jobs",
-      "invoice_items","invoices","invoice_sequences","partner_contractors","partners",
-      "journal_lines","journal_entries","financial_items","accounts",
+      "invoice_supporting_documents","invoice_credit_memos","invoice_adjustments","invoice_items","invoices","invoice_sequences","credit_memo_sequences","partner_contractors","partners",
+      "journal_lines","journal_entries","financial_item_adjustments","financial_item_voids","financial_items","financial_statement_snapshots","opening_balance_items","opening_balance_sets","accounts",
       "job_logs","knowledge_base","jobs","planned_jobs","employee_daily_rates",
       "inventory_checks","inventory_items","client_pianos","pianos","contacts","import_batches",
       "audit_log","backup_log","role_permissions","app_settings","notifications","push_subscriptions","push_activation_tests","notification_devices","notification_preferences",
@@ -3403,6 +3400,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     }
 
     // Recreate only the minimum system defaults required for a usable clean installation.
+    if(exists("accounts")) seedAccountingDefaults(db);
     if(exists("app_settings")){
       const insertSetting=db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?)");
       [
@@ -3438,13 +3436,15 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
     }
 
     if(exists("sqlite_sequence")) db.prepare("DELETE FROM sqlite_sequence").run();
+    for(const guard of guards)db.exec(guard.sql);
+    if(db.pragma('foreign_key_check').length)throw new Error('FACTORY_RESET_FOREIGN_KEY_FAILURE');
   });
 
   tx();
   googleCalendar.stop();
 
   // Remove every uploaded branding/document file and every physical backup file as part of the full reset.
-  for(const directory of [UPLOAD_DIR,BACKUP_DIR]){
+  for(const directory of [UPLOAD_DIR,BACKUP_DIR,path.join(path.dirname(db.name),"workflow-documents-v2")]){
     try{
       if(fs.existsSync(directory)){
         for(const name of fs.readdirSync(directory)){
