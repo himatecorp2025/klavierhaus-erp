@@ -13,7 +13,7 @@ const all=(sql,...args)=>db.prepare(sql).all(...args);
 const error=(fn,code)=>assert.throws(fn,e=>e.code===code||e.message===code,code);
 const total=(account,w)=>Number(one(`SELECT COALESCE(SUM(j.debit-j.credit),0) n FROM journal_lines j JOIN workflow_finance_lines l ON j.entry_id IN(l.wip_journal_entry_id,l.final_journal_entry_id,l.writeoff_journal_entry_id) WHERE l.workflow_id=? AND j.account_code=?`,w.id,account).n.toFixed(2));
 const wip=w=>total('1400-WIP-INVENTORY',w),loss=w=>total('6900-LOSS-ON-ABANDONED-WORK',w);
-const create=(extra={},actor='C0')=>engine.create({title:'UI12 isolated workflow',client_id:'C',piano_id:'P',main_responsible_user_id:'M',start_at:day(1)+'T09:00',final_due_at:day(30)+'T17:00',phases:[{stage_code:'INBOUND',enabled:true}],...extra},user(actor));
+const create=(extra={},actor='C0')=>engine.create({title:'UI12 isolated workflow',expected_revenue:0,client_id:'C',piano_id:'P',main_responsible_user_id:'M',start_at:day(1)+'T09:00',final_due_at:day(30)+'T17:00',phases:[{stage_code:'INBOUND',enabled:true}],...extra},user(actor));
 const task=(w,extra={},actor='M')=>engine.saveTask(w.id,w.stages[0].id,null,{title:'Tune piano',assignee_ids:['W','W2'],...extra},user(actor)).stages[0].tasks.at(-1);
 const cost=(w,extra={},actor='M')=>engine.saveCost(w.id,w.stages[0].id,null,{title:'Material',category:'MATERIAL',amount:123.45,...extra},user(actor)).stages[0].costs.at(-1);
 const state=()=>JSON.stringify(Object.fromEntries(['wf2_workflows','wf2_phases','workshop_subtasks','wf2_costs','wf2_audit','jobs','wf2_calendar_links','workflow_finance_lines','journal_entries','journal_lines','invoices','financial_items'].map(table=>[table,all('SELECT * FROM '+table+' ORDER BY rowid')])));
@@ -52,9 +52,9 @@ test('04 creation is atomic and idempotent; invalid final phase leaves no partia
  error(()=>create({phases:[{stage_code:'INBOUND'},{stage_code:'INBOUND'}]}),'WORKFLOW_PHASE_SELECTION_INVALID');
  const first=create({request_key:'idempotent-42'}),second=create({request_key:'idempotent-42'});assert.equal(first.id,second.id);assert.equal(second.calendar.length,3);
 });
-test('05 phase owner is exactly one; only main owner can hand over, with reason',()=>{
+test('05 phase owner is exactly one; main handover no longer needs a reason',()=>{
  const w=create({phases:undefined}),p=w.stages[0];
- error(()=>engine.updatePhase(w.id,p.id,{responsible_user_id:'W'},user('M')),'WORKFLOW_HANDOVER_REASON_REQUIRED');
+ assert.equal(engine.updatePhase(w.id,p.id,{responsible_user_id:'W'},user('M')).stages[0].responsible_user_id,'W');
  const d=engine.updatePhase(w.id,p.id,{responsible_user_id:'W',transfer_reason:'Assigned to technician'},user('M'));assert.equal(d.stages[0].responsible_user_id,'W');
  error(()=>engine.updatePhase(w.id,p.id,{responsible_user_id:'W2',transfer_reason:'Another technician'},user('W')),'WORKFLOW_FORBIDDEN');
  error(()=>engine.updatePhase(w.id,w.stages[1].id,{title:'Other phase'},user('W')),'WORKFLOW_FORBIDDEN');
@@ -78,17 +78,17 @@ test('08 all cross-workflow and cross-phase IDs are rejected without side effect
  error(()=>engine.updatePhase(b.id,a.stages[0].id,{title:'IDOR'},user('M')),'WORKFLOW_PHASE_NOT_FOUND');
  error(()=>engine.saveTask(b.id,b.stages[0].id,t.id,{title:'IDOR'},user('M')),'WORKFLOW_TASK_NOT_FOUND');assert.equal(state(),before);
 });
-test('09 admin mutations require a reason; override audit is itemized',()=>{
+test('09 admin mutations need no reason; automatic override audit remains itemized',()=>{
  const w=create(),p=w.stages[0],t=task(w),c=engine.checklist(w.id,p.id,null,{title:'Required inspection',task_id:t.id},user('M')).stages[0].checklist[0];
- error(()=>engine.update(w.id,{title:'Admin change'},user('A')),'WORKFLOW_OVERRIDE_REASON_REQUIRED');
+ assert.equal(engine.update(w.id,{title:'Admin change'},user('A')).title,'Admin change');
  error(()=>engine.closeWorkflow(w.id,{reason:'Emergency override'},user('A')),'WORKFLOW_OVERRIDE_CONFIRMATION_REQUIRED');
  const result=engine.closeWorkflow(w.id,{reason:'Emergency override',override:true},user('A'));assert.equal(result.status,'COMPLETED');
  const entries=all("SELECT * FROM wf2_audit WHERE workflow_id=? AND actor_user_id='A'",w.id);
- assert.ok(entries.some(a=>a.entity_id===t.id));assert.ok(entries.some(a=>a.entity_id===c.id));assert.ok(entries.every(a=>a.reason==='Emergency override'));
+ assert.ok(entries.some(a=>a.entity_id===t.id));assert.ok(entries.some(a=>a.entity_id===c.id));assert.ok(entries.filter(a=>a.action.includes('COMPLETE')).every(a=>a.reason==='Emergency override'));
 });
-test('10 superadmin overrides without required reason or business audit',()=>{
+test('10 superadmin overrides without required reason, retaining automatic change audit',()=>{
  const w=create();task(w);const before=one('SELECT count(*) n FROM wf2_audit WHERE workflow_id=?',w.id).n;
- assert.equal(engine.closeWorkflow(w.id,{},user('SA')).status,'COMPLETED');assert.equal(one('SELECT count(*) n FROM wf2_audit WHERE workflow_id=?',w.id).n,before);
+ assert.equal(engine.closeWorkflow(w.id,{},user('SA')).status,'COMPLETED');assert.ok(one('SELECT count(*) n FROM wf2_audit WHERE workflow_id=?',w.id).n>before);
 });
 test('11 strict half-hour validation rejects quarter-hours, invalid dates and DST gaps',()=>{
  const {localTime}=require('../server/workflow-v2');
@@ -126,26 +126,27 @@ test('15 checklist gates task and phase; progress uses completed task rows',()=>
  assert.equal(done.stages[0].progress.completed,1);assert.equal(done.stages[0].progress.total,1);assert.deepEqual(done.stages[0].tasks[0].assignee_ids,['W','W2']);
  assert.equal(engine.closePhase(w.id,p.id,{},user('M')).status,'ACTIVE');assert.equal(engine.closeWorkflow(w.id,{},user('M')).status,'COMPLETED');
 });
-test('16 reopen is admin-only, reasoned and visible in checklist/phase state',()=>{
+test('16 reopen remains admin-only without a mandatory reason',()=>{
  const w=create(),p=w.stages[0],t=task(w);engine.completeTask(w.id,p.id,t.id,{},user('W'));engine.closePhase(w.id,p.id,{},user('M'));
- error(()=>engine.reopenTask(w.id,p.id,t.id,{},user('M')),'WORKFLOW_FORBIDDEN');error(()=>engine.reopenTask(w.id,p.id,t.id,{},user('A')),'WORKFLOW_OVERRIDE_REASON_REQUIRED');
+ error(()=>engine.reopenTask(w.id,p.id,t.id,{},user('M')),'WORKFLOW_FORBIDDEN');assert.equal(engine.reopenTask(w.id,p.id,t.id,{},user('A')).stages[0].tasks[0].status,'OPEN');
  const d=engine.reopenTask(w.id,p.id,t.id,{reason:'Quality control recheck'},user('A'));assert.equal(d.stages[0].status,'IN_PROGRESS');assert.equal(d.stages[0].tasks[0].status,'OPEN');
 });
-test('17 cost is posted immediately to WIP, not delayed until phase closure',()=>{
- const w=create(),c=cost(w);assert.equal(c.approval_status,'APPROVED');assert.ok(c.finance_line_id);assert.equal(wip(w),123.45);
- const line=one('SELECT * FROM workflow_finance_lines WHERE id=?',c.finance_line_id);assert.ok(line.wip_journal_entry_id);assert.equal(line.final_journal_entry_id,null);
- assert.equal(one('SELECT status FROM wf2_phases WHERE id=?',w.stages[0].id).status,'WAITING');
+test('17 costs remain internal until whole workflow finalization',()=>{
+ const w=create(),c=cost(w);assert.equal(c.approval_status,'APPROVED');assert.equal(c.finance_line_id,null);assert.equal(wip(w),0);
+ assert.equal(one('SELECT count(*) n FROM workflow_finance_lines WHERE workflow_id=?',w.id).n,0);assert.equal(one('SELECT status FROM wf2_phases WHERE id=?',w.stages[0].id).status,'WAITING');
 });
+
 test('18 phase-owner cost requires main approval; subresponsible cannot post costs',()=>{
  const w=create(),p=w.stages[0];engine.updatePhase(w.id,p.id,{responsible_user_id:'W',transfer_reason:'Delegate phase responsibility'},user('M'));
- const c=cost(w,{},'W');assert.equal(c.approval_status,'PENDING');assert.equal(wip(w),123.45);
+ const c=cost(w,{},'W');assert.equal(c.approval_status,'PENDING');assert.equal(wip(w),0);
  error(()=>engine.closePhase(w.id,p.id,{},user('W')),'WORKFLOW_COST_APPROVAL_REQUIRED');error(()=>engine.approveCost(w.id,p.id,c.id,{},user('W')),'WORKFLOW_FORBIDDEN');
- engine.approveCost(w.id,p.id,c.id,{},user('M'));engine.closePhase(w.id,p.id,{},user('W'));assert.equal(wip(w),123.45);
+ engine.approveCost(w.id,p.id,c.id,{},user('M'));engine.closePhase(w.id,p.id,{},user('W'));assert.equal(wip(w),0);
 });
-test('19 injected ledger failure atomically rolls back cost, sources, audit and calendar',()=>{
- const w=create(),before=state();db.exec("CREATE TEMP TRIGGER ui12_fail_post BEFORE INSERT ON journal_lines BEGIN SELECT RAISE(ABORT,'TEST_LEDGER_FAILURE'); END");
- try{assert.throws(()=>cost(w),/TEST_LEDGER_FAILURE/);}finally{db.exec('DROP TRIGGER ui12_fail_post');}assert.equal(state(),before);
+test('19 injected terminal ledger failure rolls back invoice, sources, audit and calendar',()=>{
+ const w=create();cost(w);engine.closePhase(w.id,w.stages[0].id,{},user('M'));const before=state();db.exec("CREATE TEMP TRIGGER ui12_fail_post BEFORE INSERT ON journal_lines BEGIN SELECT RAISE(ABORT,'TEST_LEDGER_FAILURE'); END");
+ try{assert.throws(()=>engine.closeWorkflow(w.id,{},user('M')),/TEST_LEDGER_FAILURE/);}finally{db.exec('DROP TRIGGER ui12_fail_post');}assert.equal(state(),before);
 });
+
 test('20 abandonment needs confirmation; posts balanced loss once, retaining all history',()=>{
  const w=create();cost(w);const before=state();error(()=>engine.abandonWorkflow(w.id,{},user('M')),'WORKFLOW_DELETE_CONFIRMATION_REQUIRED');assert.equal(state(),before);
  let d=engine.abandonWorkflow(w.id,{confirmed:true,reason:'Customer cancelled restoration'},user('M'));assert.equal(d.status,'ABORTED');assert.equal(wip(w),0);assert.equal(loss(w),123.45);
@@ -158,25 +159,27 @@ test('21 deleting workflow is loss-posting soft delete; unrelated job survives',
  assert.equal(JSON.stringify(one("SELECT * FROM jobs WHERE id='NORMAL'")),protectedRow);assert.ok(one('SELECT * FROM workflow_finance_sources WHERE id=?',w.id));
  assert.equal(engine.list(user('M')).some(x=>x.id===w.id),false);
 });
-test('22 phase deletion writes loss, removes task/calendar ownership and permits reactivation',()=>{
- const w=create(),p=w.stages[0];cost(w);task(w);const d=engine.deletePhase(w.id,p.id,{confirmed:true,reason:'Phase no longer required'},user('M'));
- assert.equal(d.stages.length,0);assert.equal(d.calendar.length,2);assert.equal(loss(w),123.45);assert.equal(one('SELECT count(*) n FROM workshop_subtasks WHERE phase_id=?',p.id).n,0);
- assert.equal(engine.addPhase(w.id,'INBOUND',{},user('M')).stages.length,1);assert.deepEqual(db.pragma('foreign_key_check'),[]);
+test('22 removing a phase retains its actual costs internally until final settlement',()=>{
+ const w=create(),p=w.stages[0];cost(w);task(w);const d=engine.deletePhase(w.id,p.id,{confirmed:true},user('M'));
+ assert.equal(d.stages[0].status,'NOT_REQUIRED');assert.equal(loss(w),0);assert.equal(d.financial_summary.actual_cost_cents,12345);
+ engine.closeWorkflow(w.id,{},user('M'));assert.equal(total('5000',w),123.45);assert.deepEqual(db.pragma('foreign_key_check'),[]);
 });
-test('23 posted cost cannot be silently edited; confirmed void writes loss and is excluded at closure',()=>{
- const w=create(),p=w.stages[0],c=cost(w);error(()=>engine.saveCost(w.id,p.id,c.id,{amount:99},user('M')),'WORKFLOW_POSTED_COST_REQUIRES_ADJUSTMENT');
- engine.saveCost(w.id,p.id,c.id,{confirmed:true,reason:'Incorrect purchase voided'},user('M'),true);assert.equal(wip(w),0);assert.equal(loss(w),123.45);
- engine.closePhase(w.id,p.id,{},user('M'));const d=engine.closeWorkflow(w.id,{},user('M'));assert.equal(d.invoice_id,null);assert.equal(loss(w),123.45);
+
+test('23 unposted actual cost can be edited or voided, without recording fictitious loss',()=>{
+ const w=create(),p=w.stages[0],c=cost(w);engine.saveCost(w.id,p.id,c.id,{amount:99},user('M'));
+ engine.saveCost(w.id,p.id,c.id,{confirmed:true},user('M'),true);assert.equal(wip(w),0);assert.equal(loss(w),0);
+ engine.closePhase(w.id,p.id,{},user('M'));const d=engine.closeWorkflow(w.id,{},user('M'));assert.equal(d.invoice_id,null);
 });
-test('24 workflow close releases WIP once; missing payment method rolls back invoice and journal',()=>{
- const w=create(),p=w.stages[0];cost(w,{billing_status:'CHARGEABLE',charge_amount:200});engine.closePhase(w.id,p.id,{},user('M'));const before=state();
+
+test('24 workflow final settlement posts once; payment error rolls back invoice and journal',()=>{
+ const w=create({expected_revenue:200}),p=w.stages[0];cost(w,{amount:123.45});engine.closePhase(w.id,p.id,{},user('M'));const before=state();
  error(()=>engine.closeWorkflow(w.id,{},user('M')),'PAYMENT_METHOD_REQUIRED');assert.equal(state(),before);
  const d=engine.closeWorkflow(w.id,{payment_method:'Bank Transfer / ACH'},user('M'));assert.equal(d.status,'COMPLETED');assert.ok(d.invoice_id);assert.equal(wip(w),0);assert.equal(total('5000',w),123.45);
  const n=one('SELECT count(*) n FROM journal_entries').n;engine.closeWorkflow(w.id,{},user('M'));assert.equal(one('SELECT count(*) n FROM journal_entries').n,n);
  assert.equal(one("SELECT count(*) n FROM invoices WHERE source_type='workflow' AND source_id=?",w.id).n,1);
 });
 test('25 operational reopen cannot duplicate invoice, release or allow writeoff of released costs',()=>{
- const w=create(),p=w.stages[0];cost(w,{billing_status:'CHARGEABLE',charge_amount:150});engine.closePhase(w.id,p.id,{},user('M'));const closed=engine.closeWorkflow(w.id,{payment_method:'Cash'},user('M'));
+ const w=create({expected_revenue:150}),p=w.stages[0];cost(w,{amount:123.45});engine.closePhase(w.id,p.id,{},user('M'));const closed=engine.closeWorkflow(w.id,{payment_method:'Cash'},user('M'));
  engine.reopenWorkflow(w.id,{reason:'Operational inspection retry'},user('A'));engine.reopenPhase(w.id,p.id,{reason:'Operational inspection retry'},user('A'));
  error(()=>cost(w),'WORKFLOW_PHASE_FINANCE_CLOSED');error(()=>engine.abandonWorkflow(w.id,{confirmed:true},user('M')),'WORKFLOW_RELEASED_COST_REQUIRES_ADJUSTMENT');
  engine.closePhase(w.id,p.id,{},user('M'));const n=one('SELECT count(*) n FROM journal_entries').n;const again=engine.closeWorkflow(w.id,{},user('M'));assert.equal(again.invoice_id,closed.invoice_id);assert.equal(one('SELECT count(*) n FROM journal_entries').n,n);
