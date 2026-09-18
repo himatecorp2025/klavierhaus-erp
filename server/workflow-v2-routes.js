@@ -14,6 +14,7 @@ function registerWorkflowV2({app,db,auth,permit,invoiceEngine}){
  app.get(`${base}/workflows`,wrap(req=>({workflows:engine.list(req.user,req.query.status==='COMPLETED'?'COMPLETED':'ACTIVE'),stages:engine.definitions()})));
  app.post(`${base}/workflows`,wrap(req=>engine.create(body(req),req.user)));
  app.get(`${base}/workflows/:id`,wrap(req=>engine.detail(req.params.id,req.user)));
+ app.put(`${base}/workflows/:id/schedule`,wrap(req=>engine.updateSchedule(req.params.id,body(req),req.user)));
  app.put(`${base}/workflows/:id`,wrap(req=>engine.update(req.params.id,body(req),req.user)));
  app.post(`${base}/workflows/:id/close`,wrap(req=>engine.closeWorkflow(req.params.id,body(req),req.user)));
  app.post(`${base}/workflows/:id/reopen`,wrap(req=>engine.reopenWorkflow(req.params.id,body(req),req.user)));
