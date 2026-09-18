@@ -164,6 +164,7 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
   }
 
   function postClosedJobRevenue(job, { logId = null, billedAmount = 0, paymentMethod = "", createdBy = "System", itemDate = null } = {}) {
+    if (Number(job.finance_reset) === 1) return null;
     const amount = normalizeMoney(billedAmount);
     if (amount <= 0) return null;
     return postFinancialItemOnce({
