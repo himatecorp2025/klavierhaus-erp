@@ -5,6 +5,7 @@
 const crypto = require("node:crypto");
 const taskCatalog = require("./workflow-task-catalog");
 const { createWorkflowFinance } = require("./workflow-finance");
+const { createCardNotifications } = require("./workflow-card-notifications");
 const id = prefix => `${prefix}-${crypto.randomUUID()}`;
 const text = (value, max = 5000) => String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
 const fault = (code, status = 400, details) => Object.assign(new Error(code), { code, status, details });
@@ -43,6 +44,8 @@ function flag(value, fallback = false) {
 }
 
 function createWorkflowV2({ db, invoiceEngine }) {
+  require("./workflow-experience-migration").migrateWorkflowExperience(db);
+  const cardEvents = createCardNotifications({ db });
   const one = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -77,12 +80,6 @@ function createWorkflowV2({ db, invoiceEngine }) {
   const requireRight = allowed => { if (!allowed) throw fault("WORKFLOW_FORBIDDEN", 403); };
   const requireActive = w => { if (!active(w)) throw fault("WORKFLOW_CLOSED", 409); };
   const requirePhaseOpen = p => { if (["COMPLETED", "NOT_REQUIRED"].includes(p.status)) throw fault("WORKFLOW_PHASE_CLOSED", 409); };
-  const adminReason = (u, body) => {
-    if (admin(u) && !superuser(u) && text(body?.reason).length < 5) throw fault("WORKFLOW_OVERRIDE_REASON_REQUIRED");
-  };
-  const handoverReason = (u, body) => {
-    if (!superuser(u) && text(body.transfer_reason || body.reason).length < 5) throw fault("WORKFLOW_HANDOVER_REASON_REQUIRED");
-  };
   const definitions = () => all(`SELECT d.*,COALESCE(o.color,'#B88A44') color,COALESCE(o.required,1) required,
     COALESCE(o.enabled,1) enabled,COALESCE(o.default_status,'WAITING') default_status
     FROM workshop_phase_definitions d LEFT JOIN wf2_phase_options o ON o.code=d.code
@@ -101,17 +98,8 @@ function createWorkflowV2({ db, invoiceEngine }) {
     return { ...t, assignee_ids: all("SELECT user_id FROM wf2_task_assignees WHERE task_id=? ORDER BY user_id", t.id).map(a => a.user_id) };
   }
   function audit(w, u, action, kind, entityId, before, after, reason = "") {
-    if (superuser(u)) return;
     run("INSERT INTO wf2_audit(id,workflow_id,entity_type,entity_id,actor_user_id,action,reason,before_json,after_json) VALUES(?,?,?,?,?,?,?,?,?)",
       id("WA"), w.id, kind, entityId, u.id, action, text(reason), before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null);
-  }
-  function notifyApproval(w, t, u, reason) {
-    for (const assignee of all("SELECT user_id FROM wf2_task_assignees WHERE task_id=? AND user_id<>?", t.id, u.id)) {
-      run("INSERT INTO notifications(id,recipient_user_id,sender_user_id,notification_type,title_en,title_hu,body_en,body_hu,metadata_json) VALUES(?,?,?,'WORKFLOW_APPROVAL',?,?,?,?,?)",
-        id("WN"), assignee.user_id, u.id, "Task approved on your behalf", "R\u00e9szfeladatod teljes\u00edt\u00e9se j\u00f3v\u00e1hagyva",
-        `${u.name || u.id}: ${t.title}. ${text(reason)}`, `${u.name || u.id}: ${t.title}. ${text(reason)}`,
-        JSON.stringify({ wf2_workflow_id: w.id, task_id: t.id, approved_by: u.id }));
-    }
   }
   function validPiano(clientId, pianoId) {
     if (!one("SELECT id FROM contacts WHERE id=?", clientId)) throw fault("WORKFLOW_CLIENT_REQUIRED");
@@ -134,18 +122,32 @@ function createWorkflowV2({ db, invoiceEngine }) {
   function permissions(u, w, p = null, t = null) {
     const live = active(w), phaseOpen = !p || !["COMPLETED", "NOT_REQUIRED"].includes(p.status);
     return {
+      edit_financial_plan: live && !w.finance_locked && owns(u, w),
       edit_final_deadline: live && admin(u),
       edit_workflow: live && owns(u, w), close_workflow: live && owns(u, w),
       edit_phase: Boolean(live && phaseOpen && p && ownsPhase(u, w, p)), assign_phase: live && owns(u, w),
       edit_task: Boolean(live && phaseOpen && t && t.status !== "COMPLETED" && ownsTask(u, w, p, t)),
       edit_task_content: Boolean(live && phaseOpen && p && ownsPhase(u, w, p)),
       complete_task: Boolean(live && phaseOpen && t && t.status !== "COMPLETED" && ownsTask(u, w, p, t)),
-      record_cost: Boolean(live && phaseOpen && !w.finance_locked && p && p.financial_status !== "CLOSED" && ownsPhase(u, w, p)),
+      record_cost: Boolean(live && !w.finance_locked && p && p.financial_status !== "CLOSED" && ownsPhase(u, w, p)),
       approve_cost: Boolean(live && !w.finance_locked && owns(u, w)),
       delete_phase: Boolean(live && !w.finance_locked && owns(u, w)), delete_workflow: live && !w.finance_locked && owns(u, w),
       reopen: Boolean(admin(u) && !w.aborted_at && !w.deleted_at),
-      admin: admin(u), superadmin: superuser(u), admin_reason_required: admin(u) && !superuser(u)
+      admin: admin(u), superadmin: superuser(u), admin_reason_required: false
     };
+  }
+  function financialSummary(w, phases) {
+    const tasks = phases.filter(p=>p.status!=="NOT_REQUIRED").flatMap(p => p.tasks || []);
+    const costs = phases.flatMap(p => p.costs || []).filter(c => !c.voided_at);
+    const planned = tasks.reduce((n,t) => n + Number(t.planned_cost_cents || 0),0);
+    const actual = costs.reduce((n,c) => n + Number(c.amount_cents || 0),0);
+    const assigned = new Set(tasks.map(t=>t.id));
+    const forecast = tasks.reduce((n,t)=>{const spent=costs.filter(c=>c.task_id===t.id).reduce((a,c)=>a+c.amount_cents,0);return n+(t.status === "COMPLETED" ? spent : Math.max(Number(t.planned_cost_cents||0),spent));},0)
+      + costs.filter(c=>!assigned.has(c.task_id)).reduce((n,c)=>n+c.amount_cents,0);
+    const revenue = w.expected_revenue_cents;
+    return { expected_revenue_cents: revenue, planned_cost_cents: planned, actual_cost_cents: actual, forecast_cost_cents: forecast,
+      expected_profit_cents: revenue == null ? null : revenue-forecast,
+      actual_profit_cents: revenue == null ? null : revenue-actual, finalized: Boolean(w.finance_locked), reset: Boolean(w.finance_reset) };
   }
   function detail(key, u) {
     if (!one("SELECT 1 FROM wf2_workflows WHERE id=?", key)) return archivedDetail(key, u);
@@ -167,7 +169,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       client_name: client?.name || "", client_phone: client?.phone || "", owner_id: owner?.id || null,
       owner_name: owner?.name || "", owner_phone: owner?.phone || "", owner_is_client: Boolean(owner?.id && owner.id === w.client_id),
       creator_name: person(w.creator_user_id)?.name || "", main_responsible_name: person(w.main_responsible_user_id)?.name || "",
-      stages: phases, permissions: permissions(u, w),
+      stages: phases, financial_summary: financialSummary(w, phases), permissions: permissions(u, w),
       audit: all("SELECT a.*,u.name actor_name FROM wf2_audit a JOIN users u ON u.id=a.actor_user_id WHERE workflow_id=? ORDER BY a.created_at DESC,a.rowid DESC LIMIT 200", key),
       calendar: all("SELECT l.*,j.start_time,j.end_time,j.status FROM wf2_calendar_links l JOIN jobs j ON j.id=l.job_id WHERE l.workflow_id=?", key) };
   }
@@ -238,18 +240,20 @@ function createWorkflowV2({ db, invoiceEngine }) {
       const w = getWorkflow(key);
       if (!allowClosed) requireActive(w);
       if (body.version !== undefined && Number(body.version) !== w.version) throw fault("WORKFLOW_VERSION_CONFLICT", 409, { version: w.version });
-      adminReason(u, body);
+      
+      const beforeCards = cardEvents.workflowSnapshot(w);
       work(w);
       const current = getWorkflow(key);
       validateDates(current); syncCalendar(current);
       run("UPDATE wf2_workflows SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", key);
       audit(w, u, action, "WORKFLOW", key, w, getWorkflow(key), body.reason);
+      cardEvents.workflowChanged(beforeCards, cardEvents.workflowSnapshot(getWorkflow(key)), u);
       return detail(key, u);
     })();
   }
   function create(body, u) {
     return db.transaction(() => {
-      activeUser(u.id); adminReason(u, body);
+      activeUser(u.id); 
       const requestKey = text(body.request_key, 100) || null;
       if (requestKey) {
         const previous = one("SELECT * FROM wf2_workflows WHERE request_key=?", requestKey);
@@ -268,6 +272,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       if (body.phases !== undefined && (!Array.isArray(body.phases) || body.phases.length > 7 || new Set(body.phases.map(p => p?.stage_code)).size !== body.phases.length || body.phases.some(p => !codes.has(p?.stage_code)))) throw fault("WORKFLOW_PHASE_SELECTION_INVALID");
       run("INSERT INTO wf2_workflows(id,workflow_key,title,client_id,piano_id,creator_user_id,main_responsible_user_id,mode,start_at,final_due_at,description,request_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         key, key, title, body.client_id, body.piano_id, u.id, owner.id, mode, start, due, text(body.description), requestKey);
+      run("UPDATE wf2_workflows SET expected_revenue_cents=? WHERE id=?", body.expected_revenue === undefined || body.expected_revenue === null || body.expected_revenue === "" ? null : money(body.expected_revenue), key);
       run("UPDATE wf2_workflows SET piano_location_name=?,piano_location_address=?,service_address=? WHERE id=?",
         text(location?.location_name,500), text(location?.piano_location_address || location?.location,2000), mode === "ON_SITE" ? text(body.service_address,2000) : "", key);
       if (mode === "ON_SITE" && !text(body.service_address)) throw fault("WORKFLOW_SERVICE_ADDRESS_REQUIRED");
@@ -302,9 +307,13 @@ function createWorkflowV2({ db, invoiceEngine }) {
     return command(key, u, body, "WORKFLOW_UPDATE", w => {
       requireRight(owns(u, w));
       const next = { ...w };
+      if (body.expected_revenue !== undefined) {
+        if (w.finance_locked) throw fault("WORKFLOW_PHASE_FINANCE_CLOSED",409);
+        run("UPDATE wf2_workflows SET expected_revenue_cents=? WHERE id=?",body.expected_revenue===null||body.expected_revenue===""?null:money(body.expected_revenue),key);
+      }
       for (const field of ["title", "description", "mode", "client_id", "piano_id", "main_responsible_user_id", "start_at", "final_due_at"]) if (body[field] !== undefined) next[field] = body[field];
       if (!text(next.title, 200)) throw fault("WORKFLOW_TITLE_REQUIRED");
-      if (next.main_responsible_user_id !== w.main_responsible_user_id) { activeUser(next.main_responsible_user_id); handoverReason(u, body); }
+      if (next.main_responsible_user_id !== w.main_responsible_user_id) { activeUser(next.main_responsible_user_id); }
       if (next.client_id !== w.client_id || next.piano_id !== w.piano_id) {
         if (w.finance_locked || one("SELECT 1 FROM workflow_finance_lines WHERE workflow_id=? LIMIT 1", key)) throw fault("WORKFLOW_FINANCIAL_IDENTITY_LOCKED", 409);
       }
@@ -323,7 +332,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       const p = phaseContext(key, phaseId); requireRight(ownsPhase(u, w, p)); requirePhaseOpen(p);
       const next = { ...p };
       for (const field of ["title", "description", "responsible_user_id", "due_at", "required", "status"]) if (body[field] !== undefined) next[field] = body[field];
-      if (next.responsible_user_id !== p.responsible_user_id) { requireRight(owns(u, w)); activeUser(next.responsible_user_id); handoverReason(u, body); }
+      if (next.responsible_user_id !== p.responsible_user_id) { requireRight(owns(u, w)); activeUser(next.responsible_user_id); }
       if (body.required !== undefined) { requireRight(owns(u, w)); next.required = flag(body.required) ? 1 : 0; }
       if (!text(next.title, 200)) throw fault("WORKFLOW_TITLE_REQUIRED");
       if (!["WAITING", "IN_PROGRESS", "BLOCKED"].includes(next.status)) throw fault("WORKFLOW_USE_PHASE_CLOSE_OR_DELETE", 409);
@@ -385,6 +394,11 @@ function createWorkflowV2({ db, invoiceEngine }) {
     const taskId = id("WT"), due = localTime(body.due_at || phase.due_at || w.final_due_at);
     run("INSERT INTO workshop_subtasks(id,phase_id,title,description,due_at,required) VALUES(?,?,?,?,?,?)",
       taskId,phase.id,title,text(body.description),due,flag(body.required,true)?1:0);
+    if (body.planned_cost !== undefined && body.planned_cost !== null && body.planned_cost !== "") {
+      const category = body.planned_cost_category || "OTHER";
+      if (!["LABOR","MATERIAL","TRANSPORT","PURCHASE","CONTRACTOR","OTHER"].includes(category)) throw fault("WORKFLOW_COST_CATEGORY_INVALID");
+      run("UPDATE workshop_subtasks SET planned_cost_cents=?,planned_cost_category=? WHERE id=?",money(body.planned_cost),category,taskId);
+    }
     setAssignees(taskId,phase,body.assignee_ids);
     audit(w,u,"TASK_CREATE","TASK",taskId,null,taskSnapshot(getTask(taskId)),reason);
     return getTask(taskId);
@@ -396,13 +410,19 @@ function createWorkflowV2({ db, invoiceEngine }) {
       if (t?.status === "COMPLETED") throw fault("WORKFLOW_USE_TASK_REOPEN", 409);
       if (!t) { insertTask(w,p,body,u,body.reason); return; }
       const manager = ownsPhase(u, w, p);
-      if (!manager && ["title", "description", "assignee_ids", "required", "status"].some(field => body[field] !== undefined)) throw fault("WORKFLOW_FORBIDDEN", 403);
+      if (!manager && ["title", "description", "assignee_ids", "required", "status", "planned_cost", "planned_cost_category"].some(field => body[field] !== undefined)) throw fault("WORKFLOW_FORBIDDEN", 403);
       if (body.status !== undefined) throw fault("WORKFLOW_USE_TASK_COMPLETE", 409);
       const title = text(body.title ?? t.title, 200);
       if (!title) throw fault("WORKFLOW_TITLE_REQUIRED");
       const due = body.due_at === undefined ? (t.due_at || p.due_at || null) : body.due_at === t.due_at ? t.due_at : localTime(body.due_at);
       const tid = t.id, before = taskSnapshot(t), required = flag(body.required, Boolean(t.required)) ? 1 : 0;
       run("UPDATE workshop_subtasks SET title=?,description=?,due_at=?,required=? WHERE id=?", title, text(body.description ?? t.description), due, required, tid);
+      if (body.planned_cost !== undefined) {
+        if (w.finance_locked) throw fault("WORKFLOW_PHASE_FINANCE_CLOSED",409);
+        const category=body.planned_cost_category || t.planned_cost_category || "OTHER";
+        if (!["LABOR","MATERIAL","TRANSPORT","PURCHASE","CONTRACTOR","OTHER"].includes(category)) throw fault("WORKFLOW_COST_CATEGORY_INVALID");
+        run("UPDATE workshop_subtasks SET planned_cost_cents=?,planned_cost_category=? WHERE id=?",body.planned_cost===null||body.planned_cost===""?null:money(body.planned_cost),category,tid);
+      }
       if (body.assignee_ids !== undefined) setAssignees(tid, p, body.assignee_ids);
       audit(w, u, "TASK_UPDATE", "TASK", tid, before, taskSnapshot(getTask(tid)), body.reason);
     });
@@ -419,7 +439,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
     run("UPDATE workshop_subtasks SET status='COMPLETED',completed_by=?,completed_at=CURRENT_TIMESTAMP,approved_by=?,approval_reason=? WHERE id=?",
       u.id, own ? null : u.id, own ? null : text(reason), t.id);
     audit(w, u, own ? "TASK_COMPLETE" : "TASK_APPROVED_FOR_ASSIGNEES", "TASK", t.id, taskSnapshot(t), taskSnapshot(getTask(t.id)), reason);
-    if (!own) notifyApproval(w, t, u, reason);
+    // Checklist/task approval is deliberately silent: only card transitions notify.
   }
   function completeTask(key, phaseId, taskId, body, u) {
     return command(key, u, body, "TASK_COMPLETE", w => {
@@ -454,55 +474,65 @@ function createWorkflowV2({ db, invoiceEngine }) {
       p.id, w.id, p.stage_code, p.stage_order, p.name_snapshot_en, p.name_snapshot_hu, p.title, p.responsible_user_id, p.status, p.due_at);
     return one("SELECT * FROM workflow_finance_sources WHERE id=?", w.id);
   }
-  function postCost(w, p, cost, u) {
-    if (cost.finance_line_id || !cost.amount_cents || cost.voided_at) return;
-    const source = custody(w), lineId = id("WFL");
-    run("INSERT INTO workflow_finance_lines(id,workflow_id,stage_id,line_type,category,title,amount,billing_status,partner_id,created_by_user_id) VALUES(?,?,?,'COST',?,?,?,?,?,?)",
-      lineId, w.id, p.id, cost.category, cost.title, cost.amount_cents / 100, cost.billing_status, cost.partner_id, u.id);
-    const line = one("SELECT * FROM workflow_finance_lines WHERE id=?", lineId);
-    finance.postWipForLine(line, source, u);
-    if (cost.partner_id) {
-      const bill = invoiceEngine.createWorkflowPayableInvoice({ workflow: source, stage: p, line, partner: one("SELECT * FROM partners WHERE id=?", cost.partner_id), actor: u, now: nowLocal() });
-      if (bill) run("UPDATE workflow_finance_lines SET payable_invoice_id=? WHERE id=?", bill.id, lineId);
+  // Called only by terminal workflow commands. No running-workflow mutation
+  // creates a finance source, invoice, payable or journal entry.
+  function postCost(w, p, cost, u, aborted = false, reason = "") {
+    if (!cost.amount_cents || cost.voided_at) return;
+    const source = custody(w);
+    let lineId = cost.finance_line_id;
+    if (!lineId) {
+      lineId = id("WFL");
+      run("INSERT INTO workflow_finance_lines(id,workflow_id,stage_id,line_type,category,title,description,amount,billing_status,partner_id,created_by_user_id) VALUES(?,?,?,'COST',?,?,?,?,?,?,?)",
+        lineId,w.id,p.id,cost.category,cost.title,aborted ? `Workflow aborted: ${text(reason)}` : text(cost.note),cost.amount_cents/100,"FREE",cost.partner_id,u.id);
+      run("UPDATE wf2_costs SET finance_line_id=? WHERE id=?",lineId,cost.id);
     }
-    run("UPDATE wf2_costs SET finance_line_id=? WHERE id=?", lineId, cost.id);
+    let line = one("SELECT * FROM workflow_finance_lines WHERE id=?",lineId);
+    // Legacy released/write-off entries are not reposted on an upgrade.
+    if (line.final_journal_entry_id || line.writeoff_journal_entry_id) return;
+    if (!line.payable_invoice_id) {
+      const bill=invoiceEngine.createWorkflowPayableInvoice({workflow:source,stage:p,line,
+        partner:cost.partner_id ? one("SELECT * FROM partners WHERE id=?",cost.partner_id) : null,
+        actor:u,now:nowLocal(),internalSettlement:true,aborted,reason});
+      if (bill) run("UPDATE workflow_finance_lines SET payable_invoice_id=? WHERE id=?",bill.id,lineId);
+    }
+    line=one("SELECT * FROM workflow_finance_lines WHERE id=?",lineId);
+    finance.settleInternalLine(line,source,u,{aborted,reason});
   }
-  function postPhase(w, p, u) {
+  function postPhase(w, p, u, aborted = false, reason = "") {
     custody(w);
-    for (const cost of all("SELECT * FROM wf2_costs WHERE phase_id=? AND voided_at IS NULL", p.id)) postCost(w, p, cost, u);
-    run("UPDATE wf2_phases SET financial_status='CLOSED' WHERE id=?", p.id);
-    run("UPDATE workflow_finance_phases SET financial_status='CLOSED',financial_closed_at=CURRENT_TIMESTAMP,financial_closed_by_user_id=? WHERE id=?", u.id, p.id);
+    for (const cost of all("SELECT * FROM wf2_costs WHERE phase_id=? AND voided_at IS NULL",p.id)) postCost(w,p,cost,u,aborted,reason);
+    run("UPDATE wf2_phases SET financial_status='CLOSED' WHERE id=?",p.id);
+    run("UPDATE workflow_finance_phases SET financial_status='CLOSED',financial_closed_at=CURRENT_TIMESTAMP,financial_closed_by_user_id=? WHERE id=?",u.id,p.id);
   }
   function saveCost(key, phaseId, costId, body, u, remove = false) {
     return command(key, u, body, remove ? "COST_WRITE_OFF" : "COST_SAVE", w => {
       const p = phaseContext(key, phaseId); requireRight(ownsPhase(u, w, p));
       if (w.finance_locked || p.financial_status === "CLOSED") throw fault("WORKFLOW_PHASE_FINANCE_CLOSED", 409);
-      requirePhaseOpen(p);
       const old = costId ? one("SELECT * FROM wf2_costs WHERE id=? AND phase_id=?", costId, p.id) : null;
       if (costId && !old) throw fault("WORKFLOW_COST_NOT_FOUND", 404);
       if (remove) {
         requireRight(owns(u, w));
         if (body.confirmed !== true) throw fault("WORKFLOW_DELETE_CONFIRMATION_REQUIRED");
         if (old.voided_at) return;
-        postCost(w, p, old, u);
-        const current = one("SELECT * FROM wf2_costs WHERE id=?", old.id);
-        if (current.finance_line_id) finance.writeOffWipForLine(one("SELECT * FROM workflow_finance_lines WHERE id=?", current.finance_line_id), custody(w), u, body.reason);
+        if (old.finance_line_id) throw fault("WORKFLOW_POSTED_COST_REQUIRES_ADJUSTMENT",409);
         run("UPDATE wf2_costs SET voided_at=CURRENT_TIMESTAMP,void_reason=? WHERE id=?", text(body.reason), old.id);
         audit(w, u, "COST_WRITTEN_OFF", "COST", old.id, old, one("SELECT * FROM wf2_costs WHERE id=?", old.id), body.reason);
         return;
       }
       if (old?.finance_line_id || old?.voided_at) throw fault("WORKFLOW_POSTED_COST_REQUIRES_ADJUSTMENT", 409);
       const category = body.category || old?.category || "OTHER", title = text(body.title || old?.title || category, 200);
-      const billing = body.billing_status || old?.billing_status || "FREE";
+      const billing = "FREE";
       if (!["LABOR", "MATERIAL", "TRANSPORT", "PURCHASE", "CONTRACTOR", "OTHER"].includes(category) || !["CHARGEABLE", "WARRANTY", "FREE", "COMPENSATION", "CREDIT"].includes(billing)) throw fault("WORKFLOW_COST_CATEGORY_INVALID");
       const partner = body.partner_id === undefined ? (old?.partner_id || null) : (body.partner_id || null);
       if (partner && !one("SELECT 1 FROM partners WHERE id=? AND status='active'", partner)) throw fault("WORKFLOW_PARTNER_INVALID");
       const amount = body.amount === undefined ? (old?.amount_cents ?? money(body.amount)) : money(body.amount);
-      const charge = body.charge_amount === undefined ? (old?.charge_cents ?? (billing === "CHARGEABLE" ? amount : 0)) : money(body.charge_amount);
+      const charge = 0; // Customer revenue is maintained once, at workflow level.
       const costKey = old?.id || id("WC"), approved = owns(u, w);
       run("INSERT INTO wf2_costs(id,phase_id,title,category,amount_cents,charge_cents,billing_status,partner_id,created_by,approval_status,approved_by,approved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,category=excluded.category,amount_cents=excluded.amount_cents,charge_cents=excluded.charge_cents,billing_status=excluded.billing_status,partner_id=excluded.partner_id,approval_status=excluded.approval_status,approved_by=excluded.approved_by,approved_at=excluded.approved_at",
         costKey, p.id, title, category, amount, charge, billing, partner, u.id, approved ? "APPROVED" : "PENDING", approved ? u.id : null, approved ? new Date().toISOString() : null);
-      postCost(w, p, one("SELECT * FROM wf2_costs WHERE id=?", costKey), u);
+      const taskId=body.task_id===undefined ? old?.task_id || null : body.task_id || null;
+      if (taskId) taskContext(p,taskId);
+      run("UPDATE wf2_costs SET task_id=?,note=?,incurred_at=COALESCE(incurred_at,CURRENT_TIMESTAMP) WHERE id=?",taskId,text(body.note ?? old?.note),costKey);
       audit(w, u, "COST_RECORDED", "COST", costKey, old, one("SELECT * FROM wf2_costs WHERE id=?", costKey), body.reason);
     });
   }
@@ -554,7 +584,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
       if (p.status === "NOT_REQUIRED") throw fault("WORKFLOW_PHASE_CLOSED", 409);
       phaseGates(w, p, u, body);
       run("UPDATE wf2_phases SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,completed_by=? WHERE id=?", u.id, p.id);
-      postPhase(w, getPhase(p.id), u);
+      // Completing one phase does not finalize workflow finances.
       audit(w, u, "PHASE_COMPLETE", "PHASE", p.id, p, getPhase(p.id), body.reason);
     });
   }
@@ -567,15 +597,21 @@ function createWorkflowV2({ db, invoiceEngine }) {
   }
   function closeWorkflow(key, body, u) {
     const current = getWorkflow(key); requireRight(owns(u, current));
-    if (current.status === "COMPLETED" && !current.aborted_at && !current.deleted_at) { adminReason(u, body); return detail(key, u); }
+    if (current.status === "COMPLETED" && !current.aborted_at && !current.deleted_at) {  return detail(key, u); }
     return command(key, u, body, "WORKFLOW_CLOSE", w => {
       requireRight(owns(u, w));
+      if(Object.hasOwn(body,"expected_revenue")&&!w.finance_locked){
+        const revenue=body.expected_revenue==null||body.expected_revenue===""?null:money(body.expected_revenue);
+        run("UPDATE wf2_workflows SET expected_revenue_cents=? WHERE id=?",revenue,key);w.expected_revenue_cents=revenue;
+      }
       const phases = all("SELECT * FROM wf2_phases WHERE workflow_id=?", key);
       const pending = phases.filter(p => p.required && p.status !== "COMPLETED" && p.status !== "NOT_REQUIRED");
-      const tasks = all("SELECT t.* FROM workshop_subtasks t JOIN wf2_phases p ON p.id=t.phase_id WHERE p.workflow_id=? AND t.required=1 AND t.status<>'COMPLETED'", key);
-      const checks = all("SELECT c.* FROM wf2_checklist c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? AND c.required=1 AND c.checked=0", key);
+      const tasks = all("SELECT t.* FROM workshop_subtasks t JOIN wf2_phases p ON p.id=t.phase_id WHERE p.workflow_id=? AND p.status<>'NOT_REQUIRED' AND t.required=1 AND t.status<>'COMPLETED'", key);
+      const checks = all("SELECT c.* FROM wf2_checklist c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? AND p.status<>'NOT_REQUIRED' AND c.required=1 AND c.checked=0", key);
       const pendingCosts = all("SELECT c.* FROM wf2_costs c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? AND c.voided_at IS NULL AND c.approval_status='PENDING'", key);
       const unfinished = pending.length || tasks.length || checks.length || pendingCosts.length;
+      if (w.finance_reset) throw fault("WORKFLOW_FINANCE_RESET_LOCKED",409);
+      if (!w.finance_locked && w.expected_revenue_cents == null) throw fault("WORKFLOW_REVENUE_REVIEW_REQUIRED",409);
       const overridden = u.id !== w.main_responsible_user_id || Boolean(unfinished);
       if (unfinished && !admin(u)) throw fault("WORKFLOW_INCOMPLETE", 409, {
         phases: pending.map(p => ({ title: p.title, responsible: person(p.responsible_user_id)?.name || "" })),
@@ -588,14 +624,17 @@ function createWorkflowV2({ db, invoiceEngine }) {
         if (!w.finance_locked) postPhase(w, getPhase(p.id), u);
         if (p.status !== "COMPLETED") audit(w, u, "PHASE_COMPLETE", "PHASE", p.id, p, getPhase(p.id), body.reason);
       }
+      // Costs retained on a removed/not-required phase are still real outlays.
+      if (!w.finance_locked) for (const p of phases.filter(p=>p.status==="NOT_REQUIRED")) postPhase(w,p,u);
       let invoice = w.invoice_id ? invoiceEngine.invoiceDetail(w.invoice_id) : null;
       const source = custody(w);
       const costs = all("SELECT c.*,p.id stage_id FROM wf2_costs c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? AND c.voided_at IS NULL", key);
       if (!w.finance_locked) {
         for (const line of all("SELECT * FROM workflow_finance_lines WHERE workflow_id=? AND line_type='COST'", key)) finance.releaseWipForLine(line, source, u);
-        if (costs.some(c => c.charge_cents) && one("SELECT 1 FROM financial_statement_snapshots WHERE period>=? LIMIT 1", nowLocal().slice(0, 7))) throw fault("WORKFLOW_CLOSED_PERIOD_REVIEW_REQUIRED", 409);
+        if (w.expected_revenue_cents > 0 && one("SELECT 1 FROM financial_statement_snapshots WHERE period>=? LIMIT 1", nowLocal().slice(0, 7))) throw fault("WORKFLOW_CLOSED_PERIOD_REVIEW_REQUIRED", 409);
         invoice = invoiceEngine.createWorkflowInvoice({ workflow: source,
           stages: phases.filter(p => p.status !== "NOT_REQUIRED"),
+          revenueTotal: w.expected_revenue_cents / 100,
           lines: costs.map(c => ({ ...c, line_type: "COST", amount: c.charge_cents / 100, accounting_status: "RELEASED" })), actor: u, now: nowLocal(), paymentMethod: body.payment_method });
         if (invoice) { run("UPDATE invoices SET status='issued' WHERE id=?", invoice.id); invoiceEngine.postWorkflowInvoiceLedger(invoiceEngine.invoiceDetail(invoice.id), u); }
       }
@@ -622,33 +661,33 @@ function createWorkflowV2({ db, invoiceEngine }) {
       requireRight(owns(u, w));
       if (body.confirmed !== true) throw fault("WORKFLOW_DELETE_CONFIRMATION_REQUIRED");
       if (w.finance_locked) throw fault("WORKFLOW_RELEASED_COST_REQUIRES_ADJUSTMENT", 409);
-      const p = phaseContext(key, phaseId), source = custody(w);
-      // The supplied 42 archive may still contain unposted manual costs.
-      // Post and write off inside this SAME transaction before removing a phase.
-      for (const cost of all("SELECT * FROM wf2_costs WHERE phase_id=? AND voided_at IS NULL", p.id)) postCost(w, p, cost, u);
-      const loss = finance.writeOffStageWip(p, source, u, body.reason);
-      run("UPDATE workflow_finance_phases SET stage_code=stage_code||':REMOVED:'||id,status='ABORTED' WHERE id=?", p.id);
-      const before = { ...p, tasks: all("SELECT * FROM workshop_subtasks WHERE phase_id=?", p.id), costs: all("SELECT * FROM wf2_costs WHERE phase_id=?", p.id) };
-      run("DELETE FROM wf2_phases WHERE id=?", p.id);
-      audit(w, u, "PHASE_ABANDONED", "PHASE", p.id, before, { loss }, body.reason);
+      const p = phaseContext(key, phaseId);
+      const costs=all("SELECT * FROM wf2_costs WHERE phase_id=? AND voided_at IS NULL",p.id);
+      if (costs.length) {
+        // Retain real costs until overall finalization; never lose a cost by
+        // cascading a phase delete or post it early merely to remove a card.
+        run("UPDATE wf2_phases SET status='NOT_REQUIRED',required=0 WHERE id=?",p.id);
+      } else run("DELETE FROM wf2_phases WHERE id=?",p.id);
+      audit(w,u,"PHASE_REMOVED","PHASE",p.id,p,{retained_costs:costs.length},body.reason);
     });
   }
   function abandonWorkflow(key, body, u, remove = false) {
     const current = getWorkflow(key); requireRight(owns(u, current));
-    if (current.deleted_at || (!remove && current.aborted_at)) { adminReason(u, body); return detail(key, u); }
+    if (current.deleted_at || current.aborted_at) {  return detail(key, u); }
     return command(key, u, body, remove ? "WORKFLOW_DELETE" : "WORKFLOW_ABORT", w => {
       requireRight(owns(u, w));
       if (body.confirmed !== true) throw fault("WORKFLOW_DELETE_CONFIRMATION_REQUIRED");
       if (w.finance_locked || w.status === "COMPLETED") throw fault("WORKFLOW_RELEASED_COST_REQUIRES_ADJUSTMENT", 409);
-      const source = custody(w), losses = [];
-      for (const p of all("SELECT * FROM wf2_phases WHERE workflow_id=?", key)) {
-        for (const cost of all("SELECT * FROM wf2_costs WHERE phase_id=? AND voided_at IS NULL", p.id)) postCost(w, p, cost, u);
-        losses.push({ phase_id: p.id, ...finance.writeOffStageWip(p, source, u, body.reason) });
-      }
-      run(`UPDATE wf2_workflows SET aborted_at=COALESCE(aborted_at,CURRENT_TIMESTAMP),${remove ? "deleted_at=CURRENT_TIMESTAMP," : ""}abandonment_reason=? WHERE id=?`, text(body.reason), key);
-      run("UPDATE workflow_finance_sources SET current_status='ABORTED',financial_status='CLOSED',financial_closed_at=CURRENT_TIMESTAMP,financial_closed_by_user_id=? WHERE id=?", u.id, key);
-      run("UPDATE workflow_finance_phases SET status='ABORTED' WHERE workflow_id=?", key);
-      audit(w, u, "WORKFLOW_LOSS_WRITE_OFF", "WORKFLOW", key, w, { status: remove ? "DELETED" : "ABORTED", losses }, body.reason);
+      if (!text(body.reason)) throw fault("WORKFLOW_ABORT_REASON_REQUIRED");
+      const source=custody(w),costs=all("SELECT c.* FROM wf2_costs c JOIN wf2_phases p ON p.id=c.phase_id WHERE p.workflow_id=? AND c.voided_at IS NULL",key);
+      for (const p of all("SELECT * FROM wf2_phases WHERE workflow_id=?",key)) postPhase(w,p,u,true,body.reason);
+      run(`UPDATE wf2_workflows SET finance_locked=1,aborted_at=COALESCE(aborted_at,CURRENT_TIMESTAMP),${remove ? "deleted_at=CURRENT_TIMESTAMP," : ""}abandonment_reason=? WHERE id=?`,text(body.reason),key);
+      run("UPDATE workflow_finance_sources SET current_status='ABORTED',financial_status='CLOSED',abort_reason=?,aborted_at=CURRENT_TIMESTAMP,aborted_by_user_id=?,financial_closed_at=CURRENT_TIMESTAMP,financial_closed_by_user_id=? WHERE id=?",text(body.reason),u.id,u.id,key);
+      run("UPDATE workflow_finance_phases SET status='ABORTED' WHERE workflow_id=?",key);
+      const costTotal=costs.reduce((sum,c)=>sum+c.amount_cents,0)/100;
+      run("INSERT OR IGNORE INTO workflow_finance_closures(id,workflow_id,client_id,piano_id,final_due_at,closed_at,closed_by_user_id,closure_reason,revenue_total,cost_total,net_total,snapshot_json) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP,?,?,0,?,?,?)",
+        id("WFC"),key,w.client_id,w.piano_id,w.final_due_at,u.id,text(body.reason),costTotal,-costTotal,JSON.stringify({status:"ABORTED",costs,reason:text(body.reason)}));
+      audit(w,u,"WORKFLOW_LOSS_WRITE_OFF","WORKFLOW",key,w,{status:remove?"DELETED":"ABORTED",cost_total:costTotal},body.reason);
     }, { allowClosed: Boolean(current.aborted_at) });
   }
   function canDocument(key, phaseId, taskId, u) {
@@ -725,20 +764,21 @@ function createWorkflowV2({ db, invoiceEngine }) {
   function purgePreview(key, u) {
     requireRight(superuser(u));
     const rows = key ? all("SELECT id FROM wf2_workflows WHERE id=? AND deleted_at IS NULL", key) : all("SELECT id FROM wf2_workflows WHERE status='ACTIVE' AND finance_locked=0 AND deleted_at IS NULL");
-    return { workflows: rows.length, ledger_preserved: true, mode: "SOFT_DELETE_AND_WIP_WRITE_OFF" };
+    return { workflows: rows.length, ledger_preserved: true, mode: "SOFT_DELETE_AND_FINAL_COST_SETTLEMENT" };
   }
   function purge(key, body, u) {
     requireRight(superuser(u));
     const expected = key ? `DELETE WORKFLOW ${key}` : "DELETE ALL WORKFLOWS";
     if (body.confirmation !== expected) throw fault("WORKFLOW_DELETE_CONFIRMATION_REQUIRED");
+    if (!text(body.reason)) throw fault("WORKFLOW_ABORT_REASON_REQUIRED");
     return db.transaction(() => {
       const rows = key ? [getWorkflow(key)] : all("SELECT * FROM wf2_workflows WHERE status='ACTIVE' AND finance_locked=0 AND deleted_at IS NULL");
-      for (const w of rows) abandonWorkflow(w.id, { confirmed: true, reason: body.reason || "Superadmin deletion" }, u, true);
-      return { ok: true, workflows: rows.length, ledger_preserved: true, mode: "SOFT_DELETE_AND_WIP_WRITE_OFF" };
+      for (const w of rows) abandonWorkflow(w.id, { confirmed: true, reason: body.reason }, u, true);
+      return { ok: true, workflows: rows.length, ledger_preserved: true, mode: "SOFT_DELETE_AND_FINAL_COST_SETTLEMENT" };
     })();
   }
   function saveDefinitions(body, u) {
-    requireRight(admin(u)); adminReason(u, body);
+    requireRight(admin(u)); 
     return db.transaction(() => {
       const before = definitions(), codes = new Set(before.map(d => d.code)), items = body.stages;
       if (!Array.isArray(items) || items.length !== 7 || new Set(items.map(d => d.code)).size !== 7 || items.some(d => !codes.has(d.code))) throw fault("WORKFLOW_SEVEN_PHASES_REQUIRED");
