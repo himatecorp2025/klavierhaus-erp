@@ -152,9 +152,15 @@ test("Nested Client State Machine Suite: Unknown -> Nem/Igen -> Save/Cancel draf
   assert.equal(cancelled.start_time, original.start_time);
   assert.equal(cancelled.client_name, "Mégse Ügyfél");
 
-  assert.match(app, /entityFormFieldsMarkup\("contacts",null,initial\)/, "Nested Clientnek a közös Contacts form renderert kell használnia");
-  assert.match(app, /saveEntityFormRecord\('contacts',null,e\.target\)/, "Nested Clientnek a közös Contacts mentési útvonalat kell használnia");
-  assert.match(app, /<div id=\"contactPianoSection\"><\/div>/, "A teljes Contacts DOM része a contactPianoSection");
+  // Check actual shared-dialog delegation, not the removed inline renderer text.
+  const open=require('./helpers/master-data-entry-fixture').entry('openNestedClientModal',(kind,row,options)=>{
+    assert.equal(kind,'contacts');assert.equal(row,null);assert.equal(options.prefill.name,'Shared client');
+    options.onSaved({id:'CS',name:'Shared client'});return null;
+  });
+  let sharedResult;
+  open({prefillName:'Shared client',draft:original,stateMachine:saveFlow,onSaved:(client,retained)=>{sharedResult=retained;}});
+  assert.equal(sharedResult.client_id,'CS');assert.equal(sharedResult.notes,original.notes);
+
 });
 
 test("Sidebar Role & Icon Contract: permission-first filtering, collapsed icon-only és accessibility", () => {
