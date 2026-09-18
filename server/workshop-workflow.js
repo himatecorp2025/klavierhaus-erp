@@ -132,7 +132,18 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   const roundMoney = (value) => Math.round((numeric(value) + Number.EPSILON) * 100) / 100;
   const error = (code, message = code) => { const e = new Error(message); e.code = code; return e; };
   const userById = (id) => id ? db.prepare("SELECT id,name,role,status FROM users WHERE id=? AND status='Active'").get(id) : null;
-  const workflowById = (id) => db.prepare("SELECT * FROM workshop_workflows WHERE id=?").get(id);
+  const workflowDetailById = (id) => db.prepare(`SELECT w.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,
+    p.display_name AS piano_display_name,p.brand,p.model,p.serial_no,p.brand AS piano_brand,p.model AS piano_model,p.serial_no AS piano_serial,
+    p.finish,p.build_year,p.size_cm,p.size_in,p.size_display,p.location AS piano_location,
+    cu.name AS created_by_name,tu.name AS transport_responsible_name_resolved,u.name AS financial_closed_by_name
+    FROM workshop_workflows w
+    LEFT JOIN contacts c ON c.id=w.client_id
+    LEFT JOIN pianos p ON p.id=w.piano_id
+    LEFT JOIN users cu ON cu.id=w.created_by_user_id
+    LEFT JOIN users tu ON tu.id=w.transport_responsible_user_id
+    LEFT JOIN users u ON u.id=w.financial_closed_by_user_id
+    WHERE w.id=?`).get(id);
+  const workflowById = workflowDetailById;
   const stageById = (id) => db.prepare("SELECT * FROM workflow_stages WHERE id=?").get(id);
 
   function directAudit(req, action, recordId, oldValue = null, newValue = null, details = "", auditType = "WORK") {
@@ -141,6 +152,17 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       rid("AUD"), req.user?.id || "", req.user?.name || "", req.user?.role || "", action, "workshop_workflow", recordId || "",
       oldValue == null ? null : JSON.stringify(oldValue), newValue == null ? null : JSON.stringify(newValue), 1, details || "", auditType
     );
+  }
+
+  function assertStageOperator(req, workflow, stage) {
+    if (isAdmin(req.user)) return;
+    const isAssignee = Boolean(stage?.assigned_user_id && String(stage.assigned_user_id) === String(req.user?.id));
+    const isWorkflowOwner = Boolean(workflow?.created_by_user_id && String(workflow.created_by_user_id) === String(req.user?.id));
+    if (!isAssignee && !isWorkflowOwner) {
+      const denied = error("WORKFLOW_STAGE_FORBIDDEN");
+      denied.status = 403;
+      throw denied;
+    }
   }
 
   function seedDefinitions() {
@@ -645,6 +667,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.patch("/api/workflows/:id/stages/:stageId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
+      assertStageOperator(req, workflow, stage);
       const suppliedKeys=Object.keys(body).filter((key)=>body[key]!==undefined),deadlineOnly=suppliedKeys.length>0&&suppliedKeys.every((key)=>key==="due_at");
       if (workflow.current_status !== "ACTIVE" && !(isAdmin(req.user) && deadlineOnly)) throw error("WORKFLOW_NOT_ACTIVE");
       if (stage.status === "ABORTED" && !(isAdmin(req.user) && deadlineOnly)) throw error("WORKFLOW_STAGE_ABORTED");
@@ -675,12 +698,13 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         validatedDue = localDateTime(body.due_at); if (!validatedDue) throw error("INVALID_STAGE_DEADLINE");
         changes.push("due_at=?"); values.push(validatedDue);
       }
+      let transfer = null;
       if (body.assigned_user_id !== undefined) {
         const assignee = userById(validId(body.assigned_user_id));
         if (!assignee) throw error("WORKFLOW_ASSIGNEE_NOT_FOUND");
         if (assignee.id !== stage.assigned_user_id && !clean(body.reassignment_reason, 2000)) throw error("WORKFLOW_TRANSFER_REASON_REQUIRED");
         if (assignee.id !== stage.assigned_user_id) {
-          db.prepare(`INSERT INTO workflow_stage_transfers(id,workflow_id,stage_id,from_user_id,to_user_id,reason,transferred_by_user_id) VALUES(?,?,?,?,?,?,?)`).run(rid("WFT"), workflow.id, stage.id, stage.assigned_user_id || null, assignee.id, clean(body.reassignment_reason, 2000), req.user.id);
+          transfer = { id:rid("WFT"), assignee, reason:clean(body.reassignment_reason, 2000) };
         }
         changes.push("assigned_user_id=?", "assigned_to=?"); values.push(assignee.id, assignee.name);
       }
@@ -693,28 +717,35 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         }
         if (body.preliminary_quote_amount !== undefined) { changes.push("preliminary_quote_amount=?"); values.push(Math.max(0, numeric(body.preliminary_quote_amount))); }
       }
-      if (!changes.length) return res.json(decorateWorkflow(workflowById(workflow.id), true));
-      let linkedJobSchedule = null;
+      if (!changes.length) return res.json(decorateWorkflow(workflowDetailById(workflow.id), true));
+      let linkedJobSchedule = null, updatedStage = null, updatedWorkflow = null;
       db.transaction(() => {
+        if (transfer) {
+          db.prepare(`INSERT INTO workflow_stage_transfers(id,workflow_id,stage_id,from_user_id,to_user_id,reason,transferred_by_user_id) VALUES(?,?,?,?,?,?,?)`)
+            .run(transfer.id, workflow.id, stage.id, stage.assigned_user_id || null, transfer.assignee.id, transfer.reason, req.user.id);
+        }
         db.prepare(`UPDATE workflow_stages SET ${changes.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...values,stage.id);
         if (validatedDue && stage.stage_code === "FINAL_HANDOVER") {
           db.prepare("UPDATE workshop_workflows SET final_due_at=?,due_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(validatedDue,validatedDue.slice(11,16),workflow.id);
           linkedJobSchedule=syncLinkedWorkflowJobDeadline(workflow,validatedDue);
         } else db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+        updatedStage = stageById(stage.id);
+        updatedWorkflow = workflowDetailById(workflow.id);
+        const transferDetail = transfer ? `Munkafázis átadva: ${stage.name_snapshot_hu || stage.name_snapshot_en || stage.stage_code} – Felelős: ${transfer.assignee.name}` : "Workflow stage updated";
+        directAudit(req, transfer ? "WORKFLOW_STAGE_TRANSFERRED" : "WORKFLOW_STAGE_UPDATED", stage.id, stage, { ...updatedStage, linked_job_schedule:linkedJobSchedule }, transferDetail);
       })();
-      const updatedStage = stageById(stage.id),updatedWorkflow=workflowById(workflow.id);
       if (updatedStage.status === "IN_PROGRESS" || body.assigned_user_id !== undefined) syncLinkedJobAssignee(updatedWorkflow, updatedStage);
-      directAudit(req, "WORKFLOW_STAGE_UPDATED", stage.id, stage, { ...updatedStage, linked_job_schedule:linkedJobSchedule }, "Workshop stage updated");
       notifyAssigned(updatedStage, updatedWorkflow, req.user);
       const response = decorateWorkflow(updatedWorkflow, true);
       if (body.status && clean(body.status, 30).toUpperCase() === "COMPLETED") response.next_stage_activation = activateNextStage(updatedWorkflow, updatedStage, req);
       res.json(response);
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message, ...(e.pendingSubtasks ? { pending_subtasks: e.pendingSubtasks } : {}) }); }
+    } catch (e) { res.status(e.status || (e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400)).json({ error: e.code || e.message, ...(e.pendingSubtasks ? { pending_subtasks: e.pendingSubtasks } : {}) }); }
   });
 
   app.post("/api/workflows/:id/stages/:stageId/subtasks", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
+      assertStageOperator(req, workflow, stage);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const title = clean(body.title, 500), isCustom = body.is_custom === true || ["1","true","yes","on"].includes(clean(body.is_custom, 10).toLowerCase());
       if (!title) throw error("WORKFLOW_SUBTASK_TITLE_REQUIRED");
@@ -726,12 +757,13 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       db.prepare(`INSERT INTO workshop_subtasks(id,stage_id,workflow_id,title,is_custom,status,assigned_to_id,position) VALUES(?,?,?,?,?,'PENDING',?,?)`).run(id, stage.id, workflow.id, title, isCustom ? 1 : 0, assignee?.id || null, position);
       directAudit(req, "WORKFLOW_SUBTASK_CREATED", id, null, { stage_id: stage.id, title, is_custom: isCustom ? 1 : 0, assigned_to_id: assignee?.id || null }, "Workflow subtask created");
       res.status(201).json({ subtask: subtaskRows(stage.id).find((item) => item.id === id), workflow: decorateWorkflow(workflowById(workflow.id), true) });
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.status || (e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400)).json({ error: e.code || e.message }); }
   });
 
   app.patch("/api/workflows/:id/stages/:stageId/subtasks/:subtaskId", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
+      assertStageOperator(req, workflow, stage);
       const subtask = db.prepare("SELECT * FROM workshop_subtasks WHERE id=? AND stage_id=? AND workflow_id=?").get(validId(req.params.subtaskId), stage.id, workflow.id);
       if (!subtask) throw error("WORKFLOW_SUBTASK_NOT_FOUND");
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
@@ -755,7 +787,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const updated = db.prepare("SELECT * FROM workshop_subtasks WHERE id=?").get(subtask.id);
       directAudit(req, "WORKFLOW_SUBTASK_UPDATED", subtask.id, subtask, updated, "Workflow subtask updated");
       res.json({ subtask: subtaskRows(stage.id).find((item) => item.id === subtask.id), workflow: decorateWorkflow(workflowById(workflow.id), true) });
-    } catch (e) { res.status(["WORKFLOW_NOT_FOUND","WORKFLOW_STAGE_NOT_FOUND","WORKFLOW_SUBTASK_NOT_FOUND"].includes(e.code) ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.status || (["WORKFLOW_NOT_FOUND","WORKFLOW_STAGE_NOT_FOUND","WORKFLOW_SUBTASK_NOT_FOUND"].includes(e.code) ? 404 : 400)).json({ error: e.code || e.message }); }
   });
 
   function moveWorkflowStage(req, workflow, source, targetCode) {
@@ -766,6 +798,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
     const target = db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? AND stage_code=?").get(workflow.id, targetCode);
     if (target && target.status !== "NOT_REQUIRED") throw error("WORKFLOW_TARGET_STAGE_OCCUPIED");
     const before = { source, target };
+    let moved = null, replacement = null;
     db.transaction(() => {
       if (target) {
         const temporaryCode = `__MOVE__${target.id}`;
@@ -780,9 +813,12 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
           .run(targetDefinition.code, targetDefinition.sort_order, targetDefinition.name_en, targetDefinition.name_hu, targetCode === "FINAL_HANDOVER" ? workflow.final_due_at : source.due_at, source.id);
       }
       db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+      moved = stageById(source.id);
+      replacement = target ? stageById(target.id) : null;
+      const sourceName = source.name_snapshot_hu || source.name_snapshot_en || source.stage_code;
+      const targetName = targetDefinition.name_hu || targetDefinition.name_en || targetCode;
+      directAudit(req, "WORKFLOW_STAGE_MOVED", source.id, before, { moved, replacement }, `Munkafázis áthelyezve: ${sourceName} ➔ ${targetName}`);
     })();
-    const moved = stageById(source.id), replacement = target ? stageById(target.id) : null;
-    directAudit(req, "WORKFLOW_STAGE_MOVED", source.id, before, { moved, replacement }, `Workflow card moved horizontally from ${source.stage_code} to ${targetCode}`);
     return decorateWorkflow(workflowById(workflow.id), true);
   }
 
@@ -823,6 +859,7 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
   app.post("/api/workflows/:id/stages/:stageId/activate", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), body = req.body || {};
+      assertStageOperator(req, workflow, stage);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       if (!["NOT_REQUIRED", "WAITING"].includes(stage.status)) throw error("WORKFLOW_STAGE_ALREADY_ACTIVE");
       if (!stageCanStart(workflow, stage)) throw error("WORKFLOW_STAGE_BLOCKED_BY_PREVIOUS_STAGE");
@@ -847,23 +884,29 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const due = body.due_at === undefined ? stage.due_at : localDateTime(body.due_at);
       if (body.due_at !== undefined && !due) throw error("INVALID_STAGE_DEADLINE");
       if (due && !isAdmin(req.user) && due !== stage.due_at) throw error("STAGE_DEADLINE_NOT_ALLOWED");
-      if (assignee && assignee.id !== stage.assigned_user_id && stage.status !== "NOT_REQUIRED" && assignmentMode !== "INHERIT_PREVIOUS") recordStageTransfer(workflow, stage, assignee, body.reason, req.user);
+      const requiresTransfer = Boolean(assignee && assignee.id !== stage.assigned_user_id && stage.status !== "NOT_REQUIRED" && assignmentMode !== "INHERIT_PREVIOUS");
+      if (requiresTransfer && !clean(body.reason, 2000)) throw error("WORKFLOW_TRANSFER_REASON_REQUIRED");
       const nextStatus = startNow ? "IN_PROGRESS" : "WAITING";
-      db.prepare(`UPDATE workflow_stages SET status=?,assigned_user_id=?,assigned_to=?,due_at=?,started_at=CASE WHEN ?='IN_PROGRESS' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(nextStatus, assignee?.id || null, assignee?.name || null, due || null, nextStatus, nowISO(), stage.id);
-      db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
-      const updated = stageById(stage.id);
+      let updated = null;
+      db.transaction(()=>{
+        if(requiresTransfer)recordStageTransfer(workflow, stage, assignee, body.reason, req.user);
+        db.prepare(`UPDATE workflow_stages SET status=?,assigned_user_id=?,assigned_to=?,due_at=?,started_at=CASE WHEN ?='IN_PROGRESS' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(nextStatus, assignee?.id || null, assignee?.name || null, due || null, nextStatus, nowISO(), stage.id);
+        db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+        updated = stageById(stage.id);
+        if (inheritedAssignee) directAudit(req, "WORKFLOW_STAGE_ASSIGNEE_INHERITED", stage.id, stage, updated, "Previous completed phase responsible was inherited automatically");
+        directAudit(req, "WORKFLOW_STAGE_ACTIVATED", stage.id, stage, updated, startNow ? "Workflow stage activated and started" : "Workflow stage activated");
+      })();
       if (updated.status === "IN_PROGRESS") syncLinkedJobAssignee(workflow, updated);
-      if (inheritedAssignee) directAudit(req, "WORKFLOW_STAGE_ASSIGNEE_INHERITED", stage.id, stage, updated, "Previous completed phase responsible was inherited automatically");
-      directAudit(req, "WORKFLOW_STAGE_ACTIVATED", stage.id, stage, updated, startNow ? "Workflow stage activated and started" : "Workflow stage activated");
       notifyAssigned(updated, workflow, req.user);
       res.json(decorateWorkflow(workflowById(workflow.id), true));
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.status || (e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400)).json({ error: e.code || e.message }); }
   });
 
   app.post("/api/workflows/:id/stages/:stageId/abort", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id), reason = clean(req.body?.reason, 2000);
+      assertStageOperator(req, workflow, stage);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       if (["COMPLETED", "NOT_REQUIRED", "ABORTED"].includes(stage.status)) throw error("WORKFLOW_STAGE_NOT_ABORTABLE");
       if (!reason) throw error("WORKFLOW_STAGE_ABORT_REASON_REQUIRED");
@@ -872,12 +915,13 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
       const updated = stageById(stage.id);
       directAudit(req, "WORKFLOW_STAGE_ABORTED", stage.id, stage, updated, reason);
       res.json(decorateWorkflow(workflowById(workflow.id), true));
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.status || (e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400)).json({ error: e.code || e.message }); }
   });
 
   app.post("/api/workflows/:id/stages/:stageId/transfer", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
     try {
       const workflow = requireWorkflow(req.params.id), stage = requireStage(req.params.stageId, workflow.id);
+      assertStageOperator(req, workflow, stage);
       if (workflow.current_status !== "ACTIVE") throw error("WORKFLOW_NOT_ACTIVE");
       const assignee = userById(validId(req.body?.to_user_id)), reason = clean(req.body?.reason, 2000);
       if (!assignee) throw error("WORKFLOW_ASSIGNEE_NOT_FOUND");
@@ -886,13 +930,14 @@ function registerWorkshopWorkflowRoutes({ app, db, auth, permit, requireSuperadm
         db.prepare("INSERT INTO workflow_stage_transfers(id,workflow_id,stage_id,from_user_id,to_user_id,reason,transferred_by_user_id) VALUES(?,?,?,?,?,?,?)").run(rid("WFT"), workflow.id, stage.id, stage.assigned_user_id || null, assignee.id, reason, req.user.id);
         db.prepare("UPDATE workflow_stages SET assigned_user_id=?,assigned_to=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assignee.id, assignee.name, stage.id);
         db.prepare("UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workflow.id);
+        const updatedInTransaction=stageById(stage.id);
+        directAudit(req, "WORKFLOW_STAGE_TRANSFERRED", stage.id, stage, updatedInTransaction, `Munkafázis átadva: ${stage.name_snapshot_hu || stage.name_snapshot_en || stage.stage_code} – Felelős: ${assignee.name}`);
       })();
       const updated = stageById(stage.id);
       if (updated.status === "IN_PROGRESS") syncLinkedJobAssignee(workflow, updated);
-      directAudit(req, "WORKFLOW_STAGE_TRANSFERRED", stage.id, stage, updated, reason);
       notifyAssigned(updated, workflow, req.user);
       res.json(decorateWorkflow(workflowById(workflow.id), true));
-    } catch (e) { res.status(e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400).json({ error: e.code || e.message }); }
+    } catch (e) { res.status(e.status || (e.code === "WORKFLOW_NOT_FOUND" || e.code === "WORKFLOW_STAGE_NOT_FOUND" ? 404 : 400)).json({ error: e.code || e.message }); }
   });
 
   app.get("/api/workflows/:id/financial-lines", auth, permit("ADMIN", "MANAGER", "WORKER"), (req, res) => {
