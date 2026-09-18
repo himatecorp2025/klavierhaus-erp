@@ -2010,10 +2010,11 @@ function workflowStageCard(stage,{mobileWorkflow=null}={}){
  const title=workflowSafeText(stage?.card_title||stage?.custom_title||stage?.title,workflowStageLabel(stage)),assignee=workflowSafeText(stage?.assigned_to,bi("Unassigned","Nincs felelős")),dateText=stage?.due_at?workflowCardDateText(stage.due_at):"—",timeText=stage?.due_at?workflowCardTimeText(stage.due_at):"—",shortDescription=workflowSafeText(stage?.details),notes=workflowSafeText(stage?.notes);
  const noteText=[shortDescription,notes].filter(Boolean).join(" · "),activeBell=!['COMPLETED','NOT_REQUIRED','ABORTED'].includes(String(stage.status||""));
  const bell=activeBell&&noteText?`<span class="workflow-note-bell" title="${htmlText(noteText)}" aria-label="${bi("Card notes","Kártyamegjegyzés")}: ${htmlText(noteText)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>`:"";
- const avatars="",progress="";
+ const avatars="",total=(stage.tasks||stage.subtasks||[]).length,done=(stage.tasks||stage.subtasks||[]).filter(task=>task.status==='COMPLETED').length;
+ const progress=total?`<span class="workflow-card-progress"><progress value="${done}" max="${total}"></progress><small>${done}/${total} ${bi('done','k\u00e9sz')}</small></span>`:"";
  const mobileFacts=mobileWorkflow?`<span class="workflow-mobile-card-client">${htmlText(workflowSafeText(mobileWorkflow.client_name,"—"))}</span><span class="workflow-mobile-card-piano">${htmlText(workflowPianoLabel(mobileWorkflow)||workflowSafeText(mobileWorkflow.piano_display_name||mobileWorkflow.piano_id,bi("Unknown piano","Ismeretlen hangszer")))}</span>`:"";
  const icon=effective==="COMPLETED"?'<span class="workflow-status-icon workflow-status-icon--complete" aria-hidden="true">✓</span>':effective==="OVERDUE"?'<span class="workflow-status-icon workflow-status-icon--overdue" aria-hidden="true">!</span>':'<span class="workflow-status-dot" aria-hidden="true"></span>';
- const dragAttrs=isAdmin()?` draggable="true" data-workflow-draggable="1"`:"";
+ const dragAttrs=' draggable="false"';
  return `<button type="button" class="workflow-stage-card workflow-card status-${workflowStatusClass(effective)}${stage.is_overdue?" is-overdue":""}" data-workflow-id="${htmlText(stage.workflow_id)}" data-stage-id="${htmlText(stage.id)}" data-stage-code="${htmlText(stage.stage_code)}"${dragAttrs} onclick="workflowShellCardNotice(event,'${htmlText(stage.workflow_id)}','${htmlText(stage.id)}')"><span class="workflow-stage-card-inner">${bell}<span class="workflow-stage-status card-badge">${icon}<em>${htmlText(workflowStatusLabel(effective))}</em></span><span class="workflow-card-date${effective==="OVERDUE"?" is-overdue":""}">${htmlText(dateText)}</span><span class="workflow-card-time">${htmlText(timeText)}</span>${mobileFacts}<b class="workflow-stage-title">${htmlText(title)}</b>${progress}<span class="workflow-stage-card-footer">${avatars}<span class="workflow-stage-assignee">${htmlText(assignee)}</span><span class="workflow-stage-document" aria-hidden="true">▤</span></span></span></button>`;
 }
 
@@ -2030,35 +2031,64 @@ function workflowBoardRow(workflow){
  return `<article class="workflow-row workflow-swimlane" data-workflow-id="${htmlText(workflow.id)}" data-workflow-search="${htmlText(text)}"><div class="workflow-piano-cell"><div class="workflow-piano-visual" aria-hidden="true"><span>♬</span></div><div class="workflow-piano-copy"><div class="workflow-piano-facts"><strong class="workflow-piano-name">${htmlText(piano)}</strong><span class="workflow-client-name">${htmlText(sanitizeSafeText(workflow.client_name,"—"))}</span><span class="workflow-piano-reference-meta">${htmlText(pianoReferenceMeta(workflow)||serial||"—")}</span><b class="workflow-final-deadline">${htmlText(finalDue)}</b></div><div class="workflow-row-actions"><button type="button" class="workflow-row-open" onclick="workflowShellOpenCards('${htmlText(workflow.id)}')">${bi("Workflow details","Workflow részletei")} →</button>${superDelete}</div></div></div><div class="workflow-stage-grid">${cells}</div></article>`;
 }
 
-function workflowMobileActiveStages(workflow){
- return (workflow?.stages||[]).filter(stage=>stage.status!=="NOT_REQUIRED"&&(stage.card_title||stage.due_at||stage.assigned_to||stage.notes||stage.details||(stage.subtasks||[]).length));
+function workflowMobileActiveStages(workflow) { return (workflow?.stages||[]).filter(stage=>stage.status!=='NOT_REQUIRED'); }
+function workflowMobileListCard(workflow) {
+ const piano=workflowPianoLabel(workflow)||workflowSafeText(workflow.piano_id),client=workflowSafeText(workflow.client_name,'\u2014');
+ const due=workflow.final_due_at?workflowCardDateTimeText(workflow.final_due_at):'\u2014';
+ return `<article class="workflow-mobile-list-item"><button type="button" class="workflow-mobile-list-card" data-mobile-workflow-id="${htmlText(workflow.id)}" onclick="workflowShellOpenCards('${htmlText(workflow.id)}')"><span class="workflow-mobile-list-deadline">${htmlText(due)}</span><strong>${htmlText(client)}</strong><b>${htmlText(piano)}</b><small>${htmlText(workflow.serial_no||workflow.workflow_key||'')}</small><span class="workflow-mobile-list-open">${bi('Workflow details','Workflow r\u00e9szletei')} \u2192</span></button><button type="button" class="workflow-mobile-deck-launch" onclick="workflowOpenMobileDeck('${htmlText(workflow.id)}')">${bi('Browse phase cards','F\u00e1zisk\u00e1rty\u00e1k lapoz\u00e1sa')} \u2194</button></article>`;
 }
-function workflowMobileListCard(workflow){
- const piano=workflowPianoLabel(workflow)||workflowSafeText(workflow?.piano_display_name)||workflowSafeText(workflow?.piano_id,bi("Unknown piano","Ismeretlen hangszer"));
- const finalDue=workflow.final_due_at?workflowCardDateTimeText(workflow.final_due_at):"—",client=workflowSafeText(workflow.client_name,"—"),serial=workflowSafeText(workflow.serial_no||workflow.workflow_key,"—");
- return `<button type="button" class="workflow-mobile-list-card" data-mobile-workflow-id="${htmlText(workflow.id)}" onclick="workflowShellOpenCards('${htmlText(workflow.id)}')"><span class="workflow-mobile-list-deadline">${htmlText(finalDue)}</span><strong>${htmlText(client)}</strong><b>${htmlText(piano)}</b><small>${htmlText(serial)}</small><span class="workflow-mobile-list-open">${bi("Open workflow details","Workflow részleteinek megnyitása")} →</span></button>`;
-}
-function workflowMobileDeckMarkup(workflow){
- if(!workflow)return "";
- const stages=workflowMobileActiveStages(workflow);if(!stages.length)return `<section class="workflow-mobile-deck"><header><button type="button" class="ghost-btn" onclick="workflowCloseMobileDeck()">← ${bi("Back to workflows","Vissza a munkafolyamatokhoz")}</button></header><p class="muted">${bi("This workflow has no active phase cards.","Ehhez a workflow-hoz nincs aktív fáziskártya.")}</p></section>`;
- const maxIndex=stages.length-1,index=Math.max(0,Math.min(maxIndex,Number(workflowMobileDeckState?.index||0)));if(workflowMobileDeckState)workflowMobileDeckState.index=index;
- const slides=stages.map((stage,slideIndex)=>`<div class="workflow-mobile-deck-slide" data-mobile-stage-index="${slideIndex}">${workflowStageCard(stage,{mobileWorkflow:workflow})}</div>`).join("");
- return `<section class="workflow-mobile-deck" data-workflow-mobile-deck="${htmlText(workflow.id)}"><header class="workflow-mobile-deck-head"><button type="button" class="ghost-btn workflow-mobile-deck-back" onclick="workflowCloseMobileDeck()">← ${bi("Back to workflows","Vissza a munkafolyamatokhoz")}</button><span data-workflow-mobile-counter>${index+1} / ${stages.length}</span></header><div class="workflow-mobile-deck-viewport"><div class="workflow-mobile-deck-track" style="--workflow-mobile-index:${index}">${slides}</div></div><div class="workflow-mobile-deck-dots">${stages.map((_,dotIndex)=>`<i class="${dotIndex===index?"active":""}"></i>`).join("")}</div></section>`;
+function workflowMobileDeckMarkup(workflow) {
+ if(!workflow)return '';
+ const stages=workflowMobileActiveStages(workflow),index=Math.max(0,Math.min(Math.max(0,stages.length-1),Number(workflowMobileDeckState?.index||0)));
+ if(workflowMobileDeckState)workflowMobileDeckState.index=index;
+ return `<section class="workflow-mobile-deck" data-workflow-mobile-deck="${htmlText(workflow.id)}"><header class="workflow-mobile-deck-head"><button type="button" onclick="workflowCloseMobileDeck()">\u2190 ${bi('Workflows','Munkafolyamatok')}</button><strong data-workflow-mobile-counter aria-live="polite">${stages.length?index+1:0} / ${stages.length}</strong></header>${stages.length?`<div class="workflow-mobile-deck-viewport" aria-roledescription="carousel" aria-label="${htmlText(bi('Workflow phases','Workflow f\u00e1zisok'))}"><div class="workflow-mobile-deck-track">${stages.map((stage,i)=>`<div class="workflow-mobile-deck-slide" data-mobile-stage-index="${i}">${workflowStageCard(stage,{mobileWorkflow:workflow})}</div>`).join('')}</div></div><div class="workflow-mobile-deck-controls"><button type="button" data-deck-step="-1" aria-label="${htmlText(bi('Previous phase','El\u0151z\u0151 f\u00e1zis'))}">\u2190</button><div class="workflow-mobile-deck-dots">${stages.map((_,i)=>`<button type="button" data-deck-index="${i}" aria-label="${htmlText(bi('Phase','F\u00e1zis'))} ${i+1}" aria-pressed="${i===index}"></button>`).join('')}</div><button type="button" data-deck-step="1" aria-label="${htmlText(bi('Next phase','K\u00f6vetkez\u0151 f\u00e1zis'))}">\u2192</button></div>`:`<p>${bi('No active phases.','Nincs akt\u00edv f\u00e1zis.')}</p><button type="button" onclick="workflowShellOpenCards('${htmlText(workflow.id)}')">${bi('Workflow details','Workflow r\u00e9szletei')}</button>`}</section>`;
 }
 
+function workflowOpenMobileDeck(workflowId){workflowMobileDeckState={workflowId,index:0};workflowMobileSwipeSuppressClickUntil=0;return renderWorkshopWorkflow();}
 function workflowCloseMobileDeck(){workflowMobileDeckState=null;workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";renderWorkshopWorkflow();}
-function workflowBindMobileSwipe(root){
- const deck=root?.querySelector?.("[data-workflow-mobile-deck]"),viewport=deck?.querySelector?.(".workflow-mobile-deck-viewport"),track=deck?.querySelector?.(".workflow-mobile-deck-track");if(!deck||!viewport||!track||!workflowMobileDeckState)return;
- const slides=[...track.querySelectorAll(".workflow-mobile-deck-slide")];if(slides.length<2)return;
- let startX=0,startY=0,currentX=0,dragging=false,axis="";
- const apply=(index,animate=true)=>{const safe=Math.max(0,Math.min(slides.length-1,index));workflowMobileDeckState.index=safe;track.style.transition=animate?"transform .24s cubic-bezier(.2,.7,.2,1)":"none";track.style.transform=`translate3d(${-safe*100}%,0,0)`;deck.querySelector("[data-workflow-mobile-counter]").textContent=`${safe+1} / ${slides.length}`;deck.querySelectorAll(".workflow-mobile-deck-dots i").forEach((dot,i)=>dot.classList.toggle("active",i===safe));};
- apply(workflowMobileDeckState.index||0,false);
- viewport.addEventListener("touchstart",event=>{if(event.touches.length!==1)return;startX=currentX=event.touches[0].clientX;startY=event.touches[0].clientY;axis="";dragging=true;track.style.transition="none";},{passive:true});
- viewport.addEventListener("touchmove",event=>{if(!dragging||event.touches.length!==1)return;currentX=event.touches[0].clientX;const delta=currentX-startX,dy=event.touches[0].clientY-startY;if(!axis&&Math.max(Math.abs(delta),Math.abs(dy))>8)axis=Math.abs(delta)>Math.abs(dy)*1.2?"x":"y";if(axis!=="x"){if(axis==="y"){dragging=false;apply(workflowMobileDeckState.index||0,false);}return;}const base=-Number(workflowMobileDeckState.index||0)*100;track.style.transform=`translate3d(calc(${base}% + ${delta}px),0,0)`;if(Math.abs(delta)>8)event.preventDefault();},{passive:false});
- const finishSwipe=(cancelled=false)=>{if(!dragging)return;dragging=false;const diff=currentX-startX,current=Number(workflowMobileDeckState.index||0);if(!cancelled&&Math.abs(diff)>=45){workflowMobileSwipeSuppressClickUntil=Date.now()+350;apply(current+(diff<0?1:-1),true);}else apply(current,true);};
- viewport.addEventListener("touchend",()=>finishSwipe(false),{passive:true});
- viewport.addEventListener("touchcancel",()=>finishSwipe(true),{passive:true});
- viewport.addEventListener("click",event=>{if(Date.now()<workflowMobileSwipeSuppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
+function workflowBindMobileSwipe(root) {
+ const deck=root?.querySelector('[data-workflow-mobile-deck]'),viewport=deck?.querySelector('.workflow-mobile-deck-viewport'),track=deck?.querySelector('.workflow-mobile-deck-track');
+ if(!viewport||!track||!workflowMobileDeckState)return;
+ const slides=[...track.querySelectorAll('.workflow-mobile-deck-slide')];if(!slides.length)return;
+ viewport._workflowSwipeAbort?.abort();const controller=new AbortController();viewport._workflowSwipeAbort=controller;
+ const on=(element,event,handler,passive=true)=>element.addEventListener(event,handler,{passive,signal:controller.signal});
+ let gesture=null;
+ const index=()=>Number(workflowMobileDeckState?.index||0);
+ const apply=(next,animate=true)=>{
+  const current=Math.max(0,Math.min(slides.length-1,next));workflowMobileDeckState.index=current;
+  track.style.transition=animate?'transform 220ms ease':'none';track.style.transform=`translate3d(${-current*100}%,0,0)`;
+  deck.querySelector('[data-workflow-mobile-counter]').textContent=`${current+1} / ${slides.length}`;
+  slides.forEach((slide,i)=>{slide.inert=i!==current;slide.setAttribute('aria-hidden',String(i!==current));});
+  deck.querySelectorAll('[data-deck-index]').forEach(dot=>{dot.classList.toggle('active',Number(dot.dataset.deckIndex)===current);dot.setAttribute('aria-pressed',String(Number(dot.dataset.deckIndex)===current));});
+  deck.querySelector('[data-deck-step="-1"]').disabled=current===0;deck.querySelector('[data-deck-step="1"]').disabled=current===slides.length-1;
+ };
+ const finish=(event,cancelled=false)=>{
+  if(!gesture)return;const g=gesture;gesture=null;
+  const touch=[...(event.changedTouches||[])].find(t=>t.identifier===g.identifier);
+  if(touch){g.x=touch.clientX;g.y=touch.clientY;}
+  const dx=g.x-g.startX,dy=g.y-g.startY,axis=g.axis||(Math.abs(dx)>Math.abs(dy)?'x':'y');
+  if(Math.max(Math.abs(dx),Math.abs(dy))>8)workflowMobileSwipeSuppressClickUntil=Date.now()+450;
+  apply(!cancelled&&axis==='x'&&Math.abs(dx)>=45?index()+(dx<0?1:-1):index());
+ };
+ on(viewport,'touchstart',event=>{
+  if(event.touches.length!==1){gesture=null;apply(index());return;}
+  const t=event.touches[0];gesture={identifier:t.identifier,startX:t.clientX,startY:t.clientY,x:t.clientX,y:t.clientY,axis:''};
+ });
+ on(viewport,'touchmove',event=>{
+  if(!gesture)return;
+  if(event.touches.length!==1){finish(event,true);return;}
+  const t=event.touches[0];if(t.identifier!==gesture.identifier)return;
+  gesture.x=t.clientX;gesture.y=t.clientY;const dx=gesture.x-gesture.startX,dy=gesture.y-gesture.startY;
+  if(!gesture.axis&&Math.max(Math.abs(dx),Math.abs(dy))>8)gesture.axis=Math.abs(dx)>Math.abs(dy)*1.15?'x':'y';
+  if(gesture.axis!=='x')return; // Vertical scrolling stays entirely native.
+  if(event.cancelable)event.preventDefault();const boundary=(index()===0&&dx>0)||(index()===slides.length-1&&dx<0);
+  track.style.transition='none';track.style.transform=`translate3d(calc(${-index()*100}% + ${boundary?dx/4:dx}px),0,0)`;
+ },false);
+ on(viewport,'touchend',event=>finish(event));on(viewport,'touchcancel',event=>finish(event,true));
+ viewport.addEventListener('click',event=>{if(Date.now()<workflowMobileSwipeSuppressClickUntil){event.preventDefault();event.stopImmediatePropagation();}},{capture:true,signal:controller.signal});
+ on(deck,'click',event=>{const control=event.target.closest('[data-deck-index],[data-deck-step]');if(!control||control.disabled)return;apply(control.dataset.deckIndex!==undefined?Number(control.dataset.deckIndex):index()+Number(control.dataset.deckStep));});
+ on(viewport,'keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();apply(index()+(event.key==='ArrowRight'?1:-1));slides[index()].querySelector('button')?.focus();},false);
+ apply(index(),false);
 }
 
 
@@ -2194,7 +2224,7 @@ async function renderWorkshopWorkflow(){
   const mobileList=`<div class="workflow-mobile-list">${visibleRows.map(workflowMobileListCard).join("")||emptyBoard}</div>`;
   const mobileWorkflow=workflowMobileDeckState?workshopWorkflowRows.find(row=>String(row.id)===String(workflowMobileDeckState.workflowId)):null;
   const mobileDeck=workflowMobileDeckState?workflowMobileDeckMarkup(mobileWorkflow):"";
-  const mobileQuickActions=`<nav class="workflow-mobile-actionbar" aria-label="${htmlText(bi("Workflow quick actions","Workflow gyorsműveletek"))}"><button type="button" aria-label="${htmlText(bi("Choose date","Dátumválasztó"))}" title="${htmlText(bi("Choose date","Dátumválasztó"))}" onclick="document.querySelector('#workshop_workflow .workflow-date-picker-button')?.click()">${workflowToolbarIcon("date")}</button><button type="button" aria-label="${htmlText(bi("Previous works","Korábbi munkák"))}" title="${htmlText(bi("Previous works","Korábbi munkák"))}" onclick="workshopToggleArchived()">${workflowToolbarIcon("history")}</button><button type="button" aria-label="${htmlText(bi("Open calendar","Naptár megnyitása"))}" title="${htmlText(bi("Open calendar","Naptár megnyitása"))}" onclick="workshopOpenCalendar()">${workflowToolbarIcon("calendar-grid")}</button>${isAdmin()?`<button type="button" aria-label="${htmlText(bi("Stage settings","Fázisbeállítások"))}" title="${htmlText(bi("Stage settings","Fázisbeállítások"))}" onclick="openWorkflowStageSettings()">${workflowToolbarIcon("settings")}</button>`:""}</nav>`;
+  const mobileQuickActions=`<nav class="workflow-mobile-actionbar" aria-label="${htmlText(bi("Workflow quick actions","Workflow gyorsműveletek"))}"><button type="button" aria-label="${htmlText(bi("Choose date","Dátumválasztó"))}" title="${htmlText(bi("Choose date","Dátumválasztó"))}" onclick="document.querySelector('#workshop_workflow .workflow-date-picker-button')?.click()">${workflowToolbarIcon("date")}</button><button type="button" aria-label="${htmlText(bi("Previous works","Korábbi munkák"))}" title="${htmlText(bi("Previous works","Korábbi munkák"))}" onclick="workshopToggleArchived()">${workflowToolbarIcon("history")}</button><button type="button" aria-label="${htmlText(bi("Open calendar","Naptár megnyitása"))}" title="${htmlText(bi("Open calendar","Naptár megnyitása"))}" onclick="workshopOpenCalendar()">${workflowToolbarIcon("calendar-grid")}</button><button type="button" class="workflow-mobile-create" onclick="WorkshopV2.create()" aria-label="${htmlText(bi('New workflow','\u00daj workflow'))}">+</button>${isAdmin()?`<button type="button" aria-label="${htmlText(bi("Stage settings","Fázisbeállítások"))}" title="${htmlText(bi("Stage settings","Fázisbeállítások"))}" onclick="openWorkflowStageSettings()">${workflowToolbarIcon("settings")}</button>`:""}</nav>`;
   box.innerHTML=`<div class="workflow-shell workflow-phase-two${visibleRows.length?'':' is-empty'}"><section class="panel workflow-board-panel"><header class="workflow-toolbar"><div class="workflow-toolbar-copy"><h2>${bi("Workshop Workflow","Műhely Workflow")}</h2><p>${bi("Quality. Heritage. Forward.","Minőség. Hagyomány. Tovább.")}</p></div><div class="workflow-toolbar-clock" aria-label="${bi("New York date and time","New York-i dátum és idő")}"><strong>${htmlText(workflowBoardDateLabel(workshopWorkflowDate))}</strong><span>New York (${htmlText(workflowNYZoneLabel())}) <time data-workflow-ny-clock>${htmlText(currentNYTimeString())}</time></span></div></header>${mobileQuickActions}<div class="workflow-board-controls"><div class="workflow-day-actions"><div class="workflow-date-picker workflow-date-picker--primary" title="${bi("Choose reference date","Referencia dátum kiválasztása")}"><input class="workflow-date-text" type="text" inputmode="numeric" autocomplete="off" value="${formatAmericanDate(workshopWorkflowDate)}" placeholder="MM/DD/YYYY" aria-label="${bi("Reference date MM/DD/YYYY","Referencia dátum MM/DD/YYYY")}"><button type="button" class="workflow-date-picker-button" aria-label="${bi("Open calendar","Naptár megnyitása")}" aria-haspopup="dialog"><span class="workflow-date-picker-icon" aria-hidden="true">${workflowToolbarIcon("date")}</span></button><input class="workflow-date-input" type="hidden" value="${htmlText(workshopWorkflowDate)}" onchange="workshopWorkflowDate=this.value||nyDateKey();renderWorkshopWorkflow()"></div><button type="button" data-workflow-archive-toggle class="ghost-btn ${workshopWorkflowPrevious?"active-state-btn":""}" onclick="workshopToggleArchived()">▣ ${workshopWorkflowPrevious?bi("Back to current active works","Vissza a jelenlegi aktív munkákhoz"):bi("Previous works","Korábbi munkák")}</button><button type="button" data-workflow-open-calendar class="ghost-btn" onclick="workshopOpenCalendar()">▣ ${bi("Open calendar","Naptár megnyitása")}</button>${isAdmin()?`<button type="button" class="ghost-btn workflow-stage-settings" onclick="openWorkflowStageSettings()">⚙ ${bi("Stage settings","Fázisbeállítások")}</button>`:""}${isSuperadmin()?`<button type="button" class="danger-btn" onclick="workflowPurgeAll()">${bi("Purge All Workflows","Összes Workflow Törlése")}</button>`:""}</div><div class="workflow-board-filter-row"><label>${bi("Responsible","Felelős")}<select onchange="workshopWorkflowAssigneeFilter=this.value;renderWorkshopWorkflow()">${workflowFilterWorkerOptions()}</select></label><label>${bi("Status","Státusz")}<select onchange="workshopWorkflowStatusFilter=this.value;renderWorkshopWorkflow()">${workflowFilterStatusOptions()}</select></label><label class="workflow-overdue-toggle"><span>${bi("Overdue only","Csak lejárt")}</span><input type="checkbox" ${workshopWorkflowOverdueOnly?"checked":""} onchange="workshopWorkflowOverdueOnly=this.checked;renderWorkshopWorkflow()"><i aria-hidden="true"></i></label><button type="button" class="workflow-new-btn" onclick="WorkshopV2.create()">＋ ${bi("New workflow","Új munkafolyamat")}</button></div></div><div class="workflow-board-scroll"><div class="workflow-board-head"><div class="workflow-piano-heading">${bi("Pianos","Zongorák")}</div><div class="workflow-stage-head">${stageHead}</div></div>${board||emptyBoard}</div>${mobileList}${mobileDeck}</section></div>`;
   decorateWorkflowToolbar(box);
   workflowBindDatePicker(box);
@@ -2298,6 +2328,7 @@ function schedulerDragPayload(job){
  };
 }
 function schedulerEntryDurationMinutes(payload){
+ if(payload?.wf2_workflow_id)return 30;
  const diff=wallClockDifferenceMinutes(payload?.start_time,payload?.end_time);
  return Math.max(SCHEDULE_INTERVAL_MINUTES,diff||SCHEDULE_INTERVAL_MINUTES);
 }
@@ -2337,7 +2368,8 @@ function schedulerTargetFromPoint(clientX,clientY,dragState=schedulerPointerDrag
  const raw=dayStart+((cardTopY-rect.top)/Math.max(1,rect.height))*span;
  const duration=schedulerEntryDurationMinutes(dragState?.payload);
  const latest=Math.max(dayStart,dayEnd-Math.min(duration,dayEnd-dayStart));
- const minutes=Math.max(dayStart,Math.min(latest,Math.round(raw/SCHEDULE_INTERVAL_MINUTES)*SCHEDULE_INTERVAL_MINUTES));
+ const step=dragState?.payload?.wf2_workflow_id?30:SCHEDULE_INTERVAL_MINUTES;
+ const minutes=Math.max(dayStart,Math.min(Math.floor(latest/step)*step,Math.round(raw/step)*step));
  return {date:String(day.dataset.date||""),minutes,day,rect};
 }
 function positionSchedulerDragGhost(state,clientX,clientY){
@@ -2433,8 +2465,13 @@ function schedulerDropMinutes(event,target){
 function dateTimeFromDateAndMinutes(date,minutes){return `${date}T${String(Math.floor(minutes/60)).padStart(2,"0")}:${String(minutes%60).padStart(2,"0")}`;}
 async function commitSchedulerMove(jobId,start,end,assignedUserId,source="calendar_drag"){
  try{
-  const saved=await api(`/api/jobs/${encodeURIComponent(jobId)}/schedule`,{method:"PATCH",body:JSON.stringify({start_time:start,end_time:end,assigned_user_id:assignedUserId,source})});
-  await refreshCalendarAfterMutation(saved);return saved;
+  const current=await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+  const reason=current.wf2_workflow_id?await WorkshopV2.adminReason(true):"";
+  if(reason===null)return null;
+  const saved=await api(`/api/jobs/${encodeURIComponent(jobId)}/schedule`,{method:"PATCH",body:JSON.stringify({start_time:start,end_time:end,assigned_user_id:assignedUserId,source,reason})});
+  await refreshCalendarAfterMutation(saved);
+  if(saved.wf2_workflow_id)await refreshDeadlineNotifications();
+  return saved;
  }catch(error){showError(error);await renderScheduler();return null;}
 }
 async function handleSchedulerDrop(event,date){event.preventDefault();}
@@ -4387,7 +4424,7 @@ function unifiedDeadlineCardMarkup(row,{mobile=false}={}){
  const safeId=htmlText(String(row.id||'')),urgency=htmlText(String(row.urgency||'upcoming').toLowerCase()),phone=row.phone?htmlText(row.phone):'';
  return `<article class="unified-notification-card urgency-${urgency}${mobile?' is-mobile':''}" data-unified-notification-card="${safeId}" data-entity-type="${htmlText(row.entity_type)}" data-entity-id="${htmlText(row.entity_id)}">
   <button type="button" class="unified-notification-close-single" data-unified-notification-close aria-label="${htmlText(bi('Close notification for three hours','Értesítés bezárása három órára'))}" title="${htmlText(bi('Close for three hours','Bezárás három órára'))}">×</button><header class="unified-notification-card-head"><span class="unified-notification-icon">${unifiedDeadlineIcon(row.entity_type)}</span><div><small>${htmlText(unifiedDeadlineTypeLabel(row.entity_type))}</small><strong>${htmlText(row.title||'')}</strong></div></header>
-  <dl class="unified-notification-context"><div><dt>${bi('Instrument','Hangszer')}</dt><dd>${htmlText(row.instrument_context||'')}</dd></div><div><dt>${bi('Client','Ügyfél')}</dt><dd>${htmlText(row.client_context||'')}${phone?` · ${phone}`:''}</dd></div><div><dt>${bi('Responsible','Felelős')}</dt><dd>${htmlText(row.responsible_name||'')}</dd></div></dl>
+  <dl class="unified-notification-context"><div><dt>${bi('Instrument','Hangszer')}</dt><dd>${htmlText(row.instrument_context||'')}</dd></div><div><dt>${bi('Client','Ügyfél')}</dt><dd>${htmlText(row.client_context||'')}${phone?` <a href="tel:${htmlText(String(row.phone).replace(/[^+0-9*#,;]/g,''))}">${phone}</a>`:''}</dd></div><div><dt>${bi('Responsible','Felelős')}</dt><dd>${htmlText(row.responsible_name||'')}</dd></div></dl>
   ${row.description?`<p class="unified-notification-description">${htmlText(row.description)}</p>`:''}
   <p class="unified-notification-due">${htmlText(unifiedDeadlineDueText(row))}</p>
   <div class="unified-notification-actions" aria-label="${htmlText(bi('Notification actions','Értesítési műveletek'))}"><button type="button" class="notification-btn is-complete" data-unified-notification-action="complete">${bi('Done','Kész')}</button><button type="button" class="notification-btn is-reschedule" data-unified-notification-action="reschedule">${bi('Reschedule','Újraütemezés')}</button><button type="button" class="notification-btn is-snooze" data-unified-notification-action="snooze">${bi('Later','Később')}</button></div>
@@ -4431,19 +4468,24 @@ async function snoozeAllDeadlineNotifications(){
  const cards=[...document.querySelectorAll('[data-unified-notification-card]')];
  try{await api('/api/notifications/snooze-all',{method:'POST',body:JSON.stringify({})});cards.forEach(card=>card.classList.add('is-leaving'));deadlineNotifications=[];updateDeadlineTaskBadge(0);ensureUnifiedDeadlineStack()?.toolbar.classList.add('hidden');setTimeout(()=>cards.forEach(card=>card.remove()),280);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,280);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}
 }
-async function completeDeadlineNotification(cardId){
+async function completeDeadlineNotification(cardId) {
  const row=findDeadlineNotification(cardId);if(!row)return;
  if(row.wf2_entity_type==='FINAL')return WorkshopV2.open(row.workflow_id);
- try{await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})});animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);await WorkshopV2.refreshViews();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
+ try{
+  const reason=row.workflow_id?await WorkshopV2.adminReason(true):'';if(reason===null)return;
+  await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id,...(reason?{reason}:{})})});
+  animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);await WorkshopV2.refreshViews();
+  setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);
+ }catch(error){showError(WorkshopV2.errorMessage(error));}
 }
 function closeQuickRescheduleScheduler(){adminDatePickerClose();document.getElementById('unified-notification-reschedule-popover')?.remove();unifiedDeadlineRescheduleContext=null;}
 function openQuickRescheduleScheduler({cardId}){
  const row=findDeadlineNotification(cardId);if(!row)return;
- closeQuickRescheduleScheduler();unifiedDeadlineRescheduleContext={cardId,entityType:row.entity_type,entityId:row.entity_id,workflowId:row.workflow_id||''};
- const value=clientFollowUpDateValue(row.target_date)||String(nyNowLocalString()||'').slice(0,16),popover=document.createElement('section');popover.id='unified-notification-reschedule-popover';popover.className='unified-notification-reschedule-popover';popover.setAttribute('role','dialog');popover.setAttribute('aria-modal','false');popover.innerHTML=`<div class="unified-notification-reschedule-card"><header><div><small>${bi('Calendar reschedule','Naptári újraütemezés')}</small><h3>${bi('Choose a new date and time','Új dátum és idő kiválasztása')}</h3></div><button type="button" class="notification-btn" data-unified-reschedule-action="close" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></header><div data-unified-calendar-host></div><label>${bi('Reason for the change','Módosítás indoka')}<textarea id="unifiedRescheduleReason" maxlength="2000" rows="3" required></textarea></label><footer><button type="button" class="notification-btn" data-unified-reschedule-action="close">${bi('Cancel','Mégse')}</button><button type="button" class="notification-btn is-reschedule" data-unified-reschedule-action="save">${bi('Save new time','Új időpont mentése')}</button></footer></div>`;document.body.appendChild(popover);const anchor=document.querySelector(unifiedDeadlineCardSelector(cardId)),rect=anchor?.getBoundingClientRect();if(rect)popover.style.top=`${Math.max(12,Math.min(rect.top,window.innerHeight-560))}px`;WorkshopV2.mountDate(popover.querySelector('[data-unified-calendar-host]'),'unifiedRescheduleDate',value);popover.addEventListener('click',event=>{if(event.target===popover)closeQuickRescheduleScheduler();const action=event.target.closest?.('[data-unified-reschedule-action]')?.dataset.unifiedRescheduleAction;if(action==='close')closeQuickRescheduleScheduler();if(action==='save')void saveQuickRescheduleScheduler();});
+ closeQuickRescheduleScheduler();unifiedDeadlineRescheduleContext={cardId,entityType:row.entity_type,entityId:row.entity_id,workflowId:row.workflow_id||'',reasonRequired:!row.wf2_entity_type||(isAdmin()&&!isSuperadmin())};
+ const value=clientFollowUpDateValue(row.target_date)||String(nyNowLocalString()||'').slice(0,16),popover=document.createElement('section');popover.id='unified-notification-reschedule-popover';popover.className='unified-notification-reschedule-popover';popover.setAttribute('role','dialog');popover.setAttribute('aria-modal','false');popover.innerHTML=`<div class="unified-notification-reschedule-card"><header><div><small>${bi('Calendar reschedule','Naptári újraütemezés')}</small><h3>${bi('Choose a new date and time','Új dátum és idő kiválasztása')}</h3></div><button type="button" class="notification-btn" data-unified-reschedule-action="close" aria-label="${htmlText(bi('Close','Bezárás'))}">×</button></header><div data-unified-calendar-host></div><label>${bi('Reason for the change','Módosítás indoka')}<textarea id="unifiedRescheduleReason" maxlength="2000" rows="3" ${unifiedDeadlineRescheduleContext.reasonRequired?'required':''}></textarea></label><footer><button type="button" class="notification-btn" data-unified-reschedule-action="close">${bi('Cancel','Mégse')}</button><button type="button" class="notification-btn is-reschedule" data-unified-reschedule-action="save">${bi('Save new time','Új időpont mentése')}</button></footer></div>`;document.body.appendChild(popover);const anchor=document.querySelector(unifiedDeadlineCardSelector(cardId)),rect=anchor?.getBoundingClientRect();if(rect)popover.style.top=`${Math.max(12,Math.min(rect.top,window.innerHeight-560))}px`;WorkshopV2.mountDate(popover.querySelector('[data-unified-calendar-host]'),'unifiedRescheduleDate',value);popover.addEventListener('click',event=>{if(event.target===popover)closeQuickRescheduleScheduler();const action=event.target.closest?.('[data-unified-reschedule-action]')?.dataset.unifiedRescheduleAction;if(action==='close')closeQuickRescheduleScheduler();if(action==='save')void saveQuickRescheduleScheduler();});
 }
 async function saveQuickRescheduleScheduler(){
- const context=unifiedDeadlineRescheduleContext,input=document.getElementById('unifiedRescheduleDate'),reasonInput=document.getElementById('unifiedRescheduleReason');if(!context||!input)return;const targetDate=input.value||'',reason=reasonInput?.value.trim()||'';if(!targetDate||!reason)return showError(bi('Date and reason are required.','A dátum és az indoklás kötelező.'));
+ const context=unifiedDeadlineRescheduleContext,input=document.getElementById('unifiedRescheduleDate'),reasonInput=document.getElementById('unifiedRescheduleReason');if(!context||!input)return;const targetDate=input.value||'',reason=reasonInput?.value.trim()||'';if(!targetDate||(context.reasonRequired&&!reason))return showError(bi('Date and reason are required.','A dátum és az indoklás kötelező.'));
  try{const result=await api('/api/notifications/reschedule',{method:'POST',body:JSON.stringify({entity_type:context.entityType,entity_id:context.entityId,target_date:targetDate,reason})});if(context.entityType==='CLIENT_FOLLOWUP'){const cached=(contactsRenderData.data||[]).find(item=>String(item.id)===String(context.entityId));if(cached)patchContactTableRow({...cached,follow_up_date:result.target_date||targetDate});}closeQuickRescheduleScheduler();animateDeadlineCardOut(context.cardId);removeDeadlineNotificationLocal(context.cardId);await WorkshopV2.refreshViews();setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),320);}catch(error){showError(error);}
 }
 function bindDeadlineNotificationDelegation(){
