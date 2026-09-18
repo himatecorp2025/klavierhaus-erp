@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { seedAccountingDefaults } = require("./accounting-defaults");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { backfillUserCalendarColors } = require("./calendar-colors");
@@ -901,6 +902,7 @@ function runMigrations() {
   migrateWorkflowContract(db);
   db.exec(fs.readFileSync(path.join(__dirname, "workflow-v2-schema.sql"), "utf8"));
   migrateWorkflowContract(db);
+  require("./workflow-experience-migration").migrateWorkflowExperience(db);
   // Legacy snoozes had no owner and therefore affected every user. Keep those
   // historical rows for auditability, but make all new reads and writes user
   // scoped. SQLite cannot add a NOT NULL foreign-key column in place, so the
@@ -1405,20 +1407,7 @@ function runMigrations() {
   db.prepare("UPDATE pianos SET ownership_type=COALESCE(NULLIF(ownership_type,''),ownership,'Customer owned')").run();
   db.prepare("UPDATE pianos SET display_name=trim(COALESCE(NULLIF(original_description,''),COALESCE(brand,'')||' '||COALESCE(model,''))) WHERE display_name IS NULL OR display_name='' ").run();
 
-  const accounts = [
-    ["1000","Cash","Készpénz","ASSET","DEBIT"],["1010","Bank","Bank","ASSET","DEBIT"],
-    ["1020","Undeposited Checks","Befizetés előtti csekkek","ASSET","DEBIT"],
-    ["1200","Accounts Receivable","Vevőkövetelés","ASSET","DEBIT"],["1300","Inventory","Készlet","ASSET","DEBIT"],["1310","Work in Progress Inventory","Befejezetlen termelés (WIP)","ASSET","DEBIT"],
-    ["1500","Fixed Assets","Befektetett eszközök","ASSET","DEBIT"],["2000","Accounts Payable","Szállítói tartozás","LIABILITY","CREDIT"],["2010","Sales Tax Payable","Fizetendő forgalmi adó","LIABILITY","CREDIT"],["2020","Deferred Revenue","Halasztott bevétel","LIABILITY","CREDIT"],
-    ["2100","SBA Loan","SBA hitel","LIABILITY","CREDIT"],["3000","Owner Equity","Saját tőke","EQUITY","CREDIT"],
-    ["4000","Sales Revenue","Árbevétel","REVENUE","CREDIT"],["4100","Restoration Revenue","Felújítási bevétel","REVENUE","CREDIT"],
-    ["4200","Tuning Revenue","Hangolási bevétel","REVENUE","CREDIT"],["4300","Concert Service Revenue","Koncertszerviz bevétel","REVENUE","CREDIT"],["4390","Ticket Refund Contra Revenue","Jegy-visszatérítés bevételcsökkentés","REVENUE","DEBIT"],
-    ["5000","Cost of Goods Sold","Eladott áruk költsége","EXPENSE","DEBIT"],["6100","Rent Expense","Bérleti díj","EXPENSE","DEBIT"],
-    ["6200","Transport Expense","Szállítási költség","EXPENSE","DEBIT"],["6300","Payroll Expense","Bérköltség","EXPENSE","DEBIT"],
-    ["6400","Interest Expense","Kamatköltség","EXPENSE","DEBIT"],["6990","Loss on Abandoned Work","Megszakított munka vesztesége","EXPENSE","DEBIT"]
-  ];
-  const insertAccount = db.prepare("INSERT OR IGNORE INTO accounts(code,name_en,name_hu,category,normal_side) VALUES(?,?,?,?,?)");
-  db.transaction(() => accounts.forEach((account) => insertAccount.run(...account)))();
+  seedAccountingDefaults(db);
 
 
   // Every existing user receives enabled notification preferences. This one-time backfill does not overwrite later user choices.
