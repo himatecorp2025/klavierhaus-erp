@@ -104,19 +104,20 @@ test("scheduler supports drag, worker transfer, resize, rollback path and Notes 
 });
 
 test("New Job can create a missing client and register a piano inline without losing the draft", () => {
-  const app = read("public/app.js");
-  const server = read("server/index.js");
-  const schema = read("server/schema.sql");
-  assert.match(app, /createNestedClientStateMachine/);
-  assert.match(app, /openNestedClientModal/);
-  assert.match(app, /Register New Piano for this Client/);
-  assert.match(app, /openNestedJobPianoModal/);
-  assert.match(app, /\/api\/contacts\/\$\{encodeURIComponent\(client\.id\)\}\/pianos/);
-  assert.match(server, /syncClientContactFromJob/);
-  assert.match(server, /INSERT OR IGNORE INTO client_pianos/);
-  assert.match(schema, /CREATE TABLE IF NOT EXISTS client_pianos/);
-  assert.match(app, /Notes/);
-  assert.match(app, /name="next_notes"/);
+  const {entry}=require('./helpers/master-data-entry-fixture');
+  const draft={title:'Tuning',notes:'Retain instructions',start_time:'2032-08-04T10:00',piano_name:'B-211'};
+  const before=JSON.stringify(draft);let clientSaved=null,pianoSaved=null,cancelled=false;
+  const openClient=entry('openNestedClientModal',(kind,row,options)=>{
+    assert.equal(kind,'contacts');assert.equal(options.prefill.name,'New client');
+    options.onSaved({id:'C1',name:'New client'});options.onCancelled();return null;
+  });
+  openClient({prefillName:'New client',draft,onSaved:(client,retained)=>{clientSaved=client.id;assert.equal(retained,draft);},onCancelled:retained=>{cancelled=true;assert.equal(retained,draft);}});
+  const openPiano=entry('openNestedJobPianoModal',(kind,row,options)=>{
+    assert.equal(kind,'pianos');assert.equal(options.prefill.owner_contact_id,'C1');
+    options.onSaved({id:'P1',owner_contact_id:'C1'});return null;
+  });
+  openPiano({client:{id:clientSaved},draft,onSaved:piano=>{pianoSaved=piano.id;}});
+  assert.equal(clientSaved,'C1');assert.equal(pianoSaved,'P1');assert.equal(cancelled,true);assert.equal(JSON.stringify(draft),before);
 });
 
 test("current-time line and week calculations use the New York date source", () => {
