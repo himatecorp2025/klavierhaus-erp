@@ -1902,6 +1902,7 @@ CREATE TABLE IF NOT EXISTS workflow_stages (
   financial_closed_at TEXT,
   financial_closed_by_user_id TEXT,
   financial_closure_reason TEXT,
+  calendar_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
   preliminary_inspection TEXT CHECK(preliminary_inspection IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_inspection IS NULL),
   preliminary_assessment TEXT CHECK(preliminary_assessment IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_assessment IS NULL),
   preliminary_quote TEXT CHECK(preliminary_quote IN ('DONE','NOT_DONE','NOT_REQUIRED') OR preliminary_quote IS NULL),
@@ -2066,6 +2067,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_status_due ON workshop_workflows(current
 CREATE INDEX IF NOT EXISTS idx_workflow_client_piano ON workshop_workflows(client_id,piano_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_stage_workflow_order ON workflow_stages(workflow_id,stage_order);
 CREATE INDEX IF NOT EXISTS idx_workflow_stage_assignee ON workflow_stages(assigned_user_id,status,due_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_calendar_job ON workflow_stages(calendar_job_id);
 CREATE INDEX IF NOT EXISTS idx_stage_transfers_wf_stg ON workflow_stage_transfers(workflow_id,stage_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_material_inventory ON workflow_materials(inventory_item_id,status);
 CREATE INDEX IF NOT EXISTS idx_workflow_financial_workflow ON workflow_financial_lines(workflow_id,stage_id);
