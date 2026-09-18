@@ -1092,9 +1092,12 @@ function initNotificationActivationGate(){
  if(help)help.onclick=()=>{panel.innerHTML=notificationHelpHtml();panel.classList.toggle('hidden');};
  if(logout)logout.onclick=logoutNow;
  const recheck=async()=>{if(!token||document.visibilityState==='hidden'||!requiresMandatoryDeviceNotifications())return;const gate=document.getElementById('notificationActivationGate');const wasLocked=gate&&!gate.classList.contains('hidden');const ok=await evaluateMandatoryNotificationGate({showGate:true});const app=document.getElementById('app');if(!ok){app?.classList.add('hidden');return;}app?.classList.remove('hidden');if(wasLocked)render(currentView||'workshop_workflow',{noHistory:true});};
- document.addEventListener('visibilitychange',recheck);
- window.addEventListener('focus',recheck);
- window.addEventListener('pageshow',recheck);
+ if(!window.__khNotificationActivationGateListenersBound){
+  window.__khNotificationActivationGateListenersBound=true;
+  document.addEventListener('visibilitychange',recheck);
+  window.addEventListener('focus',recheck);
+  window.addEventListener('pageshow',recheck);
+ }
 }
 function initBrandHomeButton(){
  const button=document.getElementById('brandHomeButton');
@@ -1685,7 +1688,7 @@ function goBackView(){
  if(!rootWorkspaceViews.has(currentView))render("workshop_workflow",{noHistory:true,replaceHistory:true});
 }
 function mobileBackHeader(title){const canGoBack=viewHistory.length>0;return `<div class="page-back-header"><button type="button" class="mobile-back-btn ${canGoBack?"":"is-hidden"}" onclick="goBackView()" aria-label="${bi('Back','Vissza')}" ${canGoBack?"":"tabindex=\"-1\""}>‹</button><h2>${title}</h2></div>`;}
-function isMobileAppViewport(){ return window.matchMedia("(max-width: 900px)").matches; }
+function isMobileAppViewport(){ return window.matchMedia("(max-width: 1023.98px)").matches; }
 function nyDateKey(date=new Date()){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date).reduce((a,p)=>{a[p.type]=p.value;return a},{});
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -1719,7 +1722,8 @@ let workshopWorkflowSelectedId="";
 let workflowDrawerDirty=false;
 let workflowDrawerDirtyKey="";
 let workshopWorkflowSelectedStageId="";
-let workshopWorkflowPrevious=false;
+let workshopWorkflowPrevious=(()=>{try{return new URLSearchParams(location.search).get("workflow_previous")==="1"||sessionStorage.getItem("workflow_show_previous")==="1";}catch(_error){return false;}})();
+let workflowDetailsModalState=null;
 let workshopWorkflowRows=[];
 let workshopWorkflowDefinitions=[];
 let workshopWorkflowSubtaskCatalog={};
@@ -2005,7 +2009,9 @@ function workflowBindMobileSwipe(root){
  apply(workflowMobileDeckState.index||0,false);
  viewport.addEventListener("touchstart",event=>{if(event.touches.length!==1)return;startX=currentX=event.touches[0].clientX;dragging=true;track.style.transition="none";},{passive:true});
  viewport.addEventListener("touchmove",event=>{if(!dragging||event.touches.length!==1)return;currentX=event.touches[0].clientX;const delta=currentX-startX,width=Math.max(1,viewport.clientWidth),base=-Number(workflowMobileDeckState.index||0)*100;track.style.transform=`translate3d(calc(${base}% + ${delta}px),0,0)`;if(Math.abs(delta)>8)event.preventDefault();},{passive:false});
- viewport.addEventListener("touchend",()=>{if(!dragging)return;dragging=false;const diff=currentX-startX,current=Number(workflowMobileDeckState.index||0);if(Math.abs(diff)>50){workflowMobileSwipeSuppressClickUntil=Date.now()+350;apply(current+(diff<0?1:-1),true);}else apply(current,true);},{passive:true});
+ const finishSwipe=(cancelled=false)=>{if(!dragging)return;dragging=false;const diff=currentX-startX,current=Number(workflowMobileDeckState.index||0);if(!cancelled&&Math.abs(diff)>50){workflowMobileSwipeSuppressClickUntil=Date.now()+350;apply(current+(diff<0?1:-1),true);}else apply(current,true);};
+ viewport.addEventListener("touchend",()=>finishSwipe(false),{passive:true});
+ viewport.addEventListener("touchcancel",()=>finishSwipe(true),{passive:true});
  viewport.addEventListener("click",event=>{if(Date.now()<workflowMobileSwipeSuppressClickUntil){event.preventDefault();event.stopPropagation();}},true);
 }
 
@@ -2175,7 +2181,7 @@ function workflowEventLogPageMarkup(workflow,stages,page=0){
  return `<div class="workflow-full-log-phases">${slice.map(stage=>workflowFullEventLogPhaseMarkup(workflow,stage)).join("")}</div><footer class="workflow-full-log-pagination"><button type="button" class="ghost-btn" data-log-page="${safePage-1}" ${safePage<=0?"disabled":""}>‹ ${bi("Previous","Előző")}</button><span>${safePage+1} / ${totalPages}</span><button type="button" class="ghost-btn" data-log-page="${safePage+1}" ${safePage>=totalPages-1?"disabled":""}>${bi("Next","Következő")} ›</button></footer>`;
 }
 function workflowShowFullEventLog(workflowId){
- const workflow=workshopWorkflowRows.find(row=>String(row.id)===String(workflowId));
+ const workflow=workflowContextRow(workflowId);
  const stages=(workflow?.stages||[]).slice().sort((a,b)=>Number(a.stage_order)-Number(b.stage_order));
  if(!workflow||!stages.length)return;
  workflowCloseFullEventLog();
@@ -2213,20 +2219,42 @@ function workflowDrawerMarkup(workflow, selectedStageId=""){
  return `<aside class="workflow-drawer workflow-details-modal-content" data-workflow-drawer-key="${htmlText(`${workflow.id}:${selectedStageId||"__workflow__"}`)}" role="dialog" aria-label="${bi("Workflow details","Workflow részletei")}"><div class="workflow-drawer-head"><button type="button" class="workflow-drawer-back ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Back","Vissza")}">‹</button><div class="workflow-drawer-head-copy"><p class="event-kicker">${stage?`${Number(stage.stage_order)+1}. ${htmlText(workflowStageLabel(stage))}`:htmlText(sanitizeSafeText(workflow.workflow_key,""))}</p><h2>${stage?bi("Workflow details","Munkafolyamat részletei"):bi("Workflow details","Workflow részletei")}</h2>${stage?"":`<p class="muted">${htmlText(workflowPianoLabel(workflow)||workflowSafeText(workflow?.piano_display_name)||workflowSafeText(workflow?.piano_id,bi("Unknown piano","Ismeretlen hangszer")))} · ${htmlText(workflowSafeText(workflow?.client_name,"—"))}</p>`}</div><button type="button" class="modal-close ghost-btn" onclick="closeWorkshopWorkflow()" aria-label="${bi("Close","Bezárás")}">×</button></div><div class="workflow-drawer-scroll">${stage?workflowPhaseDrawerMarkup(workflow,stage):workflowOverviewDrawerMarkup(workflow)}</div></aside>`;
 }
 
-function openWorkshopWorkflow(id,stageId="__workflow__"){
- const nextId=String(id||""),nextStage=String(stageId||"__workflow__");
- if(workshopWorkflowSelectedId===nextId&&workshopWorkflowSelectedStageId===nextStage){void closeWorkshopWorkflow();return;}
- workshopWorkflowSelectedId=nextId;workshopWorkflowSelectedStageId=nextStage;workflowDrawerDirty=false;workflowDrawerDirtyKey=`${nextId}:${nextStage}`;renderWorkshopWorkflow();
-}
 function workflowBindDrawerDirtyState(root,workflow,stageId){
  const drawer=root?.querySelector?.(".workflow-drawer");if(!drawer||!workflow)return;const key=`${workflow.id}:${stageId||"__workflow__"}`;if(workflowDrawerDirtyKey!==key){workflowDrawerDirty=false;workflowDrawerDirtyKey=key;}
  drawer.querySelectorAll("input,select,textarea").forEach(control=>{if(control.disabled||control.readOnly)return;const mark=()=>{workflowDrawerDirty=true;drawer.dataset.dirty="true";};control.addEventListener("input",mark);control.addEventListener("change",mark);});
 }
+function workflowDetailsModalHost(){return document.getElementById("workflowDetailsModalHost");}
+function workflowMountUnifiedDetails(workflow,stageId="__workflow__",source="workflow"){
+ if(!workflow)return;
+ const normalizedStageId=String(stageId||"__workflow__");
+ workflowDetailsModalState={workflow,stageId:normalizedStageId,source};
+ workflowDrawerDirty=false;workflowDrawerDirtyKey=`${workflow.id}:${normalizedStageId}`;
+ let host=workflowDetailsModalHost();
+ if(!host){host=document.createElement("div");host.id="workflowDetailsModalHost";document.body.appendChild(host);}
+ host.innerHTML=`<div class="workflow-details-modal-overlay" role="presentation">${workflowDrawerMarkup(workflow,normalizedStageId)}</div>`;
+ host.classList.add("is-open");
+ const overlay=host.querySelector(".workflow-details-modal-overlay");
+ overlay?.addEventListener("click",event=>{if(event.target===overlay)void closeWorkshopWorkflow();});
+ workflowHydrateDrawerHost(host,workflow,normalizedStageId);
+ sessionActivity?.syncModalState?.();
+}
+async function openUnifiedWorkflowDetails(workflowId,stageId="__workflow__",source="workflow"){
+ const id=String(workflowId||"");if(!id)return;
+ const cached=workshopWorkflowRows.find(row=>String(row.id)===id)||(workflowDetailsModalState?.workflow&&String(workflowDetailsModalState.workflow.id)===id?workflowDetailsModalState.workflow:null);
+ try{
+  const workflow=cached||await api(`/api/workflows/${encodeURIComponent(id)}`);
+  workshopWorkflowSelectedId=id;workshopWorkflowSelectedStageId=String(stageId||"__workflow__");
+  workflowMountUnifiedDetails(workflow,workshopWorkflowSelectedStageId,source);
+ }catch(error){showError(error);}
+}
 async function closeWorkshopWorkflow(force=false){
  if(!force&&workflowDrawerDirty){const confirmed=await appConfirm(bi("Are you sure you want to close? Unsaved changes will be lost.","Biztosan bezárod? A mentetlen módosítások elvesznek."),{type:"warning",confirmText:bi("Close anyway","Bezárás")});if(!confirmed)return false;}
- workflowDrawerDirty=false;workflowDrawerDirtyKey="";workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";await renderWorkshopWorkflow();return true;
+ const host=workflowDetailsModalHost();if(host){host.classList.remove("is-open");host.innerHTML="";}
+ workflowDetailsModalState=null;workflowDrawerDirty=false;workflowDrawerDirtyKey="";workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";sessionActivity?.syncModalState?.();
+ if(currentView==="workshop_workflow")await renderWorkshopWorkflow();
+ return true;
 }
-function renderWorkshopPrevious(){workshopWorkflowPrevious=true;workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";renderWorkshopWorkflow();}
+function renderWorkshopPrevious(){workshopWorkflowPrevious=true;try{sessionStorage.setItem("workflow_show_previous","1");}catch(_error){};workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";renderWorkshopWorkflow();}
 function workflowPlannedJobsEnabled(){return adminModuleState.technical!==false&&adminCardState.planned_jobs!==false;}
 function workflowPlannedJobIsOpen(job){const status=String(job?.status||"").toLowerCase();return !["converted","archived","cancelled","canceled","completed","closed"].some(token=>status.includes(token));}
 function refreshWorkflowPlannedJobOptions(){
@@ -2357,44 +2385,17 @@ async function submitWorkflowCreate(form=$("#form")){
   closeModal();showToast(bi("Workflow created.","A workflow létrejött."),"success");workshopWorkflowPrevious=false;workshopWorkflowSelectedId=workflow.id||"";workshopWorkflowSelectedStageId="__workflow__";await renderWorkshopWorkflow();
  }catch(error){showError(error);}
 }
-async function workflowSaveStage(workflowId,stageId){try{const dueInput=$(`#workflowDue_${stageId}`),body={status:$(`#workflowStatus_${stageId}`)?.value,details:$(`#workflowDetails_${stageId}`)?.value,due_at:dueInput&&!dueInput.disabled?dueInput.value||undefined:undefined,assigned_user_id:$(`#workflowAssignee_${stageId}`)?.value||undefined};await api(`/api/workflows/${workflowId}/stages/${stageId}`,{method:"PATCH",body:JSON.stringify(body)});showToast(bi("Phase saved.","A fázis mentve."),"success");await renderWorkshopWorkflow();}catch(error){const pending=Array.isArray(error?.details?.pending_subtasks)?error.details.pending_subtasks:[];if(pending.length)return showError({message:`${bi("The phase cannot be closed while subtasks remain open:","A fázis nem zárható le, amíg nyitott részfeladat van:")} ${pending.map(item=>item.title).join("; ")}`});showError(error);}}
-async function workflowTransferStage(workflowId,stageId){const toUser=$(`#workflowAssignee_${stageId}`)?.value||"";if(!toUser)return showError({message:bi("Select a responsible person first.","Előbb válassz felelőst.")});const reason=await appPrompt(bi("Why is this phase being transferred?","Miért kerül átadásra ez a fázis?"),{type:"warning"});if(!reason?.trim())return;try{await api(`/api/workflows/${workflowId}/stages/${stageId}/transfer`,{method:"POST",body:JSON.stringify({to_user_id:toUser,reason})});showToast(bi("Phase transferred.","A fázis átadva."),"success");await renderWorkshopWorkflow();}catch(error){showError(error);}}
-async function workflowAddFinancialLine(workflowId){const title=$("#workflowFinanceTitle")?.value.trim(),amount=Number($("#workflowFinanceAmount")?.value||0),line_type=$("#workflowFinanceType")?.value,category=$("#workflowFinanceCategory")?.value;if(!title||amount<0)return showError({message:bi("Line title and amount are required.","A tétel neve és összege kötelező.")});try{await api(`/api/workflows/${workflowId}/financial-lines`,{method:"POST",body:JSON.stringify({title,amount,line_type,category})});await renderWorkshopWorkflow();}catch(error){showError(error);}}
 async function workflowFinalize(id){const paymentMethod=await chooseStandardPaymentMethod({title:bi("Workflow invoice payment method","Workflow-számla fizetési módja"),initialValue:"Bank Transfer / ACH",confirmText:bi("Use payment method","Fizetési mód használata")});if(!paymentMethod)return;const reason=await appPrompt(bi("Enter closure reason. Required for a zero-result workflow.","Add meg a lezárás indokát. Nulla eredményű workflow-nál kötelező."),{type:"warning"});if(reason===null)return;try{const result=await api(`/api/workflows/${id}/finalize`,{method:"POST",body:JSON.stringify({closure_reason:reason,payment_method:paymentMethod})});showToast(`${bi("Workflow closed and draft invoice prepared.","A workflow lezárva, a számlatervezet elkészült.")} · ${paymentMethod}`,"success");workshopWorkflowSelectedId="";await renderWorkshopWorkflow();if(result?.draft_invoice?.id)await reviewWorkflowDraftInvoice(result.draft_invoice.id);}catch(error){showError(error);}}
 async function workflowSecondaryDelete(id){const reason=await appPrompt(bi("Enter the operational cancellation or scrapping reason.","Add meg a megszakítás vagy selejtezés indokát."),{type:"warning"});if(!reason?.trim())return;if(!await appConfirm(bi("Remove this workflow from active operations? History and audit remain.","Kikerüljön ez a workflow az aktív működésből? Az előzmény és audit megmarad."),{type:"warning"}))return;try{await api(`/api/workflows/${id}/secondary-delete`,{method:"POST",body:JSON.stringify({reason})});workshopWorkflowSelectedId="";showToast(bi("Workflow operationally closed.","A workflow operatívan lezárva."),"success");await renderWorkshopWorkflow();}catch(error){showError(error);}}
 async function workflowSuperDelete(id){if(!isSuperadmin())return showError("PERMISSION_DENIED");const confirmed=await appConfirm(bi("Are you sure you want to permanently delete this workflow and all related phases?","Biztosan véglegesen törölni szeretnéd ezt a workflow-t és a hozzá kapcsolódó fázisokat?"),{type:"error",confirmText:bi("Delete Workflow","Workflow Törlése")});if(!confirmed)return;try{await api(`/api/workflows/${id}`,{method:"DELETE",body:JSON.stringify({reason:"SUPERADMIN_CONFIRMED_HARD_DELETE"})});workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";showToast(bi("Workflow permanently deleted.","A workflow véglegesen törölve."),"success");await renderWorkshopWorkflow();}catch(error){showError(error);}}
 async function workflowPurgeAll(){if(!isSuperadmin())return showError("PERMISSION_DENIED");const first=await appConfirm(bi("WARNING: This permanently deletes ALL active and completed workshop workflows. Continue?","FIGYELEM: Ez a művelet véglegesen törli az ÖSSZES folyamatban lévő és lezárt műhely-workflow-t! Folytatod?"),{type:"error",confirmText:bi("Continue","Folytatás")});if(!first)return;const phrase="DELETE ALL WORKFLOWS";const typed=await appPrompt(`${bi("Type the confirmation phrase to continue","A folytatáshoz írd be a megerősítő kifejezést")}: ${phrase}`,{type:"error",confirmText:bi("Purge All Workflows","Összes Workflow Törlése")});if(String(typed||"").trim()!==phrase)return showError(bi("Confirmation phrase did not match.","A megerősítő kifejezés nem egyezett."));try{const result=await api("/api/workflows/purge-all",{method:"POST",body:JSON.stringify({confirmation:phrase})});workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";workshopWorkflowPrevious=false;showToast(`${bi("All workflows deleted.","Minden workflow törölve.")} ${Number(result.deleted_workflows||0)}`,"success");await renderWorkshopWorkflow();}catch(error){showError(error);}}
-async function workflowHandleNextStageActivation(workflowId,activation){
- if(!activation)return;
- const nextStage=activation.stage;
- if(activation.mode!=="CONFIRM"||!nextStage)return;
- if(!activation.current_assignee_id){
-   workshopWorkflowSelectedId=workflowId;workshopWorkflowSelectedStageId=nextStage.id;
-   showToast(bi("The next phase is ready. Assign a responsible person before starting it.","A következő fázis készen áll. Indítás előtt adj meg felelőst."),"warning");
-   await renderWorkshopWorkflow();
-   return;
- }
- const keepResponsible=await appConfirm(`${bi("The next phase is ready:","A következő fázis készen áll:")} ${workflowStageLabel(nextStage)}. ${bi("Should the current responsible person continue?","Folytassa a jelenlegi felelős?")}`,{type:"warning",confirmText:bi("Yes, continue","Igen, folytassa")});
- if(!keepResponsible){
-   workshopWorkflowSelectedId=workflowId;workshopWorkflowSelectedStageId=nextStage.id;
-   showToast(bi("Assign the next responsible person in the phase panel.","A következő felelőst a fázis részletezőjében adhatod meg."),"warning");
-   await renderWorkshopWorkflow();
-   return;
- }
- try{
-  await api(`/api/workflows/${workflowId}/stages/${nextStage.id}/activate`,{method:"POST",body:JSON.stringify({start_now:true,assigned_user_id:activation.current_assignee_id})});
-  showToast(bi("Next phase activated.","A következő fázis aktiválva."),"success");
-  workshopWorkflowSelectedId=workflowId;workshopWorkflowSelectedStageId=nextStage.id;
-  await renderWorkshopWorkflow();
- }catch(error){showError(error);}
-}
 function workflowOpenNextStageDialog(workflowId,activation){
  return new Promise(resolve=>{
   const nextStage=activation?.stage;
   if(!nextStage)return resolve(null);
   const inheritedId=String(activation.inherited_assignee_id||"");
   const defaultAssignee=String(activation.current_assignee_id||inheritedId||"");
-  const canEditDue=isAdmin()||(user?.role==="MANAGER"&&nextStage.stage_order<6);
+  const canEditDue=isAdmin();
   const overlay=document.createElement("div");
   overlay.className="workflow-next-stage-modal";
   overlay.innerHTML=`<section class="workflow-next-stage-card" role="dialog" aria-modal="true" aria-labelledby="workflowNextStageTitle"><header><div><p class="event-kicker">${bi("Next active phase","Következő aktív fázis")}</p><h2 id="workflowNextStageTitle">${htmlText(workflowStageLabel(nextStage))}</h2><p>${bi("The phase is ready to start.","A fázis készen áll az indításra.")}</p></div><button type="button" class="workflow-next-stage-close" data-workflow-next-cancel aria-label="${bi("Cancel","Mégse")}">×</button></header><div class="workflow-next-stage-body"><label>${bi("Responsible","Felelős")}<select data-workflow-next-assignee>${workflowWorkerOptions(defaultAssignee)}</select></label><label>${bi("Phase deadline","Fázishatáridő")}${compactDateTimeControlMarkup(`workflowNextDue_${nextStage.id}`,"",nextStage.due_at||"",{defaultTime:"10:00",allowEmpty:true,disabled:!canEditDue,dataAttr:"data-workflow-next-due"})}</label><p class="workflow-next-stage-hint">${inheritedId?bi("The previous phase responsible is selected by default. Choose another person only if the work is being handed over.","Az előző fázis felelőse alapértelmezetten ki van választva. Csak átadás esetén válassz másik személyt."):bi("Select the person who will start this phase.","Válaszd ki a fázist megkezdő felelőst.")}</p><p class="workflow-next-stage-error" data-workflow-next-error role="alert"></p></div><footer><button type="button" class="ghost-btn" data-workflow-next-cancel>${bi("Cancel","Mégse")}</button><button type="button" class="workflow-next-stage-confirm" data-workflow-next-confirm>${bi("Activate phase","Fázis aktiválása")}</button></footer></section>`;
@@ -2445,11 +2446,11 @@ async function workflowHandleNextStageActivation(workflowId,activation){
  }catch(error){showError(error);}
 }
 function workflowContextRow(workflowId){
- return workshopWorkflowRows.find(row=>String(row.id)===String(workflowId))||(schedulerWorkflowDrawerState?.workflow&&String(schedulerWorkflowDrawerState.workflow.id)===String(workflowId)?schedulerWorkflowDrawerState.workflow:null);
+ return workshopWorkflowRows.find(row=>String(row.id)===String(workflowId))||(workflowDetailsModalState?.workflow&&String(workflowDetailsModalState.workflow.id)===String(workflowId)?workflowDetailsModalState.workflow:null);
 }
 function workflowEditorRoot(workflowId){
- const schedulerHost=document.getElementById("schedulerWorkflowDrawerHost");
- if(schedulerHost?.classList.contains("is-open")&&schedulerWorkflowDrawerState?.workflow&&String(schedulerWorkflowDrawerState.workflow.id)===String(workflowId))return schedulerHost;
+ const host=workflowDetailsModalHost();
+ if(host?.classList.contains("is-open")&&workflowDetailsModalState?.workflow&&String(workflowDetailsModalState.workflow.id)===String(workflowId))return host;
  return document.getElementById("workshop_workflow")||document;
 }
 function workflowScopedControl(workflowId,id){
@@ -2464,13 +2465,12 @@ function workflowHydrateDrawerHost(root,workflow,stageId="__workflow__"){
  workflowBindDrawerDirtyState(root,workflow,stageId);
 }
 async function workflowRefreshEditorAfterMutation(workflowId,stageId="__workflow__",{refreshScheduler=true}={}){
- const schedulerHost=document.getElementById("schedulerWorkflowDrawerHost"),schedulerOpen=Boolean(schedulerHost?.classList.contains("is-open")&&schedulerWorkflowDrawerState&&String(schedulerWorkflowDrawerState.workflow?.id)===String(workflowId));
- if(schedulerOpen){
-  if(refreshScheduler)await renderScheduler();
-  const workflow=await api(`/api/workflows/${encodeURIComponent(workflowId)}`);schedulerWorkflowDrawerState.workflow=workflow;schedulerWorkflowDrawerState.stageId=String(stageId||"__workflow__");
-  schedulerHost.innerHTML=`<div class="workflow-shell has-workflow-drawer scheduler-workflow-shell">${schedulerWorkflowDrawerMarkup(workflow,schedulerWorkflowDrawerState.stageId)}</div>`;workflowHydrateDrawerHost(schedulerHost,workflow,schedulerWorkflowDrawerState.stageId);return;
- }
- workshopWorkflowSelectedId=String(workflowId||"");workshopWorkflowSelectedStageId=String(stageId||"__workflow__");await renderWorkshopWorkflow();
+ const workflow=await api(`/api/workflows/${encodeURIComponent(workflowId)}`),normalizedStageId=String(stageId||"__workflow__"),source=workflowDetailsModalState?.source||"workflow";
+ workshopWorkflowRows=workshopWorkflowRows.map(row=>String(row.id)===String(workflowId)?workflow:row);
+ workshopWorkflowSelectedId=String(workflowId||"");workshopWorkflowSelectedStageId=normalizedStageId;
+ workflowMountUnifiedDetails(workflow,normalizedStageId,source);
+ if(source==="scheduler"&&refreshScheduler)await renderScheduler();
+ if(currentView==="workshop_workflow")await renderWorkshopWorkflow();
 }
 async function workflowSaveStage(workflowId,stageId){
  try{
@@ -2615,7 +2615,18 @@ function workflowEnsurePhaseCardTitleField(workflow,root=document,stageId=worksh
  const input=document.createElement("input");input.id=`workflowCardTitle_${stage.id}`;input.maxLength=240;input.value=stage.card_title||"";input.placeholder=bi("Optional title","Opcionális cím");input.disabled=String(workflow.current_status||"ACTIVE")!=="ACTIVE";label.append(input);grid.append(label);
 }
 function workshopOpenCalendar(){currentSchedulerEntryFilter="ALL";currentWeekStart=startOfWeek(workshopWorkflowDate);render("scheduler",{navigationActivate:true});}
-function workshopToggleArchived(){workshopWorkflowPrevious=!workshopWorkflowPrevious;workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";renderWorkshopWorkflow();}
+function workflowPersistPreviousState(){
+ try{sessionStorage.setItem("workflow_show_previous",workshopWorkflowPrevious?"1":"0");}catch(_error){}
+ try{
+  const url=new URL(location.href);if(workshopWorkflowPrevious)url.searchParams.set("workflow_previous","1");else url.searchParams.delete("workflow_previous");
+  history.replaceState(history.state||{},"",`${url.pathname}${url.search}${url.hash}`);
+ }catch(_error){}
+}
+async function workshopToggleArchived(){
+ workshopWorkflowPrevious=!workshopWorkflowPrevious;workflowPersistPreviousState();
+ if(workflowDetailsModalState){await closeWorkshopWorkflow(true);return;}
+ workshopWorkflowSelectedId="";workshopWorkflowSelectedStageId="";await renderWorkshopWorkflow();
+}
 async function renderWorkshopWorkflow(){
  const box=ensureView("workshop_workflow");
  try{
@@ -2637,6 +2648,21 @@ async function renderWorkshopWorkflow(){
   bindJobDateTimePickers(box);
   workflowBindBoardInteractions(box);
   workflowBindMobileSwipe(box);
+  const mobileActionbar=box.querySelector(".workflow-mobile-actionbar");
+  if(mobileActionbar){
+   const mobilePreviousButton=mobileActionbar.querySelectorAll("button")[1];
+   mobilePreviousButton?.classList.toggle("active-state-btn",workshopWorkflowPrevious);
+   mobilePreviousButton?.setAttribute("aria-pressed",workshopWorkflowPrevious?"true":"false");
+   if(!mobileActionbar.querySelector("[data-workflow-mobile-create]")){
+    const create=document.createElement("button");create.type="button";create.dataset.workflowMobileCreate="true";create.setAttribute("aria-label",bi("Create new workflow","Új workflow rögzítése"));create.title=bi("Create new workflow","Új workflow rögzítése");create.innerHTML=workflowToolbarIcon("plus");create.addEventListener("click",openWorkflowCreate);mobileActionbar.appendChild(create);
+   }
+  }
+  if(selected){
+   box.querySelector(".workflow-drawer-backdrop")?.remove();
+   box.querySelector(".workflow-drawer")?.remove();
+   box.querySelector(".workflow-shell")?.classList.remove("has-workflow-drawer");
+   workflowMountUnifiedDetails(selected,workshopWorkflowSelectedStageId,"workflow");
+  }
   if(selected)workflowHydrateDrawerHost(box,selected,workshopWorkflowSelectedStageId);
   box.querySelector(".workflow-shell")?.style.setProperty("--workflow-stage-count",String(Math.max(1,stageDefinitions.length)));
   box.querySelectorAll("[data-workflow-event-log-trigger]").forEach(button=>{button.onclick=()=>workflowShowFullEventLog(button.dataset.workflowId);});
@@ -2651,8 +2677,8 @@ function openWorkshopWorkflow(id,stageId="__workflow__"){
   appConfirm(`${bi("Add this phase to the active workflow?","Felveszed ezt a fázist az aktív workflow-ba?")} ${workflowStageLabel(stage)}`,{type:"warning",confirmText:bi("Activate phase","Fázis aktiválása")}).then(confirmed=>{if(confirmed)workflowActivateStage(nextId,nextStage);});
   return;
  }
- if(workshopWorkflowSelectedId===nextId&&workshopWorkflowSelectedStageId===nextStage){closeWorkshopWorkflow();return;}
- workshopWorkflowSelectedId=nextId;workshopWorkflowSelectedStageId=nextStage;renderWorkshopWorkflow();
+ if(workflowDetailsModalState&&String(workflowDetailsModalState.workflow?.id)===nextId&&String(workflowDetailsModalState.stageId)===nextStage){void closeWorkshopWorkflow();return;}
+ void openUnifiedWorkflowDetails(nextId,nextStage,workflowDetailsModalState?.source||"workflow");
 }
 function initMobileAppShell(){
   const nav=document.getElementById("mobileBottomNav"); if(!nav)return;
@@ -2661,7 +2687,7 @@ function initMobileAppShell(){
   const more=document.getElementById("mobileMoreBtn"); if(more) more.onclick=openMobileMore;
   const close=document.getElementById("mobileMoreClose"); if(close) close.onclick=closeMobileMore;
   const backdrop=document.querySelector("#mobileMoreSheet .mobile-sheet-backdrop"); if(backdrop) backdrop.onclick=closeMobileMore;
-  window.addEventListener("resize",()=>{ if(!isMobileAppViewport()&&currentView==="today") render("scheduler"); });
+  if(!window.__khMobileShellListenersBound){window.__khMobileShellListenersBound=true;window.addEventListener("resize",()=>{ if(!isMobileAppViewport()&&currentView==="today") render("scheduler"); });}
   updateMobileNavigationLanguage();
 }
 async function renderToday(){
@@ -2903,24 +2929,25 @@ function isMovableSchedulerEntry(job){
  return isAdmin()||String(user?.role||"").toUpperCase()==="MANAGER";
 }
 function schedulerWorkflowDrawerMarkup(workflow,stageId=""){
- return workflowDrawerMarkup(workflow,stageId).replaceAll("closeWorkshopWorkflow()","closeSchedulerWorkflowDrawer()").replaceAll("openWorkshopWorkflow(","openSchedulerWorkflowStage(");
+ return workflowDrawerMarkup(workflow,stageId);
 }
 async function openSchedulerWorkflowDrawer(row){
- const workflowId=String(row?.workflow_id||"");if(!workflowId)return;
- try{
+  const workflowId=String(row?.workflow_id||"");if(!workflowId)return;
+  try{
   const workflow=await api(`/api/workflows/${encodeURIComponent(workflowId)}`),stageId=String(row?.stage_id||row?.id||"__workflow__");
   schedulerWorkflowDrawerState={workflow,stageId};
-  let host=document.getElementById("schedulerWorkflowDrawerHost");if(!host){host=document.createElement("div");host.id="schedulerWorkflowDrawerHost";host.className="scheduler-workflow-drawer-host";document.body.appendChild(host);}
-  host.innerHTML=`<div class="workflow-shell has-workflow-drawer scheduler-workflow-shell">${schedulerWorkflowDrawerMarkup(workflow,stageId)}</div>`;host.classList.add("is-open");host.onclick=event=>{if(event.target===host||event.target?.classList?.contains("scheduler-workflow-shell"))closeSchedulerWorkflowDrawer();};workflowHydrateDrawerHost(host,workflow,stageId);sessionActivity?.syncModalState?.();
- }catch(error){showError(error);}
+  workshopWorkflowRows=workshopWorkflowRows.map(item=>String(item.id)===String(workflow.id)?workflow:item);
+  workshopWorkflowSelectedId=String(workflow.id);workshopWorkflowSelectedStageId=stageId;
+  workflowMountUnifiedDetails(workflow,stageId,"scheduler");
+  }catch(error){showError(error);}
 }
 function openSchedulerWorkflowStage(workflowId,stageId="__workflow__"){
- if(!schedulerWorkflowDrawerState?.workflow||String(schedulerWorkflowDrawerState.workflow.id)!==String(workflowId))return;
- schedulerWorkflowDrawerState.stageId=String(stageId||"__workflow__");const host=document.getElementById("schedulerWorkflowDrawerHost");if(host){host.innerHTML=`<div class="workflow-shell has-workflow-drawer scheduler-workflow-shell">${schedulerWorkflowDrawerMarkup(schedulerWorkflowDrawerState.workflow,schedulerWorkflowDrawerState.stageId)}</div>`;host.onclick=event=>{if(event.target===host||event.target?.classList?.contains("scheduler-workflow-shell"))closeSchedulerWorkflowDrawer();};workflowHydrateDrawerHost(host,schedulerWorkflowDrawerState.workflow,schedulerWorkflowDrawerState.stageId);}
+ if(!workflowDetailsModalState?.workflow||String(workflowDetailsModalState.workflow.id)!==String(workflowId))return;
+ const normalizedStageId=String(stageId||"__workflow__");workflowDetailsModalState.stageId=normalizedStageId;workflowMountUnifiedDetails(workflowDetailsModalState.workflow,normalizedStageId,"scheduler");
 }
 async function closeSchedulerWorkflowDrawer(force=false){
- if(!force&&workflowDrawerDirty){const ok=await appConfirm(bi("Are you sure you want to close? Unsaved changes will be lost.","Biztosan bezárod? A mentetlen módosítások elvesznek."),{type:"warning"});if(!ok)return false;}
- const host=document.getElementById("schedulerWorkflowDrawerHost");if(host){host.classList.remove("is-open");host.innerHTML="";host.onclick=null;}schedulerWorkflowDrawerState=null;workflowDrawerDirty=false;sessionActivity?.syncModalState?.();return true;
+ schedulerWorkflowDrawerState=null;
+ return closeWorkshopWorkflow(force);
 }
 
 async function renderScheduler(){
@@ -3137,11 +3164,6 @@ function isPastDate(value){
  return String(value).slice(0,16) < newYorkNowLocal();
 }
 
-function toggleInstructionsField(){
- const t=document.getElementById("jobType")?.value;
- const el=document.getElementById("instructionsField");
- if(el) el.classList.toggle("hidden", t!=="Part-work");
-}
 function googleImportDateTime(value){
  const raw=String(value||'').trim();
  if(!raw)return '—';
