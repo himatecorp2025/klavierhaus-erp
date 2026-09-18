@@ -174,29 +174,6 @@ function createCustomerConversationUpload(uploadDir){
 }
 
 
-function createWorkflowInspectionUpload(uploadDir){
-  const target=path.join(uploadDir,"workflow-inspections");
-  fs.mkdirSync(target,{recursive:true});
-  const allowedExt=new Set([".pdf",".jpg",".jpeg",".png",".webp"]);
-  const allowedMime=new Set(["application/pdf","image/jpeg","image/jpg","image/png","image/webp"]);
-  return multer({
-    storage:multer.diskStorage({
-      destination:(_req,_file,cb)=>cb(null,target),
-      filename:(req,file,cb)=>{
-        const workflow=String(req.params?.id||"workflow").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80)||"workflow";
-        const ext=path.extname(file.originalname||"").toLowerCase();
-        cb(null,`${workflow}-${Date.now()}-${crypto.randomBytes(10).toString("hex")}${ext}`);
-      }
-    }),
-    limits:{fileSize:25*1024*1024,files:12},
-    fileFilter:(_req,file,cb)=>{
-      const ext=path.extname(file.originalname||"").toLowerCase(),mime=String(file.mimetype||"").toLowerCase();
-      const ok=allowedExt.has(ext)&&allowedMime.has(mime);
-      cb(ok?null:new Error("INVALID_WORKFLOW_INSPECTION_FILE"),ok);
-    }
-  });
-}
-
 function uploadErrorHandler(err,req,res,next){
   if(!err) return next();
   if(err instanceof multer.MulterError){
@@ -223,7 +200,6 @@ module.exports={
   createPianoImportUpload,
   createCompanyDocumentUpload,
   createCustomerConversationUpload,
-  createWorkflowInspectionUpload,
   inspectImageFile,
   uploadErrorHandler
 };
