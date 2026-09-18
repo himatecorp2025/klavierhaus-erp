@@ -96,6 +96,9 @@ test('11 strict half-hour validation rejects quarter-hours, invalid dates and DS
  error(()=>localTime('2027-03-14T02:30'),'WORKFLOW_TIME_DST_GAP');assert.equal(localTime('2027-10-02T09:30'),'2027-10-02T09:30');
  const before=state();error(()=>create({start_at:day(1)+'T09:15'}),'WORKFLOW_TIME_INVALID');assert.equal(state(),before);
 });
+test('11b new workflow rejects a start date before the current New York day without side effects',()=>{
+ const before=state();error(()=>create({start_at:'2025-01-01T09:00',final_due_at:'2025-01-02T17:00'}),'WORKFLOW_START_BEFORE_TODAY');assert.equal(state(),before);
+});
 test('12 phase/task date hierarchy rollback includes data, calendar and audit',()=>{
  const w=create(),p=w.stages[0],before=state();
  error(()=>engine.updatePhase(w.id,p.id,{due_at:'2027-11-01T09:00'},user('M')),'WORKFLOW_PHASE_OUTSIDE_DATES');assert.equal(state(),before);
