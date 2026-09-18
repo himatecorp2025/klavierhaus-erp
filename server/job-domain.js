@@ -240,18 +240,20 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
     return { enabled: true, date: dateStr, requested: summary.suggested_allocation, ...summary };
   }
 
-  function patchJobSchedule({ jobId, startTime, endTime, assignedUser, actor = {}, reassignmentNote = "Calendar drag/drop", findConflicts = () => [] }) {
+  function patchJobSchedule({ jobId, startTime, endTime, assignedUser, allowUnassigned = false, actor = {}, reassignmentNote = "Calendar drag/drop", findConflicts = () => [] }) {
     const job = db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId);
     if (!job) throw domainError("JOB_NOT_FOUND", 404);
     if (["Completed", "Partially completed", "Failed", "Cancelled"].includes(String(job.status || ""))) throw domainError("JOB_NOT_MOVABLE", 409);
-    if (!assignedUser?.id || !assignedUser?.name) throw domainError("INVALID_ASSIGNEE", 400);
+    if ((!assignedUser?.id || !assignedUser?.name) && !allowUnassigned) throw domainError("INVALID_ASSIGNEE", 400);
     if (!isValidTimeRange(startTime, endTime)) throw domainError("INVALID_TIME_RANGE", 400);
     if (!isScheduleTime(startTime) || !isScheduleTime(endTime)) throw domainError("INVALID_TIME_STEP", 400, { interval_minutes: SCHEDULE_INTERVAL_MINUTES });
-    const conflicts = findConflicts(assignedUser.id, assignedUser.name, startTime, endTime, job.id) || [];
+    const conflicts = assignedUser?.id ? (findConflicts(assignedUser.id, assignedUser.name, startTime, endTime, job.id) || []) : [];
     if (conflicts.length) throw domainError("SCHEDULE_CONFLICT", 409, { conflicts });
     const targetDate = String(startTime).slice(0, 10);
     const minutes = timeRangeMinutes(startTime, endTime);
-    const changedAssignee = String(job.assigned_user_id || "") !== String(assignedUser.id);
+    const nextAssigneeId = assignedUser?.id || null;
+    const nextAssigneeName = assignedUser?.name || "";
+    const changedAssignee = String(job.assigned_user_id || "") !== String(nextAssigneeId || "");
     const previousDate = String(job.daily_rate_date || job.start_time || "").slice(0, 10);
     const dailyEnabled = Number(job.daily_rate_enabled || 0) === 1;
     const bucketChanged = dailyEnabled && (changedAssignee || previousDate !== targetDate);
@@ -261,11 +263,11 @@ function createJobDomain({ db, rid, balanceAccountFromPaymentMethod = () => "BAN
         last_reassigned_by=CASE WHEN ? THEN ? ELSE last_reassigned_by END,
         last_reassigned_by_user_id=CASE WHEN ? THEN ? ELSE last_reassigned_by_user_id END,
         reassignment_note=CASE WHEN ? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(startTime, endTime, assignedUser.id, assignedUser.name, minutes, minutes / 60, JOB_TIMEZONE, targetDate, bucketChanged ? 1 : 0,
+        .run(startTime, endTime, nextAssigneeId, nextAssigneeName, minutes, minutes / 60, JOB_TIMEZONE, targetDate, bucketChanged ? 1 : 0,
           changedAssignee ? 1 : 0, actor.name || "", changedAssignee ? 1 : 0, actor.id || null, changedAssignee ? 1 : 0, reassignmentNote, job.id);
       if (dailyEnabled) {
         if (bucketChanged && job.assigned_user_id && previousDate) rebalanceDailyRateAllocations({ userId: job.assigned_user_id, dateStr: previousDate });
-        rebalanceDailyRateAllocations({ userId: assignedUser.id, dateStr: targetDate });
+        if (nextAssigneeId) rebalanceDailyRateAllocations({ userId: nextAssigneeId, dateStr: targetDate });
       }
       if (job.workflow_id) {
         db.prepare("UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(endTime, job.workflow_id);
