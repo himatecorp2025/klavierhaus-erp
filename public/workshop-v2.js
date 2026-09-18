@@ -59,7 +59,8 @@ window.WorkshopV2 = (() => {
       const items = [...(info.phases || []), ...(info.tasks || []), ...(info.checklist || []), ...(info.costs || [])];
       return tr('Required work or approvals are unfinished: ', 'K\u00f6telez\u0151 munka vagy j\u00f3v\u00e1hagy\u00e1s hi\u00e1nyzik: ') + items.map(item => item.title || item.id).join('; ');
     }
-    return errors[code] ? tr(...errors[code]) : code;
+    const info=error.details?.details||error.details||{};
+    return (errors[code] ? tr(...errors[code]) : code)+(info.title?' '+info.title:'')+(info.limit?' ('+info.limit.replace('T',' ')+')':'');
   }
   function failure(error) {
     const box = state.dialog?.open && state.dialog.querySelector('[data-wf-error]');
@@ -95,7 +96,7 @@ window.WorkshopV2 = (() => {
     modal.setAttribute('aria-labelledby', 'wf2-title'); modal.setAttribute('data-ui-contract', 'UI12');
     modal.addEventListener('click', event => { void click(event).catch(failure); });
     modal.addEventListener('submit', event => { event.preventDefault(); void submit(event).catch(failure); });
-    modal.addEventListener('input', event => { if (!event.target.matches('[data-search]')) state.dirty = true; if (event.target.matches('[data-search]')) searchSelect(event.target); });
+    modal.addEventListener('input', event => { state.dirty=true;if(event.target.name==='service_address')event.target.dataset.manual='1'; });
     modal.addEventListener('change', event => { void change(event).catch(failure); });
     modal.addEventListener('cancel', event => { event.preventDefault(); void close(); });
     document.body.append(modal); state.dialog = modal; return modal;
@@ -104,7 +105,7 @@ window.WorkshopV2 = (() => {
     const modal = ensureDialog();
     modal.innerHTML = `<header class="wf2-header"><div><small>${tr('Workshop workflow \u00b7 UI12', 'M\u0171hely workflow \u00b7 UI12')}</small><h2 id="wf2-title">${esc(title)}</h2></div>${button('\u00d7', 'close', `class="wf2-close" aria-label="${esc(tr('Close', 'Bez\u00e1r\u00e1s'))}"`)}</header><div class="wf2-error" data-wf-error role="alert" tabindex="-1" hidden></div><main>${content}</main>`;
     if (!modal.open) { state.focus = document.activeElement; modal.showModal(); }
-    modal.setAttribute('aria-busy', String(state.busy)); state.dirty = false;
+    modal.setAttribute('aria-busy', String(state.busy)); state.dirty = false; syncDateBounds();
   }
   async function close(force = false) {
     if (state.busy) return;
@@ -123,24 +124,28 @@ window.WorkshopV2 = (() => {
   }
   function dateRender(box, month) {
     const value = box.querySelector('input').value;
-    const day = box.dataset.draftDay || value.slice(0, 10) || nyDay();
+    let day = box.dataset.draftDay || value.slice(0,10) || nyDay();
+    if(!value&&!box.dataset.draftDay){if(box.dataset.min&&day<box.dataset.min.slice(0,10))day=box.dataset.min.slice(0,10);if(box.dataset.max&&day>box.dataset.max.slice(0,10))day=box.dataset.max.slice(0,10);}
     const monthKey = month || box.dataset.month || day.slice(0, 7); box.dataset.month = monthKey;
     const [year, number] = monthKey.split('-').map(Number), first = new Date(Date.UTC(year, number - 1, 1));
     const offset = (first.getUTCDay() + 6) % 7, count = new Date(Date.UTC(year, number, 0)).getUTCDate();
-    const time = box.dataset.draftTime ?? (value.slice(11) || '09:00');
+    let time = box.dataset.draftTime ?? (value.slice(11) || '09:00');
+    const allowed=slot=>(!box.dataset.min||`${day}T${slot}`>=box.dataset.min)&&(!box.dataset.max||`${day}T${slot}`<=box.dataset.max);
     const aligned = /^\d{2}:(00|30)$/.test(time);
     const slots = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
     const weekdays = Array.from({ length: 7 }, (_, i) => new Intl.DateTimeFormat(hu() ? 'hu-HU' : 'en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, i + 1))));
     const days = '<span></span>'.repeat(offset) + Array.from({ length: count }, (_, i) => {
       const key = `${monthKey}-${String(i + 1).padStart(2, '0')}`;
-      return `<button type="button" data-date-action="day" data-day="${key}" aria-pressed="${day === key}" class="${day === key ? 'selected' : ''}">${i + 1}</button>`;
+      return `<button type="button" data-date-action="day" data-day="${key}"${disabled(Boolean((box.dataset.min&&key<box.dataset.min.slice(0,10))||(box.dataset.max&&key>box.dataset.max.slice(0,10))))} aria-pressed="${day === key}" class="${day === key ? 'selected' : ''}">${i + 1}</button>`;
     }).join('');
-    box.querySelector('.wf2-date-panel').innerHTML = `<div class="wf2-month"><button type="button" data-date-action="previous" aria-label="${esc(tr('Previous month', 'El\u0151z\u0151 h\u00f3nap'))}">\u2039</button><strong>${esc(new Intl.DateTimeFormat(hu() ? 'hu-HU' : 'en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first))}</strong><button type="button" data-date-action="next" aria-label="${esc(tr('Next month', 'K\u00f6vetkez\u0151 h\u00f3nap'))}">\u203a</button></div><div class="wf2-days">${weekdays.map(item => `<small>${esc(item)}</small>`).join('')}${days}</div>${field(tr('Time \u00b7 New York \u00b7 30-minute slots', 'Id\u0151 \u00b7 New York \u00b7 30 perces id\u0151s\u00e1vok'), `<select data-native-select="true" data-date-time>${!aligned ? `<option value="" selected disabled>${esc(tr('Choose a new half-hour slot', 'V\u00e1lassz \u00faj f\u00e9l\u00f3r\u00e1s id\u0151s\u00e1vot'))}</option>` : ''}${slots.map(slot => `<option value="${slot}"${selected(slot === time)}>${slot}</option>`).join('')}</select>`)}${!aligned ? `<p class="wf2-note">${esc(tr('The saved legacy time is preserved until you select a new time.', 'A kor\u00e1bbi mentett id\u0151pont megmarad, am\u00edg \u00fajat nem v\u00e1lasztasz.'))}</p>` : ''}<div class="wf2-date-actions"><button type="button" data-date-action="today">${tr('Today', 'Ma')}</button>${!box.querySelector('input').dataset.dateRequired ? `<button type="button" data-date-action="clear">${tr('Clear', 'T\u00f6rl\u00e9s')}</button>` : ''}<button type="button" data-date-action="done">${tr('Done', 'K\u00e9sz')}</button></div>`;
+    box.querySelector('.wf2-date-panel').innerHTML = `<div class="wf2-month"><button type="button" data-date-action="previous" aria-label="${esc(tr('Previous month', 'El\u0151z\u0151 h\u00f3nap'))}">\u2039</button><strong>${esc(new Intl.DateTimeFormat(hu() ? 'hu-HU' : 'en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first))}</strong><button type="button" data-date-action="next" aria-label="${esc(tr('Next month', 'K\u00f6vetkez\u0151 h\u00f3nap'))}">\u203a</button></div><div class="wf2-days">${weekdays.map(item => `<small>${esc(item)}</small>`).join('')}${days}</div>${field(tr('Time \u00b7 New York \u00b7 30-minute slots', 'Id\u0151 \u00b7 New York \u00b7 30 perces id\u0151s\u00e1vok'), `<select data-native-select="true" data-date-time>${!aligned ? `<option value="" selected disabled>${esc(tr('Choose a new half-hour slot', 'V\u00e1lassz \u00faj f\u00e9l\u00f3r\u00e1s id\u0151s\u00e1vot'))}</option>` : ''}${slots.map(slot => `<option value="${slot}"${selected(slot === time)}${disabled(!allowed(slot))}>${slot}</option>`).join('')}</select>`)}${!aligned ? `<p class="wf2-note">${esc(tr('The saved legacy time is preserved until you select a new time.', 'A kor\u00e1bbi mentett id\u0151pont megmarad, am\u00edg \u00fajat nem v\u00e1lasztasz.'))}</p>` : ''}<div class="wf2-date-actions"><button type="button" data-date-action="today">${tr('Today', 'Ma')}</button>${!box.querySelector('input').dataset.dateRequired ? `<button type="button" data-date-action="clear">${tr('Clear', 'T\u00f6rl\u00e9s')}</button>` : ''}<button type="button" data-date-action="done">${tr('Done', 'K\u00e9sz')}</button></div>`;
   }
   function dateSet(box, value) {
     const hidden = box.querySelector('input'); if (hidden.value === value) return;
+    if(value&&((box.dataset.min&&value<box.dataset.min)||(box.dataset.max&&value>box.dataset.max)))throw new Error(tr('The date must remain within the parent deadline: ','Az időpontnak a fölérendelt határidőn belül kell maradnia: ')+(box.dataset.min||'')+' - '+(box.dataset.max||''));
+    box.dataset.inherited='0';
     hidden.value = value; box.querySelector('.wf2-date-toggle span').textContent = value ? value.replace('T', ' ') : tr('Choose date and time', 'D\u00e1tum \u00e9s id\u0151 kiv\u00e1laszt\u00e1sa');
-    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    hidden.dispatchEvent(new Event('change', { bubbles: true })); syncDateBounds();
   }
   function dateClick(event) {
     const control = event.target.closest('[data-date-action]'); if (!control || control.disabled) return false;
@@ -154,8 +159,13 @@ window.WorkshopV2 = (() => {
     }
     if (action === 'clear') { delete box.dataset.draftDay; delete box.dataset.draftTime; dateSet(box, ''); }
     if (action === 'day' || action === 'today') {
+      const requestedDay=action==='today'?nyDay():control.dataset.day;
+      if((box.dataset.min&&requestedDay<box.dataset.min.slice(0,10))||(box.dataset.max&&requestedDay>box.dataset.max.slice(0,10)))return true;
       box.dataset.draftDay = action === 'today' ? nyDay() : control.dataset.day;
-      const time = panel.querySelector('[data-date-time]').value;
+      let time = panel.querySelector('[data-date-time]').value;
+      const candidate=`${box.dataset.draftDay}T${time}`;
+      if(box.dataset.min&&candidate<box.dataset.min)time=box.dataset.min.slice(11);
+      if(box.dataset.max&&candidate>box.dataset.max)time=box.dataset.max.slice(11);
       if (time) { box.dataset.draftTime = time; dateSet(box, `${box.dataset.draftDay}T${time}`); }
       dateRender(box, box.dataset.draftDay.slice(0, 7));
     }
@@ -175,19 +185,106 @@ window.WorkshopV2 = (() => {
     box.querySelector('.wf2-date-toggle').setAttribute('aria-expanded', 'true');
   }
   function validateDates(form) {
-    for (const item of form.querySelectorAll('[data-date-required]')) if (!item.value) throw new Error('WORKFLOW_TIME_INVALID');
+    syncDateBounds();
+    for(const box of form.querySelectorAll('.wf2-date')){const item=box.querySelector('input');if(item.matches(':disabled'))continue;
+      if(item.dataset.dateRequired&&!item.value)throw new Error('WORKFLOW_TIME_INVALID');
+      if(item.value&&((box.dataset.min&&item.value<box.dataset.min)||(box.dataset.max&&item.value>box.dataset.max)))throw new Error(box.querySelector('label').textContent+': '+tr('outside permitted dates ','kívül esik az engedélyezett időtartományon ')+(box.dataset.min||'')+' - '+(box.dataset.max||''));
+    }
   }
 
-  function searchable(name, title, items, value = '') {
-    return `<div class="wf2-searchable">${field(title, `<input type="search" data-search="${name}" placeholder="${esc(tr('Search...', 'Keres\u00e9s...'))}" autocomplete="off"><select data-native-select="true" name="${name}" required><option value="">${tr('Select...', 'V\u00e1lassz...')}</option>${items.map(item => `<option value="${esc(item.id)}"${selected(item.id === value)}>${esc(item.name)}</option>`).join('')}</select>`)}</div>`;
-  }
   function pianoItems(clientId) {
-    return (state.options?.pianos || []).filter(piano => !clientId || piano.owner_contact_id === clientId || state.options.client_pianos.some(link => link.client_id === clientId && link.piano_id === piano.id))
-      .map(piano => ({ id: piano.id, name: [piano.brand, piano.model, piano.serial_no ? `#${piano.serial_no}` : ''].filter(Boolean).join(' \u2013 ') || piano.display_name || piano.id }));
+    if (!clientId) return [];
+    return (state.options?.pianos || []).filter(piano => piano.owner_contact_id === clientId || (!piano.owner_contact_id && state.options.client_pianos.some(link => link.client_id === clientId && link.piano_id === piano.id)));
   }
-  function searchSelect(search) {
-    const select = search.closest('.wf2-searchable').querySelector('select'); const query = search.value.trim().toLocaleLowerCase();
-    for (const option of select.options) option.hidden = Boolean(option.value && !option.textContent.toLocaleLowerCase().includes(query));
+  function pianoLabel(piano) {
+    return [piano.brand,piano.model].filter(Boolean).join(' \u2013 ') || piano.display_name || piano.id;
+  }
+  function updatePianoList(selectedId = '') {
+    const form=state.dialog.querySelector('[data-wf-form=create]');if(!form)return;
+    const clientId=form.querySelector('[name=client_id]')?.value||'',items=pianoItems(clientId),host=form.querySelector('[data-piano-list]');
+    const chosen=items.some(p=>p.id===selectedId)?selectedId:items.length===1?items[0].id:'';
+    host.innerHTML=`<input type="hidden" name="piano_id" value="${esc(chosen)}"><div class="wf2-piano-options" role="radiogroup" aria-label="${esc(tr('Choose piano','Zongora kiv\u00e1laszt\u00e1sa'))}">${items.map(p=>`<label class="wf2-piano-choice"><input type="radio" name="piano_choice" value="${esc(p.id)}"${checked(p.id===chosen)} required><span><strong>${esc(pianoLabel(p))}</strong><small>${esc([p.location_name,p.piano_location_address||p.location].filter(Boolean).join(' \u00b7 ')||tr('Location not recorded','Helysz\u00edn nincs r\u00f6gz\u00edtve'))}</small><small>${esc(p.serial_no?'#'+p.serial_no:tr('Serial not recorded','Gy\u00e1ri sz\u00e1m nincs r\u00f6gz\u00edtve'))} \u00b7 ${esc(p.id)}</small></span></label>`).join('')}</div>${!items.length?`<p role="status">${esc(clientId?tr('This client has no piano recorded yet.','Ehhez az \u00fcgyf\u00e9lhez m\u00e9g nincs zongora r\u00f6gz\u00edtve.'):tr('Select a client to see their pianos.','V\u00e1lassz \u00fcgyfelet a zongor\u00e1i megjelen\u00edt\u00e9s\u00e9hez.'))}</p>`:''}`;
+    form.querySelector('[data-wf-action=piano-existing]').disabled=!clientId;
+    form.querySelector('[data-wf-action=piano-new]').textContent=clientId?tr('+ Add piano for this client','+ \u00daj zongora felvitele ehhez az \u00fcgyf\u00e9lhez'):tr('+ Add piano / client','+ \u00daj zongora / \u00fcgyf\u00e9l');
+    updateServiceLocation();
+  }
+  function updateServiceLocation() {
+    const form=state.dialog.querySelector('[data-wf-form=create]');if(!form)return;
+    const onsite=form.querySelector('[name=mode]').value==='ON_SITE',box=form.querySelector('[data-service-address]'),address=box.querySelector('input');
+    box.hidden=!onsite;address.disabled=!onsite;address.required=onsite;
+    const p=(state.options.pianos||[]).find(p=>p.id===form.querySelector('[name=piano_id]')?.value);
+    if(!address.dataset.manual)address.value=p?.piano_location_address||p?.location||'';
+  }
+  async function newPiano() {
+    const form=state.dialog.querySelector('[data-wf-form=create]'),clientId=form.querySelector('[name=client_id]').value;
+    const saved=await MasterData.open('pianos',null,{prefill:{owner_contact_id:clientId}});if(!saved||state.mode!=='create')return;
+    // No shell re-render: all phase/task fields remain mounted, including disabled phases.
+    const previous=state.options.pianos.findIndex(p=>p.id===saved.id);if(previous<0)state.options.pianos.push(saved);else state.options.pianos[previous]=saved;
+    const clients=await api('/api/contacts',{masterCache:false});state.options.clients=clients;state.clientPicker.setItems(clients);
+    state.clientPicker.set(clients.find(c=>c.id===saved.owner_contact_id));updatePianoList(saved.id);state.dirty=true;
+  }
+  async function existingPiano() {
+    const form=state.dialog.querySelector('[data-wf-form=create]'),clientId=form.querySelector('[name=client_id]').value;
+    if(!clientId)return;
+    // Refresh from the registry. Already-owned records with a missing relation may be repaired.
+    const fresh=await api(base+'/options');state.options.pianos=fresh.pianos;state.options.client_pianos=fresh.client_pianos;
+    const items=pianoItems(clientId);if(!items.length){updatePianoList();return;}
+    const chosen=await new Promise(resolve=>{
+      const dialog=document.createElement('dialog');dialog.className='wf2-dialog wf2-confirm';dialog.setAttribute('aria-label',tr('Existing piano','Meglev\u0151 zongora'));
+      dialog.innerHTML=`<main><h3>${tr('Choose an existing piano for this client','V\u00e1lassz az \u00fcgyf\u00e9l meglev\u0151 zongor\u00e1i k\u00f6z\u00fcl')}</h3><form>${items.map(p=>`<label class="wf2-toggle"><input type="radio" name="existing" value="${esc(p.id)}" required><span>${esc(pianoLabel(p))}<small>${esc([p.serial_no,p.location_name,p.piano_location_address||p.location,p.id].filter(Boolean).join(' \u00b7 '))}</small></span></label>`).join('')}<div class="wf2-actions"><button type="submit">${tr('Select','Kiv\u00e1laszt\u00e1s')}</button><button type="button" data-cancel>${tr('Cancel','M\u00e9gse')}</button></div></form></main>`;
+      const finish=value=>{dialog.close();dialog.remove();resolve(value);};dialog.querySelector('[data-cancel]').onclick=()=>finish(null);dialog.addEventListener('cancel',e=>{e.preventDefault();finish(null);});
+      dialog.querySelector('form').onsubmit=e=>{e.preventDefault();finish(new FormData(e.target).get('existing'));};document.body.append(dialog);dialog.showModal();
+    });
+    if(!chosen)return;
+    await api(`/api/contacts/${encodeURIComponent(clientId)}/link-piano`,{method:'POST',body:JSON.stringify({piano_id:chosen})});
+    updatePianoList(chosen);state.dirty=true;
+  }
+  function createPhaseMarkup(stage,due) {
+    const code=stage.code,enabled=stage.enabled!==0;
+    return `<fieldset class="wf2-create-phase" data-create-phase="${esc(code)}"${!enabled?' hidden disabled':''}><legend>${esc(hu()?stage.name_hu:stage.name_en)}</legend><div class="wf2-phase-plan-grid"><div>${field(tr('Phase responsible','F\u00e1zisfelel\u0151s'),`<select data-native-select="true" data-phase-responsible required>${userOptions(actor()?.id)}</select>`)}${dateField('phase_due_'+code,due,tr('Phase deadline','F\u00e1zis hat\u00e1rideje'),true)}<p class="wf2-note">${tr('Task deadlines cannot exceed this deadline.','A r\u00e9szfeladatok hat\u00e1rideje nem l\u00e9pheti t\u00fal ezt az id\u0151pontot.')}</p></div><div class="wf2-task-planner"><h4>${tr('Tasks and subresponsibles','R\u00e9szfeladatok \u00e9s alfelel\u0151s\u00f6k')}</h4>${field(tr('Suggested task','Javasolt r\u00e9szfeladat'),`<select data-native-select="true" data-task-template><option value="">${tr('Choose a suggestion...','V\u00e1lassz a javaslatokb\u00f3l...')}</option>${(state.options.task_catalog?.[code]||[]).map(t=>`<option value="${esc(t.id)}">${esc(hu()?t.name_hu:t.name_en)}</option>`).join('')}</select>`)}<div class="wf2-actions">${button(tr('+ Add selected task','+ Kiv\u00e1lasztott r\u00e9szfeladat'), 'plan-add-template')}${button(tr('+ Custom task','+ Egyedi r\u00e9szfeladat'), 'plan-add-custom')}</div><div data-plan-tasks></div></div></div></fieldset>`;
+  }
+  function appendPlanTask(phase,template=null) {
+    const container=phase.querySelector('[data-plan-tasks]');if(container.children.length>=200)throw new Error(tr('At most 200 tasks per phase.','F\u00e1zisonk\u00e9nt legfeljebb 200 r\u00e9szfeladat adhat\u00f3 meg.'));
+    if(template&&[...container.children].some(row=>row.dataset.template===template.id))return;
+    const row=document.createElement('article'),uid='plan-task-'+(++dateSequence);row.className='wf2-plan-task';row.dataset.template=template?.id||'';
+    const responsible=phase.querySelector('[data-phase-responsible]').value,due=phase.querySelector('.wf2-date input').value;
+    row.innerHTML=`<div class="wf2-plan-task-head">${field(tr('Task name','R\u00e9szfeladat neve'),input('task_title_'+uid,template?(hu()?template.name_hu:template.name_en):'','data-plan-title required maxlength="200"'))}${button(tr('Remove','Elt\u00e1vol\u00edt\u00e1s'),'plan-remove')}</div>${assigneesMarkup([responsible])}${dateField('task_due_'+uid,due,tr('Task deadline','R\u00e9szfeladat hat\u00e1rideje'),true)}${field(tr('Instructions (optional)','Utas\u00edt\u00e1sok (opcion\u00e1lis)'),'<textarea data-plan-description rows="2" maxlength="5000"></textarea>')}`;
+    row.querySelector('.wf2-date').dataset.inherited='1';container.append(row);
+    if(template)phase.querySelector(`[data-task-template] option[value="${CSS.escape(template.id)}"]`).disabled=true;
+    phase.querySelector('[data-task-template]').value='';syncDateBounds();state.dirty=true;row.querySelector('[data-plan-title]').focus();
+  }
+  function writeDate(box,value) {
+    const hidden=box.querySelector('input');hidden.value=value||'';box.querySelector('.wf2-date-toggle span').textContent=value?value.replace('T',' '):tr('Choose date and time','D\u00e1tum \u00e9s id\u0151 kiv\u00e1laszt\u00e1sa');
+  }
+  function bounds(box,min,max) {if(box){box.dataset.min=min||'';box.dataset.max=max||'';}}
+  function syncDateBounds() {
+    const form=state.dialog?.querySelector('[data-wf-form=create]');
+    if(form){
+      const start=form.querySelector('[name=start_at]').value,final=form.querySelector('[name=final_due_at]').value;
+      bounds(form.querySelector('[data-date-name=start_at]'),'',final);bounds(form.querySelector('[data-date-name=final_due_at]'),start,'');
+      for(const phase of form.querySelectorAll('[data-create-phase]')){
+        const phaseDate=phase.querySelector('.wf2-date');if(phaseDate.dataset.inherited==='1')writeDate(phaseDate,final);bounds(phaseDate,start,final);
+        for(const task of phase.querySelectorAll('.wf2-plan-task')){const date=task.querySelector('.wf2-date');if(date.dataset.inherited==='1')writeDate(date,phaseDate.querySelector('input').value);bounds(date,start,phaseDate.querySelector('input').value||final);}
+      }
+      return;
+    }
+    const w=state.workflow;if(!w)return;
+    const phase=currentPhase();
+    for(const box of state.dialog.querySelectorAll('[data-wf-form=phase] .wf2-date'))bounds(box,w.start_at,w.final_due_at);
+    for(const box of state.dialog.querySelectorAll('[data-wf-form=task] .wf2-date'))bounds(box,w.start_at,phase?.due_at||w.final_due_at);
+    const schedule=state.dialog.querySelector('[data-wf-form=schedule]');if(!schedule)return;
+    const start=schedule.querySelector('[name=start_at]')?.value||w.start_at,final=schedule.querySelector('[name=final_due_at]')?.value||w.final_due_at;
+    for(const section of schedule.querySelectorAll('[data-schedule-phase]')){
+      const p=w.stages.find(p=>p.id===section.dataset.schedulePhase),date=section.querySelector(':scope > .wf2-date');bounds(date,start,final);
+      const due=date?.querySelector('input').value||p.due_at||final;
+      for(const task of section.querySelectorAll('[data-schedule-task]'))bounds(task.querySelector('.wf2-date'),start,due);
+    }
+  }
+  function scheduleMarkup(w) {
+    if(w.status!=='ACTIVE'||w.historical)return '';
+    const phases=w.stages.filter(p=>p.permissions.edit_phase||p.tasks.some(t=>t.permissions.edit_task));
+    if(!w.permissions.edit_workflow&&!phases.length)return '';
+    return `<details class="wf2-section"><summary>${tr('Edit coordinated schedule','\u00d6sszehangolt id\u0151terv m\u00f3dos\u00edt\u00e1sa')}</summary><p class="wf2-note">${tr('Dates are saved together. No task deadline is moved automatically.','Az id\u0151pontok egy\u00fctt ment\u0151dnek. Egyetlen r\u00e9szfeladat hat\u00e1rideje sem tol\u00f3dik el automatikusan.')}</p><form data-wf-form="schedule">${w.permissions.edit_workflow?dateField('start_at',w.start_at,tr('Workflow start','Workflow kezdete'),true):''}${w.permissions.edit_final_deadline?dateField('final_due_at',w.final_due_at,tr('Final deadline (Admin)','V\u00e9gs\u0151 hat\u00e1rid\u0151 (Admin)'),true):''}${phases.map(p=>`<fieldset data-schedule-phase="${esc(p.id)}"><legend>${esc(phaseName(p))}</legend>${p.permissions.edit_phase?dateField('schedule_phase_'+p.id,p.due_at||w.final_due_at,tr('Phase deadline','F\u00e1zis hat\u00e1rideje'),true):''}${p.tasks.filter(t=>t.permissions.edit_task).map(t=>`<div data-schedule-task="${esc(t.id)}">${dateField('schedule_task_'+t.id,t.due_at||p.due_at||w.final_due_at,t.title,true)}</div>`).join('')}</fieldset>`).join('')}<button type="submit">${tr('Save entire schedule','Teljes id\u0151terv ment\u00e9se')}</button></form></details>`;
   }
   function transferMarkup(name, value, off = false) {
     return `<div class="wf2-transfer"><div class="wf2-transfer-select">${field(tr('Responsible colleague', 'Felel\u0151s munkat\u00e1rs'), `<select data-native-select="true" name="${name}" data-responsible data-original="${esc(value)}"${disabled(off)}>${userOptions(value)}</select>`)}${!off ? button(tr('Handover', '\u00c1tad\u00e1s'), 'handover') : ''}</div><label data-transfer-reason hidden>${tr('Reason for handover', '\u00c1tad\u00e1s oka...')}<textarea name="transfer_reason" rows="2" maxlength="2000"></textarea></label></div>`;
@@ -197,14 +294,17 @@ window.WorkshopV2 = (() => {
   }
   async function create() {
     if (!await mayNavigate()) return;
-    const sequence = ++state.sequence; state.reason = ''; state.mode = 'create'; state.workflow = null;
-    shell(tr('New workflow', '\u00daj workflow'), `<p>${tr('Loading...', 'Bet\u00f6lt\u00e9s...')}</p>`);
-    try {
-      const options = await api(base + '/options'); if (sequence !== state.sequence) return; state.options = options;
-      state.requestKey = window.crypto?.randomUUID?.() || `create-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const day = nyDay();
-      shell(tr('New workflow', '\u00daj workflow'), `${reasonMarkup()}<form data-wf-form="create"><div class="wf2-grid">${field(tr('Workflow title', 'Workflow megnevez\u00e9se'), input('title', '', 'required maxlength="200"'))}${field(tr('Main responsible', 'F\u0151 felel\u0151s'), `<select data-native-select="true" name="main_responsible_user_id" required>${userOptions(actor()?.id)}</select>`)}${searchable('client_id', tr('Client', '\u00dcgyf\u00e9l'), options.clients)}${searchable('piano_id', tr('Piano', 'Zongora'), pianoItems(''))}${dateField('start_at', day + 'T09:00', tr('Start \u00b7 New York', 'Kezd\u00e9s \u00b7 New York'), true)}${dateField('final_due_at', day + 'T17:00', tr('Final deadline \u00b7 New York', 'V\u00e9gs\u0151 hat\u00e1rid\u0151 \u00b7 New York'), true)}</div>${field(tr('Workflow type', 'Workflow t\u00edpusa'), '<select data-native-select="true" name="mode"><option value="INBOUND">'+tr('In workshop','M\u0171helyben')+'</option><option value="ON_SITE">'+tr('On site','Helysz\u00ednen')+'</option></select>')}${field(tr('Description', 'Le\u00edr\u00e1s'), '<textarea name="description" rows="2" maxlength="5000"></textarea>')}<fieldset><legend>${tr('Activate phases individually', 'F\u00e1zisok egyedi aktiv\u00e1l\u00e1sa')}</legend><p class="wf2-note">${tr('Only checked phases will be created. Each active phase has exactly one responsible.', 'Csak a bejel\u00f6lt f\u00e1zisok j\u00f6nnek l\u00e9tre. Minden akt\u00edv f\u00e1zisnak pontosan egy felel\u0151se van.')}</p><div class="wf2-create-phases">${options.stages.map(stage => `<section data-create-phase="${esc(stage.code)}" class="wf2-create-phase"><label class="wf2-toggle"><input type="checkbox" data-phase-enabled${checked(stage.enabled !== 0)}><strong>${esc(hu() ? stage.name_hu : stage.name_en)}</strong></label><div data-phase-fields${stage.enabled === 0 ? ' hidden' : ''}>${field(tr('Phase responsible', 'F\u00e1zisfelel\u0151s'), `<select data-native-select="true" data-phase-responsible>${userOptions(actor()?.id)}</select>`)}${dateField('phase_due_' + stage.code, '', tr('Phase deadline (defaults to final deadline)', 'F\u00e1zishat\u00e1rid\u0151 (alap\u00e9rtelmez\u00e9s: v\u00e9gs\u0151 hat\u00e1rid\u0151)'))}</div></section>`).join('')}</div></fieldset><div class="wf2-actions"><button type="submit">${tr('Create workflow', 'Workflow l\u00e9trehoz\u00e1sa')}</button>${button(tr('Cancel', 'M\u00e9gse'), 'close')}</div></form>`);
-    } catch (error) { failure(error); }
+    const sequence=++state.sequence;state.reason='';state.mode='create';state.workflow=null;
+    shell(tr('New workflow','\u00daj workflow'),`<p>${tr('Loading...','Bet\u00f6lt\u00e9s...')}</p>`);
+    try{
+      const options=await api(base+'/options');if(sequence!==state.sequence)return;state.options=options;
+      state.requestKey=window.crypto?.randomUUID?.()||`create-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const day=nyDay(),due=day+'T17:00';
+      shell(tr('New workflow','\u00daj workflow'),`${reasonMarkup()}<form data-wf-form="create"><div class="wf2-grid">${field(tr('Workflow title','Workflow megnevez\u00e9se'),input('title','','required maxlength="200"'))}${field(tr('Main responsible','F\u0151 felel\u0151s'),`<select data-native-select="true" name="main_responsible_user_id" required>${userOptions(actor()?.id)}</select>`)}<div data-client-picker></div><section class="wf2-piano-picker"><h3>${tr('Piano for this workflow','A workflow zongor\u00e1ja')}</h3><div data-piano-list></div><div class="wf2-actions">${button(tr('Existing piano','Meglev\u0151 zongora hozz\u00e1rendel\u00e9se'),'piano-existing')}${button(tr('+ Add piano','+ \u00daj zongora'),'piano-new')}</div></section>${dateField('start_at',day+'T09:00',tr('Start \u00b7 New York','Kezd\u00e9s \u00b7 New York'),true)}${dateField('final_due_at',due,tr('Final deadline \u00b7 New York','V\u00e9gs\u0151 hat\u00e1rid\u0151 \u00b7 New York'),true)}</div>${field(tr('Workflow type','Workflow t\u00edpusa'),`<select data-native-select="true" name="mode"><option value="INBOUND">${tr('In workshop','M\u0171helyben')}</option><option value="ON_SITE">${tr('On site','Helysz\u00ednen')}</option></select>`)}<div data-service-address hidden>${field(tr('Confirm work location address','Munkav\u00e9gz\u00e9si c\u00edm meger\u0151s\u00edt\u00e9se'),input('service_address','','maxlength="2000" disabled'))}</div>${field(tr('Description','Le\u00edr\u00e1s'),'<textarea name="description" rows="2" maxlength="5000"></textarea>')}<section class="wf2-plan"><h3>${tr('Individual phase settings','F\u00e1zisok egyedi be\u00e1ll\u00edt\u00e1sa')}</h3><p class="wf2-note">${tr('Enable the phases needed for this instrument. Only active phases and their tasks will be saved.','Kapcsold be a hangszerhez sz\u00fcks\u00e9ges f\u00e1zisokat. Csak az akt\u00edv f\u00e1zisok \u00e9s r\u00e9szfeladataik ment\u0151dnek.')}</p><div class="wf2-phase-switches">${options.stages.map(stage=>`<label><input type="checkbox" data-phase-toggle="${esc(stage.code)}"${checked(stage.enabled!==0)}><span>${esc(hu()?stage.name_hu:stage.name_en)}</span></label>`).join('')}</div><div class="wf2-active-phase-plans">${options.stages.map(stage=>createPhaseMarkup(stage,due)).join('')}</div></section><div class="wf2-actions"><button type="submit">${tr('Create workflow','Workflow l\u00e9trehoz\u00e1sa')}</button>${button(tr('Cancel','M\u00e9gse'),'close')}</div></form>`);
+      state.clientPicker=MasterData.clientPicker(state.dialog.querySelector('[data-client-picker]'),{items:options.clients,onSelect:()=>{const address=state.dialog.querySelector('[name=service_address]');if(address)delete address.dataset.manual;updatePianoList();state.dirty=true;}});
+      for(const p of state.dialog.querySelectorAll('[data-create-phase]'))p.querySelector('.wf2-date').dataset.inherited='1';
+      updatePianoList();syncDateBounds();state.dirty=false;
+    }catch(error){failure(error);}
   }
   function callBadge(phone) {
     const dial = String(phone || '').replace(/[^+0-9*#,;]/g, '');
@@ -213,7 +313,7 @@ window.WorkshopV2 = (() => {
   function peopleHeader(w) {
     const owner = `<p><strong>${tr('Owner:', 'Tulajdonos:')}</strong> ${esc(w.owner_name || tr('Not recorded', 'Nincs r\u00f6gz\u00edtve'))} ${callBadge(w.owner_phone)}</p>`;
     const client = w.owner_is_client ? '' : `<p><strong>${tr('Client:', '\u00dcgyf\u00e9l:')}</strong> ${esc(w.client_name)} ${callBadge(w.client_phone)}</p>`;
-    return `<section class="wf2-summary"><div data-owner-client>${owner}${client}</div><div><span class="wf2-status">${esc(statusText(w.status))}</span><p>${esc(w.title)}</p><small>${tr('Created by', 'L\u00e9trehoz\u00f3')}: ${esc(w.creator_name || w.creator_user_id)}<br>${tr('Main responsible', 'F\u0151 felel\u0151s')}: ${esc(w.main_responsible_name || userName(w.main_responsible_user_id))}</small></div></section>`;
+    return `<section class="wf2-summary"><div data-owner-client>${owner}${client}<p><strong>${tr('Piano location:','Zongora helysz\u00edne:')}</strong> ${esc([w.piano_location_name,w.piano_location_address].filter(Boolean).join(' \u00b7 ')||tr('Not recorded','Nincs r\u00f6gz\u00edtve'))}</p>${w.mode==='ON_SITE'?`<p><strong>${tr('Work location:','Munkav\u00e9gz\u00e9s c\u00edme:')}</strong> ${esc(w.service_address||tr('Not recorded','Nincs r\u00f6gz\u00edtve'))}</p>`:''}</div><div><span class="wf2-status">${esc(statusText(w.status))}</span><p>${esc(w.title)}</p><small>${tr('Created by', 'L\u00e9trehoz\u00f3')}: ${esc(w.creator_name || w.creator_user_id)}<br>${tr('Main responsible', 'F\u0151 felel\u0151s')}: ${esc(w.main_responsible_name || userName(w.main_responsible_user_id))}</small></div></section>`;
   }
   function tasksMarkup(p) {
     const tasks = p.tasks || [], manager = p.permissions.edit_task_content;
@@ -250,7 +350,7 @@ window.WorkshopV2 = (() => {
     const missing = state.options.stages.filter(stage => !w.stages.some(phase => phase.stage_code === stage.code));
     const heading = [w.brand, w.model].filter(Boolean).join(' \u2013 ') || w.display_name || tr('Workflow details', 'Workflow r\u00e9szletei');
     const closeout = w.permissions.close_workflow ? `<section class="wf2-section wf2-closeout"><h3>${tr('Close the entire workflow', 'Teljes workflow lez\u00e1r\u00e1sa')}</h3><p>${tr('Only the main responsible or a system administrator may close the entire workflow.', 'A teljes workflow-t csak a f\u0151 felel\u0151s vagy rendszergazda z\u00e1rhatja le.')}</p><form data-wf-form="closeout">${field(tr('Payment method (only for a billable customer invoice)', 'Fizet\u00e9si m\u00f3d (csak sz\u00e1ml\u00e1zhat\u00f3 \u00fcgyf\u00e9lsz\u00e1ml\u00e1hoz)'), `<select data-native-select="true" name="payment_method"><option value="">${tr('No invoice / select', 'Nincs sz\u00e1mla / v\u00e1lassz')}</option><option value="Bank Transfer / ACH">${tr('Bank transfer', 'Banki \u00e1tutal\u00e1s')}</option><option value="CASH">${tr('Cash', 'K\u00e9szp\u00e9nz')}</option><option value="CREDIT CARD">${tr('Card', 'Bankk\u00e1rtya')}</option><option value="CHECK">${tr('Check', 'Csekk')}</option></select>`)}${needsReason() ? `<label class="wf2-toggle"><input name="override" type="checkbox">${tr('Override unfinished items and record each change in the audit.', 'Befejezetlen elemek fel\u00fclb\u00edr\u00e1l\u00e1sa, minden m\u00f3dos\u00edt\u00e1s audit\u00e1l\u00e1s\u00e1val.')}</label>` : ''}<button type="submit">${tr('Close workflow', 'Workflow lez\u00e1r\u00e1sa')}</button></form></section>` : '';
-    shell(heading, `${peopleHeader(w)}${w.historical ? `<p class="wf2-note">${tr('Historical financial record. Read only.', 'T\u00f6rt\u00e9neti p\u00e9nz\u00fcgyi rekord. Csak olvashat\u00f3.')}</p>` : reasonMarkup()}${w.finance_locked && w.status === 'ACTIVE' ? `<p class="wf2-note">${tr('Operationally reopened. The existing invoice and financial close remain locked; no duplicate billing is permitted.', 'M\u0171k\u00f6d\u00e9sileg \u00fajranyitva. A kor\u00e1bbi sz\u00e1mla \u00e9s p\u00e9nz\u00fcgyi z\u00e1r\u00e1s v\u00e9dett; nincs ism\u00e9telt sz\u00e1ml\u00e1z\u00e1s.')}</p>` : ''}<details class="wf2-section" ${w.stages.length ? '' : 'open'}><summary>${tr('Workflow administration', 'Workflow adminisztr\u00e1ci\u00f3')}</summary><form data-wf-form="workflow"><fieldset${disabled(!editable)}>${field(tr('Workflow title', 'Workflow neve'), input('title', w.title, 'required maxlength="200"'))}${transferMarkup('main_responsible_user_id', w.main_responsible_user_id, !editable)}<div class="wf2-grid">${dateField('start_at', w.start_at, tr('Start \u00b7 New York', 'Kezd\u00e9s \u00b7 New York'), !w.historical)}${dateField('final_due_at', w.final_due_at, tr('Final deadline \u00b7 New York', 'V\u00e9gs\u0151 hat\u00e1rid\u0151 \u00b7 New York'), true)}</div>${field(tr('Description', 'Le\u00edr\u00e1s'), `<textarea name="description" rows="2">${esc(w.description)}</textarea>`)}${editable ? '<button type="submit">' + tr('Save workflow', 'Workflow ment\u00e9se') + '</button>' : ''}</fieldset></form></details><nav class="wf2-phase-nav" aria-label="${esc(tr('Phases', 'F\u00e1zisok'))}">${w.stages.map(phase => button(phaseName(phase), 'phase-select', `data-id="${esc(phase.id)}" aria-pressed="${phase.id === state.phaseId}"`)).join('')}</nav>${p ? phaseMarkup(p) : `<p>${tr('No active phases.', 'Nincs akt\u00edv f\u00e1zis.')}</p>`}${editable && !w.finance_locked && missing.length ? `<form data-wf-form="add-phase" class="wf2-section">${field(tr('Activate another phase', 'Tov\u00e1bbi f\u00e1zis aktiv\u00e1l\u00e1sa'), `<select data-native-select="true" name="stage_code">${missing.map(stage => `<option value="${esc(stage.code)}">${esc(hu() ? stage.name_hu : stage.name_en)}</option>`).join('')}</select>`)}<button type="submit">${tr('Activate phase', 'F\u00e1zis aktiv\u00e1l\u00e1sa')}</button></form>` : ''}${closeout}<div class="wf2-actions">${w.status === 'COMPLETED' && w.permissions.reopen ? button(tr('Reopen workflow', 'Workflow \u00fajranyit\u00e1sa'), 'workflow-reopen') : ''}${w.permissions.delete_workflow ? button(tr('Abandon workflow', 'Workflow megszak\u00edt\u00e1sa'), 'workflow-abort', 'class="danger-btn"') + button(tr('Delete workflow', 'Workflow t\u00f6rl\u00e9se'), 'workflow-delete', 'class="danger-btn"') : ''}${button(tr('Reload', '\u00dajrat\u00f6lt\u00e9s'), 'reload')}</div><details class="wf2-section"><summary>${tr('Audit trail', 'Auditnapl\u00f3')}</summary>${(w.audit || []).map(item => `<article class="wf2-audit"><strong>${esc(item.action)}</strong> \u00b7 ${esc(item.actor_name)}<br><small>${esc(item.created_at)} \u00b7 ${esc(item.entity_type)}</small><p>${esc(item.reason)}</p><details><summary>${tr('Recorded change', 'R\u00f6gz\u00edtett m\u00f3dos\u00edt\u00e1s')}</summary><pre>${esc(item.before_json || '')}\n\u2192\n${esc(item.after_json || '')}</pre></details></article>`).join('') || `<p>${tr('No mandatory business audit entries.', 'Nincs k\u00f6telez\u0151 \u00fczleti auditbejegyz\u00e9s.')}</p>`}</details>`);
+    shell(heading, `${peopleHeader(w)}${w.historical ? `<p class="wf2-note">${tr('Historical financial record. Read only.', 'T\u00f6rt\u00e9neti p\u00e9nz\u00fcgyi rekord. Csak olvashat\u00f3.')}</p>` : reasonMarkup()}${w.finance_locked && w.status === 'ACTIVE' ? `<p class="wf2-note">${tr('Operationally reopened. The existing invoice and financial close remain locked; no duplicate billing is permitted.', 'M\u0171k\u00f6d\u00e9sileg \u00fajranyitva. A kor\u00e1bbi sz\u00e1mla \u00e9s p\u00e9nz\u00fcgyi z\u00e1r\u00e1s v\u00e9dett; nincs ism\u00e9telt sz\u00e1ml\u00e1z\u00e1s.')}</p>` : ''}<details class="wf2-section" ${w.stages.length ? '' : 'open'}><summary>${tr('Workflow administration', 'Workflow adminisztr\u00e1ci\u00f3')}</summary><form data-wf-form="workflow"><fieldset${disabled(!editable)}>${field(tr('Workflow title', 'Workflow neve'), input('title', w.title, 'required maxlength="200"'))}${transferMarkup('main_responsible_user_id', w.main_responsible_user_id, !editable)}<div class="wf2-grid">${dateField('start_at', w.start_at, tr('Start \u00b7 New York', 'Kezd\u00e9s \u00b7 New York'), !w.historical)}${dateField('final_due_at', w.final_due_at, tr('Final deadline \u00b7 New York', 'V\u00e9gs\u0151 hat\u00e1rid\u0151 \u00b7 New York'), true, !w.permissions.edit_final_deadline)}</div>${field(tr('Description', 'Le\u00edr\u00e1s'), `<textarea name="description" rows="2">${esc(w.description)}</textarea>`)}${editable ? '<button type="submit">' + tr('Save workflow', 'Workflow ment\u00e9se') + '</button>' : ''}</fieldset></form></details><nav class="wf2-phase-nav" aria-label="${esc(tr('Phases', 'F\u00e1zisok'))}">${w.stages.map(phase => button(phaseName(phase), 'phase-select', `data-id="${esc(phase.id)}" aria-pressed="${phase.id === state.phaseId}"`)).join('')}</nav>${p ? phaseMarkup(p) : `<p>${tr('No active phases.', 'Nincs akt\u00edv f\u00e1zis.')}</p>`}${editable && !w.finance_locked && missing.length ? `<form data-wf-form="add-phase" class="wf2-section">${field(tr('Activate another phase', 'Tov\u00e1bbi f\u00e1zis aktiv\u00e1l\u00e1sa'), `<select data-native-select="true" name="stage_code">${missing.map(stage => `<option value="${esc(stage.code)}">${esc(hu() ? stage.name_hu : stage.name_en)}</option>`).join('')}</select>`)}<button type="submit">${tr('Activate phase', 'F\u00e1zis aktiv\u00e1l\u00e1sa')}</button></form>` : ''}${scheduleMarkup(w)}${closeout}<div class="wf2-actions">${w.status === 'COMPLETED' && w.permissions.reopen ? button(tr('Reopen workflow', 'Workflow \u00fajranyit\u00e1sa'), 'workflow-reopen') : ''}${w.permissions.delete_workflow ? button(tr('Abandon workflow', 'Workflow megszak\u00edt\u00e1sa'), 'workflow-abort', 'class="danger-btn"') + button(tr('Delete workflow', 'Workflow t\u00f6rl\u00e9se'), 'workflow-delete', 'class="danger-btn"') : ''}${button(tr('Reload', '\u00dajrat\u00f6lt\u00e9s'), 'reload')}</div><details class="wf2-section"><summary>${tr('Audit trail', 'Auditnapl\u00f3')}</summary>${(w.audit || []).map(item => `<article class="wf2-audit"><strong>${esc(item.action)}</strong> \u00b7 ${esc(item.actor_name)}<br><small>${esc(item.created_at)} \u00b7 ${esc(item.entity_type)}</small><p>${esc(item.reason)}</p><details><summary>${tr('Recorded change', 'R\u00f6gz\u00edtett m\u00f3dos\u00edt\u00e1s')}</summary><pre>${esc(item.before_json || '')}\n\u2192\n${esc(item.after_json || '')}</pre></details></article>`).join('') || `<p>${tr('No mandatory business audit entries.', 'Nincs k\u00f6telez\u0151 \u00fczleti auditbejegyz\u00e9s.')}</p>`}</details>`);
   }
   async function open(id, phaseId = '') {
     if (!await mayNavigate()) return;
@@ -298,13 +398,33 @@ window.WorkshopV2 = (() => {
     const kind = form.dataset.wfForm, body = values(form);
     if (kind === 'create') {
       body.request_key = state.requestKey; body.mode = body.mode || 'INBOUND';
-      body.phases = [...form.querySelectorAll('[data-create-phase]')].map(section => ({ stage_code: section.dataset.createPhase, enabled: section.querySelector('[data-phase-enabled]').checked, responsible_user_id: section.querySelector('[data-phase-responsible]').value, due_at: section.querySelector('.wf2-date input').value || null }));
-      for (const key of Object.keys(body)) if (key.startsWith('phase_due_')) delete body[key];
+      if(!body.client_id)throw new Error(tr('Select a client.','V\u00e1lassz \u00fcgyfelet.'));
+      if(!body.piano_id)throw new Error(tr('Select a piano for this workflow.','V\u00e1lassz zongor\u00e1t ehhez a workflow-hoz.'));
+      body.phases=[...form.querySelectorAll('[data-create-phase]')].map(section=>({
+        stage_code:section.dataset.createPhase,enabled:!section.disabled,responsible_user_id:section.querySelector('[data-phase-responsible]').value,
+        due_at:section.querySelector('.wf2-date input').value,
+        tasks:section.disabled?[]:[...section.querySelectorAll('.wf2-plan-task')].map(row=>{
+          const assignee_ids=[...row.querySelectorAll('[name=assignee_ids]:checked')].map(c=>c.value);
+          if(!assignee_ids.length)throw new Error('WORKFLOW_ASSIGNEES_REQUIRED');
+          return {title:row.querySelector('[data-plan-title]').value.trim(),template_id:row.dataset.template||undefined,description:row.querySelector('[data-plan-description]').value,
+            due_at:row.querySelector('.wf2-date input').value,assignee_ids};
+        })
+      }));
+      for(const key of Object.keys(body))if(key.startsWith('phase_due_')||key.startsWith('task_')||['assignee_ids','piano_choice'].includes(key))delete body[key];
       await mutate(base + '/workflows', 'POST', body); return;
     }
     if (kind === 'settings') {
       const stages = [...form.querySelectorAll('[data-setting-code]')].map(section => ({ code: section.dataset.settingCode, name_en: section.querySelector('[name=name_en]').value.trim(), name_hu: section.querySelector('[name=name_hu]').value.trim(), sort_order: Number(section.querySelector('[name=sort_order]').value), color: section.querySelector('[name=color]').value, enabled: section.querySelector('[name=enabled]').checked, required: section.querySelector('[name=required]').checked, default_status: section.querySelector('[name=default_status]').value }));
       const result = await mutate(base + '/phases', 'PUT', { stages }); if (result) { state.dirty = false; await close(true); } return;
+    }
+    if(kind==='schedule'){
+      const payload={phases:[],tasks:[]};
+      if(body.start_at)payload.start_at=body.start_at;if(body.final_due_at)payload.final_due_at=body.final_due_at;
+      for(const section of form.querySelectorAll('[data-schedule-phase]')){
+        const date=section.querySelector(':scope > .wf2-date input');if(date)payload.phases.push({id:section.dataset.schedulePhase,due_at:date.value});
+        for(const row of section.querySelectorAll('[data-schedule-task]'))payload.tasks.push({id:row.dataset.scheduleTask,due_at:row.querySelector('.wf2-date input').value});
+      }
+      await mutate(apiPath('/schedule'),'PUT',payload);return;
     }
     if (kind === 'workflow') { await mutate(apiPath(), 'PUT', body); return; }
     if (kind === 'phase') { if (!currentPhase().permissions.assign_phase) delete body.responsible_user_id; await mutate(apiPath(phasePath()), 'PUT', body); return; }
@@ -330,15 +450,15 @@ window.WorkshopV2 = (() => {
     if (target.matches('[data-responsible]')) {
       const section = target.closest('.wf2-transfer'); section.querySelector('[data-transfer-reason]').hidden = target.value === target.dataset.original && section.dataset.forced !== '1'; return;
     }
-    if (target.matches('[data-phase-enabled]')) { target.closest('[data-create-phase]').querySelector('[data-phase-fields]').hidden = !target.checked; return; }
-    if (target.matches('[data-phase-responsible]')) { target.dataset.manual = '1'; return; }
-    if (state.mode === 'create' && target.name === 'main_responsible_user_id') { for (const select of state.dialog.querySelectorAll('[data-phase-responsible]')) if (!select.dataset.manual) select.value = target.value; return; }
-    if (state.mode === 'create' && target.name === 'client_id') {
-      const form = target.form, select = form.querySelector('[name=piano_id]'), previous = select.value;
-      select.innerHTML = `<option value="">${tr('Select...', 'V\u00e1lassz...')}</option>` + pianoItems(target.value).map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
-      if ([...select.options].some(option => option.value === previous)) select.value = previous;
-      form.querySelector('[data-search=piano_id]').value = ''; return;
+    if(target.matches('[data-phase-toggle]')){
+      const phase=state.dialog.querySelector(`[data-create-phase="${CSS.escape(target.dataset.phaseToggle)}"]`);phase.hidden=!target.checked;phase.disabled=!target.checked;syncDateBounds();return;
     }
+    const setDefaults=phase=>{for(const task of phase.querySelectorAll('.wf2-plan-task'))if(!task.dataset.manualAssignees)for(const checkbox of task.querySelectorAll('[name=assignee_ids]'))checkbox.checked=checkbox.value===phase.querySelector('[data-phase-responsible]').value;};
+    if(target.matches('[data-phase-responsible]')){target.dataset.manual='1';setDefaults(target.closest('[data-create-phase]'));return;}
+    if(target.name==='assignee_ids'&&target.closest('.wf2-plan-task')){target.closest('.wf2-plan-task').dataset.manualAssignees='1';return;}
+    if(state.mode==='create'&&target.name==='main_responsible_user_id'){for(const select of state.dialog.querySelectorAll('[data-phase-responsible]'))if(!select.dataset.manual){select.value=target.value;setDefaults(select.closest('[data-create-phase]'));}return;}
+    if(state.mode==='create'&&target.name==='mode'){updateServiceLocation();return;}
+    if(state.mode==='create'&&target.name==='piano_choice'){target.form.querySelector('[name=piano_id]').value=target.value;const address=target.form.querySelector('[name=service_address]');delete address.dataset.manual;updateServiceLocation();return;}
     if (target.matches('[data-task-complete]')) {
       const task = currentPhase().tasks.find(item => item.id === target.dataset.taskComplete), wasComplete = task.status === 'COMPLETED';
       target.checked = wasComplete;
@@ -354,6 +474,19 @@ window.WorkshopV2 = (() => {
     if (dateClick(event)) return;
     const control = event.target.closest('[data-wf-action]'); if (!control || state.busy) return;
     const action = control.dataset.wfAction, key = encodeURIComponent(control.dataset.id || ''); event.preventDefault();
+    if(action==='piano-new')return newPiano();
+    if(action==='piano-existing')return existingPiano();
+    if(action==='plan-add-custom'||action==='plan-add-template'){
+      const phase=control.closest('[data-create-phase]'),id=phase.querySelector('[data-task-template]').value;
+      const template=action==='plan-add-template'?(state.options.task_catalog?.[phase.dataset.createPhase]||[]).find(t=>t.id===id):null;
+      if(action==='plan-add-template'&&!template)return;
+      appendPlanTask(phase,template);return;
+    }
+    if(action==='plan-remove'){
+      const row=control.closest('.wf2-plan-task'),phase=row.closest('[data-create-phase]');
+      if(row.dataset.template)phase.querySelector(`[data-task-template] option[value="${CSS.escape(row.dataset.template)}"]`).disabled=false;
+      row.remove();state.dirty=true;return;
+    }
     if (action === 'close') return close();
     if (action === 'handover') { const wrapper = control.closest('.wf2-transfer'); wrapper.dataset.forced = '1'; wrapper.querySelector('[data-transfer-reason]').hidden = false; wrapper.querySelector('textarea').focus(); return; }
     if (action === 'phase-select') { if (!await mayNavigate()) return; state.reason = state.dialog.querySelector('[data-admin-reason]')?.value || state.reason; state.phaseId = control.dataset.id; renderDetails(); return; }
