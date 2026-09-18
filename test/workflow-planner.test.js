@@ -44,8 +44,8 @@ test('planner 13 main may not change final deadline through workflow update',()=
 test('planner 14 final calendar job still completes for main but cannot be rescheduled',()=>{
  const w=f.create(),job=w.calendar.find(j=>j.entity_type==='FINAL');assert.equal(f.engine.jobRights(job.job_id,f.user('M')),true);assert.equal(f.engine.canReschedule(job.job_id,f.user('M')),false);error(()=>f.engine.rescheduleJob(job.job_id,{target_date:'2027-10-11T17:00'},f.user('M')),'WORKFLOW_FORBIDDEN');const row=f.engine.calendarRow(f.db.prepare('SELECT * FROM jobs WHERE id=?').get(job.job_id),f.user('M'));assert.equal(row.wf2_can_reschedule,false);assert.equal(row.wf2_can_edit,true);
 });
-test('planner 15 admin final deadline requires reason; superadmin exception retained',()=>{
- const w=f.create();error(()=>f.engine.update(w.id,{final_due_at:'2027-10-11T17:00'},f.user('A')),'WORKFLOW_OVERRIDE_REASON_REQUIRED');assert.equal(f.engine.update(w.id,{final_due_at:'2027-10-11T17:00',reason:'Customer approved new deadline'},f.user('A')).final_due_at,'2027-10-11T17:00');assert.equal(f.engine.update(w.id,{final_due_at:'2027-10-12T17:00'},f.user('S')).final_due_at,'2027-10-12T17:00');
+test('planner 15 admin and superadmin final deadline changes need no manual reason',()=>{
+ const w=f.create();assert.equal(f.engine.update(w.id,{final_due_at:'2027-10-11T17:00'},f.user('A')).final_due_at,'2027-10-11T17:00');assert.equal(f.engine.update(w.id,{final_due_at:'2027-10-11T17:00',reason:'Customer approved new deadline'},f.user('A')).final_due_at,'2027-10-11T17:00');assert.equal(f.engine.update(w.id,{final_due_at:'2027-10-12T17:00'},f.user('S')).final_due_at,'2027-10-12T17:00');
 });
 test('planner 16 subresponsible edits own deadline only within phase bounds',()=>{
  const w=f.create(),p=w.stages[0],t=p.tasks[0];assert.equal(f.engine.saveTask(w.id,p.id,t.id,{due_at:p.due_at},f.user('T')).stages[0].tasks[0].due_at,p.due_at);error(()=>f.engine.saveTask(w.id,p.id,t.id,{due_at:'2027-10-06T17:30'},f.user('T')),'WORKFLOW_TASK_OUTSIDE_DATES');error(()=>f.engine.saveTask(w.id,p.id,t.id,{due_at:'2027-10-06T16:00'},f.user('X')),'WORKFLOW_FORBIDDEN');
