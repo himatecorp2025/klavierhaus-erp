@@ -828,7 +828,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     const method = paymentMethod(requestedPaymentMethod);
     if (!method) throw Object.assign(new Error("PAYMENT_METHOD_REQUIRED"), { status: 400 });
     const phaseRows = (Array.isArray(stages) && stages.length ? stages : db.prepare("SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY stage_order,id").all(workflow.id)).filter((stage) => stage.status !== "NOT_REQUIRED");
-    const costLines = (lines || []).filter((row) => row.line_type === "COST");
+    const costLines = (lines || []).filter((row) => row.line_type === "COST" && String(row.accounting_status || "WIP") !== "WRITTEN_OFF");
     const items = phaseRows.map((stage) => {
       const phaseSubtotal = workflowBillablePhaseSubtotal(costLines.filter((row) => String(row.stage_id || "") === String(stage.id)));
       if (phaseSubtotal < 0) throw Object.assign(new Error("WORKFLOW_PHASE_CREDIT_EXCEEDS_CHARGEABLE_TOTAL"), { status: 409 });
