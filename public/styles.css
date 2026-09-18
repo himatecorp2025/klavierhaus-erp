@@ -2945,3 +2945,80 @@ html.session-restoring #app{visibility:visible;}
   .workflow-mobile-actionbar button{display:grid!important;place-items:center!important;width:42px!important;height:42px!important;padding:0!important;border:1px solid var(--line)!important;border-radius:11px!important;background:var(--panel2)!important;color:var(--text)!important}
   .workflow-mobile-actionbar .workflow-control-icon{width:20px!important;height:20px!important;fill:none!important;stroke:currentColor!important;stroke-width:1.8!important;stroke-linecap:round!important;stroke-linejoin:round!important}
 }
+
+/* UI v12 consolidation: one body-level workflow dialog and one 1024px responsive boundary. */
+#workflowDetailsModalHost:not(.is-open){display:none!important}
+.workflow-details-modal-overlay{
+  position:fixed!important;
+  inset:0!important;
+  z-index:10050!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  padding:1rem!important;
+  box-sizing:border-box!important;
+  background:rgba(15,23,42,.75)!important;
+  backdrop-filter:blur(8px)!important;
+  -webkit-backdrop-filter:blur(8px)!important;
+}
+.workflow-details-modal-overlay .workflow-drawer.workflow-details-modal-content{
+  position:relative!important;
+  inset:auto!important;
+  width:min(720px,95vw)!important;
+  max-width:95vw!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:90vh!important;
+  display:flex!important;
+  flex-direction:column!important;
+  overflow:hidden!important;
+  background:#0F172A!important;
+  border:1px solid #3B82F6!important;
+  border-radius:12px!important;
+  box-sizing:border-box!important;
+  box-shadow:0 24px 72px rgba(0,0,0,.58)!important;
+}
+.workflow-details-modal-overlay .workflow-drawer-scroll{min-height:0!important;overflow-y:auto!important;overscroll-behavior:contain!important}
+.workflow-details-modal-overlay .workflow-drawer-actions{position:static!important;left:auto!important;right:auto!important;bottom:auto!important;box-shadow:none!important}
+.admin-date-picker-popover,.reschedule-popover-panel .admin-date-picker-popover{z-index:10060!important}
+
+@media(min-width:1024px){
+  .workflow-mobile-actionbar{display:none!important}
+  .workflow-shell .workflow-stage-card.workflow-card{font-size:clamp(.75rem,.95vw,.94rem)!important}
+  .workflow-shell .workflow-stage-title{font-size:clamp(.82rem,1.05vw,1rem)!important}
+}
+
+@media(max-width:1023.98px){
+  .workflow-shell .workflow-board-controls,
+  .workflow-shell .workflow-day-actions{display:none!important}
+  .workflow-mobile-actionbar{
+    justify-content:flex-end!important;
+    padding-top:max(.75rem,env(safe-area-inset-top))!important;
+    padding-right:max(.75rem,env(safe-area-inset-right))!important;
+    padding-left:max(.75rem,env(safe-area-inset-left))!important;
+    padding-bottom:.25rem!important;
+  }
+  .workflow-mobile-actionbar button.active-state-btn{color:#FACC15!important;border-color:#FACC15!important;background:rgba(250,204,21,.10)!important}
+  .workflow-board-panel,
+  .workflow-mobile-list,
+  .workflow-mobile-deck{
+    padding-top:max(.75rem,env(safe-area-inset-top))!important;
+    padding-right:max(.75rem,env(safe-area-inset-right))!important;
+    padding-bottom:max(.75rem,env(safe-area-inset-bottom))!important;
+    padding-left:max(.75rem,env(safe-area-inset-left))!important;
+    box-sizing:border-box!important;
+  }
+  .workflow-mobile-deck-slide .workflow-stage-card{cursor:pointer!important}
+  .workflow-details-modal-overlay{
+    align-items:center!important;
+    padding-top:max(.75rem,env(safe-area-inset-top))!important;
+    padding-right:max(.75rem,env(safe-area-inset-right))!important;
+    padding-bottom:max(.75rem,env(safe-area-inset-bottom))!important;
+    padding-left:max(.75rem,env(safe-area-inset-left))!important;
+  }
+  .workflow-details-modal-overlay .workflow-drawer.workflow-details-modal-content{
+    width:min(720px,95vw)!important;
+    max-height:90dvh!important;
+    border-radius:12px!important;
+  }
+}
