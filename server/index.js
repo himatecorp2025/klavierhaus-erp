@@ -50,7 +50,6 @@ const {
   createPianoImportUpload,
   createCompanyDocumentUpload,
   createCustomerConversationUpload,
-  createWorkflowInspectionUpload,
   uploadErrorHandler
 } = require("./upload-middleware");
 let webpush=null;
@@ -62,7 +61,7 @@ app.set("trust proxy", 1);
 const OPERATIONAL_CONTRACT_KEYS = Object.freeze(["helpdesk", "notification_audit"]);
 const PORT = process.env.PORT || 3030;
 const VERSION = String(process.env.APP_VERSION || require("../package.json").version || "unknown");
-const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V38-2-CLEAN");
+const BUILD_ID = String(process.env.APP_BUILD_ID || "2026.09.18-V40-PHASE1");
 const DEPLOYMENT_COMMIT = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown").trim() || "unknown";
 const VAPID_PUBLIC_KEY=process.env.VAPID_PUBLIC_KEY||"";
 const VAPID_PRIVATE_KEY=process.env.VAPID_PRIVATE_KEY||"";
@@ -82,7 +81,6 @@ fs.mkdirSync(EVENT_IMAGE_DIR,{recursive:true});
 const WEBSITE_IMAGE_DIR=path.join(UPLOAD_DIR,"website");
 fs.mkdirSync(WEBSITE_IMAGE_DIR,{recursive:true});
 const companyDocumentUpload=createCompanyDocumentUpload(UPLOAD_DIR);
-const workflowInspectionUpload=createWorkflowInspectionUpload(UPLOAD_DIR);
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite"));
 db.pragma("foreign_keys = ON");
@@ -392,7 +390,7 @@ app.use(express.static(path.join(__dirname, "..", "public"),{
   lastModified:true,
   maxAge:"5m",
   setHeaders(res,filePath){
-    if(/(?:index\.html|service-worker\.js|app\.js|styles\.css)$/i.test(filePath))res.setHeader("Cache-Control","no-cache");
+    if(/(?:index\.html|service-worker\.js|app\.js|workshop-shell\.js|styles\.css)$/i.test(filePath))res.setHeader("Cache-Control","no-cache");
   }
 }));
 // Global protection: only superadmin may call DELETE endpoints. The single
@@ -400,6 +398,8 @@ app.use(express.static(path.join(__dirname, "..", "public"),{
 // business rules. They are intentionally the only admin DELETE exceptions.
 app.use('/api',(req,res,next)=>{
   if(req.method!=='DELETE') return next();
+  // The Phase I card contract performs its own database-backed auth and Admin check.
+  if(/^\/workshop-shell\/cards\/[^/]+$/.test(req.path)) return next();
   const h=req.headers.authorization||'';
   try{req.user=req.user||jwt.verify(h.startsWith('Bearer ')?h.slice(7):'',JWT_SECRET);}catch(e){return res.status(401).json({error:'AUTH_REQUIRED'});}
   if(/^\/events\/[^/]+$/.test(req.path)||/^\/(?:website-reviews|website-services|showroom-pianos|website-artists)\/[^/]+$/.test(req.path)) return next();
@@ -861,7 +861,7 @@ registerBusinessOperationsRoutes({
   jobDomain,
   invoiceEngine
 });
-const workshopWorkflowNotificationService = registerWorkshopWorkflowRoutes({
+registerWorkshopWorkflowRoutes({
   app,
   db,
   auth,
@@ -870,7 +870,6 @@ const workshopWorkflowNotificationService = registerWorkshopWorkflowRoutes({
   rid,
   nowISO,
   upload,
-  inspectionUpload:workflowInspectionUpload,
   uploadDir:UPLOAD_DIR,
   notifyUser: createNotification,
   jobDomain,
@@ -938,7 +937,7 @@ function jobsSelectSql(where=""){
     ece.provider AS calendar_source,ece.review_status AS calendar_review_status,ece.conflict_flag AS calendar_conflict_flag,
     ece.creator_email AS calendar_creator_email,ece.source_updated_at AS calendar_source_updated_at,ece.external_event_id AS calendar_external_event_id,
     ece.reviewed_at AS calendar_reviewed_at
-    FROM jobs j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id
+    FROM (SELECT * FROM jobs WHERE id NOT IN (SELECT job_id FROM workflow_retired_calendar_jobs)) j LEFT JOIN users au ON au.id=j.assigned_user_id LEFT JOIN users cu ON cu.id=j.created_by_user_id LEFT JOIN users ru ON ru.id=j.last_reassigned_by_user_id
     LEFT JOIN external_calendar_events ece ON ece.job_id=j.id AND ece.provider='GOOGLE' ${where}`;
 }
 
@@ -985,10 +984,7 @@ function canEditJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN" || user.role === "MANAGER") return true;
   return user.role === "WORKER" && isAssignedToUser(job,user);
 }
-function canManageWorkflowStage(user, stage){
-  if(isSuperadminUser(user) || user?.role==='ADMIN') return true;
-  return Boolean(stage?.assigned_user_id && String(stage.assigned_user_id)===String(user?.id));
-}
+
 function canReassignJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
   if(isAssignedToUser(job,user)) return true;
@@ -1286,7 +1282,7 @@ app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prep
 app.get('/api/notifications/acknowledgements',auth,(req,res)=>{res.json(db.prepare("SELECT id,notification_type,title_en,title_hu,body_en,body_hu,acknowledged_at,created_at FROM notifications WHERE recipient_user_id=? AND status='ACKNOWLEDGED' ORDER BY acknowledged_at DESC,created_at DESC").all(req.user.id));});
 app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
-const DEADLINE_NOTIFICATION_TYPES=new Set(['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB']);
+const DEADLINE_NOTIFICATION_TYPES=new Set(['CLIENT_FOLLOWUP','CALENDAR_JOB']);
 function deadlineUserCanSeeAll(user){return Boolean(user&&(isSuperadminUser(user)||user.role==='ADMIN'||user.role==='MANAGER'));}
 function deadlineRow({entityType,entityId,category,title,instrumentContext,clientContext,responsibleName,targetDate,description='',phone='',workflowId='',calendarJobId='',existingNote='',delayReason='',isVip=false}){
   return {
@@ -1312,10 +1308,6 @@ function deadlineRow({entityType,entityId,category,title,instrumentContext,clien
 function deadlineEntityVisibleToUser(user,entityType,entityId){
   if(!user?.id||!DEADLINE_NOTIFICATION_TYPES.has(entityType))return false;
   const unrestricted=deadlineUserCanSeeAll(user);
-  if(entityType==='WORKFLOW_STAGE'){
-    const row=db.prepare(`SELECT s.id,s.assigned_user_id,w.created_by_user_id,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.id=?`).get(entityId);
-    return Boolean(row&&row.current_status==='ACTIVE'&&(unrestricted||String(row.assigned_user_id||'')===String(user.id)||String(row.created_by_user_id||'')===String(user.id)));
-  }
   if(entityType==='CALENDAR_JOB'){
     const job=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);
     return Boolean(job&&(unrestricted||canEditJob(user,job)));
@@ -1348,22 +1340,11 @@ function activeDeadlineNotifications(user){
     instrumentContext:'Client relationship follow-up / Ügyfélkapcsolati utánkövetés',clientContext:contact.name||'Client / Ügyfél',responsibleName:contact.responsible_name||contact.name||'',
     targetDate:contact.follow_up_date,description:contact.follow_up_reason||'Client follow-up / Ügyfél utánkövetés',phone:contact.phone||'',existingNote:contact.relationship_notes||'',isVip:Number(contact.is_vip||0)===1
   })));
-  const stages=db.prepare(`SELECT s.id,s.workflow_id,s.name_snapshot_en,s.name_snapshot_hu,s.card_title,s.status,s.assigned_to,s.assigned_user_id,s.due_at,s.delay_reason,s.notes,s.calendar_job_id,
-      w.title AS workflow_title,w.created_by_user_id,p.brand,p.model,p.display_name,p.serial_no,c.name AS client_name,c.phone AS client_phone
-    FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id
-      LEFT JOIN pianos p ON p.id=w.piano_id LEFT JOIN contacts c ON c.id=w.client_id
-    WHERE w.current_status='ACTIVE' AND s.status NOT IN ('COMPLETED','NOT_REQUIRED','ABORTED') AND s.due_at IS NOT NULL AND trim(s.due_at)<>'' AND s.due_at<=?
-      AND (?=1 OR s.assigned_user_id=? OR w.created_by_user_id=?) ORDER BY s.due_at,s.id`).all(limit14,unrestricted,user.id,user.id);
-  stages.forEach(stage=>{
-    const piano=[stage.brand,stage.model].filter(Boolean).join(' ').trim()||stage.display_name||stage.serial_no||stage.workflow_title||'Workshop piano / Műhelyhangszer';
-    const stageName=stage.card_title||stage.name_snapshot_hu||stage.name_snapshot_en||'Workflow stage / Munkafázis';
-    push(deadlineRow({entityType:'WORKFLOW_STAGE',entityId:stage.id,category:'WORKFLOW_STAGE',title:stageName,instrumentContext:piano,clientContext:stage.client_name||'',responsibleName:stage.assigned_to||'',targetDate:stage.due_at,description:'Workshop phase deadline / Munkafázis határidő',phone:stage.client_phone||'',workflowId:stage.workflow_id,calendarJobId:stage.calendar_job_id||'',existingNote:stage.notes||'',delayReason:stage.delay_reason||''}));
-  });
   const jobs=db.prepare(`SELECT j.id,j.title,j.start_time,j.end_time,j.client_name,j.client_phone,j.piano_name,j.instructions,j.notes,j.completion_notes,j.status,j.assigned_to,j.assigned_user_id,
       j.is_crm_follow_up,j.contact_id,j.workshop_workflow_id,p.brand,p.model,p.display_name,p.serial_no
     FROM jobs j LEFT JOIN pianos p ON p.id=j.piano_id
     WHERE COALESCE(j.status,'Open') NOT IN ('Completed','Partially completed','Failed','Cancelled') AND j.start_time IS NOT NULL AND trim(j.start_time)<>'' AND j.start_time<=?
-      AND NOT EXISTS(SELECT 1 FROM workflow_stages s WHERE s.calendar_job_id=j.id)
+      AND NOT EXISTS(SELECT 1 FROM workflow_retired_calendar_jobs retired WHERE retired.job_id=j.id)
       AND (?=1 OR j.assigned_user_id=?) ORDER BY j.start_time,j.id`).all(limit14,unrestricted,user.id);
   jobs.forEach(job=>{
     const piano=[job.brand,job.model].filter(Boolean).join(' ').trim()||job.piano_name||job.serial_no||'Calendar appointment / Naptári időpont';
@@ -1431,32 +1412,21 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
       });
       const updated=run();audit(req,'RESCHEDULE','contacts',entityId,before,updated,1,reason,'TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
     }
-    if(entityType==='WORKFLOW_STAGE'){
-      const result=workshopWorkflowNotificationService.rescheduleStageFromNotification({stageId:entityId,actor:req.user,targetDate,reason});
-      return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:result.target_date,calendar_job_id:result.calendar_job?.id||null});
-    }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
     if(!canEditJob(req.user,before))return res.status(403).json({error:'JOB_EDIT_FORBIDDEN'});
     if(['Completed','Partially completed','Failed','Cancelled'].includes(String(before.status||'')))return res.status(400).json({error:'JOB_NOT_ACTIVE'});
     if(!isScheduleTime(targetDate))return res.status(400).json({error:'INVALID_SCHEDULE_TIME',interval_minutes:SCHEDULE_INTERVAL_MINUTES});
     const duration=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(before.start_time,before.end_time)||SCHEDULE_INTERVAL_MINUTES),endTime=notificationJobEnd(targetDate,duration);
     const assigned=resolveActiveUser(before.assigned_user_id,before.assigned_to);
-    const linkedStage=db.prepare(`SELECT s.*,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.calendar_job_id=?`).get(before.id);
-    let assigneeChanged=false;
+    let assigneeChanged=false,updated;
     db.transaction(()=>{
       const result=jobDomain.patchJobSchedule({jobId:before.id,startTime:targetDate,endTime,assignedUser:assigned,allowUnassigned:!assigned,actor:req.user,reassignmentNote:reason,findConflicts:findScheduleConflicts});
       assigneeChanged=result.assigneeChanged;
-      if(linkedStage){
-        db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(linkedStage.delay_reason,reason,'Rescheduled from calendar / Naptárból újraütemezve'),linkedStage.id);
-        db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(linkedStage.workflow_id);
-      }else if(before.workflow_id){
-        db.prepare('UPDATE workshop_workflows SET final_due_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(endTime,before.workflow_id);
-        db.prepare(`UPDATE workflow_stages SET due_at=?,updated_at=CURRENT_TIMESTAMP WHERE workflow_id=? AND stage_code='FINAL_HANDOVER'`).run(endTime,before.workflow_id);
-      }
+      const completionNotes=appendNotificationNote(before.completion_notes,reason,'Rescheduled / Újraütemezve');
+      db.prepare('UPDATE jobs SET completion_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(completionNotes,before.id);
+      updated=db.prepare(jobsSelectSql('WHERE j.id=?')).get(before.id);
+      workAudit(req,'NOTIFICATION_RESCHEDULE',before.id,before,updated,1,reason);
     })();
-    const completionNotes=appendNotificationNote(before.completion_notes,reason,'Rescheduled / Újraütemezve');db.prepare('UPDATE jobs SET completion_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(completionNotes,before.id);
-    const updated=db.prepare(jobsSelectSql('WHERE j.id=?')).get(before.id);workAudit(req,'NOTIFICATION_RESCHEDULE',before.id,before,updated,1,reason);
-    if(linkedStage)audit(req,'NOTIFICATION_RESCHEDULE_SYNC', 'workflow_stages', linkedStage.id, linkedStage, db.prepare('SELECT * FROM workflow_stages WHERE id=?').get(linkedStage.id),1,reason,'WORK');
     if(assigneeChanged)notifyAssigned(updated,req.user,'JOB_TRANSFERRED');
     return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate,end_date:endTime});
   }catch(error){if(error.code==='SCHEDULE_CONFLICT')return rejectScheduleConflict(req,res,null,error.details?.conflicts||[]);res.status(error.status||400).json({error:error.code||error.message});}
@@ -1475,10 +1445,6 @@ app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(
       });
       const result=run();audit(req,'CRM_FOLLOW_UP_COMPLETE','contacts',entityId,before,result.contact,1,note||'CRM follow-up completed from global task notification','TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId});
     }
-    if(entityType==='WORKFLOW_STAGE'){
-      const result=workshopWorkflowNotificationService.completeStageFromNotification({stageId:entityId,actor:req.user,note});
-      return res.json({ok:true,entity_type:entityType,entity_id:entityId,calendar_job_id:result.calendar_job?.id||null,financial_item_ids:(result.financial_items||[]).map(item=>item.id),already_completed:Boolean(result.already_completed)});
-    }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
     if(!canCloseJob(req.user,before))return res.status(403).json({error:'JOB_CLOSE_FORBIDDEN'});
     if(['Completed','Partially completed','Failed','Cancelled'].includes(String(before.status||'')))return res.json({ok:true,entity_type:entityType,entity_id:entityId,already_completed:true});
@@ -1489,7 +1455,7 @@ app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(
       actor:req.user,
       closeType:'Full',
       complete:true,
-      financialEntries:[],
+      financialEntries:Number(before.billed_amount)>0?[{itemDate:nyLocalDateTime(new Date()).slice(0,10),title:`Closed job revenue: ${before.title||before.id}`,amount:Number(before.billed_amount),mainType:'INCOME',category:'SERVICE_REVENUE',paymentMethod:before.payment_method||'',sourceType:'JOB_REVENUE',sourceId:`JOB_REVENUE:${before.id}`}]:[],
       mutate:({job,now})=>{
         db.prepare(`UPDATE jobs SET completion_notes=?,close_notes=COALESCE(NULLIF(close_notes,''),?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(completionNotes,note||'Completed from global task notification',job.id);
         return {notification_completion:true,completed_at:now};
@@ -3071,11 +3037,6 @@ app.post("/api/jobs/:id/close", auth, (req,res)=>{
 
   const closeType=String(req.body.close_type||"");
   if(!["Partial","Full","Failed"].includes(closeType)){return res.status(400).json({error:"Close type must be Partial, Full or Failed"});}
-  const linkedWorkshopWorkflowId=String(job.workshop_workflow_id||job.workflow_id||"").trim();
-  if(closeType==="Full"&&linkedWorkshopWorkflowId){
-    const linkedWorkflow=db.prepare("SELECT id,current_status FROM workshop_workflows WHERE id=?").get(linkedWorkshopWorkflowId);
-    if(linkedWorkflow&&String(linkedWorkflow.current_status||"")!=="COMPLETED") return res.status(409).json({error:"LINKED_WORKSHOP_WORKFLOW_NOT_COMPLETED",workflow_id:linkedWorkflow.id});
-  }
   const billed=Number(req.body.billed_amount);
   if(Number.isNaN(billed)){return res.status(400).json({error:"Billed amount is required. Use 0 if not billable."});}
   const desc=String(req.body.close_description||"").trim();
@@ -3190,32 +3151,7 @@ app.post("/api/piano-models", auth, permit("ADMIN","MANAGER","WORKER"), (req,res
   }catch(error){res.status(400).json({error:error.message||"PIANO_MODEL_CREATE_FAILED"});}
 });
 
-app.post("/api/workflow/inline-client-piano", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
-  const body=req.body||{},name=String(body.name||"").trim(),email=String(body.email||"").trim(),phone=String(body.phone||"").trim();
-  if(!name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
-  const addressLine1=String(body.address_line1||"").trim(),city=String(body.city||"").trim(),state=String(body.state||"").trim(),postalCode=String(body.postal_code||"").trim(),country=String(body.country||"United States").trim()||"United States";
-  if(!addressLine1||!city||!state||!postalCode||!country)return res.status(400).json({error:"CLIENT_ADDRESS_REQUIRED"});
-  const fullAddress=structuredContactAddress({address_line1:addressLine1,city,state,postal_code:postalCode,country});
-  const hasPiano=body.has_piano===true||body.has_piano===1||String(body.has_piano||"").toLowerCase()==="true";
-  if(hasPiano&&(!String(body.make||body.brand||"").trim()||!String(body.model||"").trim())) return res.status(400).json({error:"PIANO_CORE_FIELDS_REQUIRED"});
-  try{
-    const result=db.transaction(()=>{
-      const clientId=nextContactId();
-      db.prepare("INSERT INTO contacts(id,name,email,phone,address_line1,city,state,postal_code,country,address,billing_address,notes,has_piano,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?, 'Active')")
-        .run(clientId,name,email,phone,addressLine1,city,state,postalCode,country,fullAddress,fullAddress,String(body.short_description||body.notes||"").trim(),hasPiano?1:0);
-      let piano=null;
-      if(hasPiano){
-        const serial=String(body.serial_number||body.serial_no||"").trim();
-        const duplicate=existingPianoBySerial(serial);if(duplicate){const e=new Error("PIANO_SERIAL_ALREADY_EXISTS");e.code="PIANO_SERIAL_ALREADY_EXISTS";throw e;}
-        const id=rid("P"),brand=ensurePianoBrand(body.make||body.brand||""),model=ensurePianoModel(brand,body.model),finish=String(body.finish||"").trim(),buildYear=Number(body.year_built||body.build_year||0)||null,display=`${brand} ${model}`.trim();
-        db.prepare("INSERT INTO pianos(id,brand,model,serial_no,finish,build_year,ownership,ownership_type,display_name,owner_contact_id,location,estimated_value,status,notes,owner_resolution) VALUES(?,?,?,?,?,?,'Customer owned','Customer owned',?,?,'',0,'Active','','MATCHED_CLIENT')").run(id,brand,model,serial,finish,buildYear,display,clientId);
-        linkClientPiano(clientId,id);piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
-      }
-      return {client:db.prepare("SELECT * FROM contacts WHERE id=?").get(clientId),piano};
-    })();
-    res.status(201).json(result);
-  }catch(error){res.status(error.code==="PIANO_SERIAL_ALREADY_EXISTS"?409:400).json({error:error.code||error.message});}
-});
+
 
 app.get("/api/contacts/:id/pianos", auth, (req,res)=>{
   res.json(db.prepare(`SELECT DISTINCT p.*,cp.id AS client_piano_id,COALESCE(cp.is_verified,0) AS is_verified,cp.piano_location_address,cp.location_name,cp.verified_at,cp.verified_by
@@ -3320,7 +3256,7 @@ app.get("/api/closed-jobs", auth, (req,res)=>{
       'Workshop Workflow' AS job_type,wf.name AS responsible_at_close,u.name AS closed_by,wc.closed_at AS closed_at,
       'Workflow' AS close_type,wc.net_total AS billed_amount,wi.payment_method AS payment_method,
       wi.invoice_number AS invoice_number,NULL AS document_path,wc.closure_reason AS close_description,NULL AS next_job_id,NULL AS next_job_key,NULL AS next_job_title
-    FROM workflow_closed_jobs wc JOIN workshop_workflows w ON w.id=wc.workflow_id
+    FROM workflow_finance_closures wc JOIN workflow_finance_sources w ON w.id=wc.workflow_id
     JOIN contacts c ON c.id=wc.client_id JOIN pianos p ON p.id=wc.piano_id
     LEFT JOIN users u ON u.id=wc.closed_by_user_id
     LEFT JOIN users wf ON wf.id=w.transport_responsible_user_id
@@ -3487,7 +3423,7 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
       "website_integration_oauth_states","website_integration_settings","website_preview_tokens","website_content_versions","website_tracking_events","website_contact_leads","website_media","website_artists","website_services","website_showroom_pianos","website_reviews","website_content_pages","landing_sections","marketing_campaigns",
       "event_attendance_exports","event_attendance_actions","event_attendance_entries","event_attendance_sessions","event_checkins","event_ticket_documents","event_refund_requests","event_checkout_holds","stripe_webhook_events","event_payments","event_tickets","event_invitations","event_repeat_requests","event_closures","events","event_categories",
       "customer_message_attachments","customer_messages","customer_conversation_events","customer_conversations","communication_deliveries",
-      "workflow_audit_events","workflow_closed_jobs","workflow_documents","workflow_financial_lines","workflow_materials","workflow_stage_transfers","workflow_stages","workshop_workflows",
+      "workflow_finance_closures","workflow_finance_lines","workflow_finance_phases","workflow_finance_sources","workflow_retired_calendar_jobs",
       "invoice_items","invoices","invoice_sequences","partner_contractors","partners",
       "journal_lines","journal_entries","financial_items","accounts",
       "job_logs","knowledge_base","jobs","planned_jobs","employee_daily_rates",
