@@ -1187,7 +1187,7 @@ body.notification-gate-open{overflow:hidden;overscroll-behavior:none}
   .workflow-shell .workflow-board-filter-row .workflow-board-date{grid-column:auto}
 }
 body[data-current-view="workshop_workflow"] .main-header{display:none}
-body[data-current-view="workshop_workflow"] .main{padding-top:10px}
+body[data-current-view="workshop_workflow"] .main{padding-top:52px}
 .workflow-shell{
   --workflow-board-bg:#071522;
   --workflow-board-panel:#0a1c2d;
@@ -1215,6 +1215,7 @@ body[data-current-view="workshop_workflow"] .main{padding-top:10px}
 .workflow-shell .workflow-toolbar-clock strong{color:#f7f0e3;font-size:21px;font-weight:800}
 .workflow-shell .workflow-toolbar-clock span{color:#e5ebf0;font-size:17px;font-weight:800}
 .workflow-shell .workflow-toolbar-clock time{margin-left:22px;color:#fff;font-size:20px;font-weight:950}
+.workflow-shell .workflow-toolbar-clock .workflow-toolbar-user{margin-top:2px;color:#e6c45e;font-size:15px;font-weight:900;letter-spacing:.01em}
 .workflow-shell .workflow-board-controls{display:grid;grid-template-columns:1fr;gap:20px;margin:0;padding:22px 34px 24px;border:0;border-bottom:1px solid var(--workflow-board-border);border-radius:0;background:#071522}
 .workflow-shell .workflow-day-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 .workflow-shell .workflow-day-actions button{min-height:57px;padding:13px 22px;border:1px solid #41627e;border-radius:9px;background:#0f243a;color:#eef2f4;font-size:17px;font-weight:850;white-space:nowrap}
@@ -1298,7 +1299,7 @@ body[data-current-view="workshop_workflow"] .main{padding-top:10px}
   .workflow-shell .workflow-toolbar,.workflow-shell .workflow-board-controls{padding-inline:22px}
 }
 @media(max-width:900px){
-  body[data-current-view="workshop_workflow"] .main{padding-top:0}
+  body[data-current-view="workshop_workflow"] .main{padding-top:56px}
   .workflow-shell{min-height:0}
   .workflow-shell .workflow-toolbar{grid-template-columns:1fr;min-height:0;padding:22px 18px 20px}
   .workflow-shell .workflow-toolbar-clock{min-width:0}
