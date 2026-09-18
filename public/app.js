@@ -4982,7 +4982,7 @@ function deadlineUrgencyLabel(row){
  return `${bi('Upcoming','Közelgő')} · ${date}`;
 }
 function deadlineTypeLabel(type){return type==='CLIENT_FOLLOWUP'?bi('Client follow-up','Ügyfél megkeresés'):type==='WORKFLOW_STAGE'?bi('Workshop deadline','Műhely határidő'):bi('Calendar job','Naptári munka');}
-function deadlineSubtitleMarkup(row){const phone=row.phone?`<a class="deadline-phone" href="tel:${htmlText(String(row.phone).replace(/[^+\d]/g,''))}" onclick="event.stopPropagation()">${htmlText(row.phone)}</a>`:'';return `${htmlText(row.subtitle||'')}${phone?` · ${phone}`:''}`;}
+function deadlineSubtitleMarkup(row){const phone=row.phone?`<span class="deadline-phone">${htmlText(row.phone)}</span>`:'';return `${htmlText(row.subtitle||'')}${phone?` · ${phone}`:''}`;}
 function deadlineCardMarkup(row,{mobile=false}={}){
  return `<article class="deadline-notification-card urgency-${htmlText(String(row.urgency||'').toLowerCase())} ${mobile?'is-mobile':''}" data-deadline-card="${htmlText(row.id)}" data-entity-type="${htmlText(row.entity_type)}" data-entity-id="${htmlText(row.entity_id)}">
   <div class="deadline-card-head"><span class="deadline-card-icon">${deadlineNotificationIcon(row.entity_type)}</span><div class="deadline-card-title"><small>${htmlText(deadlineTypeLabel(row.entity_type))}</small><strong>${htmlText(row.title||'')}</strong></div></div>
@@ -4996,8 +4996,8 @@ function deadlineCardMarkup(row,{mobile=false}={}){
 function updateDeadlineTaskBadge(count){const badge=document.getElementById('pwa-tasks-badge');if(!badge)return;const safe=Math.max(0,Number(count||0));badge.textContent=safe>99?'99+':String(safe);badge.classList.toggle('hidden',safe===0);}
 function ensureDeadlineStackScaffold(){
  const stack=document.getElementById('floating-notifications-container');if(!stack)return null;
- let list=stack.querySelector('.deadline-stack-list');if(!list){stack.innerHTML=`<div class="deadline-stack-toolbar"><button type="button" class="deadline-snooze-all" data-action="snooze-all-notifications">◷ ${bi('Snooze all notifications','Összes értesítés későbbre')}</button></div><div class="deadline-stack-list"></div>`;list=stack.querySelector('.deadline-stack-list');}
- return {stack,list,toolbar:stack.querySelector('.deadline-stack-toolbar')};
+ let list=stack.querySelector('.deadline-stack-list');if(!list){stack.innerHTML='<div class="deadline-stack-list"></div>';list=stack.querySelector('.deadline-stack-list');}
+ return {stack,list};
 }
 function patchDeadlineCardElement(card,row){
  if(!card)return;['urgency-urgent_overdue','urgency-due_soon','urgency-upcoming'].forEach(name=>card.classList.remove(name));card.classList.add(`urgency-${String(row.urgency||'').toLowerCase()}`);card.dataset.entityType=row.entity_type||'';card.dataset.entityId=row.entity_id||'';
@@ -5006,7 +5006,6 @@ function patchDeadlineCardElement(card,row){
 }
 function renderDeadlineStack(rows=deadlineNotifications){
  const shell=ensureDeadlineStackScaffold();if(!shell)return;const wanted=new Set(rows.map(row=>String(row.id)));
- shell.toolbar?.classList.toggle('hidden',rows.length===0);
  shell.list.querySelectorAll('[data-deadline-card]').forEach(card=>{if(!wanted.has(String(card.dataset.deadlineCard))&&!card.classList.contains('is-leaving')){card.classList.add('is-leaving');setTimeout(()=>card.remove(),270);}});
  rows.forEach(row=>{let card=shell.list.querySelector(`[data-deadline-card="${CSS.escape(String(row.id))}"]`);if(card){patchDeadlineCardElement(card,row);return;}shell.list.insertAdjacentHTML('beforeend',deadlineCardMarkup(row));card=shell.list.lastElementChild;card?.classList.add('is-new');setTimeout(()=>card?.classList.remove('is-new'),280);});
 }
@@ -5025,31 +5024,21 @@ async function renderDeadlineTasks(){await refreshDeadlineNotifications({renderM
 function findDeadlineNotification(cardId){return deadlineNotifications.find(row=>String(row.id)===String(cardId));}
 function toggleDeadlineActionPanel(cardId,mode,event=null){
  const row=findDeadlineNotification(cardId),clickedCard=event?.currentTarget?.closest?.('.deadline-notification-card')||null,card=clickedCard||document.querySelector(`[data-deadline-card="${CSS.escape(String(cardId))}"]`),panel=card?.querySelector?.(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`)||document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row)return;
- if(mode==='reschedule'){
-  if(!panel||!card)return;
-  const alreadyOpen=panel.dataset.mode==='reschedule'&&!panel.classList.contains('hidden');
-  if(alreadyOpen){closeQuickRescheduleScheduler();return;}
-  document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
-  openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:'',anchorCard:card,hostPanel:panel});return;
- }
- if(!panel)return;closeQuickRescheduleScheduler();document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
- const open=panel.dataset.mode===mode&&!panel.classList.contains('hidden');if(open){panel.classList.add('hidden');panel.innerHTML='';panel.dataset.mode='';return;}
- panel.dataset.mode=mode;panel.classList.remove('hidden');panel.innerHTML=`<input type="text" maxlength="2000" data-deadline-note placeholder="${htmlText(bi('Closing note (optional)...','Záró megjegyzés (opcionális)...'))}"><div class="deadline-inline-actions"><button type="button" data-action="confirm-complete-notification">${bi('Confirm','Megerősítés')}</button><button type="button" class="ghost-btn" data-action="cancel-complete-notification">${bi('Cancel','Mégse')}</button></div>`;
+ if(mode!=='reschedule'||!panel||!card)return;
+ const alreadyOpen=panel.dataset.mode==='reschedule'&&!panel.classList.contains('hidden');
+ if(alreadyOpen){closeQuickRescheduleScheduler();return;}
+ document.querySelectorAll('.deadline-inline-panel').forEach(el=>{if(el!==panel){el.classList.add('hidden');el.innerHTML='';el.dataset.mode='';el.closest('.deadline-notification-card')?.classList.remove('is-rescheduling');}});
+ openQuickRescheduleScheduler({entityType:row.entity_type,entityId:row.entity_id,cardId:row.id,initialDate:row.target_date||'',reason:'',clientId:row.entity_type==='CLIENT_FOLLOWUP'?row.entity_id:'',anchorCard:card,hostPanel:panel});
 }
 function animateDeadlineCardOut(cardId,delay=0){setTimeout(()=>document.querySelectorAll(`[data-deadline-card="${CSS.escape(String(cardId))}"]`).forEach(card=>{card.classList.add('is-leaving');setTimeout(()=>card.remove(),270);}),delay);}
-function removeDeadlineNotificationLocal(cardId,{animate=false,delay=0}={}){if(animate)animateDeadlineCardOut(cardId,delay);deadlineNotifications=deadlineNotifications.filter(row=>String(row.id)!==String(cardId));updateDeadlineTaskBadge(deadlineNotifications.length);const shell=ensureDeadlineStackScaffold();shell?.toolbar?.classList.toggle('hidden',deadlineNotifications.length===0);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,Math.max(0,delay)+270);}
+function removeDeadlineNotificationLocal(cardId,{animate=false,delay=0}={}){if(animate)animateDeadlineCardOut(cardId,delay);deadlineNotifications=deadlineNotifications.filter(row=>String(row.id)!==String(cardId));updateDeadlineTaskBadge(deadlineNotifications.length);if(currentView==='tasks')setTimeout(renderDeadlineTasksFromState,Math.max(0,delay)+270);}
 async function snoozeDeadlineNotification(entityType,entityId,cardId){
  animateDeadlineCardOut(cardId);try{await api('/api/notifications/snooze',{method:'POST',body:JSON.stringify({entity_type:entityType,entity_id:entityId})});removeDeadlineNotificationLocal(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}
 }
-async function snoozeAllDeadlineNotifications(){
- const rows=[...deadlineNotifications];if(!rows.length)return;rows.forEach((row,index)=>animateDeadlineCardOut(row.id,index*55));
- try{await Promise.all(rows.map(row=>api('/api/notifications/snooze',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})})));deadlineNotifications=[];updateDeadlineTaskBadge(0);ensureDeadlineStackScaffold()?.toolbar?.classList.add('hidden');setTimeout(()=>{renderDeadlineStack([]);if(currentView==='tasks')renderDeadlineTasksFromState();},rows.length*55+280);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),rows.length*55+360);}catch(error){showError(error);await refreshDeadlineNotifications({renderMobile:currentView==='tasks'});}
-}
-async function completeDeadlineNotification(cardId,sourcePanel=null){
- const row=findDeadlineNotification(cardId),panel=sourcePanel||document.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`);if(!row||!panel)return;const note=panel.querySelector('[data-deadline-note]')?.value||'';
+async function completeDeadlineNotification(cardId){
+ const row=findDeadlineNotification(cardId);if(!row)return;
  try{
-  if(row.entity_type==='WORKFLOW_STAGE'){const existing=String(row.existing_note||'').trim(),merged=[existing,note.trim()?`[${new Date().toISOString()}] ${bi('Completed from Tasks','Teendőkből lezárva')}: ${note.trim()}`:''].filter(Boolean).join('\n');await api(`/api/workflows/${encodeURIComponent(row.workflow_id)}/stages/${encodeURIComponent(row.entity_id)}`,{method:'PATCH',body:JSON.stringify({status:'COMPLETED',notes:merged})});}
-  else await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id,note})});
+  await api('/api/notifications/complete',{method:'POST',body:JSON.stringify({entity_type:row.entity_type,entity_id:row.entity_id})});
   animateDeadlineCardOut(cardId);removeDeadlineNotificationLocal(cardId);setTimeout(()=>refreshDeadlineNotifications({renderMobile:currentView==='tasks'}),300);
  }catch(error){showError(error);}
 }
@@ -5076,16 +5065,13 @@ function bindDeadlineNotificationDelegation(){
   root.dataset.deadlineDelegationBound='true';
   root.addEventListener('click',event=>{
    const control=event.target.closest?.('[data-action]');if(!control||!root.contains(control))return;
-   const action=control.dataset.action;if(!['complete-notification','reschedule-notification','snooze-notification','confirm-complete-notification','cancel-complete-notification','snooze-all-notifications'].includes(action))return;
+   const action=control.dataset.action;if(!['complete-notification','reschedule-notification','snooze-notification'].includes(action))return;
    event.preventDefault();event.stopPropagation();
-   if(action==='snooze-all-notifications'){void snoozeAllDeadlineNotifications();return;}
    const card=control.closest('.deadline-notification-card'),cardId=card?.dataset.deadlineCard,row=cardId?findDeadlineNotification(cardId):null;
    if(!cardId||!row)return;
-   if(action==='complete-notification')toggleDeadlineActionPanel(cardId,'complete',{currentTarget:control});
+   if(action==='complete-notification')void completeDeadlineNotification(cardId);
    else if(action==='reschedule-notification')toggleDeadlineActionPanel(cardId,'reschedule',{currentTarget:control});
    else if(action==='snooze-notification')void snoozeDeadlineNotification(row.entity_type,row.entity_id,cardId);
-   else if(action==='confirm-complete-notification')void completeDeadlineNotification(cardId,card.querySelector(`[data-deadline-panel="${CSS.escape(String(cardId))}"]`));
-   else if(action==='cancel-complete-notification')toggleDeadlineActionPanel(cardId,'complete',{currentTarget:control});
   });
  };
  bind(document.getElementById('floating-notifications-container'));
@@ -5095,7 +5081,7 @@ function initDeadlineNotificationEngine(){
  if(deadlineNotificationPollTimer)clearInterval(deadlineNotificationPollTimer);
  ensureDeadlineStackScaffold();bindDeadlineNotificationDelegation();refreshDeadlineNotifications();deadlineNotificationPollTimer=setInterval(()=>{if(document.visibilityState!=="hidden")refreshDeadlineNotifications({renderMobile:currentView==='tasks'});},60000);
  if(!window.__khDeadlineVisibilityBound){document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&token)refreshDeadlineNotifications({renderMobile:currentView==='tasks'});});window.__khDeadlineVisibilityBound=true;}
- if(!window.__khDeadlineUserSwitchBound){document.addEventListener('user-switched',()=>{closeQuickRescheduleScheduler();deadlineNotifications=[];updateDeadlineTaskBadge(0);const shell=ensureDeadlineStackScaffold();if(shell){shell.list.innerHTML='';shell.toolbar?.classList.add('hidden');}if(currentView==='tasks')renderDeadlineTasksFromState();if(token)void refreshDeadlineNotifications({renderMobile:currentView==='tasks'});});window.__khDeadlineUserSwitchBound=true;}
+ if(!window.__khDeadlineUserSwitchBound){document.addEventListener('user-switched',()=>{closeQuickRescheduleScheduler();deadlineNotifications=[];updateDeadlineTaskBadge(0);const shell=ensureDeadlineStackScaffold();if(shell)shell.list.innerHTML='';if(currentView==='tasks')renderDeadlineTasksFromState();if(token)void refreshDeadlineNotifications({renderMobile:currentView==='tasks'});});window.__khDeadlineUserSwitchBound=true;}
 }
 
 function notificationBellMarkup(id='notificationBell'){
