@@ -58,6 +58,7 @@ function createWorkflowFinance({ db, rid, nowISO = () => new Date().toISOString(
     if (!input || input.line_type !== "COST") return null;
     let line = persisted(input, workflow);
     if (line.accounting_status === "WRITTEN_OFF") return null;
+    if (line.final_journal_entry_id) return db.prepare("SELECT * FROM journal_entries WHERE id=?").get(line.final_journal_entry_id);
     if (!line.wip_journal_entry_id) postWipForLine(line, workflow, actor);
     line = persisted(line, workflow);
     return post({ line, workflow, actor, field: "final_journal_entry_id", status: "RELEASED", debit: "5000", credit: originalWipAccount(line),
@@ -75,6 +76,16 @@ function createWorkflowFinance({ db, rid, nowISO = () => new Date().toISOString(
     return post({ line, workflow, actor, field: "writeoff_journal_entry_id", status: "WRITTEN_OFF", debit: LOSS_ACCOUNT, credit: originalWipAccount(line),
       description: `Abandoned workshop loss: ${line.title} (${workflow.workflow_key || workflow.id})`, memo: clean(reason) || "Debit realized workshop loss; credit the original WIP account" });
   }
+  function settleInternalLine(input, workflow, actor, {aborted=false,reason=""}={}) {
+    const line=persisted(input,workflow);
+    if (line.final_journal_entry_id || line.writeoff_journal_entry_id) return null;
+    if (line.wip_journal_entry_id) return aborted ? writeOffWipForLine(line,workflow,actor,reason) : releaseWipForLine(line,workflow,actor);
+    // New workflows accrue actual outlays only at terminal settlement. A cost
+    // is payable, not cash-paid, until the separate payment process records it.
+    return post({line,workflow,actor,field:aborted?"writeoff_journal_entry_id":"final_journal_entry_id",
+      status:aborted?"WRITTEN_OFF":"RELEASED",debit:aborted?LOSS_ACCOUNT:"5000",credit:"2000",
+      description:`${aborted?"Aborted":"Completed"} workflow cost: ${line.title} (${workflow.id})`,memo:aborted?clean(reason):"Actual workflow cost accrued at final completion; unpaid"});
+  }
   function writeOffStageWip(stage, workflow, actor, reason) {
     const lines = db.prepare("SELECT * FROM workflow_finance_lines WHERE workflow_id=? AND stage_id=? AND line_type='COST' ORDER BY created_at,id").all(workflow.id, stage.id);
     const journalIds = [];
@@ -86,7 +97,7 @@ function createWorkflowFinance({ db, rid, nowISO = () => new Date().toISOString(
     }
     return { lines, journal_entry_ids: journalIds, total: money(total) };
   }
-  return { postWipForLine: db.transaction(postWipForLine), releaseWipForLine: db.transaction(releaseWipForLine),
+  return { settleInternalLine: db.transaction(settleInternalLine), postWipForLine: db.transaction(postWipForLine), releaseWipForLine: db.transaction(releaseWipForLine),
     writeOffWipForLine: db.transaction(writeOffWipForLine), writeOffStageWip: db.transaction(writeOffStageWip), ensureWorkflowAccountingAccounts };
 }
 module.exports = { createWorkflowFinance, WIP_ACCOUNT, LOSS_ACCOUNT };
