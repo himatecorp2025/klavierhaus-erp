@@ -404,12 +404,14 @@ app.use('/api',(req,res,next)=>{
   if(!isSuperadminUser(req.user)) return res.status(403).json({error:'PERMISSION_DENIED'});
   next();
 });
-// Automatic audit trail for all business-changing API requests.
+// Automatic audit trail for all business-changing API requests, including
+// PATCH and superadmin actions. Route-level audit entries remain useful for
+// domain detail; this middleware supplies the complete request envelope.
 app.use('/api',(req,res,next)=>{
-  if(!['POST','PUT','DELETE'].includes(req.method) || req.path==='/login') return next();
+  if(!['POST','PUT','PATCH','DELETE'].includes(req.method) || req.path==='/login') return next();
   const started=Date.now();
   res.on('finish',()=>{
-    if(req.skipAutoAudit || req.path.startsWith('/audit-log') || isSuperadminUser(req.user)) return;
+    if(req.skipAutoAudit || req.path.startsWith('/audit-log')) return;
     const safeBody=redactPasswordFields(req.body||{});
     const isWork=req.path==='/jobs'||req.path.startsWith('/jobs/');
     audit(req,req.method,isWork?'jobs':(req.path.split('/')[1]||'api'),req.params?.id||'',null,safeBody,res.statusCode<400?1:0,`${req.path} (${res.statusCode}) ${Date.now()-started}ms`,isWork?'WORK':'TECHNICAL');
@@ -981,6 +983,10 @@ function canEditJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN" || user.role === "MANAGER") return true;
   return user.role === "WORKER" && isAssignedToUser(job,user);
 }
+function canManageWorkflowStage(user, stage){
+  if(isSuperadminUser(user) || user?.role==='ADMIN') return true;
+  return Boolean(stage?.assigned_user_id && String(stage.assigned_user_id)===String(user?.id));
+}
 function canReassignJob(user, job){
   if(isSuperadminUser(user) || user.role === "ADMIN") return true;
   if(isAssignedToUser(job,user)) return true;
@@ -1264,9 +1270,9 @@ app.post('/api/notifications/:id/acknowledge',auth,(req,res)=>{const row=db.prep
 app.get('/api/notifications/acknowledgements',auth,(req,res)=>{res.json(db.prepare("SELECT id,notification_type,title_en,title_hu,body_en,body_hu,acknowledged_at,created_at FROM notifications WHERE recipient_user_id=? AND status='ACKNOWLEDGED' ORDER BY acknowledged_at DESC,created_at DESC").all(req.user.id));});
 app.post('/api/notifications/message',auth,(req,res)=>{const recipientUserId=String(req.body?.recipient_user_id||'');const message=String(req.body?.message||'').trim();if(!recipientUserId||!message)return res.status(400).json({error:'RECIPIENT_AND_MESSAGE_REQUIRED'});if(message.length>250)return res.status(400).json({error:'MESSAGE_TOO_LONG'});const recipient=db.prepare("SELECT id,name FROM users WHERE id=? AND status='Active'").get(recipientUserId);if(!recipient)return res.status(404).json({error:'RECIPIENT_NOT_FOUND'});const row=createNotification({recipientUserId,senderUserId:req.user.id,type:'DIRECT_MESSAGE',titleEn:`Message from ${req.user.name}`,titleHu:`Üzenet érkezett: ${req.user.name}`,bodyEn:message,bodyHu:message,customMessage:message,metadata:{sender_name:req.user.name}});res.json(row);});
 
-function activeDeadlineNotifications(){
+function activeDeadlineNotifications(userId){
   const now=new Date(),nowIso=now.toISOString(),limit14=nyLocalDateTime(new Date(now.getTime()+14*86400000));
-  const activeSnoozes=db.prepare(`SELECT entity_type,entity_id FROM notification_snooze_log WHERE snoozed_until>?`).all(nowIso);
+  const activeSnoozes=db.prepare(`SELECT entity_type,entity_id FROM notification_snooze_log WHERE user_id=? AND snoozed_until>?`).all(userId,nowIso);
   const snoozed=new Set(activeSnoozes.map(row=>`${row.entity_type}:${row.entity_id}`));
   const notifications=[];
   const push=(row)=>{
@@ -1294,7 +1300,7 @@ function activeDeadlineNotifications(){
 }
 
 app.get('/api/notifications/active',auth,(req,res)=>{
-  try{res.json({ok:true,notifications:activeDeadlineNotifications()});}
+  try{res.json({ok:true,notifications:activeDeadlineNotifications(req.user.id)});}
   catch(error){console.error('Active deadline notification aggregation failed:',error);res.status(500).json({error:'NOTIFICATION_AGGREGATION_FAILED'});}
 });
 
@@ -1302,8 +1308,10 @@ app.post('/api/notifications/snooze',auth,permit('ADMIN','MANAGER','WORKER'),(re
   const entityType=String(req.body?.entity_type||'').trim().toUpperCase(),entityId=String(req.body?.entity_id||'').trim();
   if(!['CLIENT_FOLLOWUP','WORKFLOW_STAGE','CALENDAR_JOB'].includes(entityType)||!entityId)return res.status(400).json({error:'INVALID_NOTIFICATION_ENTITY'});
   const snoozedUntil=new Date(Date.now()+3*60*60*1000).toISOString(),id=rid('NSZ');
-  db.prepare('INSERT INTO notification_snooze_log(id,entity_type,entity_id,snoozed_until) VALUES(?,?,?,?)').run(id,entityType,entityId,snoozedUntil);
-  audit(req,'SNOOZE','notification_snooze_log',id,null,{entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil},1,'Deadline notification snoozed for exactly three hours','TECHNICAL');
+  db.prepare(`INSERT INTO notification_snooze_log(id,user_id,entity_type,entity_id,snoozed_until)
+    VALUES(?,?,?,?,?)
+    ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET snoozed_until=excluded.snoozed_until,created_at=CURRENT_TIMESTAMP`).run(id,req.user.id,entityType,entityId,snoozedUntil);
+  audit(req,'SNOOZE','notification_snooze_log',id,null,{user_id:req.user.id,entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil},1,'Deadline notification snoozed for exactly three hours','TECHNICAL');
   res.json({ok:true,entity_type:entityType,entity_id:entityId,snoozed_until:snoozedUntil,hours:3});
 });
 
@@ -1323,13 +1331,18 @@ app.post('/api/notifications/reschedule',auth,permit('ADMIN','MANAGER','WORKER')
       const updated=run();audit(req,'RESCHEDULE','contacts',entityId,before,updated,1,reason,'TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
     }
     if(entityType==='WORKFLOW_STAGE'){
-      const before=db.prepare(`SELECT s.*,w.current_status FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.id=?`).get(entityId);if(!before)return res.status(404).json({error:'WORKFLOW_STAGE_NOT_FOUND'});
+      const before=db.prepare(`SELECT s.*,w.current_status,w.created_by_user_id FROM workflow_stages s JOIN workshop_workflows w ON w.id=s.workflow_id WHERE s.id=?`).get(entityId);if(!before)return res.status(404).json({error:'WORKFLOW_STAGE_NOT_FOUND'});
       if(before.current_status!=='ACTIVE'||['COMPLETED','NOT_REQUIRED','ABORTED'].includes(String(before.status||'')))return res.status(400).json({error:'WORKFLOW_STAGE_NOT_ACTIVE'});
-      db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(before.delay_reason,reason,'Rescheduled / Újraütemezve'),entityId);
-      db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(before.workflow_id);
-      const updated=db.prepare('SELECT * FROM workflow_stages WHERE id=?').get(entityId);audit(req,'RESCHEDULE','workshop_workflow',entityId,before,updated,1,reason,'WORK');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
+      if(!canManageWorkflowStage(req.user,before))return res.status(403).json({error:'WORKFLOW_STAGE_RESCHEDULE_FORBIDDEN'});
+      const updated=db.transaction(()=>{
+        db.prepare('UPDATE workflow_stages SET due_at=?,delay_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(targetDate,appendNotificationNote(before.delay_reason,reason,'Rescheduled / Újraütemezve'),entityId);
+        db.prepare('UPDATE workshop_workflows SET updated_at=CURRENT_TIMESTAMP WHERE id=?').run(before.workflow_id);
+        return db.prepare('SELECT * FROM workflow_stages WHERE id=?').get(entityId);
+      })();
+      audit(req,'RESCHEDULE','workshop_workflow',entityId,before,updated,1,reason,'WORK');return res.json({ok:true,entity_type:entityType,entity_id:entityId,target_date:targetDate});
     }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
+    if(!canEditJob(req.user,before))return res.status(403).json({error:'JOB_EDIT_FORBIDDEN'});
     if(['Completed','Partially completed','Failed','Cancelled'].includes(String(before.status||'')))return res.status(400).json({error:'JOB_NOT_ACTIVE'});
     if(!isScheduleTime(targetDate))return res.status(400).json({error:'INVALID_SCHEDULE_TIME',interval_minutes:SCHEDULE_INTERVAL_MINUTES});
     const duration=Math.max(SCHEDULE_INTERVAL_MINUTES,domainTimeRangeMinutes(before.start_time,before.end_time)||SCHEDULE_INTERVAL_MINUTES),endTime=notificationJobEnd(targetDate,duration);
@@ -1369,10 +1382,22 @@ app.post('/api/notifications/complete',auth,permit('ADMIN','MANAGER','WORKER'),(
       const result=run();audit(req,'CRM_FOLLOW_UP_COMPLETE','contacts',entityId,before,result.contact,1,note||'CRM follow-up completed from global task notification','TECHNICAL');return res.json({ok:true,entity_type:entityType,entity_id:entityId});
     }
     const before=db.prepare('SELECT * FROM jobs WHERE id=?').get(entityId);if(!before)return res.status(404).json({error:'JOB_NOT_FOUND'});
+    if(!canCloseJob(req.user,before))return res.status(403).json({error:'JOB_CLOSE_FORBIDDEN'});
     if(['Completed','Partially completed','Failed','Cancelled'].includes(String(before.status||'')))return res.json({ok:true,entity_type:entityType,entity_id:entityId,already_completed:true});
     const completionNotes=appendNotificationNote(before.completion_notes,note,'Completed / Elvégezve');
-    db.prepare(`UPDATE jobs SET status='Completed',workflow_status=CASE WHEN COALESCE(workflow_status,'')='FAILED' THEN workflow_status ELSE 'COMPLETED' END,completion_notes=?,completed_at=COALESCE(completed_at,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(completionNotes,new Date().toISOString(),entityId);
-    const updated=db.prepare(jobsSelectSql('WHERE j.id=?')).get(entityId);workAudit(req,'NOTIFICATION_COMPLETE',entityId,before,updated,1,note||'Calendar job completed from global task notification');return res.json({ok:true,entity_type:entityType,entity_id:entityId});
+    jobDomain.closeoutJobOrchestration({
+      jobId:before.id,
+      source:'NOTIFICATION',
+      actor:req.user,
+      closeType:'Full',
+      complete:true,
+      financialEntries:[],
+      mutate:({job,now})=>{
+        db.prepare(`UPDATE jobs SET completion_notes=?,close_notes=COALESCE(NULLIF(close_notes,''),?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(completionNotes,note||'Completed from global task notification',job.id);
+        return {notification_completion:true,completed_at:now};
+      }
+    });
+    const updated=db.prepare(jobsSelectSql('WHERE j.id=?')).get(entityId);workAudit(req,'NOTIFICATION_COMPLETE',entityId,before,updated,1,note||'Calendar job completed through closeout orchestration');return res.json({ok:true,entity_type:entityType,entity_id:entityId,financial_status:updated.financial_status});
   }catch(error){res.status(error.status||400).json({error:error.code||error.message});}
 });
 
@@ -2828,6 +2853,7 @@ app.put("/api/jobs/:id", auth, (req,res)=>{
 app.patch("/api/jobs/:id/schedule", auth, permit("ADMIN","MANAGER","WORKER"), (req,res)=>{
   const job=getJobByAnyId(req.params.id,req.body||{});
   if(!job) return res.status(404).json({error:"JOB_NOT_FOUND"});
+  if(!canEditJob(req.user,job)) return res.status(403).json({error:"JOB_EDIT_FORBIDDEN"});
   const assigned=resolveActiveUser(req.body.assigned_user_id!==undefined?req.body.assigned_user_id:job.assigned_user_id,req.body.assigned_to!==undefined?req.body.assigned_to:job.assigned_to);
   try{
     const result=jobDomain.patchJobSchedule({
@@ -2900,15 +2926,17 @@ app.delete("/api/jobs/:id", auth, requireSuperadmin, (req,res)=>{
     .filter(row=>Number(row.daily_rate_enabled||0)===1&&row.assigned_user_id)
     .map(row=>({userId:row.assigned_user_id,dateStr:String(row.daily_rate_date||row.start_time||'').slice(0,10)}))
     .filter(bucket=>bucket.dateStr);
+  db.transaction(()=>{
+    db.prepare("DELETE FROM financial_items WHERE (job_id=? AND source_type IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','closed_job','job_close_revenue')) OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
+    db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
+    db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
+    db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
+    db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
+    const seenDailyBuckets=new Set();
+    for(const bucket of dailyRateBuckets){const key=`${bucket.userId}|${bucket.dateStr}`;if(seenDailyBuckets.has(key))continue;seenDailyBuckets.add(key);jobDomain.rebalanceDailyRateAllocations(bucket);}
+  })();
   googleCalendar.ignoreDeletedJob(job.id);
   childJobs.forEach(child=>googleCalendar.ignoreDeletedJob(child.id));
-  db.prepare("DELETE FROM financial_items WHERE (job_id=? AND source_type IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','closed_job','job_close_revenue')) OR (source_type='closed_job' AND source_id=?) OR (source_type IN ('job_close_revenue','JOB_REVENUE') AND source_id IN (?,?))").run(job.id, job.id, `JOB_CLOSE:${job.id}`, `JOB_REVENUE:${job.id}`);
-  db.prepare("DELETE FROM knowledge_base WHERE job_id=?").run(job.id);
-  db.prepare("DELETE FROM job_logs WHERE job_id=?").run(job.id);
-  db.prepare("DELETE FROM jobs WHERE parent_job_id=?").run(job.id);
-  db.prepare("DELETE FROM jobs WHERE id=?").run(job.id);
-  const seenDailyBuckets=new Set();
-  for(const bucket of dailyRateBuckets){const key=`${bucket.userId}|${bucket.dateStr}`;if(seenDailyBuckets.has(key))continue;seenDailyBuckets.add(key);jobDomain.rebalanceDailyRateAllocations(bucket);}
   if(job.assigned_user_id && String(job.assigned_user_id)!==String(req.user.id)) createNotification({recipientUserId:job.assigned_user_id,senderUserId:req.user.id,type:'JOB_DELETED',titleEn:'An assigned job was deleted',titleHu:'Töröltek egy hozzád rendelt munkát',bodyEn:jobDescription(job),bodyHu:jobDescription(job),metadata:{deleted_job_id:job.id}});
   res.json({ok:true,deleted_job_id:job.id,deleted_logs:logs.length});
 });
@@ -3301,11 +3329,11 @@ app.put('/api/settings/permissions',auth,permit('ADMIN'),(req,res)=>{
 });
 app.get('/api/audit-log',auth,permit('ADMIN'),(req,res)=>{
   const limit=Math.min(Number(req.query.limit||500),2000); const type=String(req.query.type||'WORK').toUpperCase()==='TECHNICAL'?'TECHNICAL':'WORK';
-  res.json(db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC LIMIT ?").all(type,limit));
+  res.json(db.prepare("SELECT * FROM audit_log WHERE audit_type=? ORDER BY event_time DESC LIMIT ?").all(type,limit));
 });
 app.get('/api/audit-log/export',auth,requireSuperadmin,(req,res)=>{
   const type=String(req.query.type||'WORK').toUpperCase()==='TECHNICAL'?'TECHNICAL':'WORK';
-  const rows=db.prepare("SELECT * FROM audit_log WHERE audit_type=? AND user_role<>'SUPERADMIN' ORDER BY event_time DESC").all(type);
+  const rows=db.prepare("SELECT * FROM audit_log WHERE audit_type=? ORDER BY event_time DESC").all(type);
   const cols=['event_time','user_name','user_role','action','module','record_id','old_value','new_value','success','details']; const escCsv=v=>'"'+String(v??'').replaceAll('"','""')+'"'; const csv=[cols.join(','),...rows.map(r=>cols.map(c=>escCsv(r[c])).join(','))].join('\n'); res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${type==='WORK'?'work-audit':'technical-audit'}.csv"`);res.send('\ufeff'+csv);
 });
 app.delete('/api/audit-log',auth,requireSuperadmin,(req,res)=>{
@@ -3435,6 +3463,11 @@ app.post("/api/system/delete-everything", auth, requireSuperadmin, (req,res)=>{
 });
 
 app.use(uploadErrorHandler);
+app.use((err,req,res,next)=>{
+  if(res.headersSent)return next(err);
+  console.error('Unhandled API error:',err?.stack||err);
+  res.status(500).json({error:'INTERNAL_SERVER_ERROR'});
+});
 scheduleFinancialStatementClose();
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();
