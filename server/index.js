@@ -1152,6 +1152,20 @@ app.post('/api/account-activation/resend',async(req,res)=>{
 });
 app.post("/api/logout",auth,(req,res)=>{db.prepare("UPDATE users SET session_version=COALESCE(session_version,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id);audit(req,'LOGOUT','authentication',req.user.id,null,{session_revoked:true},1,'User logout and session revocation','TECHNICAL');res.json({ok:true});});
 app.get("/api/me", auth, (req,res)=>res.json(req.user));
+app.post("/api/auth/verify-session",auth,async(req,res)=>{
+  req.skipAutoAudit=true;
+  const password=String(req.body?.password||"");
+  if(!password)return res.status(400).json({error:"PASSWORD_REQUIRED"});
+  const owner=db.prepare("SELECT id,password_hash FROM users WHERE id=? AND status='Active'").get(req.user.id);
+  const valid=Boolean(owner?.password_hash)&&await bcryptCompareAsync(password,owner.password_hash);
+  if(!valid){
+    audit(req,'SESSION_REVERIFICATION','authentication',req.user.id,null,{reason:'INVALID_PASSWORD'},0,'Offline-lock password verification failed','TECHNICAL');
+    return res.status(401).json({error:"INVALID_PASSWORD"});
+  }
+  audit(req,'SESSION_REVERIFICATION','authentication',req.user.id,null,{source:'OFFLINE_SECURITY_LOCK'},1,'Offline-lock session verified','TECHNICAL');
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,user:req.user});
+});
 
 app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
 app.get('/api/google-calendar/auth-url',auth,requireSuperadmin,(req,res)=>{
