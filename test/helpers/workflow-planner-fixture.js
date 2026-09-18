@@ -20,7 +20,7 @@ function fixture(){
  const piano=require('../../server/piano-master-data').createPianoMasterData({db,ensurePianoBrand,ensurePianoModel,lookup:values=>require('../../server/piano-reference-engine').centralPianoLookup(db,{...values,currentYear:2026})});
  const user=id=>db.prepare('SELECT * FROM users WHERE id=?').get(id);
  const task=(extra={})=>({title:'Key repair',assignee_ids:['T','T2'],due_at:'2027-10-05T12:00',...extra});
- const body=(extra={})=>({title:'Restoration',client_id:'CL',piano_id:'P1',main_responsible_user_id:'M',start_at:'2027-10-01T09:00',final_due_at:'2027-10-10T17:00',phases:[{stage_code:'MECHANICS',responsible_user_id:'F',due_at:'2027-10-06T17:00',enabled:true,tasks:[task()]}],...extra});
+ const body=(extra={})=>({title:'Restoration',expected_revenue:0,client_id:'CL',piano_id:'P1',main_responsible_user_id:'M',start_at:'2027-10-01T09:00',final_due_at:'2027-10-10T17:00',phases:[{stage_code:'MECHANICS',responsible_user_id:'F',due_at:'2027-10-06T17:00',enabled:true,tasks:[task()]}],...extra});
  const create=(extra={},actor='C')=>engine.create(body(extra),user(actor));
  const snapshot=()=>JSON.stringify(Object.fromEntries(['wf2_workflows','wf2_phases','workshop_subtasks','wf2_task_assignees','jobs','wf2_calendar_links','wf2_audit','pianos','client_pianos','contacts','journal_entries','journal_lines','piano_brands','piano_model_catalog'].map(table=>[table,db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()])));
  return {db,engine,piano,user,task,body,create,snapshot,invoiceEngine,folder,close(){db.close();fs.rmSync(folder,{recursive:true,force:true});}};
