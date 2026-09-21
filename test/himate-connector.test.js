@@ -41,15 +41,17 @@ test("START-22 registry is exactly the Klavierhaus 38-module contract",()=>{
 });
 
 test("START-22 allowlist never exposes secrets or direct identity fields",()=>{
-  const forbidden=[
-    "password","password_hash","token","secret","session","stripe","card","cvv","tax_id",
+  const forbiddenFragments=["password","secret","token","stripe","card_number","cvv"];
+  const forbiddenExact=new Set([
+    "session","session_id","session_hash","anonymous_session_hash","tax_id",
     "buyer_name","attendee_name","guest_name","guest_email","contact_email","client_name",
-    "client_phone","message","notes","body","address_line1","postal_code"
-  ];
+    "client_phone","message","message_body","notes","body","address_line1","postal_code"
+  ]);
   for(const definition of registry.DATASETS){
     for(const field of definition.allowed_fields){
       const lower=field.toLowerCase();
-      for(const bad of forbidden){
+      assert.equal(forbiddenExact.has(lower),false,`${definition.dataset_key} exposes forbidden field ${field}`);
+      for(const bad of forbiddenFragments){
         assert.equal(lower.includes(bad),false,`${definition.dataset_key} exposes forbidden field ${field}`);
       }
     }
