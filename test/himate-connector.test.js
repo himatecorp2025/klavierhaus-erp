@@ -135,3 +135,24 @@ test("heartbeat advertises all 38 known module contracts without secrets",()=>{
   assert.equal(JSON.stringify(modules).includes("token"),false);
   assert.equal(JSON.stringify(modules).includes("secret"),false);
 });
+
+test("START-22 production configuration documents runtime-only connector secrets",()=>{
+  const root=path.join(__dirname,"..");
+  const envExample=fs.readFileSync(path.join(root,".env.example"),"utf8");
+  const readme=fs.readFileSync(path.join(root,"README.md"),"utf8");
+  for(const key of [
+    "HIMATE_CONNECTOR_ENABLED",
+    "HIMATE_CONNECTOR_URL",
+    "HIMATE_CONNECTOR_TOKEN",
+    "HIMATE_CONNECTOR_TIMEOUT_MS"
+  ]){
+    assert.match(envExample,new RegExp(`^${key}=`,"m"),`${key} missing from .env.example`);
+    assert.ok(readme.includes(`\`${key}\``),`${key} missing from README`);
+  }
+  assert.match(envExample,/HIMATE_CONNECTOR_ENABLED=false/);
+  assert.match(envExample,/HIMATE_CONNECTOR_TOKEN=\s*$/m);
+  assert.match(envExample,/runtime secret/i);
+  assert.match(readme,/never store a real value in Git, SQLite, logs or frontend code/i);
+  assert.equal(/HIMATE_CONNECTOR_TOKEN=\S{8,}/.test(envExample),false,".env.example must never contain a real connector token");
+});
+
