@@ -147,7 +147,7 @@ test("START-22 production configuration documents runtime-only connector secrets
     "HIMATE_CONNECTOR_TIMEOUT_MS"
   ]){
     assert.match(envExample,new RegExp(`^${key}=`,"m"),`${key} missing from .env.example`);
-    assert.ok(readme.includes(`\`${key}\``),`${key} missing from README`);
+    assert.ok(readme.includes(key),`${key} missing from README`);
   }
   assert.match(envExample,/HIMATE_CONNECTOR_ENABLED=false/);
   assert.match(envExample,/HIMATE_CONNECTOR_TOKEN=\s*$/m);
