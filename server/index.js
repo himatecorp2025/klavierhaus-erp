@@ -36,6 +36,7 @@ const {createCardNotifications,decorateDeadline}=require('./workflow-card-notifi
 const {registerFinanceResetRoutes}=require('./finance-reset');
 const {registerInvoiceSupportRoutes}=require('./invoice-support');
 const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
+const { createHimateExportAdapter } = require("./himate-connector");
 const { SCHEDULE_INTERVAL_MINUTES, isScheduleTime, isScheduleDurationHours, timeRangeMinutes: domainTimeRangeMinutes, createJobDomain } = require("./job-domain");
 const {
   analyzeClientWorkbook,
@@ -98,6 +99,7 @@ const transactionalEmail=createTransactionalEmail(process.env);
 const accountActivation=createAccountActivationService({db,emailService:transactionalEmail});
 const businessDocuments=createBusinessDocumentService({db,uploadDir:UPLOAD_DIR,transactionalEmail,websiteBaseUrl:process.env.WEBSITE_BASE_URL,env:process.env,invoiceEngineProvider:()=>invoiceEngine});
 const stripeSandbox=createStripeSandbox({db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,onPaymentRecorded:businessDocuments.onPaymentRecorded,onPaymentFulfilled:businessDocuments.onPaymentFulfilled,onPaymentRefunded:businessDocuments.onPaymentRefunded});
+const himateConnector=createHimateExportAdapter({db,env:process.env,sourceVersion:VERSION});
 
 // Database schema and migrations are executed exclusively by server/init-db.js.
 // The application process does not create users, demo data, tables, columns, or indexes.
@@ -800,6 +802,27 @@ function isSuperadminUser(user){ return user && (user.role === "SUPERADMIN" || N
 function canManageCalendarColors(user){ return Boolean(user && (isSuperadminUser(user) || user.role === "ADMIN")); }
 function permit(...roles){ return (req,res,next)=> (isSuperadminUser(req.user) || roles.includes(req.user.role)) ? next() : res.status(403).json({error:"Forbidden"}); }
 function requireSuperadmin(req,res,next){ return isSuperadminUser(req.user) ? next() : res.status(403).json({error:"Superadmin only / Csak szuperadmin"}); }
+
+app.get("/api/system/himate-connector/status",auth,requireSuperadmin,(_req,res)=>{
+  res.json(himateConnector.state());
+});
+app.post("/api/system/himate-connector/sync",auth,requireSuperadmin,async(req,res)=>{
+  try{
+    const moduleKey=String(req.body?.module_key||"").trim();
+    const full=Boolean(req.body?.full);
+    const cadence=String(req.body?.cadence||"").trim().toUpperCase();
+    let result;
+    if(moduleKey) result=await himateConnector.triggerModuleSync(moduleKey);
+    else if(full) result=await himateConnector.sync({full:true});
+    else if(cadence) result=await himateConnector.sync({cadences:[cadence]});
+    else result=await himateConnector.sync({cadences:["HOURLY"]});
+    audit(req,"HIMATE_CONNECTOR_SYNC","system_integrations","HIMATE",null,{module_key:moduleKey,full,cadence,status:result?.last_status||""},1,"HIMATE START-22 connector sync","TECHNICAL");
+    res.json(result);
+  }catch(error){
+    audit(req,"HIMATE_CONNECTOR_SYNC","system_integrations","HIMATE",null,{error:String(error?.message||error)},0,"HIMATE START-22 connector sync failed","TECHNICAL");
+    res.status(502).json({error:"HIMATE_CONNECTOR_SYNC_FAILED",message:String(error?.message||error)});
+  }
+});
 registerEventRoutes({
   app,
   db,
@@ -3463,6 +3486,7 @@ app.use((err,req,res,next)=>{
   console.error('Unhandled API error:',err?.stack||err);
   res.status(500).json({error:'INTERNAL_SERVER_ERROR'});
 });
+himateConnector.start();
 scheduleFinancialStatementClose();
 generateOneHourReminders();
 setInterval(generateOneHourReminders,5*60*1000).unref();

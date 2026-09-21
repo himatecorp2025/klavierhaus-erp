@@ -39,6 +39,23 @@ No demo user is created. Existing production users and the hidden superadmin rem
 - Use HTTPS outside local development. / Helyi fejlesztésen kívül HTTPS szükséges.
 - Run `npm test` and `npm run check` before deployment. / Telepítés előtt futtasd az `npm test` és `npm run check` parancsokat.
 
+## HIMATE START-22 connector / HIMATE START-22 adatkapcsolat
+
+The ERP includes a one-way, privacy-safe Klavierhaus -> HIMATE export adapter. It does **not** give HIMATE direct SQLite access and it does not replicate raw ERP tables. The adapter has an explicit 38-module registry and exports only approved aggregate/business-metadata fields. Passwords, sessions, API/OAuth secrets, invitation/preview tokens, payment credentials and raw customer-message bodies are outside the export contract.
+
+Az ERP egy egyirányú, adatminimalizált Klavierhaus -> HIMATE export adaptert tartalmaz. A HIMATE **nem** kap közvetlen SQLite-hozzáférést, és a rendszer nem másolja át nyersen az ERP tábláit. Az adapter pontosan 38 modul géppel olvasható szerződését használja, és csak jóváhagyott aggregált vagy üzleti metaadatokat továbbít.
+
+Runtime configuration / Futásidejű konfiguráció:
+
+- `HIMATE_CONNECTOR_ENABLED=true` enables scheduled export only after the remaining settings are valid.
+- `HIMATE_CONNECTOR_URL` is the HTTPS HIMATE Gateway origin, without a `/connector/v1` suffix.
+- `HIMATE_CONNECTOR_TOKEN` is the one-time raw partner+environment credential issued by HIMATE. Treat it as a production secret; never store a real value in Git, SQLite, logs or frontend code.
+- `HIMATE_CONNECTOR_TIMEOUT_MS` controls outbound request timeout and defaults to 10000 ms.
+
+The adapter sends a heartbeat and system telemetry every five minutes, operational datasets hourly, and a complete 38-module batch plus reconciliation daily. Batch/reconciliation requests use SHA-512 integrity checks, HMAC-SHA-512 signatures, timestamps and one-time nonces. Manual status/sync endpoints are Superadmin-only: `GET /api/system/himate-connector/status` and `POST /api/system/himate-connector/sync`.
+
+A Connector Protocol v1 implementation-language independent. A future Go-based Klavierhaus backend can implement the same contract without changing HIMATE.
+
 ## Finance scope / A pénzügyi modul hatóköre
 
 The finance module is a simple internal income, expense and management register. It does not implement guaranteed double-entry bookkeeping and does not replace an official accounting system or accountant.
