@@ -156,3 +156,30 @@ test("START-22 production configuration documents runtime-only connector secrets
   assert.equal(/HIMATE_CONNECTOR_TOKEN=\S{8,}/.test(envExample),false,".env.example must never contain a real connector token");
 });
 
+
+
+test("START-22 runtime wiring stays disabled by default and Superadmin-only",()=>{
+  const root=path.join(__dirname,"..");
+  const serverSource=fs.readFileSync(path.join(root,"server","index.js"),"utf8");
+  const envExample=fs.readFileSync(path.join(root,".env.example"),"utf8");
+
+  assert.match(envExample,/^HIMATE_CONNECTOR_ENABLED=false$/m);
+  assert.match(envExample,/^HIMATE_CONNECTOR_TOKEN=\s*$/m);
+
+  assert.match(
+    serverSource,
+    /app\.get\("\/api\/system\/himate-connector\/status",auth,requireSuperadmin,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\("\/api\/system\/himate-connector\/sync",auth,requireSuperadmin,/
+  );
+  assert.match(serverSource,/const himateConnector=createHimateExportAdapter\(\{db,env:process\.env,sourceVersion:VERSION\}\);/);
+  assert.match(serverSource,/himateConnector\.start\(\);/);
+
+  assert.equal(
+    /console\.(?:log|info|warn|error)\([^\n]*HIMATE_CONNECTOR_TOKEN/.test(serverSource),
+    false,
+    "connector token must never be logged"
+  );
+});
