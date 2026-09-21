@@ -59,3 +59,25 @@ jobs:
         run: npm test
       - name: Check website production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  start22-connector:
+    name: START-22 Connector Contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.0
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check START-22 adapter syntax
+        run: |
+          node --check server/himate-connector/registry.js
+          node --check server/himate-connector/protocol.js
+          node --check server/himate-connector/collectors.js
+          node --check server/himate-connector/index.js
+      - name: Run START-22 connector contract tests
+        run: node --test test/himate-connector.test.js
