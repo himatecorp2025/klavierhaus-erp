@@ -7,8 +7,8 @@ const {buildItem}=require("./protocol");
 function n(value){const x=Number(value);return Number.isFinite(x)?x:0;}
 function money(value){return Math.round(n(value)*100)/100;}
 function rate(a,b){return b>0?Math.round((n(a)/n(b))*10000)/10000:0;}
-function row(db,sql,params=[]){try{return db.prepare(sql).get(...params)||{};}catch(_e){return {};}}
-function all(db,sql,params=[]){try{return db.prepare(sql).all(...params)||[];}catch(_e){return [];}}
+function row(db,sql,params=[]){return db.prepare(sql).get(...params)||{};}
+function all(db,sql,params=[]){return db.prepare(sql).all(...params)||[];}
 function count(db,table,where="1=1",params=[]){return n(row(db,`SELECT COUNT(*) c FROM ${table} WHERE ${where}`,params).c);}
 function nyDate(value=new Date()){
   return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(value);
@@ -265,8 +265,7 @@ function collectDataset(db,definition,{now=new Date(),idempotencyPrefix=""}={}){
   return buildItem(definition,data,{
     periodStart:period,
     periodEnd:period,
-    aggregation:"LATEST",
-    idempotencyKey:idempotencyPrefix?undefined:undefined
+    aggregation:"LATEST"
   });
 }
 
