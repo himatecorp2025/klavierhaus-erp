@@ -972,6 +972,33 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
+  stage_key TEXT PRIMARY KEY CHECK(stage_key IN ('received','in_progress','qa_review','admin_approval','completed')),
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 5),
+  label_en TEXT NOT NULL,
+  label_hu TEXT NOT NULL,
+  updated_by_user_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_workflow_phases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  stage_key TEXT NOT NULL CHECK(stage_key IN ('received','in_progress','qa_review','admin_approval','completed')),
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 5),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  due_at TEXT,
+  blocker_code TEXT CHECK(blocker_code IS NULL OR blocker_code IN ('material_procurement','parts_procurement','material_issue','waiting_client','waiting_technician','waiting_admin','waiting_invoice','other')),
+  blocker_note TEXT,
+  activated_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(job_id,stage_key),
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS job_handoffs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,
@@ -1147,6 +1174,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_piano ON jobs(piano_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_intake ON jobs(intake_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_technician ON jobs(assigned_technician_id,stage,scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_job_handoffs_job ON job_handoffs(job_id,created_at,id);
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_definitions_position ON workflow_stage_definitions(position);
+CREATE INDEX IF NOT EXISTS idx_job_workflow_phases_job ON job_workflow_phases(job_id,position);
+CREATE INDEX IF NOT EXISTS idx_job_workflow_phases_due ON job_workflow_phases(enabled,due_at,completed_at);
 CREATE INDEX IF NOT EXISTS idx_job_handoffs_cost_date ON job_handoffs(created_at,job_id);
 CREATE INDEX IF NOT EXISTS idx_partners_name ON partners(lower(company_name),status);
 CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id);
