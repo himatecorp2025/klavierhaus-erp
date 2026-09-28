@@ -267,11 +267,11 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   function overview(monthValue){
     const month=validMonth(monthValue)?String(monthValue):nyDate().slice(0,7),first=month+"-01",next=nextMonth(month)+"-01";
     const laborRevenue=money(db.prepare(`SELECT COALESCE(SUM(subtotal_labor),0) amount FROM invoices
-      WHERE direction='receivable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
+      WHERE deleted_at IS NULL AND direction='receivable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
     const handoffMaterial=money(db.prepare("SELECT COALESCE(SUM(phase_material_cost),0) amount FROM job_handoffs WHERE created_at>=? AND created_at<?").get(first,next).amount);
     const cancelledLabor=money(db.prepare(`SELECT COALESCE(SUM(total_labor_cost),0) amount FROM jobs WHERE cancelled_at>=? AND cancelled_at<?`).get(first,next).amount);
     const directExpense=money(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM direct_expenses WHERE expense_date>=? AND expense_date<?").get(first,next).amount);
-    const vendorCost=money(db.prepare(`SELECT COALESCE(SUM(total_amount),0) amount FROM invoices WHERE direction='payable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
+    const vendorCost=money(db.prepare(`SELECT COALESCE(SUM(total_amount),0) amount FROM invoices WHERE deleted_at IS NULL AND direction='payable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
     const materialDirectCost=money(handoffMaterial+cancelledLabor+directExpense+vendorCost);
     const net=money(laborRevenue-materialDirectCost);
     const outstanding=db.prepare(`SELECT COUNT(*) count,COALESCE(SUM(total_amount),0) amount FROM invoices
@@ -365,7 +365,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     }catch(error){respondError(res,error);}
   });
   app.put("/api/invoices/:id",auth,financeAdmin,(req,res)=>{
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     if(before.status!=="draft")return res.status(409).json({error:"ONLY_DRAFT_INVOICE_EDITABLE"});
     try{
       const taxRate=Number(req.body?.tax_rate??before.tax_rate);
@@ -422,14 +422,14 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   });
 
   app.post("/api/invoices/:id/send-email",auth,financeAdmin,async(req,res)=>{
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     try{
       const after=await sendInvoice(id,req.user,req.body?.language,req.body?.recipient_email);audit(req,"SEND_EMAIL","invoices",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
 
   app.post("/api/invoices/:id/mark-paid",auth,financeReader,(req,res)=>{
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     try{
       if(before.status==="paid")return res.json({ok:true,idempotent:true,invoice:before});
       if(before.status!=="sent")throw problem("INVOICE_NOT_SENT",409);
@@ -446,7 +446,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   });
 
   app.post("/api/invoices/:id/cancel",auth,financeAdmin,(req,res)=>{
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     if(before.status==="paid")return res.status(409).json({error:"PAID_INVOICE_CANNOT_BE_CANCELLED"});
     const reason=text(req.body?.reason,2000);if(!reason)return res.status(400).json({error:"CANCEL_REASON_REQUIRED"});
     db.prepare(`UPDATE invoices SET status='cancelled',cancelled_at=CURRENT_TIMESTAMP,cancelled_by_user_id=?,cancel_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
@@ -455,7 +455,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   });
   app.post("/api/invoices/:id/void",auth,financeAdmin,(req,res)=>{
     req.body={...(req.body||{}),reason:req.body?.reason||"Legacy void action"};
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     if(before.status==="paid")return res.status(409).json({error:"PAID_INVOICE_CANNOT_BE_CANCELLED"});
     db.prepare("UPDATE invoices SET status='cancelled',cancelled_at=CURRENT_TIMESTAMP,cancelled_by_user_id=?,cancel_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(req.user.id,text(req.body.reason,2000),id);
@@ -486,7 +486,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
 
   app.get("/api/invoices/:id/pdf",auth,financeReader,(req,res)=>{
     try{
-      const invoice=invoiceDetail(integerId(req.params.id));if(!invoice)throw problem("INVOICE_NOT_FOUND",404);
+      const invoice=invoiceDetail(integerId(req.params.id));if(!invoice||invoice.deleted_at)throw problem("INVOICE_NOT_FOUND",404);
       const persisted=persistPdf(invoice.id);
       res.type("application/pdf").set("Content-Disposition",`attachment; filename="${invoice.invoice_number}.pdf"`).send(persisted.pdf);
     }catch(error){respondError(res,error);}
@@ -515,7 +515,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   app.get("/api/finance/ledger",auth,financeReader,(req,res)=>{
     const month=validMonth(req.query.month)?String(req.query.month):nyDate().slice(0,7),first=month+"-01",next=nextMonth(month)+"-01";
     const invoiceRows=db.prepare(`SELECT id,invoice_number,direction,issue_date entry_date,total_amount amount,counterparty_name,summary,status FROM invoices
-      WHERE status<>'cancelled' AND issue_date>=? AND issue_date<? ORDER BY issue_date,id`).all(first,next)
+      WHERE deleted_at IS NULL AND status<>'cancelled' AND issue_date>=? AND issue_date<? ORDER BY issue_date,id`).all(first,next)
       .map(row=>({...row,entry_type:"invoice",account:row.direction==="receivable"?"Accounts Receivable":"Accounts Payable"}));
     const expenseRows=db.prepare("SELECT id,expense_date entry_date,amount,category counterparty_name,description summary FROM direct_expenses WHERE expense_date>=? AND expense_date<? ORDER BY expense_date,id").all(first,next)
       .map(row=>({...row,entry_type:"direct_expense",account:"Direct Expense"}));
@@ -525,8 +525,8 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     try{
       const month=validMonth(req.query.month)?String(req.query.month):nyDate().slice(0,7),stats=overview(month),info=company(),logoPath=resolveLogoPath(info.logo_url,uploadDir);
       const first=month+"-01",next=nextMonth(month)+"-01";
-      const rows=db.prepare(`${selectInvoice} WHERE i.status<>'cancelled' AND i.issue_date>=? AND i.issue_date<? ORDER BY i.issue_date,i.invoice_number`).all(first,next);
-      const carried=db.prepare(`${selectInvoice} WHERE i.direction='receivable' AND i.status IN ('draft','sent') AND i.issue_date<? ORDER BY i.due_date,i.invoice_number`).all(first);
+      const rows=db.prepare(`${selectInvoice} WHERE i.deleted_at IS NULL AND i.status<>'cancelled' AND i.issue_date>=? AND i.issue_date<? ORDER BY i.issue_date,i.invoice_number`).all(first,next);
+      const carried=db.prepare(`${selectInvoice} WHERE i.deleted_at IS NULL AND i.direction='receivable' AND i.status IN ('draft','sent') AND i.issue_date<? ORDER BY i.due_date,i.invoice_number`).all(first);
       const pdf=generateMonthlyInvoiceReportPdf({
         company:info,month,summary:{revenue:stats.kpis.labor_revenue,costs:stats.kpis.material_direct_cost,net:stats.kpis.net_workshop_result},
         paymentBreakdown:[],carried,invoices:rows,logoPath
