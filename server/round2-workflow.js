@@ -153,10 +153,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const siteAddress=text(body?.site_address??body?.service_address??defaults.site_address??(locationType==="on_site"?client.address:""),1200)||null;
     const info=db.prepare(`INSERT INTO jobs(
       job_code,client_id,piano_id,intake_id,title,description,location_type,site_address,scheduled_at,estimated_duration_min,stage,
-      assigned_technician_id,total_labor_cost,total_material_cost,internal_notes,created_by_user_id,created_at,updated_at
-    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+      assigned_technician_id,total_labor_cost,total_material_cost,estimated_revenue,internal_notes,created_by_user_id,created_at,updated_at
+    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
       clientId,pianoId,intakeId,title,text(body?.description??defaults.description,10000)||null,locationType,siteAddress,scheduledAt,duration,stage,
-      assigned?.id||null,text(body?.internal_notes??defaults.internal_notes,10000)||null,req.user.id
+      assigned?.id||null,Math.max(0,Number(body?.estimated_revenue??defaults.estimated_revenue??0)||0),text(body?.internal_notes??defaults.internal_notes,10000)||null,req.user.id
     );
     const id=Number(info.lastInsertRowid);
     db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${newYorkYear()}-${String(id).padStart(5,"0")}`,id);
@@ -184,7 +184,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       site_address:body?.site_address||converted.client.address,
       assigned_technician_id:body?.assigned_technician_id||converted.lead.assigned_technician_id,
       estimated_duration_min:body?.estimated_duration_min||120,
-      workflow_phases:body?.workflow_phases
+      estimated_revenue:body?.estimated_revenue??converted.lead.estimated_total??0,
+      workflow_phases:body?.workflow_phases,
+      scheduled_at:body?.scheduled_at,
+      site_address:body?.site_address||converted.client.address
     },req);
     return {idempotent:false,job,client:converted.client,piano:converted.piano,lead:converted.lead};
   }
