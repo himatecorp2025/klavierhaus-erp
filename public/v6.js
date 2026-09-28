@@ -257,16 +257,35 @@ async function v6RenderBranding(){
   const host=$("#cmsMain");
   const [branding,assets,design,globalEn]=await Promise.all([api("/api/settings/branding"),api("/api/settings/branding/assets"),api("/api/website-design-settings"),api("/api/website-content/global?lang=en")]);
   const publicFavicon=globalEn.content?.brand?.logoImage||"";
+  const palette=[
+    ["black",tr("Primary dark","Elsődleges sötét"),design.black||"#080807"],
+    ["ivory",tr("Ivory","Elefántcsont"),design.ivory||"#f2efe8"],
+    ["cream",tr("Cream","Krém"),design.cream||"#e8e1d5"],
+    ["gold",tr("Accent","Kiemelő szín"),design.gold||"#b79a60"],
+    ["gold_bright",tr("Bright accent","Világos kiemelés"),design.gold_bright||"#d9bd7a"],
+    ["muted",tr("Muted text","Másodlagos szöveg"),design.muted||"#aaa49a"]
+  ];
   host.innerHTML=`<div class="branding-grid">
     ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Header logo on the public website.","A publikus weboldal fejlécében használt logó."))}
     ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),publicFavicon,tr("Browser tab icon. Stored through the existing global website content.","Böngészőfül ikon. A meglévő globális weboldaltartalmon keresztül tárolva."))}
     ${v6BrandAssetCard("erpLogo",tr("ERP logo","ERP logó"),branding.logo_url,tr("Logo used by login and the admin shell.","A login és az adminfelület logója."))}
     ${v6BrandAssetCard("appIcon",tr("PWA / app icon","PWA / alkalmazásikon"),assets.app_icon_url,tr("Installed app icon and touch icon.","Telepített alkalmazás és touch ikon."))}
     ${v6BrandAssetCard("loginBackground",tr("Login background","Login háttérkép"),branding.login_background_url,tr("Responsive background image behind the login card.","Reszponzív háttérkép a login kártya mögött."))}
-  </div>`;
+  </div>
+  <section class="panel website-design-panel"><div class="panel-head"><div><span class="eyebrow">${tr("PUBLIC WEBSITE DESIGN","PUBLIKUS WEBOLDAL DIZÁJN")}</span><h2>${tr("Colors & typography","Színek és tipográfia")}</h2></div></div>
+    <form id="websiteDesignForm" class="website-design-form">
+      <div class="design-color-grid">${palette.map(([key,label,value])=>`<label class="design-color-field"><input type="color" name="${key}" value="${esc(value)}"><span><strong>${esc(label)}</strong><small>${esc(value)}</small></span></label>`).join("")}</div>
+      <div class="form-grid design-font-grid"><label class="field"><span>${tr("Display font","Címbetűtípus")}</span><input name="display" value="${esc(design.display||"Cormorant Garamond")}"></label><label class="field"><span>${tr("Body font","Szövegbetűtípus")}</span><input name="sans" value="${esc(design.sans||"Inter")}"></label></div>
+      <div class="form-actions"><button class="primary-button" type="submit">${tr("Save website design","Weboldal-dizájn mentése")}</button></div>
+    </form>
+  </section>`;
   async function uploadWebsite(file){return (await v6UploadWebsiteImage(file)).image_url;}
   async function uploadBranding(endpoint,field,file){const form=new FormData();form.append(field,file);const out=await api(endpoint,{method:"POST",body:form});return out.url||out.logo_url||out.login_background_url;}
-  $$("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
+  $("#websiteDesignForm")?.addEventListener("submit",async event=>{
+    event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));
+    try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
+  });
+  $("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0],kind=event.currentTarget.dataset.brandFile;if(!file)return;
     try{
       if(kind==="websiteLogo"){const url=await uploadWebsite(file);await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,logo_url:url})});}
