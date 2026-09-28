@@ -160,7 +160,7 @@ function v6BindCmsFields(){
   $$("[data-cms-image-upload]",host).forEach(input=>input.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0];if(!file)return;
     const path=v6CmsPathRead(event.currentTarget.dataset.cmsImageUpload);
-    try{const uploaded=await v6UploadWebsiteImage(file);v6CmsSet(path,uploaded.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");v6RenderCmsFields();}catch(error){toast(humanError(error),"error");}
+    try{const uploaded=await v6UploadWebsiteImage(file);v6CmsSet(path,uploaded.absolute_url||uploaded.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");v6RenderCmsFields();}catch(error){toast(humanError(error),"error");}
   }));
   $$("[data-cms-image-remove]",host).forEach(button=>button.addEventListener("click",()=>{v6CmsSet(v6CmsPathRead(button.dataset.cmsImageRemove),"");v6RenderCmsFields();}));
   for(const axis of ["x","y"])$(`[data-cms-focal-${axis}]`,host).forEach(input=>input.addEventListener("input",event=>{
@@ -192,7 +192,7 @@ async function v6LoadCmsPage(){
 
 function v6MediaUrlCard(url){return url?`<div class="collection-image-preview"><img src="${esc(url)}" alt=""></div>`:`<div class="collection-image-preview empty">＋</div>`;}
 async function v6CollectionImageUpload(input,setter){
-  const file=input.files?.[0];if(!file)return;try{const result=await v6UploadWebsiteImage(file);setter(result.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");}catch(error){toast(humanError(error),"error");}
+  const file=input.files?.[0];if(!file)return;try{const result=await v6UploadWebsiteImage(file);setter(result.absolute_url||result.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");}catch(error){toast(humanError(error),"error");}
 }
 function v6GalleryParse(value){try{const rows=Array.isArray(value)?value:JSON.parse(value||"[]");return rows.map(item=>typeof item==="string"?{url:item,alt_en:"",alt_hu:""}:item).filter(item=>item?.url);}catch(_error){return [];}}
 function v6GalleryMarkup(rows){
@@ -218,7 +218,7 @@ async function v6OpenCollectionEditor(type,row=null,refresh){
   $("#collectionImageFile").addEventListener("change",event=>v6CollectionImageUpload(event.currentTarget,url=>{image=url;$("#collectionMainImage").querySelector(".collection-image-preview").outerHTML=v6MediaUrlCard(image);}));
   function bindGallery(){
     if(!def.gallery)return;
-    $("#galleryFiles")?.addEventListener("change",async event=>{for(const file of [...event.currentTarget.files||[]]){try{const up=await v6UploadWebsiteImage(file);gallery.push({url:up.image_url,alt_en:"",alt_hu:""});}catch(error){toast(humanError(error),"error");}}$("#collectionGallery").innerHTML=v6GalleryMarkup(gallery);bindGallery();});
+    $("#galleryFiles")?.addEventListener("change",async event=>{for(const file of [...event.currentTarget.files||[]]){try{const up=await v6UploadWebsiteImage(file);gallery.push({url:up.absolute_url||up.image_url,alt_en:"",alt_hu:""});}catch(error){toast(humanError(error),"error");}}$("#collectionGallery").innerHTML=v6GalleryMarkup(gallery);bindGallery();});
     $$("[data-gallery-remove]").forEach(button=>button.addEventListener("click",()=>{gallery.splice(Number(button.dataset.galleryRemove),1);$("#collectionGallery").innerHTML=v6GalleryMarkup(gallery);bindGallery();}));
   }
   bindGallery();
@@ -279,7 +279,7 @@ async function v6RenderBranding(){
       <div class="form-actions"><button class="primary-button" type="submit">${tr("Save website design","Weboldal-dizájn mentése")}</button></div>
     </form>
   </section>`;
-  async function uploadWebsite(file){return (await v6UploadWebsiteImage(file)).image_url;}
+  async function uploadWebsite(file){const out=await v6UploadWebsiteImage(file);return out.absolute_url||out.image_url;}
   async function uploadBranding(endpoint,field,file){const form=new FormData();form.append(field,file);const out=await api(endpoint,{method:"POST",body:form});return out.url||out.logo_url||out.login_background_url;}
   $("#websiteDesignForm")?.addEventListener("submit",async event=>{
     event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));
@@ -289,7 +289,7 @@ async function v6RenderBranding(){
     const file=event.currentTarget.files?.[0],kind=event.currentTarget.dataset.brandFile;if(!file)return;
     try{
       if(kind==="websiteLogo"){const url=await uploadWebsite(file);await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,logo_url:url})});}
-      else if(kind==="websiteFavicon"){await v6SetGlobalFavicon(await uploadWebsite(file));}
+      else if(kind==="websiteFavicon"){const form=new FormData();form.append("file",file);const out=await api("/api/settings/branding/favicon",{method:"POST",body:form});await v6SetGlobalFavicon(out.absolute_url||out.url);}
       else if(kind==="erpLogo"){await uploadBranding("/api/settings/branding/logo","logo",file);}
       else if(kind==="appIcon"){await uploadBranding("/api/settings/branding/app-icon","file",file);}
       else if(kind==="loginBackground"){await uploadBranding("/api/settings/branding/background","background",file);}
