@@ -309,7 +309,10 @@ app.delete("/api/users/:id",auth,permit("ADMIN"),(req,res)=>{
     if(adminCount<=1)return res.status(409).json({error:"LAST_ADMIN_CANNOT_BE_DELETED"});
   }
   const before=safeUser(row);
-  db.prepare("DELETE FROM users WHERE id=?").run(row.id);audit(req,"DELETE","users",row.id,before,null);res.json({ok:true});
+  const deletedEmail=`deleted.${String(row.id).replace(/[^A-Za-z0-9_-]/g,"").slice(0,80)}.${Date.now()}@invalid.klavierhaus`;
+  db.prepare(`UPDATE users SET status='Inactive',hidden_user=1,email=?,contact_email=NULL,session_version=COALESCE(session_version,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(deletedEmail,row.id);
+  audit(req,"DELETE","users",row.id,before,{soft_deleted:true});res.json({ok:true,soft_deleted:true});
 });
 
 app.get("/api/settings/branding",auth,permit("ADMIN"),(_req,res)=>res.json(getBranding()));
