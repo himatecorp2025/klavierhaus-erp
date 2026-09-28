@@ -69,7 +69,13 @@ function humanError(error){
     INVOICE_NOT_SENT:["Only a sent invoice can be marked paid.","Csak elküldött számla jelölhető fizetettnek."],INVALID_PAYMENT_METHOD:["Choose a valid payment method.","Válassz érvényes fizetési módot."],
     PAID_INVOICE_CANNOT_BE_CANCELLED:["A paid invoice cannot be cancelled.","Fizetett számla nem érvényteleníthető."],PARTNER_HAS_INVOICES:["This partner is linked to invoices.","A partner számlához kapcsolódik."],
     SUPERADMIN_REQUIRED:["Super Admin permission is required.","Super Admin jogosultság szükséges."],INVALID_INTAKE_MEDIA_TYPE:["Use a supported photo or video file.","Támogatott fotó- vagy videófájlt válassz."],
-    TOO_MANY_INTAKE_MEDIA:["Maximum 20 media links are allowed.","Legfeljebb 20 média csatolható."],INVALID_INTAKE_MEDIA_URL:["Invalid media URL.","Érvénytelen média URL."]
+    TOO_MANY_INTAKE_MEDIA:["Maximum 20 media links are allowed.","Legfeljebb 20 média csatolható."],INVALID_INTAKE_MEDIA_URL:["Invalid media URL.","Érvénytelen média URL."],
+    WORKFLOW_REQUIRES_ACTIVE_PHASE:["Choose at least one working phase before Completed.","A Lezárva előtt legalább egy munkafázist válassz."],
+    WORKFLOW_LABEL_REQUIRED:["Both English and Hungarian workflow names are required.","Az angol és magyar fázisnév is kötelező."],
+    CURRENT_WORKFLOW_PHASE_REQUIRED:["The current phase cannot be removed from an active workflow.","Az aktuális fázis nem távolítható el az aktív munkafolyamatból."],
+    INVALID_BLOCKER_CODE:["Choose a valid delay reason.","Válassz érvényes elakadási okot."],
+    INVALID_WORKFLOW_DUE_AT:["The phase deadline is invalid.","A fázis határideje érvénytelen."],
+    JOB_NOT_READY_FOR_CLOSEOUT:["Complete the remaining enabled phases first.","Előbb zárd le a még aktív munkafázisokat."]
   };
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
