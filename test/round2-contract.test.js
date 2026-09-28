@@ -43,3 +43,22 @@ test("Round 2 route module owns Planned Jobs, Workshop and Calendar APIs",()=>{
   for(const state of ["planned","scheduled","in_progress","blocked","ready_for_closeout"])assert.ok(source.includes(`key: "${state}"`),state);
   assert.doesNotMatch(server,/registerWorkshopWorkflowRoutes|registerWorkflowV2|registerBusinessOperationsRoutes|createJobDomain/);
 });
+
+
+test("Round 2 PWA activates Planned Jobs and Workshop while Finance remains Round 3",()=>{
+  const html=read("public/index.html"),app=read("public/app.js"),round2=read("public/round2.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
+  assert.match(html,/data-nav="workshop"/);
+  assert.match(html,/data-nav="planned"/);
+  assert.match(html,/Pénzügy<small>3\. kör<\/small>/);
+  assert.ok(html.includes("/round2.js"));
+  for(const label of ["Tervezett","Ütemezett","Folyamatban","Blokkolva","Lezárásra vár"])assert.ok(round2.includes(label),label);
+  assert.match(round2,/\/api\/planned-jobs/);
+  assert.match(round2,/\/api\/workshop/);
+  assert.match(round2,/\/api\/calendar/);
+  assert.match(round2,/data-drop-stage/);
+  assert.match(css,/\.workflow-board/);
+  assert.match(css,/\.calendar-grid/);
+  assert.match(css,/min-height:48px/);
+  assert.match(sw,/klavierhaus-round2-shell-v1/);
+  assert.match(app,/createJobFromIntake/);
+});
