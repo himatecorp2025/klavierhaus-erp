@@ -73,10 +73,19 @@
         <button type="button" class="nav-item" data-nav="cms"><span>🌐</span><span data-i18n="nav_cms">Website CMS</span></button>
       </nav>
 
-      <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
-      <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings">
-        <span id="profileInitials">KH</span>
-      </button>
+      <div class="header-tools">
+        <div class="ny-clock" aria-live="off">
+          <span data-i18n="new_york_time">New York time</span>
+          <strong id="newYorkClock">--:--</strong>
+          <small id="newYorkDate">---</small>
+        </div>
+        <div class="header-actions">
+          <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
+          <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings">
+            <span id="profileInitials">KH</span>
+          </button>
+        </div>
+      </div>
     </header>
 
     <main id="workspace" class="workspace" tabindex="-1"></main>
@@ -99,7 +108,7 @@
           <span id="dialogEyebrow" class="eyebrow"></span>
           <h2 id="dialogTitle"></h2>
         </div>
-        <button class="icon-button" value="cancel" aria-label="Bezárás" type="submit">×</button>
+        <button class="icon-button dialog-close-button" data-dialog-close type="button" aria-label="Close">×</button>
       </header>
       <div id="dialogBody" class="dialog-body"></div>
     </form>
