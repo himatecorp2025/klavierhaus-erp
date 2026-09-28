@@ -29,7 +29,10 @@ function v6ApplyTheme(theme,{save=false}={}){
     void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme:next})}).catch(error=>toast(humanError(error),"error"));
   }
 }
-function v6ToggleTheme(){v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:true});}
+function v6ToggleTheme(){
+  if(!state.user)state.v6LoginThemeTouched=true;
+  v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:Boolean(state.user)});
+}
 function v6SidebarKey(){return state.user?.id?`kh_sidebar_collapsed_${state.user.id}`:"kh_sidebar_collapsed";}
 function v6ApplySidebar(){
   const collapsed=localStorage.getItem(v6SidebarKey())==="1";
@@ -55,14 +58,20 @@ function v6BindShell(){
 showLogin=function(){
   v6Original.showLogin();
   state.user=null;
+  state.v6LoginThemeTouched=false;
   v6ApplyTheme(localStorage.getItem("kh_login_theme")==="light"?"light":"dark");
 };
 setSession=function(payload){
+  const loginTheme=document.documentElement.dataset.theme==="light"?"light":"dark";
+  const loginChoiceTouched=Boolean(state.v6LoginThemeTouched);
   v6Original.setSession(payload);
   state.user=payload.user;
   const saved=localStorage.getItem(`kh_theme_user_${state.user.id}`);
-  const theme=state.user.theme_preference||saved||"dark";
+  const theme=loginChoiceTouched?loginTheme:(state.user.theme_preference||saved||"dark");
+  state.user.theme_preference=theme;
   v6ApplyTheme(theme);
+  state.v6LoginThemeTouched=false;
+  if(loginChoiceTouched)void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme})}).catch(()=>{});
 };
 showApp=function(){
   v6Original.showApp();
