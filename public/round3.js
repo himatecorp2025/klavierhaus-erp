@@ -152,7 +152,7 @@ function r3InvoiceRow(invoice){
       (invoice.direction==="receivable"&&invoice.status==="draft"&&admin?"<button class='secondary-button' type='button' data-edit-invoice='"+invoice.id+"'>"+tr("Review / Edit","Átnézés / módosítás")+"</button><button class='primary-button' type='button' data-send-invoice='"+invoice.id+"'>"+tr("Approve & Send","Jóváhagyás és küldés")+"</button>":"")+
       (invoice.status==="sent"?"<button class='primary-button' type='button' data-pay-invoice='"+invoice.id+"'>"+tr("Mark Paid","Kiegyenlítés rögzítése")+"</button>":"")+
       (admin&&!["paid","cancelled"].includes(invoice.status)?"<button class='danger-button' type='button' data-cancel-invoice='"+invoice.id+"'>"+tr("Cancel","Érvénytelenítés")+"</button>":"")+
-      (superadmin?"<button class='danger-button' type='button' data-delete-invoice='"+invoice.id+"'>"+tr("Delete / Archive","Törlés / Archívum")+"</button>":"")+
+      (superadmin&&["draft","cancelled"].includes(invoice.status)?"<button class='danger-button' type='button' data-delete-invoice='"+invoice.id+"'>"+tr("Delete / Archive","Törlés / Archívum")+"</button>":"")+
     "</div></article>";
 }
 function r3BindInvoiceActions(root,invoices,refresh=renderFinance){
