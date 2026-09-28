@@ -55,6 +55,14 @@ if (legacyPianosDetected) {
   console.log("[ROUND1] Legacy pianos table isolated for migration");
 }
 
+const currentJobColumns = columns("jobs");
+const legacyJobsDetected = tableExists("jobs") && !(currentJobColumns.has("client_id") && currentJobColumns.has("piano_id") && currentJobColumns.has("scheduled_start") && currentJobColumns.has("ready_for_closeout_at"));
+if (legacyJobsDetected) {
+  if (tableExists("_round2_legacy_jobs")) db.exec('DROP TABLE "_round2_legacy_jobs"');
+  db.exec('ALTER TABLE "jobs" RENAME TO "_round2_legacy_jobs"');
+  console.log("[ROUND2] Legacy jobs table isolated; Round 1 safety backup retains the retired data.");
+}
+
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
@@ -133,7 +141,7 @@ function migrateLegacyMasterData() {
 
 db.transaction(migrateLegacyMasterData)();
 
-const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads"]);
+const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads","jobs"]);
 for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all()) {
   if (row.type === "view") {
     db.exec(`DROP VIEW IF EXISTS ${quoteName(row.name)}`);
@@ -145,6 +153,8 @@ for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN 
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 setSetting("round1_core_migration_complete", "1");
 setSetting("round1_schema_version", "1");
+setSetting("round2_workflow_migration_complete", "1");
+setSetting("round2_schema_version", "2");
 
 db.pragma("foreign_keys = ON");
 const fk = db.prepare("PRAGMA foreign_key_check").all();
@@ -152,5 +162,5 @@ if (fk.length) throw new Error(`ROUND1_FOREIGN_KEY_CHECK_FAILED:${JSON.stringify
 const integrity = db.prepare("PRAGMA integrity_check").get();
 if (String(integrity?.integrity_check || "").toLowerCase() !== "ok") throw new Error("ROUND1_INTEGRITY_CHECK_FAILED");
 
-console.log(`[ROUND1] Database ready: clients=${db.prepare("SELECT COUNT(*) c FROM clients").get().c}, pianos=${db.prepare("SELECT COUNT(*) c FROM pianos").get().c}, intake=${db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c}`);
+console.log(`[ROUND2] Database ready: clients=${db.prepare("SELECT COUNT(*) c FROM clients").get().c}, pianos=${db.prepare("SELECT COUNT(*) c FROM pianos").get().c}, intake=${db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c}, jobs=${db.prepare("SELECT COUNT(*) c FROM jobs").get().c}`);
 db.close();
