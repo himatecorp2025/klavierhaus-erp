@@ -49,6 +49,15 @@ function round3MigrationBackup() {
   console.log(`[ROUND3] Safety backup created: ${target}`);
   return target;
 }
+function finalComplianceBackup() {
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("final_compliance_migration_complete") === "1") return null;
+  try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(backupDir, `final-compliance-pre-migration-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath, target);
+  console.log(`[COMPLIANCE] Safety backup created: ${target}`);
+  return target;
+}
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
 }
@@ -59,6 +68,7 @@ function legacyValue(row, ...names) {
 
 preMigrationBackup();
 round3MigrationBackup();
+finalComplianceBackup();
 
 const legacyPianoColumns = columns("pianos");
 const legacyPianosDetected = tableExists("pianos") && (!legacyPianoColumns.has("client_id") || legacyPianoColumns.has("owner_contact_id") || legacyPianoColumns.has("serial_no"));
