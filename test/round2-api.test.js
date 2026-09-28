@@ -115,18 +115,27 @@ test("technician overlap is rejected without creating duplicate calendar state",
   const clients=await request("/api/clients?q=Round%20Two",{token});
   const client=clients.payload[0];
   const pianos=await request(`/api/clients/${client.id}/pianos`,{token});
+  const anchor=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:client.id,piano_id:pianos.payload[0].id,title:"Active anchor job",assigned_technician_id:"U-TECH-A"
+  }});
+  assert.equal(anchor.status,201,JSON.stringify(anchor.payload));
+  const anchorSchedule=await request(`/api/jobs/${anchor.payload.id}/schedule`,{token,method:"PATCH",body:{
+    assigned_technician_id:"U-TECH-A",scheduled_start:"2030-04-11T14:00:00.000Z",scheduled_end:"2030-04-11T16:00:00.000Z"
+  }});
+  assert.equal(anchorSchedule.status,200,JSON.stringify(anchorSchedule.payload));
+
   const second=await request("/api/jobs",{token,method:"POST",body:{
     client_id:client.id,piano_id:pianos.payload[0].id,title:"Second scheduled job",assigned_technician_id:"U-TECH-A"
   }});
   assert.equal(second.status,201,JSON.stringify(second.payload));
   const conflict=await request(`/api/jobs/${second.payload.id}/schedule`,{token,method:"PATCH",body:{
-    assigned_technician_id:"U-TECH-A",scheduled_start:"2030-04-10T15:00:00.000Z",scheduled_end:"2030-04-10T17:00:00.000Z"
+    assigned_technician_id:"U-TECH-A",scheduled_start:"2030-04-11T15:00:00.000Z",scheduled_end:"2030-04-11T17:00:00.000Z"
   }});
   assert.equal(conflict.status,409,JSON.stringify(conflict.payload));
   assert.equal(conflict.payload.error,"SCHEDULE_CONFLICT");
-  assert.ok(conflict.payload.conflict?.id);
+  assert.equal(conflict.payload.conflict?.id,anchor.payload.id);
   const okay=await request(`/api/jobs/${second.payload.id}/schedule`,{token,method:"PATCH",body:{
-    assigned_technician_id:"U-TECH-B",scheduled_start:"2030-04-10T15:00:00.000Z",scheduled_end:"2030-04-10T17:00:00.000Z"
+    assigned_technician_id:"U-TECH-B",scheduled_start:"2030-04-11T15:00:00.000Z",scheduled_end:"2030-04-11T17:00:00.000Z"
   }});
   assert.equal(okay.status,200,JSON.stringify(okay.payload));
 });
