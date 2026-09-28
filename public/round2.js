@@ -301,7 +301,7 @@ function r2BindDrag(root,jobs){
 function r2OpenStageSettings(){
   if(!r2IsAdmin())return;
   const stages=r2Definitions();
-  openDialog({title:tr("Workflow stage names","Munkafázisok elnevezése"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form">${stages.map(stage=>`<section class="stage-setting-row" data-stage-key="${stage.key}"><strong>${stage.position}. ${esc(stage.key)}</strong><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
+  openDialog({title:tr("Workflow stage names","Munkafázisok elnevezése"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form">${stages.map(stage=>`<section class="stage-setting-row" data-stage-key="${stage.key}"><strong>${stage.position}. ${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
   $("#stageSettingsForm").addEventListener("submit",async event=>{
     event.preventDefault();const fd=new FormData(event.currentTarget),body={stages:stages.map(stage=>({key:stage.key,label_en:fd.get("en_"+stage.key),label_hu:fd.get("hu_"+stage.key)}))};
     try{await api("/api/workflow/settings",{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow names updated.","Munkafázisok neve frissítve."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}
@@ -341,7 +341,7 @@ function r2CurrentLine(date){
 }
 function r2RenderTimeGrid(range,jobs){
   const labels=Array.from({length:14},(_,index)=>7+index);
-  return `<div class="time-calendar">
+  return `<div class="time-calendar mode-${state.r2CalendarMode}" style="--calendar-columns:${range.days.length}">
     <div class="time-calendar-head"><div class="time-gutter-head">NYC</div>${range.days.map(date=>`<button type="button" class="time-day-head" data-new-calendar-job="${date}"><strong>${esc(r2FormatDate(date,{weekday:"short"}))}</strong><span>${esc(r2FormatDate(date,{month:"short",day:"numeric"}))}</span></button>`).join("")}</div>
     <div class="time-calendar-scroll"><div class="time-calendar-body" style="--calendar-columns:${range.days.length}">
       <div class="time-gutter">${labels.map(hour=>`<span style="top:${(hour*60-R2_DAY_START)*R2_PX_PER_MIN}px">${r2Pad(hour)}:00</span>`).join("")}</div>
@@ -415,7 +415,7 @@ function r2BindCalendarPointer(host,jobs){
       }
       gesture.tip.textContent=`${r2FormatDate(gesture.targetDate,{month:"short",day:"numeric"})} · ${r2Pad(Math.floor(gesture.targetMinutes/60))}:${r2Pad(gesture.targetMinutes%60)}`;
     }
-    gesture.tip.style.left=`${event.clientX+14}px`;gesture.tip.style.top=`${event.clientY-34}px`;
+    gesture.tip.style.left=`${event.clientX+20}px`;gesture.tip.style.top=`${event.clientY+20}px`;
   }
   async function finish(event){
     if(!gesture)return;
@@ -476,7 +476,12 @@ function r2OverviewRows(key,overview){
   return `<div class="overview-table-wrap"><table class="overview-table"><thead><tr><th>${tr("Job","Munka")}</th><th>${tr("Client / Piano","Ügyfél / Zongora")}</th><th>${tr("Phase","Fázis")}</th><th>${tr("Responsible","Felelős")}</th><th>${tr("Schedule / Due","Időpont / Határidő")}</th><th>${tr("Financial","Pénzügy")}</th><th>${tr("Issue","Probléma")}</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${esc(row.job_code||("#"+row.id))}</strong><small>${esc(row.title)}</small></td><td>${esc(row.client_name)}<small>${esc(r2JobPiano(row))}</small></td><td>${esc(r2StageLabel(row.stage))}</td><td>${esc(row.assigned_technician_name||"—")}</td><td>${esc(r2FormatDateTime(row.scheduled_at))}<small>${row.current_phase?.due_at?esc(r2FormatDateTime(row.current_phase.due_at)):"—"}</small></td><td>${esc(r2Money(row.financial_total??(Number(row.total_labor_cost||0)+Number(row.total_material_cost||0))))}</td><td>${row.invoice_issue?esc(row.invoice_issue==="awaiting_closeout"?tr("Waiting for admin closeout","Admin lezárásra vár"):row.invoice_issue==="invoice_draft"?tr("Invoice draft not sent","Piszkozat számla nincs kiküldve"):tr("Sent invoice open","Kiküldött számla nyitott")):esc(r2BlockerLabel(row.current_phase?.blocker_code))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function r2OpenOverview(key,overview){
-  const labels={active_workflows:[tr("Active workflows","Aktív munkafolyamatok"),"ACTIVITY"],overdue_workflows:[tr("Overdue / stuck workflows","Lejárt / elakadt munkafolyamatok"),"ATTENTION"],active_financial:[tr("Active work financial volume","Aktív munkák pénzügyi volumene"),"FINANCE"],open_invoice_actions:[tr("Open invoice actions","Folyamatban lévő számlák"),"INVOICING"]};
+  const labels={
+    active_workflows:[tr("Active workflows","Aktív munkafolyamatok"),tr("ACTIVITY","AKTIVITÁS")],
+    overdue_workflows:[tr("Overdue / stuck workflows","Lejárt / elakadt munkafolyamatok"),tr("ATTENTION","FIGYELMET IGÉNYEL")],
+    active_financial:[tr("Active work financial volume","Aktív munkák pénzügyi volumene"),tr("FINANCE","PÉNZÜGY")],
+    open_invoice_actions:[tr("Open invoice actions","Folyamatban lévő számlák"),tr("INVOICING","SZÁMLÁZÁS")]
+  };
   openDialog({title:labels[key]?.[0]||tr("Workshop details","Műhely részletei"),eyebrow:labels[key]?.[1]||"WORKSHOP",body:r2OverviewRows(key,overview)});
 }
 async function renderWorkshop(){
