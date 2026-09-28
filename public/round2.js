@@ -492,7 +492,7 @@ async function r2RenderWorkflow(data){
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
   </div><small>${bucket==="active"?tr("Only currently running work is shown.","Csak a jelenleg futó munkák láthatók."):tr("Completed work is read-only and kept for history.","A lezárt munkák csak olvashatók és előzményként megmaradnak.")}</small></div>
   <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}">${(data.columns||[]).map(r2WorkflowColumn).join("")}</div></div>`;
-  $("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket(button.dataset.workflowBucket)));
+  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket(button.dataset.workflowBucket)));
   const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active")r2BindDrag(board,data.jobs||[]);
 }
 function r2OverviewRows(key,overview){
