@@ -243,8 +243,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND ${stageSql}
       ORDER BY CASE j.stage WHEN 'received' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'qa_review' THEN 2 WHEN 'admin_approval' THEN 3 ELSE 4 END,
       COALESCE(j.completed_at,j.scheduled_at,j.updated_at) DESC,j.id DESC`).all().map(decorateJob);
-    const allStages=stageDefinitions(),stages=bucket==="closed"?allStages.filter(stage=>stage.key==="completed"):allStages.filter(stage=>stage.key!=="completed");
-    res.json({bucket,stages,columns:stages.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
+    const allStages=stageDefinitions(),visibleStages=bucket==="closed"?allStages.filter(stage=>stage.key==="completed"):allStages.filter(stage=>stage.key!=="completed");
+    res.json({bucket,stages:allStages,columns:visibleStages.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
   });
   app.get("/api/workshop",auth,staff,(_req,res)=>{
     const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage IN ('received','in_progress','qa_review','admin_approval','completed')
