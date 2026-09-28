@@ -84,7 +84,14 @@ function humanError(error){
     CURRENT_WORKFLOW_PHASE_REQUIRED:["The current phase cannot be removed from an active workflow.","Az aktuális fázis nem távolítható el az aktív munkafolyamatból."],
     INVALID_BLOCKER_CODE:["Choose a valid delay reason.","Válassz érvényes elakadási okot."],
     INVALID_WORKFLOW_DUE_AT:["The phase deadline is invalid.","A fázis határideje érvénytelen."],
-    JOB_NOT_READY_FOR_CLOSEOUT:["Complete the remaining enabled phases first.","Előbb zárd le a még aktív munkafázisokat."]
+    JOB_NOT_READY_FOR_CLOSEOUT:["Complete the remaining enabled phases first.","Előbb zárd le a még aktív munkafázisokat."],
+    INVALID_WORKFLOW_BUCKET:["Choose Active or Closed workflows.","Válaszd az Aktív vagy Lezárt munkafolyamatokat."],
+    INVOICE_DELETE_REQUIRES_DRAFT_OR_CANCELLED:["Only draft or cancelled invoices can be removed to the archive.","Csak piszkozat vagy érvénytelenített számla helyezhető át az archívumba."],
+    INVALID_ARCHIVE_CATEGORY:["Choose a valid archive category.","Válassz érvényes archív kategóriát."],
+    ARCHIVE_TITLE_REQUIRED:["Enter a title for the archive record.","Adj címet az archivált tételnek."],
+    INVALID_ARCHIVE_FILE_TYPE:["Use a supported document or image file.","Támogatott dokumentum- vagy képfájlt válassz."],
+    ARCHIVE_DOCUMENT_NOT_FOUND:["The archive record no longer exists.","Az archív tétel már nem létezik."],
+    ARCHIVE_FILE_NOT_FOUND:["The archived file is not available.","Az archivált fájl nem érhető el."]
   };
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
