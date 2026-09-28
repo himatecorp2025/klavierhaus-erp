@@ -437,4 +437,17 @@ test("Admin and Super Admin invoice controls move deleted drafts to the document
   const retained=appDb.prepare("SELECT deleted_at,archive_document_id FROM invoices WHERE id=?").get(manual.payload.id);
   assert.ok(retained?.deleted_at);
   assert.equal(Number(retained.archive_document_id),Number(archived.id));
+
+  const form=new FormData();
+  form.append("category","company_document");
+  form.append("title","Internal operating note");
+  form.append("description","Retention and operating reference");
+  form.append("file",new Blob(["archive text"],{type:"text/plain"}),"operating-note.txt");
+  const createdDocument=await request("/api/archive/documents",{token:superToken,method:"POST",form});
+  assert.equal(createdDocument.status,201,JSON.stringify(createdDocument.payload));
+  assert.equal(createdDocument.payload.category,"company_document");
+  assert.equal(createdDocument.payload.original_name,"operating-note.txt");
+  const companyDocuments=await request("/api/archive/documents?category=company_document",{token:superToken});
+  assert.equal(companyDocuments.status,200);
+  assert.ok(companyDocuments.payload.rows.some(row=>row.id===createdDocument.payload.id));
 });
