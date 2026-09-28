@@ -65,6 +65,42 @@ function legacyValue(row, ...names) {
   for (const name of names) if (row && row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") return row[name];
   return null;
 }
+function numericId(value) {
+  const id=Number(value);
+  return Number.isSafeInteger(id)&&id>0?id:null;
+}
+function jsonArray(value) {
+  if(Array.isArray(value))return JSON.stringify(value);
+  try {
+    const parsed=JSON.parse(String(value||"[]"));
+    return JSON.stringify(Array.isArray(parsed)?parsed:[]);
+  } catch (_error) { return "[]"; }
+}
+function normalizePaymentMethod(value) {
+  const raw=String(value||"").trim().toLowerCase();
+  if(!raw)return null;
+  if(raw.includes("cash"))return "Cash";
+  if(raw.includes("card")||raw.includes("stripe"))return "Credit Card / Stripe";
+  if(raw.includes("check"))return "Check";
+  return "Bank Transfer";
+}
+function mappedStage(row) {
+  const raw=String(legacyValue(row,"stage","status")||"planned").toLowerCase();
+  if(raw==="planned")return "planned";
+  if(["scheduled","received"].includes(raw))return "received";
+  if(["in_progress","blocked"].includes(raw))return "in_progress";
+  if(raw==="qa_review")return "qa_review";
+  if(["ready_for_closeout","admin_approval"].includes(raw))return "admin_approval";
+  if(raw==="completed"||legacyValue(row,"closed_at","completed_at"))return "completed";
+  return "planned";
+}
+function mappedInvoiceStatus(row) {
+  const raw=String(row?.status||"draft").toLowerCase();
+  if(raw==="paid")return "paid";
+  if(["void","cancelled","canceled"].includes(raw))return "cancelled";
+  if(["sent","partial"].includes(raw))return "sent";
+  return "draft";
+}
 
 preMigrationBackup();
 round3MigrationBackup();
