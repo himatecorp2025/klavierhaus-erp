@@ -28,6 +28,7 @@ const {
   uploadErrorHandler
 } = require("./upload-middleware");
 const { registerRound1CoreRoutes } = require("./round1-core");
+const { createIntakeMediaUpload } = require("./intake-media-upload");
 const { registerRound2WorkflowRoutes } = require("./round2-workflow");
 const { registerRound3FinanceRoutes } = require("./round3-finance");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
@@ -58,6 +59,7 @@ const brandingUpload = createBrandingUpload(UPLOAD_DIR);
 const eventImageUpload = createEventImageUpload(EVENT_IMAGE_DIR);
 const websiteImageUpload = createWebsiteImageUpload(WEBSITE_IMAGE_DIR);
 const customerConversationUpload = createCustomerConversationUpload(UPLOAD_DIR);
+const intakeMediaUpload = createIntakeMediaUpload(UPLOAD_DIR);
 
 function newId(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(5).toString("hex")}`;
@@ -165,7 +167,7 @@ app.post("/api/webhooks/resend",express.raw({type:"application/json",limit:"1mb"
 
 app.use(express.json({limit:"10mb"}));
 
-app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"round3-closeout-finance"}));
+app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"six-module-final-compliance"}));
 app.get("/api/health",(_req,res)=>res.status(200).json({status:"ok"}));
 app.get("/api/public/branding",(_req,res)=>res.json(getBranding()));
 app.get("/manifest.webmanifest",(_req,res)=>{
@@ -323,9 +325,9 @@ app.post("/api/settings/branding/background",auth,permit("ADMIN"),brandingUpload
 app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{setSetting("logo_url","/icons/icon-512.png",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
-registerRound1CoreRoutes({app,db,auth,permit,audit});
+registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
-registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR});
+registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
@@ -356,7 +358,7 @@ app.use((err,req,res,next)=>{
 });
 
 function startServer(port=PORT){
-  return app.listen(port,()=>console.log(`Klavierhaus ERP Round 3 listening on :${port}`));
+  return app.listen(port,()=>console.log(`Klavierhaus ERP six-module compliance build listening on :${port}`));
 }
 if(require.main===module)startServer();
 
