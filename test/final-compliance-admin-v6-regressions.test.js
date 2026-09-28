@@ -26,6 +26,11 @@ test("calendar collection bindings use querySelectorAll and create binding is to
   assert.match(pointerBody,/\$\$\("\[data-calendar-job\]",host\)\.forEach/);
 });
 
+test("CMS focal-point controls bind as collections",()=>{
+  assert.match(v6,/for\(const axis of \["x","y"\]\)\$\$\(`\[data-cms-focal-\$\{axis\}\]`,host\)\.forEach/);
+  assert.doesNotMatch(v6,/for\(const axis of \["x","y"\]\)\$\(`\[data-cms-focal-\$\{axis\}\]`,host\)\.forEach/);
+});
+
 test("branding file controls bind as a collection",()=>{
   assert.match(v6,/\$\$\("\[data-brand-file\]",host\)\.forEach/);
   assert.doesNotMatch(v6,/(^|[^$])\$\("\[data-brand-file\]",host\)\.forEach/);
