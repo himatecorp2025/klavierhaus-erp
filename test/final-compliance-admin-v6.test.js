@@ -155,6 +155,28 @@ test("approved intake can create a scheduled active calendar/workflow job with q
   assert.ok(calendar.payload.jobs.some(row=>row.id===ids.job));
 });
 
+test("service CMS galleries persist through the v6 extension and are exposed by the preserved public API",async()=>{
+  const service=await request("/api/website-services",{token:ids.admin,method:"POST",body:{
+    title_en:"Concert preparation",title_hu:"Koncert-előkészítés",
+    summary_en:"Preparation service",summary_hu:"Előkészítési szolgáltatás",
+    image_url:"/uploads/website/service-main.jpg",image_alt_en:"Concert piano",image_alt_hu:"Koncertzongora",visible:true
+  }});
+  assert.equal(service.status,201,JSON.stringify(service.payload));
+  const media=await request(`/api/v6/website-services/${service.payload.id}/gallery`,{token:ids.admin,method:"PUT",body:{gallery:[
+    {url:"/uploads/website/service-1.jpg",alt_en:"Action work",alt_hu:"Mechanikai munka"},
+    {url:"/uploads/website/service-2.jpg",alt_en:"Voicing",alt_hu:"Intonálás"}
+  ]}});
+  assert.equal(media.status,200,JSON.stringify(media.payload));
+  assert.equal(JSON.parse(media.payload.gallery_json).length,2);
+
+  const publicList=await request("/api/public/website-services?lang=en");
+  assert.equal(publicList.status,200,JSON.stringify(publicList.payload));
+  const publicService=publicList.payload.find(row=>row.id===service.payload.id);
+  assert.ok(publicService);
+  assert.equal(publicService.gallery.length,2);
+  assert.equal(publicService.gallery[0].alt,"Action work");
+});
+
 test("direct-expense receipt endpoint accepts a real PDF upload and returns a persistent public path",async()=>{
   const form=new FormData();
   form.append("file",new Blob(["%PDF-1.4\nV6 receipt"],{type:"application/pdf"}),"receipt.pdf");
