@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
   hidden_user INTEGER DEFAULT 0,
   is_superadmin INTEGER DEFAULT 0,
   session_version INTEGER NOT NULL DEFAULT 0,
+  theme_preference TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light')),
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -927,12 +928,47 @@ CREATE TABLE IF NOT EXISTS intake_leads (
   estimated_urgency TEXT NOT NULL DEFAULT 'normal' CHECK(estimated_urgency IN ('low','normal','urgent')),
   status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','under_review','converted','archived')),
   assigned_technician_id TEXT,
+  estimated_total REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   converted_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS intake_catalog_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  description_en TEXT,
+  description_hu TEXT,
+  default_price REAL NOT NULL DEFAULT 0 CHECK(default_price >= 0),
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS intake_assessment_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  intake_id INTEGER NOT NULL,
+  catalog_item_id INTEGER,
+  item_title_en TEXT NOT NULL,
+  item_title_hu TEXT NOT NULL,
+  price REAL NOT NULL DEFAULT 0 CHECK(price >= 0),
+  notes TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(intake_id,catalog_item_id),
+  FOREIGN KEY (intake_id) REFERENCES intake_leads(id) ON DELETE CASCADE,
+  FOREIGN KEY (catalog_item_id) REFERENCES intake_catalog_items(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -951,6 +987,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   assigned_technician_id TEXT,
   total_labor_cost REAL NOT NULL DEFAULT 0 CHECK(total_labor_cost >= 0),
   total_material_cost REAL NOT NULL DEFAULT 0 CHECK(total_material_cost >= 0),
+  estimated_revenue REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0),
   internal_notes TEXT,
   cancelled_at TEXT,
   cancelled_by_user_id TEXT,
@@ -1167,6 +1204,8 @@ CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
 CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_intake_client ON intake_leads(client_id);
 CREATE INDEX IF NOT EXISTS idx_intake_technician ON intake_leads(assigned_technician_id,status);
+CREATE INDEX IF NOT EXISTS idx_intake_catalog_active ON intake_catalog_items(active,sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_intake_assessment_intake ON intake_assessment_items(intake_id,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_jobs_stage ON jobs(stage,cancelled_at,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled_at ON jobs(scheduled_at,cancelled_at,stage);
 CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id,created_at DESC);
