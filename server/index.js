@@ -31,6 +31,7 @@ const { registerRound1CoreRoutes } = require("./round1-core");
 const { createIntakeMediaUpload } = require("./intake-media-upload");
 const { registerRound2WorkflowRoutes } = require("./round2-workflow");
 const { registerRound3FinanceRoutes } = require("./round3-finance");
+const { registerAdminUxV6Routes } = require("./admin-ux-v6");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 
 const app = express();
@@ -89,7 +90,8 @@ function safeUser(row) {
     phone: row.phone || "",
     address: row.address || "",
     is_superadmin: superadmin ? 1 : 0,
-    session_version: Number(row.session_version || 0)
+    session_version: Number(row.session_version || 0),
+    theme_preference: ["light","dark"].includes(row.theme_preference) ? row.theme_preference : "dark"
   };
 }
 function auth(req,res,next) {
@@ -139,6 +141,8 @@ function getBranding() {
     company_name:setting("company_name","Klavierhaus"),
     short_name:setting("short_name","KH ERP"),
     logo_url:setting("logo_url","/icons/icon-512.png"),
+    favicon_url:setting("favicon_url","/icons/icon-192.png"),
+    app_icon_url:setting("app_icon_url",setting("logo_url","/icons/icon-512.png")),
     login_background_url:setting("login_background_url",""),
     branding_version:setting("branding_version","1")
   };
@@ -174,8 +178,8 @@ app.get("/manifest.webmanifest",(_req,res)=>{
   const branding=getBranding(),version=encodeURIComponent(branding.branding_version);
   res.type("application/manifest+json").send(JSON.stringify({
     name:branding.company_name,short_name:branding.short_name,start_url:"/",display:"standalone",
-    background_color:"#f6f7f9",theme_color:"#111318",
-    icons:[{src:`${branding.logo_url}${branding.logo_url.includes("?")?"&":"?"}v=${version}`,sizes:"192x192 512x512",type:/\.jpe?g(?:$|\?)/i.test(branding.logo_url)?"image/jpeg":"image/png",purpose:"any maskable"}]
+    background_color:"#0f1115",theme_color:"#0f1115",
+    icons:[{src:`${branding.app_icon_url}${branding.app_icon_url.includes("?")?"&":"?"}v=${version}`,sizes:"192x192 512x512",type:/\.jpe?g(?:$|\?)/i.test(branding.app_icon_url)?"image/jpeg":"image/png",purpose:"any maskable"}]
   }));
 });
 app.use("/uploads",express.static(UPLOAD_DIR,{etag:true,lastModified:true,maxAge:"5m"}));
@@ -296,10 +300,16 @@ app.put("/api/users/:id",auth,async(req,res)=>{
     .run(name,email,contactEmail||null,String(req.body?.phone ?? before.phone ?? ""),String(req.body?.address ?? before.address ?? ""),role,status,passwordHash,before.id);
   const after=db.prepare("SELECT * FROM users WHERE id=?").get(before.id);audit(req,"UPDATE","users",before.id,safeUser(before),safeUser(after));res.json(safeUser(after));
 });
-app.delete("/api/users/:id",auth,requireSuperadmin,(req,res)=>{
+app.delete("/api/users/:id",auth,permit("ADMIN"),(req,res)=>{
   const row=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);if(!row)return res.status(404).json({error:"USER_NOT_FOUND"});
-  if(Number(row.hidden_user||0)===1)return res.status(403).json({error:"HIDDEN_OWNER_PROTECTED"});
-  db.prepare("DELETE FROM users WHERE id=?").run(row.id);audit(req,"DELETE","users",row.id,safeUser(row),null);res.json({ok:true});
+  if(String(row.id)===String(req.user.id))return res.status(409).json({error:"CANNOT_DELETE_SELF"});
+  if(Number(row.hidden_user||0)===1||Number(row.is_superadmin||0)===1)return res.status(403).json({error:"HIDDEN_OWNER_PROTECTED"});
+  if(row.role==="ADMIN"){
+    const adminCount=Number(db.prepare("SELECT COUNT(*) count FROM users WHERE status='Active' AND role='ADMIN' AND COALESCE(hidden_user,0)=0").get().count||0);
+    if(adminCount<=1)return res.status(409).json({error:"LAST_ADMIN_CANNOT_BE_DELETED"});
+  }
+  const before=safeUser(row);
+  db.prepare("DELETE FROM users WHERE id=?").run(row.id);audit(req,"DELETE","users",row.id,before,null);res.json({ok:true});
 });
 
 app.get("/api/settings/branding",auth,permit("ADMIN"),(_req,res)=>res.json(getBranding()));
@@ -328,6 +338,7 @@ app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
+registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
