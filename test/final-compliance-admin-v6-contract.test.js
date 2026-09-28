@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v6-shell-v1/);
+  assert.match(sw,/klavierhaus-admin-v6-shell-v2-archive-workflow/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -89,4 +89,24 @@ test("receipt upload and Admin-only user deletion use backend authorization, not
 test("public website source tree and protected website backend remain outside the v6 implementation surface",()=>{
   for(const file of ["server/website-platform.js","server/website-content.js","server/website-catalog.js","server/upload-middleware.js"])assert.ok(fs.existsSync(path.join(root,file)),file);
   assert.ok(fs.existsSync(path.join(root,"website","server","index.js")));
+});
+
+
+test("CMS archive, workflow lifecycle split and send-time client email are wired end to end",()=>{
+  const schema=read("server/schema.sql"),archive=read("server/archive-center.js"),finance=read("server/round3-finance.js"),round2=read("server/round2-workflow.js"),ui2=read("public/round2.js"),ui3=read("public/round3.js"),v6=read("public/v6.js");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS document_archive/);
+  assert.match(schema,/deleted_at TEXT/);
+  assert.match(archive,/\/api\/archive\/documents/);
+  assert.match(archive,/deleted_invoice/);
+  assert.match(v6,/Documents \/ Archive/);
+  assert.match(v6,/internal_correspondence/);
+  assert.match(v6,/company_message/);
+  assert.match(v6,/company_document/);
+  assert.match(round2,/bucket===\"closed\"/);
+  assert.match(ui2,/data-workflow-bucket="closed"/);
+  assert.match(ui2,/🔒/);
+  assert.match(finance,/persistClientEmail/);
+  assert.match(finance,/recipient_email/);
+  assert.match(ui3,/name='recipient_email'/);
+  assert.match(finance,/ARCHIVE_DELETE/);
 });
