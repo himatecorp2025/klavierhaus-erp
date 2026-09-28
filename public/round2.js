@@ -283,32 +283,96 @@ function r2BindWorkflowActions(root,jobs){
   $("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);}));
   $("[data-history-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowHistory(Number(button.dataset.historyJob))));
 }
-function r2WorkflowColumn(column){
+function r2ClosedWorkflowCard(job){
+  const cancelled=Boolean(job.cancelled_at);
+  return `<article class="job-card stage-card is-locked ${cancelled?"is-cancelled":"is-completed"}" data-job-id="${job.id}">
+    <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${cancelled?tr("CANCELLED","TÖRÖLT / MEGSZAKÍTOTT"):tr("COMPLETED","LEZÁRVA")}</span></div>
+    <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
+    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(cancelled?job.cancelled_at:job.completed_at))}</span><span>👤 ${esc(cancelled?(job.cancelled_by_name||"—"):(job.completed_by_name||"—"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
+    ${cancelled&&job.cancel_reason?`<div class="blocked-note">${esc(job.cancel_reason)}</div>`:""}
+    <div class="job-actions"><button class="secondary-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Workflow details","Munkafolyamat részletei")}</button></div>
+  </article>`;
+}
+function r2WorkflowColumn(column,{closed=false}={}){
   const label=state.language==="hu"?column.label_hu:column.label_en;
-  return `<section class="workflow-column stage-${column.key}" data-drop-stage="${column.key}"><header><div><span class="eyebrow">${tr("WORKFLOW","MUNKAFOLYAMAT")}</span><h2>${esc(label)}</h2></div><span class="column-count">${column.jobs.length}</span></header><div class="workflow-stack">${column.jobs.length?column.jobs.map(r2WorkflowCard).join(""):`<div class="workflow-empty">${tr("No jobs in this phase.","Nincs munka ebben a fázisban.")}</div>`}</div></section>`;
+  const reorderable=!closed&&r2IsAdmin()&&!r2FixedStage(column.key);
+  return `<section class="workflow-column stage-${column.key} ${reorderable?"stage-reorderable":""}" data-drop-stage="${column.key}" data-stage-column="${column.key}"><header><div><span class="eyebrow">${tr("WORKFLOW","MUNKAFOLYAMAT")}</span><h2>${esc(label)}</h2></div><div class="workflow-column-tools">${reorderable?`<button type="button" class="stage-drag-handle" draggable="true" data-stage-drag="${column.key}" title="${tr("Drag to reorder phase","Húzd a fázis átrendezéséhez")}">↔</button>`:""}<span class="column-count">${column.jobs.length}</span></div></header><div class="workflow-stack">${column.jobs.length?column.jobs.map(closed?r2ClosedWorkflowCard:r2WorkflowCard).join(""):`<div class="workflow-empty">${tr("No jobs in this phase.","Nincs munka ebben a fázisban.")}</div>`}</div></section>`;
+}
+function r2AddStageColumn(){
+  return `<button type="button" class="workflow-add-column" id="workflowAddStageCard"><span>＋</span><strong>${tr("Add workflow phase","Új munkafázis")}</strong><small>${tr("Up to two additional intermediate phases","Legfeljebb két további köztes fázis")}</small></button>`;
 }
 function r2BindDrag(root,jobs){
-  $$("[data-job-id]",root).forEach(card=>card.addEventListener("dragstart",event=>{event.dataTransfer.setData("text/job-id",card.dataset.jobId);card.classList.add("dragging");}));
-  $$("[data-job-id]",root).forEach(card=>card.addEventListener("dragend",()=>card.classList.remove("dragging")));
+  $$('[data-job-id][draggable="true"]',root).forEach(card=>card.addEventListener("dragstart",event=>{event.dataTransfer.setData("text/job-id",card.dataset.jobId);card.classList.add("dragging");}));
+  $$('[data-job-id][draggable="true"]',root).forEach(card=>card.addEventListener("dragend",()=>card.classList.remove("dragging")));
   $$("[data-drop-stage]",root).forEach(column=>{
-    column.addEventListener("dragover",event=>event.preventDefault());
+    column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/job-id"))event.preventDefault();});
     column.addEventListener("drop",event=>{
-      event.preventDefault();const job=jobs.find(item=>String(item.id)===event.dataTransfer.getData("text/job-id"));
-      if(!job||job.stage===column.dataset.dropStage)return;
-      if(column.dataset.dropStage!==job.next_stage){toast(tr("Move the job only to its next enabled phase.","A munka csak a következő aktív fázisba mozgatható."),"error");return;}
-      if(job.next_stage==="completed"){if(r2IsAdmin()&&typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);else toast(tr("Admin closeout is required.","Adminisztrátori lezárás szükséges."),"error");return;}
-      r2OpenHandoff(job);
+      const jobId=event.dataTransfer.getData("text/job-id");if(!jobId)return;
+      event.preventDefault();const job=jobs.find(item=>String(item.id)===jobId),target=column.dataset.dropStage;
+      if(!job||job.stage===target)return;
+      r2OpenHandoff(job,renderWorkshop,target);
     });
   });
 }
+async function r2SaveStageOrder(stageKeys,refresh=renderWorkshop){
+  try{
+    const result=await api("/api/workflow/stages/order",{method:"PUT",body:JSON.stringify({stage_keys:stageKeys})});
+    state.r2Workflow={...(state.r2Workflow||{}),stages:result.stages,max_stages:result.max_stages,can_add_stage:result.can_add_stage};
+    toast(tr("Workflow phase order updated.","Munkafázisok sorrendje frissítve."),"success");await refresh();
+  }catch(error){toast(humanError(error),"error");}
+}
+function r2BindStageColumnReorder(root){
+  if(!r2IsAdmin())return;
+  $$("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragstart",event=>{event.stopPropagation();event.dataTransfer.setData("text/stage-key",handle.dataset.stageDrag);event.dataTransfer.effectAllowed="move";}));
+  $$("[data-stage-column]",root).forEach(column=>{
+    column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/stage-key")&&!r2FixedStage(column.dataset.stageColumn))event.preventDefault();});
+    column.addEventListener("drop",event=>{
+      const source=event.dataTransfer.getData("text/stage-key"),target=column.dataset.stageColumn;if(!source||!target||source===target||r2FixedStage(target))return;
+      event.preventDefault();const middle=r2Definitions().filter(stage=>!r2FixedStage(stage.key)).map(stage=>stage.key);
+      const from=middle.indexOf(source),to=middle.indexOf(target);if(from<0||to<0)return;
+      middle.splice(to,0,middle.splice(from,1)[0]);r2SaveStageOrder(middle,()=>r2LoadWorkflowBucket("active"));
+    });
+  });
+}
+function r2OpenAddStage(){
+  openDialog({title:tr("Add workflow phase","Új munkafázis"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="addWorkflowStageForm" class="form-grid">
+    <div class="detail-note full">${tr("The new phase is inserted before Admin Approval. Received stays first and Admin Approval stays last.","Az új fázis az Admin jóváhagyás elé kerül. A Beérkezett mindig első, az Admin jóváhagyás mindig utolsó marad.")}</div>
+    <label class="field"><span>${tr("English name","Angol név")}</span><input name="label_en" required autofocus></label>
+    <label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="label_hu" required></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Add phase","Fázis hozzáadása")}</button></div></form>`});
+  $("#addWorkflowStageForm").addEventListener("submit",async event=>{event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));try{const result=await api("/api/workflow/stages",{method:"POST",body:JSON.stringify(body)});state.r2Workflow={...(state.r2Workflow||{}),...result};closeDialog();toast(tr("Workflow phase added.","Munkafázis hozzáadva."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}});
+}
+async function r2DeleteStage(key){
+  if(!confirm(tr("Remove this custom workflow phase? Historical completed jobs keep their recorded history.","Eltávolítod ezt az egyedi munkafázist? A lezárt munkák történeti adatai megmaradnak.")))return;
+  try{const result=await api("/api/workflow/stages/"+encodeURIComponent(key),{method:"DELETE"});state.r2Workflow={...(state.r2Workflow||{}),...result};toast(tr("Workflow phase removed.","Munkafázis eltávolítva."),"success");await renderWorkshop();r2OpenStageSettings();}catch(error){toast(humanError(error),"error");}
+}
+function r2BindStageSettingsDrag(stages){
+  $$("[data-stage-setting-drag]").forEach(handle=>handle.addEventListener("dragstart",event=>{event.dataTransfer.setData("text/stage-key",handle.dataset.stageSettingDrag);event.dataTransfer.effectAllowed="move";}));
+  $$("[data-stage-setting-row]").forEach(row=>row.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/stage-key")&&!r2FixedStage(row.dataset.stageSettingRow))event.preventDefault();}));
+  $$("[data-stage-setting-row]").forEach(row=>row.addEventListener("drop",event=>{const source=event.dataTransfer.getData("text/stage-key"),target=row.dataset.stageSettingRow;if(!source||!target||source===target||r2FixedStage(target))return;event.preventDefault();const middle=stages.filter(stage=>!r2FixedStage(stage.key)).map(stage=>stage.key),from=middle.indexOf(source),to=middle.indexOf(target);if(from<0||to<0)return;middle.splice(to,0,middle.splice(from,1)[0]);r2SaveStageOrder(middle,async()=>{await renderWorkshop();r2OpenStageSettings();});}));
+}
 function r2OpenStageSettings(){
   if(!r2IsAdmin())return;
-  const stages=r2Definitions();
-  openDialog({title:tr("Workflow stage names","Munkafázisok elnevezése"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form">${stages.map(stage=>`<section class="stage-setting-row" data-stage-key="${stage.key}"><strong>${stage.position}. ${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
+  const stages=r2Definitions(),canAdd=(state.r2Workflow?.can_add_stage??stages.length<7);
+  openDialog({title:tr("Workflow stages","Munkafázisok"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form"><div class="detail-note">${tr("Drag intermediate phases to reorder them. Received is always first; Admin Approval is always the last active phase. Maximum seven total workflow definitions.","A köztes fázisokat húzással átrendezheted. A Beérkezett mindig első; az Admin jóváhagyás mindig az utolsó aktív fázis. Legfeljebb hét workflow-definíció lehet.")}</div>${stages.map(stage=>`<section class="stage-setting-row ${r2FixedStage(stage.key)?"is-fixed":""}" data-stage-setting-row="${stage.key}"><div class="stage-setting-head">${!r2FixedStage(stage.key)?`<button type="button" class="stage-drag-handle" draggable="true" data-stage-setting-drag="${stage.key}">↕</button>`:"<span class='stage-lock'>🔒</span>"}<strong>${stage.position}. ${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong>${stage.removable?`<button type="button" class="text-button danger-text" data-delete-stage="${stage.key}">${tr("Remove","Eltávolítás")}</button>`:""}</div><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button>${canAdd?`<button type="button" class="secondary-button" id="addStageFromSettings">＋ ${tr("Add phase","Új fázis")}</button>`:""}<button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
   $("#stageSettingsForm").addEventListener("submit",async event=>{
     event.preventDefault();const fd=new FormData(event.currentTarget),body={stages:stages.map(stage=>({key:stage.key,label_en:fd.get("en_"+stage.key),label_hu:fd.get("hu_"+stage.key)}))};
-    try{await api("/api/workflow/settings",{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow names updated.","Munkafázisok neve frissítve."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}
+    try{const result=await api("/api/workflow/settings",{method:"PUT",body:JSON.stringify(body)});state.r2Workflow={...(state.r2Workflow||{}),...result};closeDialog();toast(tr("Workflow names updated.","Munkafázisok neve frissítve."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}
   });
+  $("#addStageFromSettings")?.addEventListener("click",()=>{closeDialog();r2OpenAddStage();});
+  $$("[data-delete-stage]").forEach(button=>button.addEventListener("click",()=>r2DeleteStage(button.dataset.deleteStage)));
+  r2BindStageSettingsDrag(stages);
+}
+
+async function r2OpenWorkflowHistory(jobId){
+  try{
+    const data=await api(`/api/jobs/${jobId}/history`),job=data.job,locale=state.language==="hu"?"hu-HU":"en-US";
+    const date=value=>value?new Intl.DateTimeFormat(locale,{timeZone:R2_TZ,dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"—";
+    const phases=(data.phases||[]).map(phase=>`<div class="workflow-history-row"><span class="history-status ${phase.completed_at?"done":phase.activated_at?"active":""}">${phase.completed_at?"✓":phase.activated_at?"●":"○"}</span><div><strong>${esc(state.language==="hu"?phase.label_hu:phase.label_en)}</strong><small>${tr("Activated","Aktiválva")}: ${esc(date(phase.activated_at))} · ${tr("Completed","Lezárva")}: ${esc(date(phase.completed_at))}</small>${phase.blocker_note?`<p>${esc(phase.blocker_note)}</p>`:""}</div></div>`).join("");
+    const handoffs=(data.handoffs||[]).map(row=>`<div class="workflow-history-row"><span class="history-status done">↪</span><div><strong>${esc(r2StageLabel(row.from_stage))} → ${esc(r2StageLabel(row.to_stage))}</strong><small>${esc(date(row.created_at))} · ${esc(row.performed_by||"—")} → ${esc(row.assigned_to||"—")}</small>${row.phase_note?`<p>${esc(row.phase_note)}</p>`:""}<small>${esc(r2Money(Number(row.phase_labor_cost||0)+Number(row.phase_material_cost||0)))}</small></div></div>`).join("");
+    const invoices=(data.invoices||[]).map(row=>`<div class="workflow-history-row"><span class="history-status">＄</span><div><strong>${esc(row.invoice_number)} · ${esc(String(row.status||"").toUpperCase())}</strong><small>${esc(r2Money(row.total_amount))} · ${esc(row.issue_date||"")}</small></div></div>`).join("");
+    openDialog({title:job.title,eyebrow:`${job.job_code||("#"+job.id)} · ${job.cancelled_at?tr("CANCELLED","TÖRÖLT / MEGSZAKÍTOTT"):job.stage==="completed"?tr("COMPLETED","LEZÁRVA"):tr("WORKFLOW HISTORY","MUNKAFOLYAMAT-TÖRTÉNET")}`,body:`<div class="workflow-history-summary"><div><small>${tr("Client","Ügyfél")}</small><strong>${esc(job.client_name)}</strong></div><div><small>${tr("Piano","Zongora")}</small><strong>${esc(r2JobPiano(job))}</strong></div><div><small>${tr("Scheduled","Ütemezve")}</small><strong>${esc(date(job.scheduled_at))}</strong></div><div><small>${tr("Responsible","Felelős")}</small><strong>${esc(job.assigned_technician_name||"—")}</strong></div></div>${job.cancelled_at?`<div class="detail-note danger-note"><strong>${tr("Cancellation","Megszakítás")}</strong><br>${esc(job.cancel_reason||"—")} · ${esc(job.cancelled_by_name||"—")} · ${esc(date(job.cancelled_at))}</div>`:""}<section class="workflow-history-section"><h3>${tr("Phases","Fázisok")}</h3>${phases||`<div class="empty-state">${tr("No phase history.","Nincs fázistörténet.")}</div>`}</section><section class="workflow-history-section"><h3>${tr("Handoffs / work log","Átadások / munkanapló")}</h3>${handoffs||`<div class="empty-state">${tr("No handoffs recorded.","Nincs rögzített átadás.")}</div>`}</section>${invoices?`<section class="workflow-history-section"><h3>${tr("Invoices","Számlák")}</h3>${invoices}</section>`:""}`});
+  }catch(error){toast(humanError(error),"error");}
 }
 
 function r2CalendarTitle(range,mode){
@@ -329,7 +393,7 @@ function r2EventSegment(job,date){
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
   const color=job.assigned_technician_color||"#8d6a2c";
-  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
+  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
     <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ${esc(job.title)}</strong>
     <span>${esc(job.client_name)} · ${esc(job.assigned_technician_name||"—")}</span>
     <small>${esc(r2StageLabel(job.stage))}</small>
@@ -365,7 +429,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2UpdateCalendarNowLine(){
@@ -482,21 +546,24 @@ async function r2RenderCalendar(){
   r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();
   clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(r2UpdateCalendarNowLine,30000);
 }
-async function r2LoadWorkflowBucket(bucket){
-  const next=["active","closed"].includes(bucket)?bucket:"active";
-  const data=await api("/api/jobs/workflow?bucket="+encodeURIComponent(next));
-  state.r2WorkflowBucket=next;state.r2Workflow=data;await r2RenderWorkflow(data);
+async function r2LoadWorkflowBucket(bucket,closedType=null){
+  const next=["active","closed"].includes(bucket)?bucket:"active",type=closedType||state.r2ClosedType||"completed";
+  const data=await api("/api/jobs/workflow?bucket="+encodeURIComponent(next)+(next==="closed"?"&closed_type="+encodeURIComponent(type):""));
+  state.r2WorkflowBucket=next;if(next==="closed")state.r2ClosedType=data.closed_type||type;state.r2Workflow=data;await r2RenderWorkflow(data);
 }
 async function r2RenderWorkflow(data){
   const host=$("#workshopContent");if(!host)return;
-  const bucket=data?.bucket||state.r2WorkflowBucket||"active";state.r2WorkflowBucket=bucket;
-  host.innerHTML=`<div class="workflow-view-toolbar"><div class="segmented-control compact workflow-status-switch">
+  const bucket=data?.bucket||state.r2WorkflowBucket||"active",closedType=data?.closed_type||state.r2ClosedType||"completed";state.r2WorkflowBucket=bucket;state.r2ClosedType=closedType;
+  const columns=data.columns||[],canAdd=bucket==="active"&&r2IsAdmin()&&Boolean(data.can_add_stage),count=columns.length+(canAdd?1:0);
+  host.innerHTML=`<div class="workflow-view-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
     <button type="button" data-workflow-bucket="active" class="${bucket==="active"?"active":""}">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
-  </div><small>${bucket==="active"?tr("Only currently running work is shown.","Csak a jelenleg futó munkák láthatók."):tr("Completed work is read-only and kept for history.","A lezárt munkák csak olvashatók és előzményként megmaradnak.")}</small></div>
-  <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}">${(data.columns||[]).map(r2WorkflowColumn).join("")}</div></div>`;
+  </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
+  <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column,{closed:bucket==="closed"})).join("")}${canAdd?r2AddStageColumn():""}</div></div>`;
   $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket(button.dataset.workflowBucket)));
-  const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active")r2BindDrag(board,data.jobs||[]);
+  $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
+  $("#workflowAddStageCard")?.addEventListener("click",r2OpenAddStage);
+  const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);}
 }
 function r2OverviewRows(key,overview){
   const rows=overview?.details?.[key]||[];
