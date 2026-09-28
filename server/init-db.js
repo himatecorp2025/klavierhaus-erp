@@ -78,37 +78,23 @@ if (legacyPianosDetected) {
   console.log("[ROUND1] Legacy pianos table isolated for migration");
 }
 
-const currentJobColumns = columns("jobs");
-const legacyJobsDetected = tableExists("jobs") && !(currentJobColumns.has("client_id") && currentJobColumns.has("piano_id") && currentJobColumns.has("scheduled_start") && currentJobColumns.has("ready_for_closeout_at"));
-if (legacyJobsDetected) {
-  if (tableExists("_round2_legacy_jobs")) db.exec('DROP TABLE "_round2_legacy_jobs"');
-  db.exec('ALTER TABLE "jobs" RENAME TO "_round2_legacy_jobs"');
-  console.log("[ROUND2] Legacy jobs table isolated; Round 1 safety backup retains the retired data.");
-}
+const complianceReady =
+  (!tableExists("intake_leads") || columns("intake_leads").has("media_urls")) &&
+  (!tableExists("jobs") || columns("jobs").has("stage")) &&
+  (!tableExists("invoices") || columns("invoices").has("subtotal_labor")) &&
+  (!tableExists("invoice_items") || columns("invoice_items").has("item_type"));
 
-if (tableExists("jobs") && !legacyJobsDetected) {
-  ensureColumn("jobs","closed_at","TEXT");
-  ensureColumn("jobs","closed_by_user_id","TEXT");
-}
-
-const round3Shapes = {
-  partners:["company_name","status"],
-  partner_contractors:["partner_id","user_id"],
-  invoice_sequences:["direction","sequence_year","last_value"],
-  invoices:["invoice_number","direction","status","job_id","counterparty_name","total_amount","balance_due"],
-  invoice_items:["invoice_id","item_description","quantity","unit_price","total_price"],
-  invoice_payments:["invoice_id","amount","payment_method","paid_at"]
-};
-for (const [name,required] of Object.entries(round3Shapes)) {
-  if (!tableExists(name)) continue;
-  const current=columns(name);
-  if (required.every(column=>current.has(column))) continue;
-  const legacyName=`_round3_legacy_${name}`;
+function isolateForCompliance(name) {
+  if (!tableExists(name)) return;
+  const legacyName = `_final_legacy_${name}`;
   if (tableExists(legacyName)) db.exec(`DROP TABLE ${quoteName(legacyName)}`);
   db.exec(`ALTER TABLE ${quoteName(name)} RENAME TO ${quoteName(legacyName)}`);
-  console.log(`[ROUND3] Legacy ${name} table isolated; safety backup retained.`);
+  console.log(`[COMPLIANCE] Legacy ${name} table isolated for migration`);
 }
 
+if (setting("final_compliance_migration_complete") !== "1" && !complianceReady) {
+  for (const name of ["invoice_payments","invoice_items","invoices","jobs","intake_leads"]) isolateForCompliance(name);
+}
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
