@@ -157,8 +157,9 @@ test("Pipeline activation feeds the Calendar and exact five-stage Workflow",asyn
 
   const workflow=await request("/api/jobs/workflow",{token});
   assert.equal(workflow.status,200,JSON.stringify(workflow.payload));
+  assert.equal(workflow.payload.bucket,"active");
   assert.deepEqual(workflow.payload.stages.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval","completed"]);
-  assert.equal(workflow.payload.columns.length,5);
+  assert.deepEqual(workflow.payload.columns.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval"]);
   assert.ok(workflow.payload.jobs.some(job=>job.id===shared.job.id));
 
   const calendar=await request("/api/calendar?from=2035-05-10T00:00:00.000Z&to=2035-05-11T23:59:59.000Z",{token});
@@ -206,10 +207,12 @@ test("Handoff fields are optional, current technician carries forward, and costs
 
 test("Admin closeout creates editable draft invoice from aggregated costs and records closing Admin",async()=>{
   const token=shared.adminToken;
+  appDb.prepare("UPDATE clients SET email=NULL WHERE id=?").run(shared.client.id);
   const closeout=await request("/api/jobs/"+shared.job.id+"/complete",{token,method:"POST",body:{
     invoice_mode:"draft",
     due_date:nyDate(),
-    email_language:"en"
+    email_language:"en",
+    recipient_email:"captured.final@example.com"
   }});
   assert.equal(closeout.status,201,JSON.stringify(closeout.payload));
   assert.equal(closeout.payload.invoice.status,"draft");
@@ -220,6 +223,17 @@ test("Admin closeout creates editable draft invoice from aggregated costs and re
   assert.match(closeout.payload.invoice.pdf_path,/^\/uploads\/invoices\//);
   assert.equal(closeout.payload.job.stage,"completed");
   assert.equal(closeout.payload.job.completed_by_name,"Final Admin");
+  assert.equal(closeout.payload.invoice.counterparty_email,"captured.final@example.com");
+  assert.equal(appDb.prepare("SELECT email FROM clients WHERE id=?").get(shared.client.id).email,"captured.final@example.com");
+  const activeWorkflow=await request("/api/jobs/workflow",{token});
+  assert.equal(activeWorkflow.status,200);
+  assert.equal(activeWorkflow.payload.jobs.some(job=>job.id===shared.job.id),false);
+  const closedWorkflow=await request("/api/jobs/workflow?bucket=closed",{token});
+  assert.equal(closedWorkflow.status,200,JSON.stringify(closedWorkflow.payload));
+  assert.equal(closedWorkflow.payload.bucket,"closed");
+  assert.deepEqual(closedWorkflow.payload.stages.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval","completed"]);
+  assert.deepEqual(closedWorkflow.payload.columns.map(stage=>stage.key),["completed"]);
+  assert.ok(closedWorkflow.payload.jobs.some(job=>job.id===shared.job.id));
   shared.invoice=closeout.payload.invoice;
 
   const edit=await request("/api/invoices/"+shared.invoice.id,{token,method:"PUT",body:{
@@ -385,7 +399,7 @@ test("Admin cancellation removes a job from active Calendar/Workflow while incur
   assert.equal(overview.payload.kpis.net_workshop_result,-20);
 });
 
-test("Admin and Super Admin invoice controls preserve audit-friendly cancellation and hard delete",async()=>{
+test("Admin and Super Admin invoice controls move deleted drafts to the document archive",async()=>{
   const token=shared.adminToken;
   const manual=await request("/api/invoices",{token,method:"POST",body:{
     direction:"receivable",
@@ -407,8 +421,33 @@ test("Admin and Super Admin invoice controls preserve audit-friendly cancellatio
   assert.equal(denied.payload.error,"SUPERADMIN_REQUIRED");
 
   const superToken=await login("owner.final@example.com");
-  const deleted=await request("/api/invoices/"+manual.payload.id,{token:superToken,method:"DELETE"});
+  const deleted=await request("/api/invoices/"+manual.payload.id,{token:superToken,method:"DELETE",body:{reason:"Duplicate draft removed from active finance"}});
   assert.equal(deleted.status,200,JSON.stringify(deleted.payload));
+  assert.equal(deleted.payload.archived,true);
   const missing=await request("/api/invoices/"+manual.payload.id,{token:superToken});
   assert.equal(missing.status,404);
+  const activeInvoices=await request("/api/invoices",{token:superToken});
+  assert.equal(activeInvoices.status,200);
+  assert.equal(activeInvoices.payload.some(row=>row.id===manual.payload.id),false);
+  const archive=await request("/api/archive/documents?category=deleted_invoice",{token:superToken});
+  assert.equal(archive.status,200,JSON.stringify(archive.payload));
+  const archived=archive.payload.rows.find(row=>row.entity_type==="invoice"&&String(row.entity_id)===String(manual.payload.id));
+  assert.ok(archived);
+  assert.equal(archived.metadata.invoice.invoice_number,manual.payload.invoice_number);
+  const retained=appDb.prepare("SELECT deleted_at,archive_document_id FROM invoices WHERE id=?").get(manual.payload.id);
+  assert.ok(retained?.deleted_at);
+  assert.equal(Number(retained.archive_document_id),Number(archived.id));
+
+  const form=new FormData();
+  form.append("category","company_document");
+  form.append("title","Internal operating note");
+  form.append("description","Retention and operating reference");
+  form.append("file",new Blob(["archive text"],{type:"text/plain"}),"operating-note.txt");
+  const createdDocument=await request("/api/archive/documents",{token:superToken,method:"POST",form});
+  assert.equal(createdDocument.status,201,JSON.stringify(createdDocument.payload));
+  assert.equal(createdDocument.payload.category,"company_document");
+  assert.equal(createdDocument.payload.original_name,"operating-note.txt");
+  const companyDocuments=await request("/api/archive/documents?category=company_document",{token:superToken});
+  assert.equal(companyDocuments.status,200);
+  assert.ok(companyDocuments.payload.rows.some(row=>row.id===createdDocument.payload.id));
 });

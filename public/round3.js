@@ -113,6 +113,7 @@ async function r3OpenCloseout(job,refresh=renderWorkshop){
   openDialog({title:tr("Complete Job & Invoice","Munka lezárása és számlázás"),eyebrow:job.job_code||"ADMIN APPROVAL",body:
     "<form id='closeoutForm' class='form-grid'>"+
       "<div class='detail-note full'>"+tr("Review the automatically calculated invoice. You may change prices, add extra lines or add a discount before closing the job.","Ellenőrizd az automatikusan számolt számlát. A lezárás előtt módosíthatod az árakat, adhatsz hozzá plusz tételt vagy kedvezményt.")+"</div>"+
+      "<label class='field full'><span>"+tr("Client email","Ügyfél e-mail")+" </span><input name='recipient_email' type='email' value='"+esc(job.client_email||"")+"' placeholder='name@example.com'><small>"+tr("If you enter or change it here, it is saved to the client master record.","Ha itt megadod vagy módosítod, a rendszer elmenti az ügyfél törzsadatába is.")+"</small></label>"+
       r3InvoiceEditorBody({job})+
       "<div class='closeout-choice full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button type='submit' class='secondary-button' name='closeout_mode' value='draft'>"+tr("Save Draft / Send Later","Mentés piszkozatként / későbbi küldés")+"</button><button type='submit' class='primary-button' name='closeout_mode' value='send'>"+tr("Send Invoice Now","Számla azonnali kiküldése")+"</button></div>"+
     "</form>"
@@ -122,7 +123,9 @@ async function r3OpenCloseout(job,refresh=renderWorkshop){
   $$("[name='closeout_mode']",form).forEach(button=>button.addEventListener("click",()=>{mode=button.value;}));
   form.addEventListener("submit",async event=>{
     event.preventDefault();
-    const body={...r3EditorPayload(form),invoice_mode:mode};
+    const email=String(form.elements.recipient_email?.value||"").trim();
+    if(mode==="send"&&!email){toast(tr("Add the client email before sending.","Küldés előtt add meg az ügyfél e-mail címét."),"error");form.elements.recipient_email?.focus();return;}
+    const body={...r3EditorPayload(form),invoice_mode:mode,recipient_email:email||null};
     try{
       const result=await api("/api/jobs/"+job.id+"/complete",{method:"POST",body:JSON.stringify(body)});
       closeDialog();
@@ -149,7 +152,7 @@ function r3InvoiceRow(invoice){
       (invoice.direction==="receivable"&&invoice.status==="draft"&&admin?"<button class='secondary-button' type='button' data-edit-invoice='"+invoice.id+"'>"+tr("Review / Edit","Átnézés / módosítás")+"</button><button class='primary-button' type='button' data-send-invoice='"+invoice.id+"'>"+tr("Approve & Send","Jóváhagyás és küldés")+"</button>":"")+
       (invoice.status==="sent"?"<button class='primary-button' type='button' data-pay-invoice='"+invoice.id+"'>"+tr("Mark Paid","Kiegyenlítés rögzítése")+"</button>":"")+
       (admin&&!["paid","cancelled"].includes(invoice.status)?"<button class='danger-button' type='button' data-cancel-invoice='"+invoice.id+"'>"+tr("Cancel","Érvénytelenítés")+"</button>":"")+
-      (superadmin?"<button class='danger-button' type='button' data-delete-invoice='"+invoice.id+"'>"+tr("Delete","Törlés")+"</button>":"")+
+      (superadmin&&["draft","cancelled"].includes(invoice.status)?"<button class='danger-button' type='button' data-delete-invoice='"+invoice.id+"'>"+tr("Delete / Archive","Törlés / Archívum")+"</button>":"")+
     "</div></article>";
 }
 function r3BindInvoiceActions(root,invoices,refresh=renderFinance){
@@ -196,7 +199,8 @@ function r3OpenEditInvoice(invoice,refresh=renderFinance){
 }
 function r3OpenSendInvoice(invoice,refresh=renderFinance){
   openDialog({title:tr("Approve & Send Invoice","Számla jóváhagyása és küldése"),eyebrow:invoice.invoice_number,body:
-    "<form id='sendInvoiceForm' class='form-grid'><div class='detail-note full'>"+tr("The PDF will be sent to ","A PDF számla erre az e-mail címre kerül: ")+esc(invoice.counterparty_email||tr("No client email","Nincs ügyfél e-mail"))+"</div>"+
+    "<form id='sendInvoiceForm' class='form-grid'><div class='detail-note full'>"+tr("Confirm the recipient before sending. A new address is saved to the client master record.","Küldés előtt ellenőrizd a címzettet. Az új cím az ügyfél törzsadatába is elmentésre kerül.")+"</div>"+
+    "<label class='field full'><span>"+tr("Client email","Ügyfél e-mail")+" *</span><input name='recipient_email' type='email' value='"+esc(invoice.counterparty_email||invoice.client_master_email||"")+"' placeholder='name@example.com' required></label>"+
     "<label class='field full'><span>"+tr("Email language","E-mail nyelve")+"</span><select name='language'><option value='en' "+((invoice.email_language||"en")==="en"?"selected":"")+">English</option><option value='hu' "+(invoice.email_language==="hu"?"selected":"")+">Magyar</option></select></label>"+
     "<div class='form-actions full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button class='primary-button' type='submit'>"+tr("Send Invoice","Számla küldése")+"</button></div></form>"
   });
@@ -234,11 +238,13 @@ function r3OpenCancelInvoice(invoice,refresh=renderFinance){
   });
 }
 function r3OpenHardDelete(invoice,refresh=renderFinance){
-  openDialog({title:tr("Permanent Delete","Végleges törlés"),eyebrow:"SUPER ADMIN",body:
-    "<div class='detail-note'>"+tr("This permanently deletes invoice ","A művelet végleg törli ezt a számlát: ")+"<strong>"+esc(invoice.invoice_number)+"</strong>.</div><div class='form-actions'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button type='button' class='danger-button' id='hardDeleteInvoice'>"+tr("Delete Permanently","Végleges törlés")+"</button></div>"
+  openDialog({title:tr("Remove Invoice from Active Finance","Számla kivétele az aktív pénzügyből"),eyebrow:"SUPER ADMIN · ARCHIVE",body:
+    "<form id='archiveInvoiceForm' class='form-grid'><div class='detail-note full'>"+tr("The invoice will disappear from active outgoing/incoming lists, but its snapshot and PDF will remain in Documents / Archive.","A számla kikerül az aktív kimenő/bejövő listából, de a pillanatképe és PDF-je megmarad a Dokumentumok / Archívumban.")+"<br><strong>"+esc(invoice.invoice_number)+"</strong></div>"+
+    "<label class='field full'><span>"+tr("Archive reason","Archiválás oka")+"</span><textarea name='reason' placeholder='"+tr("Duplicate, cancelled draft, created by mistake…","Duplikáció, törölt piszkozat, tévesen létrehozva…")+"'></textarea></label>"+
+    "<div class='form-actions full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button type='submit' class='danger-button'>"+tr("Remove & Archive","Kivétel és archiválás")+"</button></div></form>"
   });
   $("[data-close-dialog]").addEventListener("click",closeDialog);
-  $("#hardDeleteInvoice").addEventListener("click",async()=>{try{await api("/api/invoices/"+invoice.id,{method:"DELETE"});closeDialog();toast(tr("Invoice deleted.","Számla törölve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}});
+  $("#archiveInvoiceForm").addEventListener("submit",async event=>{event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));try{await api("/api/invoices/"+invoice.id,{method:"DELETE",body:JSON.stringify(body)});closeDialog();toast(tr("Invoice moved to the archive.","A számla az archívumba került."),"success");await refresh();}catch(error){toast(humanError(error),"error");}});
 }
 
 async function r3OpenManualInvoice(refresh=renderFinance){

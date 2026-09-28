@@ -1122,6 +1122,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   cancelled_at TEXT,
   cancelled_by_user_id TEXT,
   cancel_reason TEXT,
+  deleted_at TEXT,
+  deleted_by_user_id TEXT,
+  archive_document_id INTEGER,
   created_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1238,3 +1241,27 @@ CREATE INDEX IF NOT EXISTS idx_customer_messages_round1 ON customer_messages(con
 CREATE INDEX IF NOT EXISTS idx_customer_attachments_round1 ON customer_message_attachments(conversation_id,message_id);
 CREATE INDEX IF NOT EXISTS idx_website_content_versions_round1 ON website_content_versions(page_key,language,version DESC);
 CREATE INDEX IF NOT EXISTS idx_website_tracking_round1 ON website_tracking_events(event_name,created_at DESC);
+
+
+-- Enterprise document/archive center. Deleted operational records are retained here
+-- as immutable snapshots while active modules only show live records.
+CREATE TABLE IF NOT EXISTS document_archive (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','internal_correspondence','company_message','company_document')),
+  title TEXT NOT NULL,
+  description TEXT,
+  entity_type TEXT,
+  entity_id TEXT,
+  original_name TEXT,
+  stored_name TEXT,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  file_path TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  archived_by_user_id TEXT,
+  archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (archived_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_document_archive_category_time ON document_archive(category,archived_at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_archive_entity ON document_archive(entity_type,entity_id);

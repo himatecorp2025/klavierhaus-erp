@@ -43,3 +43,11 @@ test("dark mode regression layer removes hard-coded white operational surfaces",
   assert.match(css,/\.cms-toggle-row,[\s\S]*background:var\(--surface-2\)/);
   assert.match(css,/\.client-row\{[\s\S]*grid-template-columns:minmax\(0,1fr\) 44px/);
 });
+
+
+test("single-element selector helper is never iterated in active v6 workflow surfaces",()=>{
+  for(const [name,source] of [["round2",round2],["v6",v6]]){
+    const invalid=source.match(/(^|[^$])\$\([^\n;]*\)\.forEach/gm)||[];
+    assert.deepEqual(invalid,[],name+" contains $().forEach runtime hazards: "+invalid.join(" | "));
+  }
+});

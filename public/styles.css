@@ -1189,3 +1189,52 @@ select option{background:var(--surface);color:var(--ink)}
   .client-row{grid-template-columns:minmax(0,1fr) 40px}
   .client-row .count{width:34px;min-width:34px}
 }
+
+
+/* ARCHIVE + WORKFLOW STATUS */
+.workflow-view-toolbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:var(--surface);
+  color:var(--ink);
+}
+.workflow-view-toolbar small{color:var(--muted)}
+.closed-workflow-board{grid-template-columns:minmax(320px,640px)}
+.closed-workflow-board .workflow-column{min-height:240px}
+.archive-center{padding:18px}
+.archive-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.archive-toolbar h2{margin:4px 0 6px}
+.archive-toolbar p{margin:0;color:var(--muted);max-width:760px}
+.archive-filters{display:grid;grid-template-columns:minmax(220px,320px) minmax(260px,1fr);gap:12px;margin-bottom:14px}
+.archive-filters select,.archive-filters input{background:var(--input-bg);color:var(--ink);border-color:var(--line)}
+.archive-list{display:grid;gap:10px}
+.archive-row{
+  display:grid;
+  grid-template-columns:44px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  padding:14px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:var(--surface-2);
+  color:var(--ink);
+}
+.archive-row-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--surface)}
+.archive-row-main{min-width:0}
+.archive-row-main p{margin:6px 0;color:var(--muted)}
+.archive-row-main small{display:block;color:var(--muted);overflow-wrap:anywhere}
+.archive-row-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.archive-row-actions{display:flex;gap:8px;align-items:center}
+.archive-detail{display:grid;gap:12px}
+@media(max-width:760px){
+  .workflow-view-toolbar,.archive-toolbar{align-items:stretch;flex-direction:column}
+  .archive-filters{grid-template-columns:1fr}
+  .archive-row{grid-template-columns:40px minmax(0,1fr)}
+  .archive-row-actions{grid-column:1/-1;justify-content:flex-end}
+}

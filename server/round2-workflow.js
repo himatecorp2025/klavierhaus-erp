@@ -236,12 +236,15 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     res.json(db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage='planned' AND j.scheduled_at IS NULL ORDER BY j.created_at,j.id`).all().map(decorateJob));
   });
 
-  app.get("/api/jobs/workflow",auth,staff,(_req,res)=>{
-    const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage IN ('received','in_progress','qa_review','admin_approval','completed')
+  app.get("/api/jobs/workflow",auth,staff,(req,res)=>{
+    const bucket=String(req.query.bucket||"active").toLowerCase();
+    if(!["active","closed"].includes(bucket))return res.status(400).json({error:"INVALID_WORKFLOW_BUCKET"});
+    const stageSql=bucket==="closed"?"j.stage='completed'":"j.stage IN ('received','in_progress','qa_review','admin_approval')";
+    const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND ${stageSql}
       ORDER BY CASE j.stage WHEN 'received' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'qa_review' THEN 2 WHEN 'admin_approval' THEN 3 ELSE 4 END,
-      COALESCE(j.scheduled_at,j.updated_at),j.id`).all().map(decorateJob);
-    const stages=stageDefinitions();
-    res.json({stages,columns:stages.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
+      COALESCE(j.completed_at,j.scheduled_at,j.updated_at) DESC,j.id DESC`).all().map(decorateJob);
+    const allStages=stageDefinitions(),visibleStages=bucket==="closed"?allStages.filter(stage=>stage.key==="completed"):allStages.filter(stage=>stage.key!=="completed");
+    res.json({bucket,stages:allStages,columns:visibleStages.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
   });
   app.get("/api/workshop",auth,staff,(_req,res)=>{
     const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage IN ('received','in_progress','qa_review','admin_approval','completed')
@@ -256,7 +259,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const active=all.filter(job=>job.stage!=="planned"&&job.stage!=="completed");
     const now=Date.now();
     const overdue=active.filter(job=>job.current_phase?.due_at&&new Date(job.current_phase.due_at).getTime()<now);
-    const invoiceRows=db.prepare("SELECT id,job_id,invoice_number,status,total_amount,due_date FROM invoices WHERE direction='receivable' AND job_id IS NOT NULL AND status IN ('draft','sent') ORDER BY id DESC").all();
+    const invoiceRows=db.prepare("SELECT id,job_id,invoice_number,status,total_amount,due_date FROM invoices WHERE deleted_at IS NULL AND direction='receivable' AND job_id IS NOT NULL AND status IN ('draft','sent') ORDER BY id DESC").all();
     const invoiceByJob=new Map();for(const row of invoiceRows)if(!invoiceByJob.has(Number(row.job_id)))invoiceByJob.set(Number(row.job_id),row);
     const openInvoice=all.filter(job=>job.ready_for_closeout||invoiceByJob.has(Number(job.id))).map(job=>({...job,invoice:invoiceByJob.get(Number(job.id))||null,invoice_issue:job.ready_for_closeout&&!invoiceByJob.has(Number(job.id))?"awaiting_closeout":invoiceByJob.get(Number(job.id))?.status==="draft"?"invoice_draft":"invoice_sent"}));
     const activeFinancial=active.map(job=>({...job,financial_total:money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0))}));

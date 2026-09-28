@@ -32,6 +32,7 @@ const { createIntakeMediaUpload } = require("./intake-media-upload");
 const { registerRound2WorkflowRoutes } = require("./round2-workflow");
 const { registerRound3FinanceRoutes } = require("./round3-finance");
 const { registerAdminUxV6Routes } = require("./admin-ux-v6");
+const { registerArchiveCenterRoutes } = require("./archive-center");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 
 const app = express();
@@ -342,6 +343,7 @@ registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
+registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
