@@ -133,6 +133,22 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir}){
     }catch(error){respond(res,error);}
   });
 
+  app.put("/api/v6/website-services/:id/gallery",auth,admin,(req,res)=>{
+    const before=db.prepare("SELECT * FROM website_services WHERE id=?").get(req.params.id);
+    if(!before)return res.status(404).json({error:"WEBSITE_SERVICE_NOT_FOUND"});
+    const source=Array.isArray(req.body?.gallery)?req.body.gallery:[];
+    const gallery=source.slice(0,12).map(item=>{
+      const url=text(item?.url||item?.image_url,1000);
+      if(!url||(!/^https?:\/\//i.test(url)&&!url.startsWith("/")))throw problem("INVALID_WEBSITE_GALLERY_IMAGE");
+      return {url,alt_en:text(item?.alt_en,500),alt_hu:text(item?.alt_hu,500)};
+    });
+    db.prepare("UPDATE website_services SET gallery_json=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(JSON.stringify(gallery),req.user.id,before.id);
+    const after=db.prepare("SELECT * FROM website_services WHERE id=?").get(before.id);
+    audit(req,"UPDATE_MEDIA","website_services",before.id,{gallery_json:before.gallery_json},{gallery_json:after.gallery_json});
+    res.json(after);
+  });
+
   app.post("/api/v6/direct-expense-receipt",auth,finance,receiptUpload,(req,res)=>{
     if(!req.file)return res.status(400).json({error:"RECEIPT_FILE_REQUIRED"});
     const url=`/uploads/receipts/${path.basename(req.file.path)}`;
