@@ -308,6 +308,17 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const id=integerId(req.params.id),row=id&&jobById(id);if(!row)return res.status(404).json({error:"JOB_NOT_FOUND"});
     res.json({...row,handoffs:db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(id)});
   });
+  app.get("/api/jobs/:id/history",auth,staff,(req,res)=>{
+    const id=integerId(req.params.id),job=id&&jobById(id);if(!job)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    const labels=new Map(stageDefinitions({includeInactive:true}).map(stage=>[stage.key,stage]));
+    const phases=job.workflow_phases.map(phase=>({...phase,label_en:labels.get(phase.stage_key)?.label_en||phase.stage_key,label_hu:labels.get(phase.stage_key)?.label_hu||phase.stage_key}));
+    const handoffs=db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(id);
+    const invoices=db.prepare(`SELECT id,invoice_number,status,total_amount,issue_date,due_date,sent_at,paid_at,cancelled_at,deleted_at,pdf_path
+      FROM invoices WHERE job_id=? OR (source_type='job' AND source_id=?) ORDER BY id DESC`).all(id,String(id));
+    const events=db.prepare(`SELECT id,event_time,user_id,user_name,user_role,action,module,record_id,success,details
+      FROM audit_log WHERE module='jobs' AND record_id=? ORDER BY event_time,id`).all(String(id));
+    res.json({job,phases,handoffs,invoices,events});
+  });
 
   app.get("/api/clients/:id/jobs",auth,staff,(req,res)=>{
     const clientId=integerId(req.params.id);
