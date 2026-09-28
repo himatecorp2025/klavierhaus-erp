@@ -4,6 +4,7 @@ const fs=require("fs");
 const path=require("path");
 const crypto=require("crypto");
 const multer=require("multer");
+const {inspectImageFile}=require("./upload-middleware");
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function integerId(value){const n=Number(value);return Number.isSafeInteger(n)&&n>0?n:null;}
@@ -44,7 +45,7 @@ function diskUpload(target,prefix,{extensions,mimes,max=25*1024*1024}){
   });
 }
 
-function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir}){
+function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=""}){
   const staff=permit("ADMIN","MANAGER","WORKER"),admin=permit("ADMIN"),finance=permit("ADMIN","MANAGER");
   const receiptDir=path.join(uploadDir,"receipts"),brandDir=path.join(uploadDir,"branding-v6");
   const receiptUpload=diskUpload(receiptDir,"receipt",{extensions:RECEIPT_EXTENSIONS,mimes:RECEIPT_MIMES,max:40*1024*1024}).single("file");
@@ -168,9 +169,13 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir}){
   ]){
     app.post(`/api/settings/branding/${spec.route}`,auth,admin,brandUpload,(req,res)=>{
       if(!req.file)return res.status(400).json({error:"INVALID_BRANDING_IMAGE_TYPE"});
+      const details=inspectImageFile(req.file.path);
+      const min=spec.route==="app-icon"?192:32;
+      if(!details||details.width<min||details.height<min){try{fs.unlinkSync(req.file.path);}catch(_error){}return res.status(400).json({error:"INVALID_BRANDING_IMAGE"});}
       const before=setting(db,spec.key,""),url=`/uploads/branding-v6/${path.basename(req.file.path)}`;
+      const absolute_url=`${String(appBaseUrl||"").replace(/\/$/,"")}${url}`;
       setSetting(db,spec.key,url,req.user);setSetting(db,"branding_version",String(Date.now()),req.user);
-      audit(req,"UPDATE","branding",spec.key,{url:before},{url});res.json({url,branding_version:setting(db,"branding_version","1")});
+      audit(req,"UPDATE","branding",spec.key,{url:before},{url,...details});res.json({url,absolute_url,...details,branding_version:setting(db,"branding_version","1")});
     });
   }
 }
