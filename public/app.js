@@ -9,12 +9,12 @@ const state={
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,intake:[],users:[],
-  cmsPages:[],cmsPage:"home",cmsLanguage:"en",landing:[]
+  cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null
 };
 const activeViews=new Set(["workshop","planned","intake","master","finance","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
-const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?"Super Admin":role==="ADMIN"?"Admin":role==="MANAGER"?"Manager":role||"";
+const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
 
 const chromeText={
   login_copy:["Sign in to the Klavierhaus internal workspace.","Jelentkezz be a Klavierhaus belső munkafelületére."],
@@ -24,7 +24,7 @@ const chromeText={
   nav_workshop:["Workshop & Calendar","Műhely & Naptár"],nav_intake:["Intake","Igényfelmérés"],nav_planned:["Planned Jobs","Tervezett munkák"],
   nav_master:["Master Data","Törzsadatok"],nav_finance:["Finance","Pénzügy"],nav_cms:["Website CMS","Weboldal CMS"],
   mobile_workshop:["Workshop","Műhely"],mobile_planned:["Planned","Tervezett"],mobile_intake:["Intake","Igény"],mobile_master:["Master","Törzs"],
-  mobile_finance:["Finance","Pénzügy"],mobile_profile:["Profile","Profil"]
+  mobile_finance:["Finance","Pénzügy"],mobile_profile:["Profile","Profil"],new_york_time:["New York time","New York-i idő"]
 };
 function applyChromeLanguage(){
   document.documentElement.lang=state.language;
@@ -34,6 +34,8 @@ function applyChromeLanguage(){
   });
   const toggle=$("#languageToggle");if(toggle)toggle.textContent=state.language==="en"?"HU":"EN";
   const profile=$("#profileButton");if(profile)profile.setAttribute("aria-label",tr("Profile and settings","Profil és beállítások"));
+  const close=$("#appDialog [data-dialog-close]");if(close)close.setAttribute("aria-label",tr("Close","Bezárás"));
+  updateNewYorkClock();
 }
 function setLanguage(language){
   state.language=language==="hu"?"hu":"en";
@@ -93,9 +95,21 @@ function clearSession(){
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
 }
 function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");}
+function updateNewYorkClock(){
+  const now=new Date(),locale=state.language==="hu"?"hu-HU":"en-US";
+  const time=$("#newYorkClock"),date=$("#newYorkDate");
+  if(time)time.textContent=new Intl.DateTimeFormat(locale,{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:state.language!=="hu"}).format(now);
+  if(date)date.textContent=new Intl.DateTimeFormat(locale,{timeZone:"America/New_York",weekday:"short",month:"short",day:"numeric",year:"numeric"}).format(now);
+}
+function startNewYorkClock(){
+  updateNewYorkClock();
+  if(state.clockTimer)clearInterval(state.clockTimer);
+  state.clockTimer=setInterval(updateNewYorkClock,1000);
+}
 function showApp(){
   $("#loginScreen").classList.add("hidden");$("#appShell").classList.remove("hidden");
   $("#profileInitials").textContent=initials(state.user?.name);
+  startNewYorkClock();
 }
 async function loadBranding(){
   try{
@@ -125,8 +139,12 @@ function openDialog({title,eyebrow="",body}){
   $("#dialogTitle").textContent=title;$("#dialogEyebrow").textContent=eyebrow;$("#dialogBody").innerHTML=body;
   const dialog=$("#appDialog");if(!dialog.open)dialog.showModal();return dialog;
 }
-function closeDialog(){const dialog=$("#appDialog");if(dialog.open)dialog.close();}
+function closeDialog(){const dialog=$("#appDialog");if(dialog?.open)dialog.close();}
+document.addEventListener("click",event=>{
+  if(event.target.closest("[data-dialog-close],[data-close-dialog]")){event.preventDefault();closeDialog();}
+});
 $("#appDialog").addEventListener("click",event=>{if(event.target===$("#appDialog"))closeDialog();});
+$("#appDialog").addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
 
 async function renderView(){
   const workspace=$("#workspace");workspace.innerHTML=loading();
@@ -347,41 +365,127 @@ async function renderCms(){
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role)){workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Admin access required.","Admin jogosultság szükséges."))+`<section class="panel empty-state">${tr("No CMS permission.","Nincs CMS jogosultság.")}</section>`;return;}
   const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];
   if(!state.cmsPages.some(page=>page.page_key===state.cmsPage))state.cmsPage=state.cmsPages[0]?.page_key||"home";
-  workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Edit the existing public website without changing its protected architecture.","A meglévő publikus weboldal kezelése a védett architektúra módosítása nélkül."))+
-    `<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${state.cmsPages.map(page=>`<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button">${esc(page.title_en||page.page_key)}</button>`).join("")}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
-  $$("[data-cms-page]").forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await loadCmsPage();}));
+  workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Edit the protected public website through a visual content editor — no code or JSON required.","A védett publikus weboldal tartalmának vizuális szerkesztése — kód és JSON nélkül."))+
+    `<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${state.cmsPages.map(page=>`<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button">${esc(state.language==="hu"?(page.title_hu||page.title_en||page.page_key):(page.title_en||page.page_key))}</button>`).join("")}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
+  $$("[data-cms-page]").forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
   await loadCmsPage();
+}
+const CMS_LABELS={
+  title:["Title","Cím"],subtitle:["Subtitle","Alcím"],heading:["Heading","Címsor"],eyebrow:["Eyebrow","Kiemelő felirat"],
+  text:["Text","Szöveg"],body:["Body text","Törzsszöveg"],description:["Description","Leírás"],name:["Name","Név"],role:["Role","Szerepkör"],
+  quote:["Quote","Idézet"],label:["Label","Felirat"],button_text:["Button text","Gomb felirata"],button_label:["Button label","Gomb felirata"],
+  button_url:["Button link","Gomb hivatkozása"],cta_label:["CTA label","CTA felirata"],cta_url:["CTA link","CTA hivatkozása"],
+  image_url:["Image","Kép"],image:["Image","Kép"],alt:["Alternative text","Alternatív képszöveg"],url:["Link","Hivatkozás"],
+  email:["Email","E-mail"],phone:["Phone","Telefon"],address:["Address","Cím"],items:["Items","Elemek"],sections:["Sections","Szekciók"]
+};
+function cmsFieldLabel(key,index=0){
+  const normalized=String(key||"").toLowerCase(),pair=CMS_LABELS[normalized];
+  if(pair)return state.language==="hu"?pair[1]:pair[0];
+  const clean=String(key||"").replace(/[_-]+/g," ").replace(/\b\w/g,ch=>ch.toUpperCase());
+  return clean||`${tr("Item","Elem")} ${index+1}`;
+}
+function cmsPathAttr(path){return encodeURIComponent(JSON.stringify(path));}
+function cmsPathDecode(value){try{return JSON.parse(decodeURIComponent(value));}catch(_error){return [];}}
+function cmsGetPath(root,path){return path.reduce((value,key)=>value?.[key],root);}
+function cmsSetPath(root,path,value){
+  if(!path.length)return;
+  let node=root;for(let i=0;i<path.length-1;i+=1)node=node[path[i]];
+  node[path[path.length-1]]=value;
+}
+function cmsEmptyClone(value){
+  if(Array.isArray(value))return [];
+  if(value&&typeof value==="object")return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,cmsEmptyClone(item)]));
+  if(typeof value==="boolean")return false;
+  if(typeof value==="number")return 0;
+  return "";
+}
+function cmsRenderNode(value,path=[],key="",index=0){
+  const label=cmsFieldLabel(key,index);
+  if(Array.isArray(value)){
+    return `<section class="cms-fieldset"><div class="cms-fieldset-head"><div><strong>${esc(label)}</strong><small>${value.length} ${tr("items","elem")}</small></div><button type="button" class="secondary-button" data-cms-add="${cmsPathAttr(path)}">＋ ${tr("Add","Hozzáadás")}</button></div><div class="cms-repeater">${value.map((item,itemIndex)=>`<article class="cms-repeat-item"><div class="cms-repeat-head"><strong>${esc(cmsFieldLabel(key,itemIndex))} #${itemIndex+1}</strong><button class="text-button danger-text" type="button" data-cms-remove="${cmsPathAttr([...path,itemIndex])}">${tr("Remove","Eltávolítás")}</button></div>${cmsRenderNode(item,[...path,itemIndex],key,itemIndex)}</article>`).join("")||`<div class="cms-empty">${tr("No items yet.","Még nincs elem.")}</div>`}</div></section>`;
+  }
+  if(value&&typeof value==="object"){
+    return `<section class="cms-fieldset"><div class="cms-fieldset-head"><strong>${esc(label)}</strong></div><div class="cms-object-grid">${Object.entries(value).map(([childKey,child],childIndex)=>cmsRenderNode(child,[...path,childKey],childKey,childIndex)).join("")}</div></section>`;
+  }
+  if(typeof value==="boolean"){
+    return `<label class="cms-toggle-row"><span>${esc(label)}</span><input type="checkbox" data-cms-path="${cmsPathAttr(path)}" ${value?"checked":""}></label>`;
+  }
+  const str=String(value??""),urlField=/url|link|image/i.test(key),longField=/text|body|description|quote|content/i.test(key)||str.length>120;
+  if(longField)return `<label class="field cms-primitive"><span>${esc(label)}</span><textarea data-cms-path="${cmsPathAttr(path)}">${esc(str)}</textarea></label>`;
+  return `<label class="field cms-primitive"><span>${esc(label)}</span><input data-cms-path="${cmsPathAttr(path)}" type="${urlField?"url":"text"}" value="${esc(str)}"></label>`;
+}
+function bindCmsVisualEditor(){
+  const host=$("#cmsVisualFields");if(!host)return;
+  $$("[data-cms-path]",host).forEach(input=>input.addEventListener(input.type==="checkbox"?"change":"input",event=>{
+    const path=cmsPathDecode(event.currentTarget.dataset.cmsPath),old=cmsGetPath(state.cmsDraft,path);
+    const value=event.currentTarget.type==="checkbox"?event.currentTarget.checked:typeof old==="number"?Number(event.currentTarget.value||0):event.currentTarget.value;
+    cmsSetPath(state.cmsDraft,path,value);
+  }));
+  $$("[data-cms-remove]",host).forEach(button=>button.addEventListener("click",()=>{
+    const path=cmsPathDecode(button.dataset.cmsRemove),index=Number(path.at(-1)),parent=cmsGetPath(state.cmsDraft,path.slice(0,-1));
+    if(Array.isArray(parent)){parent.splice(index,1);renderCmsDraftFields();}
+  }));
+  $$("[data-cms-add]",host).forEach(button=>button.addEventListener("click",()=>{
+    const path=cmsPathDecode(button.dataset.cmsAdd),arr=cmsGetPath(state.cmsDraft,path);
+    if(Array.isArray(arr)){arr.push(arr.length?cmsEmptyClone(arr[0]):"");renderCmsDraftFields();}
+  }));
+}
+function renderCmsDraftFields(){
+  const host=$("#cmsVisualFields");if(!host)return;
+  const entries=Object.entries(state.cmsDraft||{});
+  host.innerHTML=entries.length?entries.map(([key,value],index)=>cmsRenderNode(value,[key],key,index)).join(""):`<div class="cms-empty">${tr("This page currently has no editable content fields.","Ezen az oldalon jelenleg nincs szerkeszthető tartalmi mező.")}</div>`;
+  bindCmsVisualEditor();
 }
 async function loadCmsPage(){
   const host=$("#cmsEditor");host.innerHTML=loading();
-  const [page,landing]=await Promise.all([api(`/api/website-content/${encodeURIComponent(state.cmsPage)}?lang=${state.cmsLanguage}`),api("/api/landing-sections").catch(()=>[])]);
-  state.landing=Array.isArray(landing)?landing:[];
-  host.innerHTML=`<div class="cms-toolbar"><div><span class="eyebrow">${tr("PAGE","OLDAL")}</span><h2>${esc(state.cmsPage)}</h2></div><label class="field"><span>${tr("Content language","Tartalom nyelve")}</span><select id="cmsLanguage"><option value="en" ${state.cmsLanguage==="en"?"selected":""}>English</option><option value="hu" ${state.cmsLanguage==="hu"?"selected":""}>Magyar</option></select></label></div>
-    <label class="field"><span>JSON</span><textarea id="cmsJson" spellcheck="false">${esc(JSON.stringify(page.content||{},null,2))}</textarea></label>
-    <div class="form-actions"><button id="saveCmsBtn" class="primary-button" type="button">${tr("Save & publish","Mentés és publikálás")}</button></div>
+  const page=await api(`/api/website-content/${encodeURIComponent(state.cmsPage)}?lang=${state.cmsLanguage}`);
+  state.cmsDraft=structuredClone(page.content||{});
+  const meta=state.cmsPages.find(item=>item.page_key===state.cmsPage)||{};
+  host.innerHTML=`<div class="cms-toolbar"><div><span class="eyebrow">${tr("VISUAL PAGE EDITOR","VIZUÁLIS OLDALSZERKESZTŐ")}</span><h2>${esc(state.language==="hu"?(meta.title_hu||meta.title_en||state.cmsPage):(meta.title_en||state.cmsPage))}</h2></div><label class="field cms-language-field"><span>${tr("Content language","Tartalom nyelve")}</span><select id="cmsLanguage"><option value="en" ${state.cmsLanguage==="en"?"selected":""}>${tr("English","Angol")}</option><option value="hu" ${state.cmsLanguage==="hu"?"selected":""}>Magyar</option></select></label></div>
+    <div id="cmsVisualFields" class="cms-visual-fields"></div>
+    <div class="cms-publish-bar"><span>${tr("Changes are published to the existing protected website content API.","A módosítások a meglévő, védett weboldal-tartalmi API-n keresztül kerülnek publikálásra.")}</span><button id="saveCmsBtn" class="primary-button" type="button">${tr("Save & publish","Mentés és publikálás")}</button></div>
     <div class="cms-upload"><label class="field"><span>${tr("Upload image","Kép feltöltése")}</span><input id="cmsImageFile" type="file" accept="image/*"></label><button id="uploadCmsImage" class="secondary-button" type="button">${tr("Upload","Feltöltés")}</button><div id="imageUploadResult" class="muted full"></div></div>`;
+  renderCmsDraftFields();
   $("#cmsLanguage").addEventListener("change",async event=>{state.cmsLanguage=event.target.value;await loadCmsPage();});
-  $("#saveCmsBtn").addEventListener("click",async()=>{let content;try{content=JSON.parse($("#cmsJson").value);}catch(_error){toast(tr("Invalid JSON.","Hibás JSON."),"error");return;}try{await api(`/api/website-content/${encodeURIComponent(state.cmsPage)}`,{method:"PUT",body:JSON.stringify({language:state.cmsLanguage,content})});toast(tr("Website content published.","Weboldal tartalma publikálva."),"success");}catch(error){toast(humanError(error),"error");}});
-  $("#uploadCmsImage").addEventListener("click",async()=>{const file=$("#cmsImageFile").files?.[0];if(!file){toast(tr("Choose an image.","Válassz képet."),"error");return;}const form=new FormData();form.set("image",file);try{const result=await api("/api/website-content/image",{method:"POST",body:form});$("#imageUploadResult").textContent=result.image_url;toast(tr("Image uploaded.","Kép feltöltve."),"success");}catch(error){toast(humanError(error),"error");}});
+  $("#saveCmsBtn").addEventListener("click",async()=>{try{await api(`/api/website-content/${encodeURIComponent(state.cmsPage)}`,{method:"PUT",body:JSON.stringify({language:state.cmsLanguage,content:state.cmsDraft})});toast(tr("Website content published.","Weboldal tartalma publikálva."),"success");}catch(error){toast(humanError(error),"error");}});
+  $("#uploadCmsImage").addEventListener("click",async()=>{const file=$("#cmsImageFile").files?.[0];if(!file){toast(tr("Choose an image.","Válassz képet."),"error");return;}const form=new FormData();form.set("image",file);try{const result=await api("/api/website-content/image",{method:"POST",body:form});$("#imageUploadResult").innerHTML=`<strong>${tr("Uploaded image URL","Feltöltött kép hivatkozása")}:</strong> <code>${esc(result.image_url)}</code>`;toast(tr("Image uploaded.","Kép feltöltve."),"success");}catch(error){toast(humanError(error),"error");}});
 }
 
 async function renderProfile(){
   const workspace=$("#workspace"),users=await loadUsers(),canManage=["ADMIN","SUPERADMIN"].includes(state.user?.role);
-  workspace.innerHTML=pageHead(tr("Profile & Settings","Profil & Beállítások"),tr("Your account, team and application language.","Saját fiók, csapat és alkalmazásnyelv."),canManage?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
+  workspace.innerHTML=pageHead(tr("Profile & Settings","Profil és beállítások"),tr("Your account, team and application language.","Saját fiók, csapat és alkalmazásnyelv."),canManage?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
     `<div class="profile-grid"><section class="panel profile-card"><div class="profile-avatar">${esc(initials(state.user?.name))}</div><h2>${esc(state.user?.name)}</h2><p class="muted">${esc(state.user?.email||"")}</p><span class="role-chip">${esc(roleLabel(state.user?.role))}</span><div class="form-actions"><button id="logoutBtn" class="danger-button" type="button">${tr("Sign out","Kijelentkezés")}</button></div></section>
-    <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span></div>`).join("")}</div></section></div>`;
+    <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span>${canManage?`<button class="secondary-button team-edit-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>`:""}</div>`).join("")}</div></section></div>`;
   $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}clearSession();showLogin();});
-  $("#newUserBtn")?.addEventListener("click",openUserDialog);
+  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
+  $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
 }
-function openUserDialog(){
-  openDialog({title:tr("New user","Új felhasználó"),eyebrow:tr("USER MANAGEMENT","FELHASZNÁLÓKEZELÉS"),body:`<form id="userEditor" class="form-grid">
-    <label class="field"><span>${tr("Name","Név")} *</span><input name="name" required autofocus></label><label class="field"><span>${tr("Role","Szerepkör")} *</span><select name="role"><option value="WORKER">${tr("Technician","Technikus")}</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select></label>
-    <label class="field"><span>${tr("Login email","Belépési e-mail")} *</span><input name="email" type="email" required></label><label class="field"><span>${tr("Contact email","Kapcsolati e-mail")} *</span><input name="contact_email" type="email" required></label>
-    <label class="field"><span>${tr("Temporary password","Ideiglenes jelszó")} *</span><input name="password" type="password" minlength="8" required></label><label class="field"><span>${tr("Confirm password","Jelszó újra")} *</span><input name="password_confirmation" type="password" minlength="8" required></label>
-    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
-  $("[data-close-dialog]").addEventListener("click",closeDialog);
-  $("#userEditor").addEventListener("submit",async event=>{event.preventDefault();try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))});closeDialog();toast(tr("User created.","Felhasználó létrehozva."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}});
+function openUserDialog(user=null){
+  const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id);
+  openDialog({title:editing?tr("Edit team member","Csapattag szerkesztése"):tr("New user","Új felhasználó"),eyebrow:tr("USER MANAGEMENT","FELHASZNÁLÓKEZELÉS"),body:`<form id="userEditor" class="form-grid">
+    <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user?.name||"")}" required autofocus></label>
+    <label class="field"><span>${tr("Role","Szerepkör")} *</span><select name="role"><option value="WORKER" ${user?.role==="WORKER"?"selected":""}>${tr("Technician","Technikus")}</option><option value="MANAGER" ${user?.role==="MANAGER"?"selected":""}>${tr("Manager","Menedzser")}</option><option value="ADMIN" ${user?.role==="ADMIN"?"selected":""}>${tr("Admin","Admin")}</option></select></label>
+    <label class="field"><span>${tr("Login email","Belépési e-mail")} *</span><input name="email" type="email" value="${esc(user?.email||"")}" required></label>
+    <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")} ${editing?"":"*"}</span><input name="contact_email" type="email" value="${esc(user?.contact_email||"")}" ${editing?"":"required"}></label>
+    <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user?.phone||"")}"></label>
+    <label class="field"><span>${tr("Status","Státusz")}</span><select name="status" ${isSelf?"disabled":""}><option value="Active" ${user?.status!=="Inactive"?"selected":""}>${tr("Active","Aktív")}</option><option value="Inactive" ${user?.status==="Inactive"?"selected":""}>${tr("Inactive","Inaktív")}</option></select></label>
+    <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user?.address||"")}"></label>
+    <label class="field"><span>${editing?tr("New password (optional)","Új jelszó (opcionális)"):tr("Temporary password","Ideiglenes jelszó")} ${editing?"":"*"}</span><input name="password" type="password" minlength="8" ${editing?"":"required"}></label>
+    <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
+  $("#userEditor").addEventListener("submit",async event=>{
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
+    if(editing&&!body.password){delete body.password;delete body.password_confirmation;}
+    if(editing&&isSelf)delete body.status;
+    try{
+      const updated=await api(editing?`/api/users/${encodeURIComponent(user.id)}`:"/api/users",{method:editing?"PUT":"POST",body:JSON.stringify(body)});
+      closeDialog();toast(editing?tr("Team member updated.","Csapattag frissítve."):tr("User created.","Felhasználó létrehozva."),"success");
+      if(editing&&isSelf){state.user={...state.user,...updated};$("#profileInitials").textContent=initials(state.user.name);}
+      await renderProfile();
+    }catch(error){toast(humanError(error),"error");}
+  });
 }
+
 function debounce(fn,wait=180){let timer;return(...args)=>{clearTimeout(timer);timer=setTimeout(()=>fn(...args),wait);};}
 
 $("#loginForm").addEventListener("submit",async event=>{
@@ -404,7 +508,7 @@ $("#resendActivationBtn").addEventListener("click",async()=>{try{const payload=a
 $("#backToLoginBtn").addEventListener("click",()=>{$("#activationForm").classList.add("hidden");$("#loginForm").classList.remove("hidden");sessionStorage.removeItem("kh_activation_token");});
 
 async function boot(){
-  applyChromeLanguage();await loadBranding();bindNavigation();
+  applyChromeLanguage();startNewYorkClock();await loadBranding();bindNavigation();
   if(!state.token){showLogin();return;}
   try{state.user=await api("/api/me");showApp();if(!activeViews.has(state.view))state.view="workshop";await renderView();}
   catch(_error){clearSession();showLogin();}
