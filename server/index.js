@@ -289,7 +289,7 @@ app.put("/api/users/:id",auth,async(req,res)=>{
     passwordHash=bcrypt.hashSync(String(req.body.password),10);
   }
   db.prepare(`UPDATE users SET name=?,email=?,contact_email=?,phone=?,address=?,role=?,status=?,password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(name,email,contactEmail||null,String(req.body?.phone??before.phone||""),String(req.body?.address??before.address||""),role,status,passwordHash,before.id);
+    .run(name,email,contactEmail||null,String(req.body?.phone ?? before.phone ?? ""),String(req.body?.address ?? before.address ?? ""),role,status,passwordHash,before.id);
   const after=db.prepare("SELECT * FROM users WHERE id=?").get(before.id);audit(req,"UPDATE","users",before.id,safeUser(before),safeUser(after));res.json(safeUser(after));
 });
 app.delete("/api/users/:id",auth,requireSuperadmin,(req,res)=>{
