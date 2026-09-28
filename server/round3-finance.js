@@ -275,7 +275,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     const materialDirectCost=money(handoffMaterial+cancelledLabor+directExpense+vendorCost);
     const net=money(laborRevenue-materialDirectCost);
     const outstanding=db.prepare(`SELECT COUNT(*) count,COALESCE(SUM(total_amount),0) amount FROM invoices
-      WHERE direction='receivable' AND status IN ('draft','sent')`).get();
+      WHERE direction='receivable' AND deleted_at IS NULL AND status IN ('draft','sent')`).get();
     const result={month,kpis:{
       labor_revenue:laborRevenue,material_direct_cost:materialDirectCost,net_workshop_result:net,
       outstanding_invoice_count:Number(outstanding.count||0),outstanding_invoice_amount:money(outstanding.amount)
@@ -350,13 +350,13 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       const direction=text(req.query.direction,20),status=text(req.query.status,20),q=text(req.query.q,160).toLowerCase(),like=`%${q}%`;
       if(direction&&!["receivable","payable"].includes(direction))throw problem("INVALID_INVOICE_DIRECTION");
       if(status&&!INVOICE_STATUSES.includes(status))throw problem("INVALID_INVOICE_STATUS");
-      res.json(db.prepare(`${selectInvoice} WHERE (?='' OR i.direction=?) AND (?='' OR i.status=?)
+      res.json(db.prepare(`${selectInvoice} WHERE i.deleted_at IS NULL AND (?='' OR i.direction=?) AND (?='' OR i.status=?)
         AND (?='' OR lower(i.invoice_number) LIKE ? OR lower(i.counterparty_name) LIKE ? OR lower(i.summary) LIKE ? OR lower(COALESCE(j.job_code,'')) LIKE ?)
         ORDER BY i.issue_date DESC,i.id DESC`).all(direction,direction,status,status,q,like,like,like,like));
     }catch(error){respondError(res,error);}
   });
   app.get("/api/invoices/:id",auth,financeReader,(req,res)=>{
-    const row=invoiceDetail(integerId(req.params.id));if(!row)return res.status(404).json({error:"INVOICE_NOT_FOUND"});res.json(row);
+    const row=invoiceDetail(integerId(req.params.id));if(!row||row.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});res.json(row);
   });
   app.post("/api/invoices",auth,financeReader,(req,res)=>{
     try{
@@ -392,13 +392,14 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       const id=integerId(req.params.id),before=jobForInvoice(id);if(!before)throw problem("JOB_NOT_FOUND",404);
       const mode=["draft","send"].includes(req.body?.invoice_mode)?req.body.invoice_mode:"draft";
       const result=db.transaction(()=>{
+        if(req.body?.recipient_email)persistClientEmail(before.client_id,req.body.recipient_email);
         const invoice=generateFromJob(id,req.body||{},req.user);
         const job=completeJob(id,req.user);
         return {invoice,job};
       })();
       audit(req,"COMPLETE","jobs",String(id),before,result.job);
       if(mode==="send"){
-        try{result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language);}
+        try{result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language,req.body?.recipient_email);}
         catch(error){return res.status(Number(error.status||502)).json({error:error.message||"EMAIL_DELIVERY_FAILED",job:result.job,invoice:invoiceDetail(result.invoice.id)});}
       }
       res.status(201).json({ok:true,invoice_mode:mode,...result});
@@ -410,9 +411,12 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     try{
       const id=integerId(req.params.id),before=jobForInvoice(id);if(!before)throw problem("JOB_NOT_FOUND",404);
       const mode=["draft","send"].includes(req.body.invoice_mode)?req.body.invoice_mode:"draft";
-      const result=db.transaction(()=>({invoice:generateFromJob(id,req.body,req.user),job:completeJob(id,req.user)}))();
+      const result=db.transaction(()=>{
+        if(req.body?.recipient_email)persistClientEmail(before.client_id,req.body.recipient_email);
+        return {invoice:generateFromJob(id,req.body,req.user),job:completeJob(id,req.user)};
+      })();
       audit(req,"COMPLETE","jobs",String(id),before,result.job);
-      if(mode==="send")result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language);
+      if(mode==="send")result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language,req.body?.recipient_email);
       res.status(201).json({ok:true,invoice_mode:mode,...result});
     }catch(error){respondError(res,error);}
   });
@@ -420,7 +424,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   app.post("/api/invoices/:id/send-email",auth,financeAdmin,async(req,res)=>{
     const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
     try{
-      const after=await sendInvoice(id,req.user,req.body?.language);audit(req,"SEND_EMAIL","invoices",String(id),before,after);res.json(after);
+      const after=await sendInvoice(id,req.user,req.body?.language,req.body?.recipient_email);audit(req,"SEND_EMAIL","invoices",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
 
@@ -459,8 +463,25 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   });
 
   app.delete("/api/invoices/:id",auth,requireSuperadmin,(req,res)=>{
-    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
-    db.prepare("DELETE FROM invoices WHERE id=?").run(id);audit(req,"HARD_DELETE","invoices",String(id),before,null);res.json({ok:true});
+    const id=integerId(req.params.id),before=invoiceDetail(id);if(!before||before.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    if(!["draft","cancelled"].includes(before.status))return res.status(409).json({error:"INVOICE_DELETE_REQUIRES_DRAFT_OR_CANCELLED"});
+    const reason=text(req.body?.reason,2000)||"Removed from active finance";
+    const snapshot=JSON.stringify({invoice:before,reason});
+    const filePath=before.pdf_path||null,localFile=filePath?.startsWith("/uploads/")?path.join(uploadDir,filePath.replace(/^\/uploads\//,"")):null;
+    const size=localFile&&fs.existsSync(localFile)?fs.statSync(localFile).size:null;
+    const archiveId=db.transaction(()=>{
+      const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+        VALUES('deleted_invoice',?,?,?,?,?,?,?,?,?,?,?)`).run(
+        `Deleted invoice ${before.invoice_number}`,reason,"invoice",String(before.id),before.invoice_number+".pdf",
+        filePath?path.basename(filePath):null,"application/pdf",size,filePath,snapshot,req.user.id
+      );
+      const nextId=Number(info.lastInsertRowid);
+      db.prepare("UPDATE invoices SET deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=?,archive_document_id=?,job_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(req.user.id,nextId,id);
+      return nextId;
+    })();
+    const after=invoiceDetail(id);audit(req,"ARCHIVE_DELETE","invoices",String(id),before,after);
+    res.json({ok:true,archived:true,archive_document_id:archiveId});
   });
 
   app.get("/api/invoices/:id/pdf",auth,financeReader,(req,res)=>{
