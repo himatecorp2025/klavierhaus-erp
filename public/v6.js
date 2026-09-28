@@ -285,7 +285,7 @@ async function v6RenderBranding(){
     event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));
     try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
   });
-  $("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
+  $$("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0],kind=event.currentTarget.dataset.brandFile;if(!file)return;
     try{
       if(kind==="websiteLogo"){const url=await uploadWebsite(file);await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,logo_url:url})});}
