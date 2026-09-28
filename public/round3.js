@@ -200,7 +200,7 @@ function r3OpenEditInvoice(invoice,refresh=renderFinance){
 function r3OpenSendInvoice(invoice,refresh=renderFinance){
   openDialog({title:tr("Approve & Send Invoice","Számla jóváhagyása és küldése"),eyebrow:invoice.invoice_number,body:
     "<form id='sendInvoiceForm' class='form-grid'><div class='detail-note full'>"+tr("Confirm the recipient before sending. A new address is saved to the client master record.","Küldés előtt ellenőrizd a címzettet. Az új cím az ügyfél törzsadatába is elmentésre kerül.")+"</div>"+
-    "<label class='field full'><span>"+tr("Client email","Ügyfél e-mail")+" *</span><input name='recipient_email' type='email' value='"+esc(invoice.counterparty_email||"")+"' placeholder='name@example.com' required></label>"+
+    "<label class='field full'><span>"+tr("Client email","Ügyfél e-mail")+" *</span><input name='recipient_email' type='email' value='"+esc(invoice.counterparty_email||invoice.client_master_email||"")+"' placeholder='name@example.com' required></label>"+
     "<label class='field full'><span>"+tr("Email language","E-mail nyelve")+"</span><select name='language'><option value='en' "+((invoice.email_language||"en")==="en"?"selected":"")+">English</option><option value='hu' "+(invoice.email_language==="hu"?"selected":"")+">Magyar</option></select></label>"+
     "<div class='form-actions full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button class='primary-button' type='submit'>"+tr("Send Invoice","Számla küldése")+"</button></div></form>"
   });
