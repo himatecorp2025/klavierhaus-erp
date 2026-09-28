@@ -201,7 +201,7 @@ function v6GalleryMarkup(rows){
 async function v6OpenCollectionEditor(type,row=null,refresh){
   const definitions={
     piano:{title:tr(row?"Edit showroom piano":"New showroom piano",row?"Bemutatótermi zongora szerkesztése":"Új bemutatótermi zongora"),route:"showroom-pianos",image:"image_url",gallery:true},
-    service:{title:tr(row?"Edit service":"New service",row?"Szolgáltatás szerkesztése":"Új szolgáltatás"),route:"website-services",image:"image_url"},
+    service:{title:tr(row?"Edit service":"New service",row?"Szolgáltatás szerkesztése":"Új szolgáltatás"),route:"website-services",image:"image_url",gallery:true},
     artist:{title:tr(row?"Edit artist":"New artist",row?"Művész szerkesztése":"Új művész"),route:"website-artists",image:"portrait_url",gallery:true},
     review:{title:tr(row?"Edit review":"New review",row?"Vélemény szerkesztése":"Új vélemény"),route:"website-reviews",image:"portrait_url"}
   },def=definitions[type];
@@ -229,7 +229,7 @@ async function v6OpenCollectionEditor(type,row=null,refresh){
     if(type==="service")body.visible=row?.visible??true;
     if(type==="artist")body.published=row?.published??true;
     if(type==="review")body.visible=row?.visible??true;
-    try{await api(`/api/${def.route}${row?"/"+encodeURIComponent(row.id):""}`,{method:row?"PUT":"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Website item saved.","Weboldalelem mentve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+    try{const saved=await api(`/api/${def.route}${row?"/"+encodeURIComponent(row.id):""}`,{method:row?"PUT":"POST",body:JSON.stringify(body)});if(type==="service"&&def.gallery)await api(`/api/v6/website-services/${encodeURIComponent(saved.id)}/gallery`,{method:"PUT",body:JSON.stringify({gallery})});closeDialog();toast(tr("Website item saved.","Weboldalelem mentve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
 async function v6RenderCollections(){
