@@ -150,6 +150,10 @@ if (setting("final_compliance_migration_complete") !== "1" && !complianceReady) 
   for (const name of ["invoice_payments","invoice_items","invoices","jobs","intake_leads"]) isolateForCompliance(name);
 }
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+// schema.sql enables FK enforcement for normal runtime use. The migration must keep
+// it disabled until all legacy parent/child tables have been retired, otherwise
+// DROP TABLE on an obsolete parent can fire SQLite's FK constraint triggers.
+db.pragma("foreign_keys = OFF");
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
   ('company_name','Klavierhaus','SYSTEM'),
