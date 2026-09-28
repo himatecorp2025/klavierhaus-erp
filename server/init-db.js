@@ -56,7 +56,7 @@ function ensureIndex(name, sql) {
 }
 
 function installKpiSummaryCache() {
-  const requiredTables = ["jobs", "invoices", "events", "workflow_finance_sources"];
+  const requiredTables = ["jobs", "invoices", "events", "wf2_workflows"];
   if (!requiredTables.every(tableExists)) return;
   db.exec("CREATE TABLE IF NOT EXISTS kpi_summary_cache (key TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL)");
   const payloadSql = `SELECT json_object(
@@ -73,9 +73,9 @@ function installKpiSummaryCache() {
       'payable_total',ROUND(COALESCE((SELECT SUM(total_amount) FROM invoices WHERE direction='payable' AND LOWER(COALESCE(status,'')) NOT IN ('draft','void')),0),2)
     ),
     'workshop',json_object(
-      'active',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,'ACTIVE'))='ACTIVE'),
-      'completed',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,''))='COMPLETED'),
-      'aborted',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,''))='ABORTED')
+      'active',(SELECT COUNT(*) FROM wf2_workflows WHERE UPPER(COALESCE(status,'ACTIVE'))='ACTIVE' AND aborted_at IS NULL AND deleted_at IS NULL),
+      'completed',(SELECT COUNT(*) FROM wf2_workflows WHERE UPPER(COALESCE(status,''))='COMPLETED' AND aborted_at IS NULL AND deleted_at IS NULL),
+      'aborted',(SELECT COUNT(*) FROM wf2_workflows WHERE aborted_at IS NOT NULL AND deleted_at IS NULL)
     ),
     'events',json_object(
       'draft',(SELECT COUNT(*) FROM events WHERE UPPER(COALESCE(status,'DRAFT'))='DRAFT'),
