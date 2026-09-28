@@ -189,7 +189,6 @@ function seedWorkshopUxV5() {
     }
   }
 }
-seedWorkshopUxV5();
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
   ('company_name','Klavierhaus','SYSTEM'),
@@ -343,6 +342,7 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
+seedWorkshopUxV5();
 
 const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]);
 for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all()) {
