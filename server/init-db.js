@@ -286,7 +286,7 @@ function migrateFinalComplianceData() {
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
 
-const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads","jobs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments"]);
+const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads","jobs","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]);
 for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all()) {
   if (row.type === "view") {
     db.exec(`DROP VIEW IF EXISTS ${quoteName(row.name)}`);
@@ -302,12 +302,15 @@ setSetting("round2_workflow_migration_complete", "1");
 setSetting("round2_schema_version", "2");
 setSetting("round3_finance_migration_complete", "1");
 setSetting("round3_schema_version", "3");
+setSetting("final_compliance_migration_complete", "1");
+setSetting("final_compliance_schema_version", "4");
+setSetting("ui_default_language", "en");
 
 db.pragma("foreign_keys = ON");
 const fk = db.prepare("PRAGMA foreign_key_check").all();
-if (fk.length) throw new Error(`ROUND3_FOREIGN_KEY_CHECK_FAILED:${JSON.stringify(fk.slice(0,10))}`);
+if (fk.length) throw new Error(`FINAL_COMPLIANCE_FOREIGN_KEY_CHECK_FAILED:${JSON.stringify(fk.slice(0,10))}`);
 const integrity = db.prepare("PRAGMA integrity_check").get();
-if (String(integrity?.integrity_check || "").toLowerCase() !== "ok") throw new Error("ROUND3_INTEGRITY_CHECK_FAILED");
+if (String(integrity?.integrity_check || "").toLowerCase() !== "ok") throw new Error("FINAL_COMPLIANCE_INTEGRITY_CHECK_FAILED");
 
-console.log(`[ROUND3] Database ready: clients=${db.prepare("SELECT COUNT(*) c FROM clients").get().c}, pianos=${db.prepare("SELECT COUNT(*) c FROM pianos").get().c}, intake=${db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c}, jobs=${db.prepare("SELECT COUNT(*) c FROM jobs").get().c}, invoices=${db.prepare("SELECT COUNT(*) c FROM invoices").get().c}`);
+console.log(`[COMPLIANCE] Database ready: clients=${db.prepare("SELECT COUNT(*) c FROM clients").get().c}, pianos=${db.prepare("SELECT COUNT(*) c FROM pianos").get().c}, intake=${db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c}, jobs=${db.prepare("SELECT COUNT(*) c FROM jobs").get().c}, handoffs=${db.prepare("SELECT COUNT(*) c FROM job_handoffs").get().c}, invoices=${db.prepare("SELECT COUNT(*) c FROM invoices").get().c}, expenses=${db.prepare("SELECT COUNT(*) c FROM direct_expenses").get().c}`);
 db.close();
