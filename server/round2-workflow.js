@@ -55,7 +55,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   }
   function logicalStage(row){return row?.workflow_stage_key||row?.stage||PIPELINE_STAGE;}
   function storageStage(stageKey){
-    if(["received","in_progress","qa_review","admin_approval","completed"].includes(stageKey))return stageKey;
+    if(["planned","received","in_progress","qa_review","admin_approval","completed"].includes(stageKey))return stageKey;
     return "in_progress";
   }
   function phasesForJob(jobId){
