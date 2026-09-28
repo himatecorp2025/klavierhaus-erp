@@ -43,6 +43,10 @@ try{
       SELECT CASE WHEN (SELECT i.revenue_recognition_status FROM invoices i WHERE i.id=NEW.invoice_id)='DEFERRED'
         THEN RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO') END;
     END;
+    CREATE TABLE legacy_fk_parent(id INTEGER PRIMARY KEY,label TEXT);
+    CREATE TABLE legacy_fk_child(id INTEGER PRIMARY KEY,parent_id INTEGER NOT NULL,FOREIGN KEY(parent_id) REFERENCES legacy_fk_parent(id));
+    INSERT INTO legacy_fk_parent(id,label) VALUES(1,'parent');
+    INSERT INTO legacy_fk_child(id,parent_id) VALUES(1,1);
   `);
   legacy.prepare("INSERT INTO users(id,name,email,password_hash,role,status,contact_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,'Active',?,0,0)")
     .run("U1","Round One Admin","admin@example.com",bcrypt.hashSync("Round1Pass!",4),"ADMIN","admin@example.com");
@@ -62,7 +66,7 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
-  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items"]){
+  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
   for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
