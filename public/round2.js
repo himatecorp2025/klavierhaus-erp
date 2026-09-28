@@ -281,11 +281,15 @@ function r2BindWorkflowActions(root,jobs){
   $$("[data-plan-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowPlan(jobs.find(job=>Number(job.id)===Number(button.dataset.planJob)))));
   $$("[data-cancel-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenCancel(jobs.find(job=>Number(job.id)===Number(button.dataset.cancelJob)))));
   $$("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);}));
-  $$("[data-history-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowHistory(Number(button.dataset.historyJob))));
+  $("[data-history-job]",root).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenWorkflowHistory(Number(button.dataset.historyJob));}));
+  $("[data-history-card]",root).forEach(card=>{
+    card.addEventListener("click",()=>r2OpenWorkflowHistory(Number(card.dataset.historyCard)));
+    card.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();r2OpenWorkflowHistory(Number(card.dataset.historyCard));}});
+  });
 }
 function r2ClosedWorkflowCard(job){
   const cancelled=Boolean(job.cancelled_at);
-  return `<article class="job-card stage-card is-locked ${cancelled?"is-cancelled":"is-completed"}" data-job-id="${job.id}">
+  return `<article class="job-card stage-card is-locked ${cancelled?"is-cancelled":"is-completed"}" data-job-id="${job.id}" data-history-card="${job.id}" role="button" tabindex="0">
     <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${cancelled?tr("CANCELLED","TÖRÖLT / MEGSZAKÍTOTT"):tr("COMPLETED","LEZÁRVA")}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
     <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(cancelled?job.cancelled_at:job.completed_at))}</span><span>👤 ${esc(cancelled?(job.cancelled_by_name||"—"):(job.completed_by_name||"—"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
