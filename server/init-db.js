@@ -207,7 +207,84 @@ function migrateLegacyMasterData() {
   }
 }
 
+
+function migrateFinalComplianceData() {
+  if (tableExists("_final_legacy_intake_leads")) {
+    const insert=db.prepare(`INSERT OR IGNORE INTO intake_leads(id,client_id,piano_id,raw_client_name,raw_contact,service_location,reported_issue,media_urls,estimated_urgency,status,assigned_technician_id,created_at,converted_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const row of db.prepare('SELECT * FROM "_final_legacy_intake_leads" ORDER BY rowid').all()) {
+      const id=numericId(row.id); if(!id) continue;
+      const status=["new","under_review","converted","archived"].includes(String(row.status||""))?String(row.status):"new";
+      insert.run(id,numericId(row.client_id),numericId(row.piano_id),legacyValue(row,"raw_client_name"),legacyValue(row,"raw_contact"),
+        ["workshop","on_site"].includes(String(row.service_location))?row.service_location:"workshop",String(legacyValue(row,"reported_issue")||"Migrated intake"),
+        jsonArray(row.media_urls),["low","normal","urgent"].includes(String(row.estimated_urgency))?row.estimated_urgency:"normal",status,legacyValue(row,"assigned_technician_id"),
+        legacyValue(row,"created_at")||new Date().toISOString(),legacyValue(row,"converted_at"),legacyValue(row,"updated_at")||legacyValue(row,"created_at")||new Date().toISOString());
+    }
+  }
+
+  if (tableExists("_final_legacy_jobs")) {
+    const insert=db.prepare(`INSERT OR IGNORE INTO jobs(id,job_code,client_id,piano_id,intake_id,title,description,location_type,site_address,scheduled_at,estimated_duration_min,stage,assigned_technician_id,total_labor_cost,total_material_cost,internal_notes,cancelled_at,cancelled_by_user_id,cancelled_by_name,cancelled_by_party,cancel_reason,completed_at,completed_by_user_id,completed_by_name,created_by_user_id,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const row of db.prepare('SELECT * FROM "_final_legacy_jobs" ORDER BY rowid').all()) {
+      const id=numericId(row.id),clientId=numericId(row.client_id),pianoId=numericId(row.piano_id); if(!id||!clientId||!pianoId) continue;
+      const scheduledAt=legacyValue(row,"scheduled_at","scheduled_start");
+      let duration=Number(legacyValue(row,"estimated_duration_min")||0);
+      if(!(duration>0)&&scheduledAt&&row.scheduled_end){const delta=(new Date(row.scheduled_end).getTime()-new Date(scheduledAt).getTime())/60000;if(Number.isFinite(delta)&&delta>0)duration=Math.round(delta);}
+      if(!(duration>0))duration=120;
+      const stage=mappedStage(row);
+      const completedAt=stage==="completed"?(legacyValue(row,"completed_at","closed_at")||new Date().toISOString()):null;
+      const completedUser=stage==="completed"?legacyValue(row,"completed_by_user_id","closed_by_user_id"):null;
+      const completedName=completedUser?db.prepare("SELECT name FROM users WHERE id=?").get(completedUser)?.name||null:legacyValue(row,"completed_by_name");
+      const blockedNote=String(row.status||"")==="blocked"&&row.blocked_reason?("[Legacy blocked] "+row.blocked_reason):"";
+      const notes=[legacyValue(row,"internal_notes"),blockedNote].filter(Boolean).join("\n")||null;
+      const location=String(legacyValue(row,"location_type","service_location")||"workshop");
+      insert.run(id,legacyValue(row,"job_code"),clientId,pianoId,numericId(legacyValue(row,"intake_id","intake_lead_id")),String(legacyValue(row,"title")||"Migrated job"),legacyValue(row,"description"),
+        ["workshop","on_site"].includes(location)?location:"workshop",legacyValue(row,"site_address","service_address"),scheduledAt,duration,stage,legacyValue(row,"assigned_technician_id"),
+        Number(legacyValue(row,"total_labor_cost")||0),Number(legacyValue(row,"total_material_cost")||0),notes,legacyValue(row,"cancelled_at"),legacyValue(row,"cancelled_by_user_id"),legacyValue(row,"cancelled_by_name"),
+        legacyValue(row,"cancelled_by_party"),legacyValue(row,"cancel_reason"),completedAt,completedUser,completedName,legacyValue(row,"created_by_user_id"),legacyValue(row,"created_at")||new Date().toISOString(),legacyValue(row,"updated_at")||legacyValue(row,"created_at")||new Date().toISOString());
+    }
+  }
+
+  if (tableExists("_final_legacy_invoices")) {
+    const insert=db.prepare(`INSERT OR IGNORE INTO invoices(id,invoice_number,direction,status,source_type,source_id,job_id,client_id,partner_id,counterparty_name,counterparty_contact,counterparty_email,counterparty_phone,counterparty_address,counterparty_tax_id,summary,notes,issue_date,due_date,currency,subtotal_labor,subtotal_material,subtotal_adjustment,tax_rate,tax_amount,total_amount,payment_method,paid_at,pdf_path,email_language,sent_at,sent_by_user_id,resend_message_id,cancelled_at,cancelled_by_user_id,cancel_reason,created_by_user_id,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const row of db.prepare('SELECT * FROM "_final_legacy_invoices" ORDER BY rowid').all()) {
+      const id=numericId(row.id); if(!id) continue;
+      const direction=String(row.direction||"receivable")==="payable"?"payable":"receivable";
+      const total=Number(legacyValue(row,"total_amount")||0),tax=Number(legacyValue(row,"tax_amount")||0);
+      const job=numericId(row.job_id)?db.prepare("SELECT * FROM jobs WHERE id=?").get(Number(row.job_id)):null;
+      const labor=Number(legacyValue(row,"subtotal_labor")??job?.total_labor_cost??(direction==="receivable"?Math.max(0,total-tax):0))||0;
+      const material=Number(legacyValue(row,"subtotal_material")??job?.total_material_cost??0)||0;
+      const adjustment=Number(legacyValue(row,"subtotal_adjustment")??Math.round((total-labor-material-tax)*100)/100)||0;
+      insert.run(id,String(row.invoice_number||("MIGRATED-"+id)),direction,mappedInvoiceStatus(row),String(row.source_type||"manual"),legacyValue(row,"source_id"),numericId(row.job_id),numericId(row.client_id),numericId(row.partner_id),
+        String(legacyValue(row,"counterparty_name")||"Migrated counterparty"),legacyValue(row,"counterparty_contact"),legacyValue(row,"counterparty_email"),legacyValue(row,"counterparty_phone"),legacyValue(row,"counterparty_address"),legacyValue(row,"counterparty_tax_id"),
+        String(legacyValue(row,"summary")||"Migrated invoice"),legacyValue(row,"notes"),String(legacyValue(row,"issue_date")||new Date().toISOString().slice(0,10)),String(legacyValue(row,"due_date")||legacyValue(row,"issue_date")||new Date().toISOString().slice(0,10)),String(row.currency||"USD"),
+        labor,material,adjustment,Number(legacyValue(row,"tax_rate")||0),tax,total,normalizePaymentMethod(row.payment_method),legacyValue(row,"paid_at"),legacyValue(row,"pdf_path"),["en","hu"].includes(String(row.email_language))?row.email_language:"en",
+        legacyValue(row,"sent_at"),legacyValue(row,"sent_by_user_id"),legacyValue(row,"resend_message_id"),legacyValue(row,"cancelled_at","voided_at"),legacyValue(row,"cancelled_by_user_id","voided_by_user_id"),legacyValue(row,"cancel_reason","void_reason"),legacyValue(row,"created_by_user_id"),
+        legacyValue(row,"created_at")||new Date().toISOString(),legacyValue(row,"updated_at")||legacyValue(row,"created_at")||new Date().toISOString());
+    }
+  }
+
+  if (tableExists("_final_legacy_invoice_items")) {
+    const insert=db.prepare("INSERT OR IGNORE INTO invoice_items(id,invoice_id,item_type,item_description,quantity,unit_price,total_price,sort_order,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+    for (const row of db.prepare('SELECT * FROM "_final_legacy_invoice_items" ORDER BY rowid').all()) {
+      const id=numericId(row.id),invoiceId=numericId(row.invoice_id); if(!id||!invoiceId||!db.prepare("SELECT 1 FROM invoices WHERE id=?").get(invoiceId)) continue;
+      const description=String(legacyValue(row,"item_description","description")||"Migrated item");
+      const itemType=["labor","material","adjustment","other"].includes(String(row.item_type))?row.item_type:(/material|part|felt|string/i.test(description)?"material":/labor|service|tuning|regulation|voicing/i.test(description)?"labor":"other");
+      insert.run(id,invoiceId,itemType,description,Number(row.quantity||1),Number(row.unit_price||0),Number(row.total_price||0),Number(row.sort_order||0),legacyValue(row,"created_at")||new Date().toISOString());
+    }
+  }
+
+  if (tableExists("_final_legacy_invoice_payments")) {
+    const insert=db.prepare("INSERT OR IGNORE INTO invoice_payments(id,invoice_id,amount,payment_method,reference,paid_at,notes,created_by_user_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+    for (const row of db.prepare('SELECT * FROM "_final_legacy_invoice_payments" ORDER BY rowid').all()) {
+      const id=numericId(row.id),invoiceId=numericId(row.invoice_id); if(!id||!invoiceId||!db.prepare("SELECT 1 FROM invoices WHERE id=?").get(invoiceId)) continue;
+      insert.run(id,invoiceId,Number(row.amount||0),normalizePaymentMethod(row.payment_method)||"Bank Transfer",legacyValue(row,"reference"),String(legacyValue(row,"paid_at")||new Date().toISOString().slice(0,10)),legacyValue(row,"notes"),legacyValue(row,"created_by_user_id"),legacyValue(row,"created_at")||new Date().toISOString());
+    }
+  }
+}
 db.transaction(migrateLegacyMasterData)();
+db.transaction(migrateFinalComplianceData)();
 
 const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","clients","pianos","intake_leads","jobs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments"]);
 for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all()) {
