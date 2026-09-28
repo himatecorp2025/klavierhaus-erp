@@ -479,10 +479,21 @@ async function r2RenderCalendar(){
   r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();
   clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(r2UpdateCalendarNowLine,30000);
 }
+async function r2LoadWorkflowBucket(bucket){
+  const next=["active","closed"].includes(bucket)?bucket:"active";
+  const data=await api("/api/jobs/workflow?bucket="+encodeURIComponent(next));
+  state.r2WorkflowBucket=next;state.r2Workflow=data;await r2RenderWorkflow(data);
+}
 async function r2RenderWorkflow(data){
   const host=$("#workshopContent");if(!host)return;
-  host.innerHTML=`<div class="workflow-scroll"><div id="workflowBoard" class="workflow-board">${(data.columns||[]).map(r2WorkflowColumn).join("")}</div></div>`;
-  const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);r2BindDrag(board,data.jobs||[]);
+  const bucket=data?.bucket||state.r2WorkflowBucket||"active";state.r2WorkflowBucket=bucket;
+  host.innerHTML=`<div class="workflow-view-toolbar"><div class="segmented-control compact workflow-status-switch">
+    <button type="button" data-workflow-bucket="active" class="${bucket==="active"?"active":""}">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
+  </div><small>${bucket==="active"?tr("Only currently running work is shown.","Csak a jelenleg futó munkák láthatók."):tr("Completed work is read-only and kept for history.","A lezárt munkák csak olvashatók és előzményként megmaradnak.")}</small></div>
+  <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}">${(data.columns||[]).map(r2WorkflowColumn).join("")}</div></div>`;
+  $("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket(button.dataset.workflowBucket)));
+  const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active")r2BindDrag(board,data.jobs||[]);
 }
 function r2OverviewRows(key,overview){
   const rows=overview?.details?.[key]||[];
@@ -499,8 +510,8 @@ function r2OpenOverview(key,overview){
   openDialog({title:labels[key]?.[0]||tr("Workshop details","Műhely részletei"),eyebrow:labels[key]?.[1]||"WORKSHOP",body:r2OverviewRows(key,overview)});
 }
 async function renderWorkshop(){
-  const workspace=$("#workspace"),[data,overview]=await Promise.all([api("/api/jobs/workflow"),api("/api/workshop/overview"),loadUsers()]);
-  state.r2Workflow=data;state.r2Overview=overview;state.r2WorkshopMode=state.r2WorkshopMode||localStorage.getItem("kh_workshop_mode")||"calendar";
+  const workspace=$("#workspace"),[data,overview]=await Promise.all([api("/api/jobs/workflow?bucket=active"),api("/api/workshop/overview"),loadUsers()]);
+  state.r2Workflow=data;state.r2WorkflowBucket="active";state.r2Overview=overview;state.r2WorkshopMode=state.r2WorkshopMode||localStorage.getItem("kh_workshop_mode")||"calendar";
   workspace.innerHTML=pageHead(tr("Workshop & Calendar","Műhely és naptár"),tr("Operational control center for calendar, workflow, deadlines and financial follow-up.","Operatív vezérlőpult naptárhoz, munkafolyamathoz, határidőkhöz és pénzügyi utánkövetéshez."),
     `<button id="workshopNewJob" class="primary-button" type="button">＋ ${tr("New job","Új munka")}</button>${r2IsAdmin()?`<button id="workflowSettingsBtn" class="secondary-button" type="button">⚙ ${tr("Workflow names","Fázisnevek")}</button>`:""}`)+
     `<div class="workshop-kpis">
