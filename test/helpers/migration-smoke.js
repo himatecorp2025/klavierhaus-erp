@@ -35,6 +35,14 @@ try{
     CREATE TABLE contacts(id TEXT PRIMARY KEY,name TEXT,email TEXT,phone TEXT,address TEXT,notes TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE pianos(id TEXT PRIMARY KEY,brand TEXT,model TEXT,serial_no TEXT,finish TEXT,location TEXT,notes TEXT,owner_contact_id TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE client_pianos(id TEXT PRIMARY KEY,client_id TEXT,piano_id TEXT);
+    CREATE TABLE invoices(id INTEGER PRIMARY KEY,total_amount REAL,status TEXT);
+    CREATE TABLE invoice_credit_memos(id INTEGER PRIMARY KEY,invoice_id INTEGER);
+    CREATE TRIGGER trg_invoice_credit_memos_immutable_update
+    BEFORE UPDATE ON invoice_credit_memos
+    BEGIN
+      SELECT CASE WHEN (SELECT i.revenue_recognition_status FROM invoices i WHERE i.id=NEW.invoice_id)='DEFERRED'
+        THEN RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO') END;
+    END;
   `);
   legacy.prepare("INSERT INTO users(id,name,email,password_hash,role,status,contact_email,hidden_user,is_superadmin) VALUES(?,?,?,?,?,'Active',?,0,0)")
     .run("U1","Round One Admin","admin@example.com",bcrypt.hashSync("Round1Pass!",4),"ADMIN","admin@example.com");
@@ -69,6 +77,7 @@ try{
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'ui_default_language\'").get().setting_value,"en");
   assert.equal(db.pragma("foreign_key_check").length,0);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type IN ('trigger','view')").get().c,0,"legacy triggers/views must be retired before structural migration");
   db.close();
   const backups=fs.readdirSync(backupDir);
   assert.ok(backups.some(name=>name.startsWith("round1-pre-migration-")),"Round 1 safety backup missing");
