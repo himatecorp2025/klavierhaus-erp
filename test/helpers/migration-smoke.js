@@ -54,17 +54,18 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
-  for(const retired of ["contacts","client_pianos","jobs","planned_jobs","inventory_items","wf2_workflows","financial_items","invoices"]){
+  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items","invoices"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
   assert.equal(db.pragma("foreign_key_check").length,0);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   db.close();
   assert.ok(fs.readdirSync(backupDir).some(name=>name.startsWith("round1-pre-migration-")),"safety backup missing");
-  console.log("Round 1 migration smoke passed");
+  console.log("Round 1 + Round 2 migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }
