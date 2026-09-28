@@ -1122,3 +1122,70 @@ select option{background:var(--surface);color:var(--ink)}
 .design-font-grid{margin-top:12px}
 @media(max-width:900px){.design-color-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.design-color-grid{grid-template-columns:1fr}}
+
+
+/* ADMIN UX V6 REGRESSION FIXES */
+.client-row{
+  grid-template-columns:minmax(0,1fr) 44px;
+  min-width:0;
+}
+.client-row>span:first-child{min-width:0}
+.client-row .count{
+  width:36px;
+  min-width:36px;
+  height:31px;
+  justify-self:end;
+  background:var(--surface-2);
+  color:var(--ink);
+  border-color:var(--line);
+}
+.dialog-card{
+  background:var(--surface);
+  color:var(--ink);
+  border-color:var(--line);
+}
+.dialog-header{
+  background:color-mix(in srgb,var(--surface) 95%,transparent);
+  border-color:var(--line);
+}
+.cms-toggle-row,
+.cms-fieldset,
+.cms-fieldset .cms-fieldset,
+.cms-repeat-item,
+.workflow-plan-row,
+.stage-setting-row,
+.job-card,
+.workflow-column,
+.column-count,
+.cms-upload,
+.cms-publish-bar{
+  background:var(--surface-2);
+  color:var(--ink);
+  border-color:var(--line);
+}
+.cms-toggle-row input{accent-color:var(--accent)}
+.workflow-column{background:var(--surface-2)}
+.job-card,.column-count,.cms-repeat-item{background:var(--surface)}
+.job-party,.job-meta,.contact-pill,.detail-note,.intake-card p{color:var(--muted)}
+.piano-card{background:var(--surface-2)}
+.cms-page-button{color:var(--muted)}
+.cms-page-button:hover,.cms-page-button.active{color:var(--accent)}
+.workshop-kpi,
+.workshop-kpi.attention,
+.workshop-kpi.finance,
+.workshop-kpi.invoice{
+  background:var(--surface);
+  color:var(--ink);
+  border-color:var(--line);
+}
+.workshop-kpi span,.workshop-kpi small{color:var(--muted)}
+.calendar-toolbar,.calendar-drag-help,.time-calendar-head,.time-day-head{
+  background:var(--surface);
+  color:var(--ink);
+  border-color:var(--line);
+}
+.time-day-head:hover{background:var(--surface-2)}
+@media(max-width:700px){
+  .client-row{grid-template-columns:minmax(0,1fr) 40px}
+  .client-row .count{width:34px;min-width:34px}
+}
