@@ -281,8 +281,8 @@ function r2BindWorkflowActions(root,jobs){
   $$("[data-plan-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowPlan(jobs.find(job=>Number(job.id)===Number(button.dataset.planJob)))));
   $$("[data-cancel-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenCancel(jobs.find(job=>Number(job.id)===Number(button.dataset.cancelJob)))));
   $$("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);}));
-  $("[data-history-job]",root).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenWorkflowHistory(Number(button.dataset.historyJob));}));
-  $("[data-history-card]",root).forEach(card=>{
+  $$("[data-history-job]",root).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenWorkflowHistory(Number(button.dataset.historyJob));}));
+  $$("[data-history-card]",root).forEach(card=>{
     card.addEventListener("click",()=>r2OpenWorkflowHistory(Number(card.dataset.historyCard)));
     card.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();r2OpenWorkflowHistory(Number(card.dataset.historyCard));}});
   });
