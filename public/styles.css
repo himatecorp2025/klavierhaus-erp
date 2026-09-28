@@ -528,6 +528,7 @@ body{background:
 .calendar-range-title{font-family:Georgia,"Times New Roman",serif;font-size:17px!important;font-weight:600}
 .calendar-drag-help{padding:8px 16px;border-bottom:1px solid var(--line);background:#fffaf1;color:#77694f;font-size:10px}
 .time-calendar{--time-grid-height:936px;min-width:720px}
+.time-calendar.mode-day{min-width:420px}
 .time-calendar-head{display:grid;grid-template-columns:64px repeat(var(--calendar-columns,7),minmax(150px,1fr));position:sticky;z-index:12;top:0;border-bottom:1px solid var(--line);background:#fff}
 .time-gutter-head{display:grid;place-items:center;border-right:1px solid var(--line);font-size:9px;font-weight:850;color:#88724a}
 .time-day-head{display:grid;place-items:center;min-height:58px;border:0;border-right:1px solid var(--line);background:#fff;color:inherit}
@@ -618,6 +619,7 @@ body{background:
   .calendar-toolbar-right select{min-width:0}
   .calendar-drag-help{font-size:9px}
   .time-calendar{min-width:500px}
+  .time-calendar.mode-day{min-width:0}
   .time-calendar-head{grid-template-columns:50px repeat(var(--calendar-columns,1),minmax(140px,1fr))}
   .time-calendar-body{grid-template-columns:50px minmax(0,1fr);min-width:calc(50px + var(--calendar-columns,1)*140px)}
   .month-calendar{min-width:720px}
