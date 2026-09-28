@@ -102,9 +102,27 @@ function mappedInvoiceStatus(row) {
   return "draft";
 }
 
+function dropLegacyDerivedSchemaObjects() {
+  const objects=db.prepare(`SELECT type,name FROM sqlite_master
+    WHERE type IN ('trigger','view') AND name NOT LIKE 'sqlite_%'
+    ORDER BY CASE type WHEN 'trigger' THEN 0 ELSE 1 END,name`).all();
+  let triggers=0,views=0;
+  for(const object of objects){
+    if(object.type==="trigger"){
+      db.exec(`DROP TRIGGER IF EXISTS ${quoteName(object.name)}`);
+      triggers+=1;
+    }else if(object.type==="view"){
+      db.exec(`DROP VIEW IF EXISTS ${quoteName(object.name)}`);
+      views+=1;
+    }
+  }
+  if(triggers||views)console.log(`[COMPLIANCE] Retired legacy derived schema objects before table migration: triggers=${triggers}, views=${views}`);
+}
+
 preMigrationBackup();
 round3MigrationBackup();
 finalComplianceBackup();
+dropLegacyDerivedSchemaObjects();
 
 const legacyPianoColumns = columns("pianos");
 const legacyPianosDetected = tableExists("pianos") && (!legacyPianoColumns.has("client_id") || legacyPianoColumns.has("owner_contact_id") || legacyPianoColumns.has("serial_no"));
