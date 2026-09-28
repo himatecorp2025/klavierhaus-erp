@@ -9,10 +9,10 @@ const { spawnSync } = require("node:child_process");
 const Database = require("better-sqlite3");
 
 const root=path.resolve(__dirname,"../..");
-const temp=fs.mkdtempSync(path.join(os.tmpdir(),"kh-round1-migration-"));
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),"kh-final-migration-"));
 const dbPath=path.join(temp,"legacy.sqlite");
 const backupDir=path.join(temp,"backups");
-const env={...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir,JWT_SECRET:"round1-migration-test-secret-1234567890"};
+const env={...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir,JWT_SECRET:"final-migration-test-secret-1234567890"};
 
 function run(label){
   const result=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env,encoding:"utf8"});
@@ -43,8 +43,8 @@ try{
   legacy.prepare("INSERT INTO client_pianos(id,client_id,piano_id) VALUES('CP-1','C-1','P-1')").run();
   legacy.close();
 
-  run("ROUND1_LEGACY_MIGRATION");
-  run("ROUND1_IDEMPOTENT");
+  run("FINAL_LEGACY_MIGRATION");
+  run("FINAL_IDEMPOTENT");
 
   const db=new Database(dbPath,{readonly:true});
   assert.equal(db.prepare("SELECT COUNT(*) c FROM clients").get().c,1);
@@ -57,19 +57,24 @@ try{
   for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM invoices").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM partners").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM job_handoffs").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM direct_expenses").get().c,0);
+  assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'final_compliance_schema_version\'").get().setting_value,"4");
+  assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'ui_default_language\'").get().setting_value,"en");
   assert.equal(db.pragma("foreign_key_check").length,0);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   db.close();
   const backups=fs.readdirSync(backupDir);
   assert.ok(backups.some(name=>name.startsWith("round1-pre-migration-")),"Round 1 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("round3-pre-migration-")),"Round 3 safety backup missing");
-  console.log("Round 1 + Round 2 + Round 3 migration smoke passed");
+  assert.ok(backups.some(name=>name.startsWith("final-compliance-pre-migration-")),"Final compliance safety backup missing");
+  console.log("Final six-module migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }
