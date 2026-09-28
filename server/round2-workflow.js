@@ -106,7 +106,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const info=db.prepare(`INSERT INTO jobs(
       job_code,client_id,piano_id,intake_lead_id,title,description,service_location,service_address,priority,status,
       assigned_technician_id,scheduled_start,scheduled_end,timezone,blocked_reason,internal_notes,position,created_by_user_id,created_at,updated_at
-    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,'America/New_York',NULL,?,0,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,'America/New_York',NULL,?,0,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
       clientId,pianoId,intakeId,title,text(body?.description ?? defaults.description,10000)||null,serviceLocation,
       text(body?.service_address ?? defaults.service_address ?? (serviceLocation==="on_site"?client.address:""),1200)||null,
       priority,status,tech?.id||null,scheduledStart,scheduledEnd,text(body?.internal_notes ?? defaults.internal_notes,10000)||null,req.user.id
