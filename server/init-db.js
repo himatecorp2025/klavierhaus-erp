@@ -55,6 +55,47 @@ function ensureIndex(name, sql) {
   log(`Index ready: ${name}`);
 }
 
+function installKpiSummaryCache() {
+  const requiredTables = ["jobs", "invoices", "events", "workflow_finance_sources"];
+  if (!requiredTables.every(tableExists)) return;
+  db.exec("CREATE TABLE IF NOT EXISTS kpi_summary_cache (key TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL)");
+  const payloadSql = `SELECT json_object(
+    'generated_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    'jobs',json_object(
+      'active',(SELECT COUNT(*) FROM jobs WHERE UPPER(COALESCE(status,'OPEN')) NOT IN ('COMPLETED','CLOSED','FAILED','CANCELLED')),
+      'completed',(SELECT COUNT(*) FROM jobs WHERE UPPER(COALESCE(status,'')) IN ('COMPLETED','CLOSED')),
+      'unbilled',(SELECT COUNT(*) FROM jobs WHERE UPPER(COALESCE(status,'')) IN ('COMPLETED','CLOSED') AND LOWER(COALESCE(billing_status,'unbilled'))='unbilled')
+    ),
+    'invoices',json_object(
+      'open',(SELECT COUNT(*) FROM invoices WHERE LOWER(COALESCE(status,'')) IN ('issued','carried_over')),
+      'paid',(SELECT COUNT(*) FROM invoices WHERE LOWER(COALESCE(status,''))='paid'),
+      'receivable_total',ROUND(COALESCE((SELECT SUM(total_amount) FROM invoices WHERE direction='receivable' AND LOWER(COALESCE(status,'')) NOT IN ('draft','void')),0),2),
+      'payable_total',ROUND(COALESCE((SELECT SUM(total_amount) FROM invoices WHERE direction='payable' AND LOWER(COALESCE(status,'')) NOT IN ('draft','void')),0),2)
+    ),
+    'workshop',json_object(
+      'active',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,'ACTIVE'))='ACTIVE'),
+      'completed',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,''))='COMPLETED'),
+      'aborted',(SELECT COUNT(*) FROM workflow_finance_sources WHERE UPPER(COALESCE(current_status,''))='ABORTED')
+    ),
+    'events',json_object(
+      'draft',(SELECT COUNT(*) FROM events WHERE UPPER(COALESCE(status,'DRAFT'))='DRAFT'),
+      'published',(SELECT COUNT(*) FROM events WHERE UPPER(COALESCE(status,'')) IN ('PUBLISHED','RESCHEDULED')),
+      'completed',(SELECT COUNT(*) FROM events WHERE UPPER(COALESCE(status,'')) IN ('COMPLETED','CLOSED'))
+    )
+  )`;
+  const refreshSql = `INSERT INTO kpi_summary_cache(key,payload,updated_at)
+    VALUES('dashboard_summary',(${payloadSql}),CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at;`;
+  for (const tableName of requiredTables) {
+    for (const [suffix, operation] of [["ai","INSERT"],["au","UPDATE"],["ad","DELETE"]]) {
+      const triggerName = `trg_kpi_summary_${tableName}_${suffix}`;
+      db.exec(`DROP TRIGGER IF EXISTS ${triggerName}; CREATE TRIGGER ${triggerName} AFTER ${operation} ON ${tableName} BEGIN ${refreshSql} END;`);
+    }
+  }
+  db.exec(refreshSql);
+  log("Materialized KPI summary cache initialized");
+}
+
 function ensureFinancialSourceUniqueIndex() {
   if (!tableExists("financial_items")) return;
   const columns = tableColumns("financial_items");
@@ -897,6 +938,13 @@ function runMigrations() {
     ensureColumn("workflow_finance_phases", "calendar_job_id", "TEXT");
     ensureColumn("workflow_finance_phases", "card_title", "TEXT");
   }
+  // Columns used by fresh-schema performance indexes must exist before replaying schema.sql on an older database.
+  if (tableExists("invoices")) ensureColumn("invoices", "client_id", "TEXT");
+  if (tableExists("events")) {
+    ensureColumn("events", "category_id", "TEXT");
+    ensureColumn("events", "start_at", "TEXT");
+    ensureColumn("events", "status", "TEXT NOT NULL DEFAULT 'DRAFT'");
+  }
 
   db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   migrateWorkflowContract(db);
@@ -1336,6 +1384,40 @@ function runMigrations() {
   ensureIndex("idx_notification_snooze_active", "CREATE INDEX IF NOT EXISTS idx_notification_snooze_active ON notification_snooze_log(user_id,entity_type,entity_id,snoozed_until)");
   ensureIndex("idx_jobs_client_id", "CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id)");
   ensureIndex("idx_jobs_piano_id", "CREATE INDEX IF NOT EXISTS idx_jobs_piano_id ON jobs(piano_id)");
+  ensureIndex("idx_jobs_status_scheduled", "CREATE INDEX IF NOT EXISTS idx_jobs_status_scheduled ON jobs(status,start_time)");
+  ensureIndex("idx_events_scheduled_at", "CREATE INDEX IF NOT EXISTS idx_events_scheduled_at ON events(start_at)");
+  ensureIndex("idx_events_type_status", "CREATE INDEX IF NOT EXISTS idx_events_type_status ON events(category_id,status)");
+  ensureIndex("idx_invoices_client_id", "CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id)");
+  ensureIndex("idx_invoices_status_due", "CREATE INDEX IF NOT EXISTS idx_invoices_status_due ON invoices(status,due_date)");
+  if (tableExists("wf2_workflows")) {
+    const workflowV2Indexes = [
+      ["idx_wf2_workflows_client","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_client ON wf2_workflows(client_id)"],
+      ["idx_wf2_workflows_piano","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_piano ON wf2_workflows(piano_id)"],
+      ["idx_wf2_workflows_creator","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_creator ON wf2_workflows(creator_user_id)"],
+      ["idx_wf2_workflows_responsible","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_responsible ON wf2_workflows(main_responsible_user_id)"],
+      ["idx_wf2_workflows_invoice","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_invoice ON wf2_workflows(invoice_id)"],
+      ["idx_wf2_workflows_completed_by","CREATE INDEX IF NOT EXISTS idx_wf2_workflows_completed_by ON wf2_workflows(completed_by)"],
+      ["idx_wf2_phases_workflow","CREATE INDEX IF NOT EXISTS idx_wf2_phases_workflow ON wf2_phases(workflow_id,stage_code)"],
+      ["idx_wf2_phases_stage_code","CREATE INDEX IF NOT EXISTS idx_wf2_phases_stage_code ON wf2_phases(stage_code)"],
+      ["idx_wf2_phases_completed_by","CREATE INDEX IF NOT EXISTS idx_wf2_phases_completed_by ON wf2_phases(completed_by)"],
+      ["idx_workshop_subtasks_completed_by","CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_completed_by ON workshop_subtasks(completed_by)"],
+      ["idx_workshop_subtasks_approved_by","CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_approved_by ON workshop_subtasks(approved_by)"],
+      ["idx_wf2_costs_phase","CREATE INDEX IF NOT EXISTS idx_wf2_costs_phase ON wf2_costs(phase_id)"],
+      ["idx_wf2_costs_partner","CREATE INDEX IF NOT EXISTS idx_wf2_costs_partner ON wf2_costs(partner_id)"],
+      ["idx_wf2_costs_finance_line","CREATE INDEX IF NOT EXISTS idx_wf2_costs_finance_line ON wf2_costs(finance_line_id)"],
+      ["idx_wf2_costs_created_by","CREATE INDEX IF NOT EXISTS idx_wf2_costs_created_by ON wf2_costs(created_by)"],
+      ["idx_wf2_costs_approved_by","CREATE INDEX IF NOT EXISTS idx_wf2_costs_approved_by ON wf2_costs(approved_by)"],
+      ["idx_wf2_checklist_phase","CREATE INDEX IF NOT EXISTS idx_wf2_checklist_phase ON wf2_checklist(phase_id)"],
+      ["idx_wf2_checklist_task","CREATE INDEX IF NOT EXISTS idx_wf2_checklist_task ON wf2_checklist(task_id)"],
+      ["idx_wf2_checklist_checked_by","CREATE INDEX IF NOT EXISTS idx_wf2_checklist_checked_by ON wf2_checklist(checked_by)"],
+      ["idx_wf2_documents_phase","CREATE INDEX IF NOT EXISTS idx_wf2_documents_phase ON wf2_documents(phase_id)"],
+      ["idx_wf2_documents_task","CREATE INDEX IF NOT EXISTS idx_wf2_documents_task ON wf2_documents(task_id)"],
+      ["idx_wf2_documents_uploaded_by","CREATE INDEX IF NOT EXISTS idx_wf2_documents_uploaded_by ON wf2_documents(uploaded_by)"],
+      ["idx_wf2_audit_actor","CREATE INDEX IF NOT EXISTS idx_wf2_audit_actor ON wf2_audit(actor_user_id)"],
+      ["idx_wf2_closeouts_actor","CREATE INDEX IF NOT EXISTS idx_wf2_closeouts_actor ON wf2_closeouts(actor_user_id)"]
+    ];
+    for (const [name, sql] of workflowV2Indexes) ensureIndex(name, sql);
+  }
   ensureIndex("idx_jobs_contact_id", "CREATE INDEX IF NOT EXISTS idx_jobs_contact_id ON jobs(contact_id)");
   ensureIndex("idx_jobs_parent_id", "CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_job_id)");
   ensureIndex("idx_job_logs_job_id", "CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id)");
@@ -1419,6 +1501,7 @@ function runMigrations() {
     db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES('notification_preferences_v1_backfilled','1','SYSTEM')").run();
     log('Enabled all notification preferences for existing users');
   }
+  installKpiSummaryCache();
   installWorkflowDeletionGuards(db);
   assertPreservedBusinessCounts(preservedCounts);
   // Automatic sample installation was intentionally removed. Existing rows

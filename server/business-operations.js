@@ -3,8 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
-const { generateGuestDataPdf } = require("./guest-list-pdf");
+const { createPdfDiskCache, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
 const { readGuestData } = require("./guest-data");
 const { createTicketService } = require("./ticket-service");
 const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods");
@@ -873,6 +872,7 @@ function registerBusinessOperationsRoutes(options) {
   const helpdesk = permit("ADMIN", "MANAGER", "WORKER");
   const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
   const ticketService = providedTicketService || createTicketService({ db });
+  const pdfCache = createPdfDiskCache({ rootDir: path.resolve(process.cwd(), "storage", "cache", "pdf") });
   const conversationKey = conversationEncryptionKey(env);
   const recentRequests = new Map();
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -887,6 +887,15 @@ function registerBusinessOperationsRoutes(options) {
     if (error?.state) payload.state = error.state;
     res.status(Number(error?.status || (code.includes("NOT_FOUND") ? 404 : code.includes("ALREADY") || code.includes("CONFLICT") ? 409 : 400))).json(payload);
   }
+  db.exec("CREATE TABLE IF NOT EXISTS kpi_summary_cache (key TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL)");
+  const dashboardSummaryStatement = db.prepare("SELECT payload FROM kpi_summary_cache WHERE key='dashboard_summary'");
+  app.get("/api/dashboard/summary", auth, (_req, res) => {
+    const row = dashboardSummaryStatement.get();
+    if (!row?.payload) return res.status(503).json({ error: "KPI_SUMMARY_CACHE_UNAVAILABLE" });
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Klavierhaus-Cache", "materialized-summary");
+    res.type("application/json").send(row.payload);
+  });
   if (invoiceEngine) {
     const invoiceSelect = `SELECT i.*,c.name AS client_name,p.company_name AS partner_name,
       CASE WHEN i.partner_id IS NOT NULL OR i.direction='payable' THEN COALESCE(NULLIF(p.company_name,''),'Supplier not specified') ELSE COALESCE(NULLIF(c.company,''),c.name,i.summary,'Client') END AS counterparty_name
@@ -1208,13 +1217,17 @@ function registerBusinessOperationsRoutes(options) {
       res.status(405).json({ error: "IMMUTABLE_FINANCIAL_RECORDS", message: "Issued financial documents cannot be physically deleted. Use Void with a documented adjustment reason." });
     });
 
-    app.get("/api/invoices/:id/pdf", auth, financeReader, (req, res) => {
-      const invoice = invoiceEngine.invoiceDetail(req.params.id); if (!invoice) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
-      const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-      const pdf = generateBusinessInvoicePdf({ company, invoice, items: invoice.items, counterpartyName: invoice.counterparty_name, logoPath });
-      res.type("application/pdf").set("Content-Disposition", `attachment; filename="${invoice.invoice_number}.pdf"`).send(pdf);
+    app.get("/api/invoices/:id/pdf", auth, financeReader, async (req, res) => {
+      try {
+        const invoice = invoiceEngine.invoiceDetail(req.params.id); if (!invoice) return res.status(404).json({ error: "INVOICE_NOT_FOUND" });
+        const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
+        const args = { company, invoice, items: invoice.items, counterpartyName: invoice.counterparty_name, logoPath };
+        const cached = await pdfCache.render({ type: "invoice", id: invoice.id, generatorName: "generateBusinessInvoicePdf", args, source: args });
+        sendPdfFile(res, cached.filePath, `${invoice.invoice_number}.pdf`, cached.cacheHit);
+      } catch (error) { sendError(res, error, "INVOICE_PDF_FAILED"); }
     });
-    app.get("/api/invoices/monthly/report.pdf", auth, financeReader, (req, res) => {
+    app.get("/api/invoices/monthly/report.pdf", auth, financeReader, async (req, res) => {
+      try {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : new Date().toISOString().slice(0,7);
       const rows = db.prepare(`${invoiceSelect} WHERE substr(i.issue_date,1,7)=? AND i.status<>'void' ORDER BY i.issue_date,i.invoice_number`).all(month);
       const paid = rows.filter((row)=>row.status==='paid');
@@ -1229,8 +1242,10 @@ function registerBusinessOperationsRoutes(options) {
       const monthEnd = actualMonthEndDate(month);
       const carried = db.prepare(`${invoiceSelect} WHERE i.status IN ('issued','carried_over') AND COALESCE(i.due_date,'9999-12-31')<=? ORDER BY i.due_date,i.invoice_number`).all(monthEnd);
       const company = readCompanyData(db); const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-      const pdf = generateMonthlyInvoiceReportPdf({ company, month, summary:{ revenue, costs, net: revenue-costs }, paymentBreakdown: breakdown, carried, invoices: rows, logoPath });
-      res.type("application/pdf").set("Content-Disposition", `attachment; filename="klavierhaus-monthly-financial-${month}.pdf"`).send(pdf);
+      const args = { company, month, summary:{ revenue, costs, net: revenue-costs }, paymentBreakdown: breakdown, carried, invoices: rows, logoPath };
+      const cached = await pdfCache.render({ type: "monthly-financial", id: month, generatorName: "generateMonthlyInvoiceReportPdf", args, source: args });
+      sendPdfFile(res, cached.filePath, `klavierhaus-monthly-financial-${month}.pdf`, cached.cacheHit);
+      } catch (error) { sendError(res, error, "MONTHLY_FINANCIAL_PDF_FAILED"); }
     });
 
     app.get("/api/partners", auth, admin, (_req, res) => res.json(db.prepare(`SELECT p.*,COUNT(DISTINCT pc.id) AS contractor_count,COUNT(DISTINCT i.id) AS invoice_count FROM partners p LEFT JOIN partner_contractors pc ON pc.partner_id=p.id LEFT JOIN invoices i ON i.partner_id=p.id GROUP BY p.id ORDER BY lower(p.company_name),p.id`).all()));
@@ -1398,6 +1413,13 @@ function registerBusinessOperationsRoutes(options) {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.type("application/pdf").send(pdf);
   }
+  function sendPdfFile(res, filePath, filename, cacheHit = true) {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("X-Klavierhaus-PDF-Cache", cacheHit ? "HIT" : "MISS");
+    res.type("application/pdf");
+    return res.sendFile(path.resolve(filePath));
+  }
 
   function normalizeTicketVariant(value) {
     const key = clean(value, 40).toUpperCase().replace(/[- ]+/g, "_");
@@ -1563,7 +1585,7 @@ function registerBusinessOperationsRoutes(options) {
     } catch (error) { sendError(res, error, "GUEST_DATA_LOAD_FAILED"); }
   });
 
-  app.get("/api/guest-data.pdf", auth, admin, (req, res) => {
+  app.get("/api/guest-data.pdf", auth, admin, async (req, res) => {
     try {
       const data = readGuestData(db, {
         search: clean(req.query.search, 160),
@@ -1571,12 +1593,10 @@ function registerBusinessOperationsRoutes(options) {
       });
       const language = req.query.lang === "hu" ? "hu" : "en";
       const company = readCompanyData(db);
-      const pdf = generateGuestDataPdf({
-        guests: data.guests,
-        language,
-        logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir)
-      });
-      sendPdf(res, pdf, `klavierhaus-guest-data-${language}.pdf`);
+      const args = { guests: data.guests, language, logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir) };
+      const cacheId = [clean(req.query.event_id,160)||"all",language,clean(req.query.search,160)||"all"].join("-");
+      const cached = await pdfCache.render({ type: "guest-data", id: cacheId, moduleName: "guest-list-pdf", generatorName: "generateGuestDataPdf", args, source: args });
+      sendPdfFile(res, cached.filePath, `klavierhaus-guest-data-${language}.pdf`, cached.cacheHit);
     } catch (error) { sendError(res, error, "GUEST_DATA_PDF_FAILED"); }
   });
 

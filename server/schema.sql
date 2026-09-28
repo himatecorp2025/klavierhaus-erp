@@ -2139,3 +2139,16 @@ CREATE INDEX IF NOT EXISTS idx_notification_devices_user_status ON notification_
 -- Phase I custody only. No operational workflow records can be created here.
 CREATE TABLE IF NOT EXISTS workflow_retired_calendar_jobs (job_id TEXT PRIMARY KEY,workflow_id TEXT NOT NULL,snapshot_json TEXT NOT NULL,retired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS workflow_financial_delete_scope (entity_table TEXT NOT NULL,entity_id TEXT NOT NULL,PRIMARY KEY(entity_table,entity_id));
+
+-- Klavierhaus read-path performance primitives.
+-- Calendar scheduling is stored as jobs.start_time / events.start_at; event type is category_id.
+CREATE TABLE IF NOT EXISTS kpi_summary_cache (
+  key TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status_scheduled ON jobs(status,start_time);
+CREATE INDEX IF NOT EXISTS idx_events_scheduled_at ON events(start_at);
+CREATE INDEX IF NOT EXISTS idx_events_type_status ON events(category_id,status);
+CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);

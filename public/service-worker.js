@@ -1,24 +1,25 @@
-const CACHE_NAME="klavierhaus-shell-ui12-guided-finance-v1";
+const CACHE_NAME="klavierhaus-shell-swr-v2";
 const APP_SHELL=["/","/index.html","/styles.css","/app.js","/finance-tools.js","/workshop-shell.js","/master-data.js","/master-data.css","/workshop-v2.js","/workshop-v2.css","/icons/icon-192.png","/icons/icon-512.png"];
+const STATIC_ASSET=/\.(?:html|css|js|mjs|png|jpg|jpeg|svg|webp|ico|woff2?)$/i;
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+function isStaticRequest(request,url){return request.mode==="navigate"||APP_SHELL.includes(url.pathname)||STATIC_ASSET.test(url.pathname);}
 self.addEventListener("fetch",event=>{
   const request=event.request;
   const url=new URL(request.url);
-  if(request.method!=="GET"||url.pathname.startsWith("/api/")||url.pathname.startsWith("/uploads/")||url.pathname==="/manifest.webmanifest") return;
-  event.respondWith((async()=>{
-    const isCriticalShell=["/app.js","/finance-tools.js","/workshop-shell.js","/master-data.js","/master-data.css","/workshop-v2.js","/workshop-v2.css","/styles.css","/index.html","/"].includes(url.pathname);
-    const cached=await caches.match(request);
-    const network=fetch(request).then(async response=>{
-      if(response.ok){const cache=await caches.open(CACHE_NAME);await cache.put(request,response.clone());}
-      return response;
-    });
-    if(isCriticalShell){
-      try{return await network;}catch(_error){return cached||(await caches.match("/index.html"))||Response.error();}
-    }
-    if(cached){event.waitUntil(network.catch(()=>{}));return cached;}
-    try{return await network;}catch(_error){return (await caches.match("/index.html"))||Response.error();}
-  })());
+  if(request.method!=="GET"||url.origin!==self.location.origin)return;
+  if(url.pathname.startsWith("/api/"))return;
+  if(url.pathname.startsWith("/uploads/")||url.pathname==="/manifest.webmanifest"||!isStaticRequest(request,url))return;
+  const cachePromise=caches.open(CACHE_NAME);
+  const revalidate=cachePromise.then(cache=>fetch(request,{cache:"no-cache"}).then(async response=>{
+    if(response.ok)await cache.put(request,response.clone());
+    return response;
+  }));
+  event.waitUntil(revalidate.catch(()=>{}));
+  event.respondWith(cachePromise.then(cache=>cache.match(request)).then(cached=>{
+    if(cached)return cached;
+    return revalidate.catch(async()=>request.mode==="navigate"?(await caches.match("/index.html"))||Response.error():Response.error());
+  }));
 });
 
 async function updateAppBadge(count){
