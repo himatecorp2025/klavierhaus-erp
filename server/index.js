@@ -28,6 +28,7 @@ const {
   uploadErrorHandler
 } = require("./upload-middleware");
 const { registerRound1CoreRoutes } = require("./round1-core");
+const { registerRound2WorkflowRoutes } = require("./round2-workflow");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 
 const app = express();
@@ -163,7 +164,7 @@ app.post("/api/webhooks/resend",express.raw({type:"application/json",limit:"1mb"
 
 app.use(express.json({limit:"10mb"}));
 
-app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"round1-core"}));
+app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"round2-workflow"}));
 app.get("/api/health",(_req,res)=>res.status(200).json({status:"ok"}));
 app.get("/api/public/branding",(_req,res)=>res.json(getBranding()));
 app.get("/manifest.webmanifest",(_req,res)=>{
@@ -322,6 +323,7 @@ app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{se
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
 registerRound1CoreRoutes({app,db,auth,permit,audit});
+registerRound2WorkflowRoutes({app,db,auth,permit,audit});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
@@ -352,7 +354,7 @@ app.use((err,req,res,next)=>{
 });
 
 function startServer(port=PORT){
-  return app.listen(port,()=>console.log(`Klavierhaus ERP Round 1 listening on :${port}`));
+  return app.listen(port,()=>console.log(`Klavierhaus ERP Round 2 listening on :${port}`));
 }
 if(require.main===module)startServer();
 
