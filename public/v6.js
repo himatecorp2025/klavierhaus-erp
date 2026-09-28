@@ -154,7 +154,7 @@ function v6BindCmsFields(){
     try{const uploaded=await v6UploadWebsiteImage(file);v6CmsSet(path,uploaded.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");v6RenderCmsFields();}catch(error){toast(humanError(error),"error");}
   }));
   $$("[data-cms-image-remove]",host).forEach(button=>button.addEventListener("click",()=>{v6CmsSet(v6CmsPathRead(button.dataset.cmsImageRemove),"");v6RenderCmsFields();}));
-  for(const axis of ["x","y"])$$([`[data-cms-focal-${axis}]`],host).flat().forEach(input=>input.addEventListener("input",event=>{
+  for(const axis of ["x","y"])$(`[data-cms-focal-${axis}]`,host).forEach(input=>input.addEventListener("input",event=>{
     const path=v6CmsPathRead(event.currentTarget.dataset[`cmsFocal${axis.toUpperCase()}`]),key=v6CmsMetaKey(path),meta=v6CmsMeta()[key]||{focal_x:50,focal_y:50};
     meta[`focal_${axis}`]=Number(event.currentTarget.value);v6CmsMeta()[key]=meta;
     const card=event.currentTarget.closest(".cms-media-card");card?.querySelector(".cms-media-preview")?.style.setProperty(`--focal-${axis}`,`${event.currentTarget.value}%`);
