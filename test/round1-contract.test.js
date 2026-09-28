@@ -23,12 +23,12 @@ test("zero-modification protected website server modules are byte-identical to R
   for(const [file,sha] of Object.entries(expected))assert.equal(gitBlobSha(file),sha,`${file} changed despite zero-modification policy`);
 });
 
-test("schema contains only preserved public/auth domain plus Round 1 master-data domain",()=>{
+test("schema preserves public/auth and Round 1 master-data while Round 2 adds central jobs",()=>{
   const schema=read("server/schema.sql");
   for(const table of ["clients","pianos","intake_leads","users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media"]){
     assert.match(schema,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\s*\\(`));
   }
-  for(const table of ["jobs","planned_jobs","inventory_items","workflow_finance_sources","financial_items","invoices","partners"]){
+  for(const table of ["planned_jobs","inventory_items","workflow_finance_sources","financial_items","invoices","partners"]){
     assert.doesNotMatch(schema,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\s*\\(`));
   }
   assert.match(schema,/idx_pianos_client/);
