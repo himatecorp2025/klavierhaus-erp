@@ -114,6 +114,17 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       p.brand piano_brand,p.model piano_model,p.serial_number piano_serial_number,p.location_notes piano_location_notes
       FROM jobs j JOIN clients c ON c.id=j.client_id JOIN pianos p ON p.id=j.piano_id WHERE j.id=?`).get(id);
   }
+  function workflowReadyForCloseout(job){
+    if(!job||job.stage==="planned"||job.stage==="completed")return job?.stage==="completed";
+    const current=db.prepare("SELECT position FROM job_workflow_phases WHERE job_id=? AND stage_key=?").get(job.id,job.stage);
+    if(!current)return job.stage==="admin_approval";
+    const next=db.prepare("SELECT stage_key FROM job_workflow_phases WHERE job_id=? AND enabled=1 AND position>? ORDER BY position LIMIT 1").get(job.id,current.position);
+    return next?.stage_key==="completed";
+  }
+  function markWorkflowCompleted(jobId,currentStage){
+    db.prepare("UPDATE job_workflow_phases SET completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(jobId,currentStage);
+    db.prepare("UPDATE job_workflow_phases SET enabled=1,activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP),completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='completed'").run(jobId);
+  }
   function defaultJobItems(job){
     const rows=[];
     if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:"Labor / technician service",quantity:1,unit_price:Number(job.total_labor_cost)});
@@ -179,7 +190,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   function generateFromJob(jobId,body,actor){
     const job=jobForInvoice(jobId);if(!job)throw problem("JOB_NOT_FOUND",404);
     if(job.cancelled_at)throw problem("JOB_CANCELLED",409);
-    if(!["admin_approval","completed"].includes(job.stage))throw problem("JOB_NOT_READY_FOR_INVOICE",409);
+    if(job.stage!=="completed"&&!workflowReadyForCloseout(job))throw problem("JOB_NOT_READY_FOR_INVOICE",409);
     const existing=db.prepare("SELECT id FROM invoices WHERE job_id=? AND status<>'cancelled' ORDER BY id DESC LIMIT 1").get(jobId);
     if(existing){
       const invoice=invoiceDetail(existing.id);
@@ -197,8 +208,9 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     const before=jobForInvoice(jobId);if(!before)throw problem("JOB_NOT_FOUND",404);
     if(before.cancelled_at)throw problem("JOB_CANCELLED",409);
     if(before.stage==="completed")return before;
-    if(before.stage!=="admin_approval")throw problem("JOB_NOT_READY_FOR_CLOSEOUT",409);
+    if(!workflowReadyForCloseout(before))throw problem("JOB_NOT_READY_FOR_CLOSEOUT",409);
     if(!isAdmin(actor))throw problem("ADMIN_REQUIRED",403);
+    markWorkflowCompleted(jobId,before.stage);
     db.prepare(`UPDATE jobs SET stage='completed',completed_at=CURRENT_TIMESTAMP,completed_by_user_id=?,completed_by_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(actor.id,actor.name,jobId);
     db.prepare("UPDATE pianos SET last_serviced_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nyDate(),before.piano_id);
