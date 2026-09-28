@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v6-shell-v2-archive-workflow/);
+  assert.match(sw,/klavierhaus-admin-v7-dynamic-workflow-cms-images/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -109,4 +109,27 @@ test("CMS archive, workflow lifecycle split and send-time client email are wired
   assert.match(finance,/recipient_email/);
   assert.match(ui3,/name='recipient_email'/);
   assert.match(finance,/ARCHIVE_DELETE/);
+});
+
+
+test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
+  const schema=read("server/schema.sql"),workflow=read("server/round2-workflow.js"),ui=read("public/round2.js"),v6=read("public/v6.js"),css=read("public/styles.css");
+  assert.match(schema,/position INTEGER NOT NULL CHECK\(position BETWEEN 1 AND 7\)/);
+  assert.match(schema,/stage_type TEXT NOT NULL DEFAULT 'intermediate'/);
+  assert.match(schema,/workflow_stage_key TEXT/);
+  assert.match(workflow,/MAX_WORKFLOW_STAGES=7/);
+  assert.match(workflow,/\/api\/workflow\/stages\/order/);
+  assert.match(workflow,/\/api\/workflow\/stages\/\:key/);
+  assert.match(workflow,/closed_type/);
+  assert.match(workflow,/\/api\/jobs\/\:id\/history/);
+  assert.match(ui,/workflowAddStageCard/);
+  assert.match(ui,/data-stage-drag/);
+  assert.match(ui,/data-closed-type="completed"/);
+  assert.match(ui,/data-closed-type="cancelled"/);
+  assert.match(ui,/r2OpenWorkflowHistory/);
+  assert.match(css,/--workflow-columns/);
+  assert.match(css,/calendar-event-block\.is-completed/);
+  assert.match(v6,/function v6CmsPreviewUrl/);
+  assert.match(v6,/url\.pathname\.startsWith\("\/uploads\/website\/"\)/);
+  assert.match(v6,/data-cms-original-src/);
 });

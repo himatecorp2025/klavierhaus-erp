@@ -169,6 +169,17 @@ function isolateForCompliance(name) {
 if (setting("final_compliance_migration_complete") !== "1" && !complianceReady) {
   for (const name of ["invoice_payments","invoice_items","invoices","jobs","intake_leads"]) isolateForCompliance(name);
 }
+
+const dynamicWorkflowNeedsMigration =
+  tableExists("workflow_stage_definitions") &&
+  (!columns("workflow_stage_definitions").has("active") || !columns("job_workflow_phases").has("stage_key"));
+if(dynamicWorkflowNeedsMigration){
+  if(tableExists("_dynamic_legacy_job_workflow_phases"))db.exec('DROP TABLE "_dynamic_legacy_job_workflow_phases"');
+  if(tableExists("_dynamic_legacy_workflow_stage_definitions"))db.exec('DROP TABLE "_dynamic_legacy_workflow_stage_definitions"');
+  if(tableExists("job_workflow_phases"))db.exec('ALTER TABLE "job_workflow_phases" RENAME TO "_dynamic_legacy_job_workflow_phases"');
+  if(tableExists("workflow_stage_definitions"))db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_dynamic_legacy_workflow_stage_definitions"');
+  console.log("[WORKFLOW-DYNAMIC] Legacy five-stage workflow tables isolated");
+}
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 // schema.sql enables FK enforcement for normal runtime use. The migration must keep
 // it disabled until all legacy parent/child tables have been retired, otherwise
@@ -178,6 +189,7 @@ db.pragma("foreign_keys = OFF");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
+ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
@@ -186,26 +198,54 @@ ensureColumn("invoices","archive_document_id","INTEGER");
 function seedWorkshopUxV5() {
   if (!tableExists("workflow_stage_definitions") || !tableExists("job_workflow_phases")) return;
   const stageRows = [
-    ["received",1,"Received / Scheduled","Beérkezett / Ütemezve"],
-    ["in_progress",2,"In Progress","Folyamatban"],
-    ["qa_review",3,"QA / Handoff","Minőségellenőrzés / Átadás"],
-    ["admin_approval",4,"Admin Approval","Admin jóváhagyás"],
-    ["completed",5,"Completed","Lezárva"]
+    ["received",1,"Received / Scheduled","Beérkezett / Ütemezve","start",0],
+    ["in_progress",2,"In Progress","Folyamatban","intermediate",0],
+    ["qa_review",3,"QA / Handoff","Minőségellenőrzés / Átadás","intermediate",0],
+    ["admin_approval",4,"Admin Approval","Admin jóváhagyás","approval",0],
+    ["completed",5,"Completed","Lezárva","completed",0]
   ];
-  const insertStage=db.prepare(`INSERT OR IGNORE INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,updated_at)
-    VALUES(?,?,?,?,CURRENT_TIMESTAMP)`);
+  const insertStage=db.prepare(`INSERT OR IGNORE INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,updated_at)
+    VALUES(?,?,?,?,?,1,?,CURRENT_TIMESTAMP)`);
   stageRows.forEach(row=>insertStage.run(...row));
-  const insertPhase=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,activated_at,completed_at)
-    VALUES(?,?,?,?,?,?)`);
-  const jobs=db.prepare("SELECT id,stage,created_at,completed_at FROM jobs ORDER BY id").all();
-  for(const job of jobs){
-    for(const row of stageRows){
-      const stageKey=row[0],position=row[1],currentIndex=stageRows.findIndex(item=>item[0]===job.stage),positionIndex=position-1;
-      const completed=job.stage==="completed"|| (currentIndex>=0 && positionIndex<currentIndex);
-      const activated=job.stage===stageKey||completed;
-      insertPhase.run(job.id,stageKey,position,1,activated?(job.created_at||new Date().toISOString()):null,completed?(job.completed_at||job.created_at||new Date().toISOString()):null);
+
+  if(tableExists("_dynamic_legacy_workflow_stage_definitions")){
+    const legacyStages=db.prepare("SELECT stage_key,position,label_en,label_hu,updated_by_user_id,updated_at FROM _dynamic_legacy_workflow_stage_definitions ORDER BY position").all();
+    const upsert=db.prepare(`INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,updated_by_user_id,updated_at)
+      VALUES(?,?,?,?,?,1,0,?,?)
+      ON CONFLICT(stage_key) DO UPDATE SET label_en=excluded.label_en,label_hu=excluded.label_hu,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at`);
+    for(const row of legacyStages){
+      const type=row.stage_key==="received"?"start":row.stage_key==="admin_approval"?"approval":row.stage_key==="completed"?"completed":"intermediate";
+      upsert.run(row.stage_key,row.position,row.label_en,row.label_hu,type,row.updated_by_user_id,row.updated_at);
     }
   }
+
+  const insertPhase=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,due_at,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)`);
+  if(tableExists("_dynamic_legacy_job_workflow_phases")){
+    for(const row of db.prepare("SELECT * FROM _dynamic_legacy_job_workflow_phases ORDER BY job_id,position,id").all()){
+      insertPhase.run(row.job_id,row.stage_key,row.position,row.enabled,row.due_at,row.blocker_code,row.blocker_note,row.activated_at,row.completed_at,row.created_at,row.updated_at);
+    }
+  }
+
+  const jobs=db.prepare("SELECT id,stage,workflow_stage_key,created_at,completed_at,cancelled_at FROM jobs ORDER BY id").all();
+  const activeStages=db.prepare("SELECT stage_key,position FROM workflow_stage_definitions WHERE active=1 ORDER BY position").all();
+  const phaseInsert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,activated_at,completed_at)
+    VALUES(?,?,?,?,?,?)`);
+  for(const job of jobs){
+    if(job.stage!=="planned"&&!job.workflow_stage_key)db.prepare("UPDATE jobs SET workflow_stage_key=? WHERE id=?").run(job.stage,job.id);
+    if(db.prepare("SELECT 1 FROM job_workflow_phases WHERE job_id=? LIMIT 1").get(job.id))continue;
+    const logical=job.workflow_stage_key||job.stage,currentIndex=activeStages.findIndex(item=>item.stage_key===logical);
+    for(const row of activeStages){
+      const index=activeStages.findIndex(item=>item.stage_key===row.stage_key);
+      const done=logical==="completed"||(currentIndex>=0&&index<currentIndex);
+      const active=logical===row.stage_key||done;
+      phaseInsert.run(job.id,row.stage_key,row.position,1,active?(job.created_at||new Date().toISOString()):null,done?(job.completed_at||job.created_at||new Date().toISOString()):null);
+    }
+  }
+
+  if(tableExists("_dynamic_legacy_job_workflow_phases"))db.exec('DROP TABLE "_dynamic_legacy_job_workflow_phases"');
+  if(tableExists("_dynamic_legacy_workflow_stage_definitions"))db.exec('DROP TABLE "_dynamic_legacy_workflow_stage_definitions"');
+  setSetting("workflow_dynamic_schema_version","1");
 }
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES

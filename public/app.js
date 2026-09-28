@@ -91,7 +91,18 @@ function humanError(error){
     ARCHIVE_TITLE_REQUIRED:["Enter a title for the archive record.","Adj címet az archivált tételnek."],
     INVALID_ARCHIVE_FILE_TYPE:["Use a supported document or image file.","Támogatott dokumentum- vagy képfájlt válassz."],
     ARCHIVE_DOCUMENT_NOT_FOUND:["The archive record no longer exists.","Az archív tétel már nem létezik."],
-    ARCHIVE_FILE_NOT_FOUND:["The archived file is not available.","Az archivált fájl nem érhető el."]
+    ARCHIVE_FILE_NOT_FOUND:["The archived file is not available.","Az archivált fájl nem érhető el."],
+    WORKFLOW_FIXED_STAGE_REQUIRED:["Received, Admin Approval and Completed are required.","A Beérkezett, Admin jóváhagyás és Lezárva fázis kötelező."],
+    WORKFLOW_STAGE_LIMIT_REACHED:["The workflow already has the maximum seven phases.","A munkafolyamat már elérte a legfeljebb hét fázist."],
+    INVALID_WORKFLOW_STAGE_ORDER:["The workflow phase order is invalid.","A munkafázisok sorrendje érvénytelen."],
+    WORKFLOW_FIXED_STAGE_ORDER:["Received must stay first and Admin Approval must stay last.","A Beérkezettnek elsőnek, az Admin jóváhagyásnak utolsónak kell maradnia."],
+    WORKFLOW_STAGE_NOT_REMOVABLE:["This system workflow phase cannot be removed.","Ez a rendszerfázis nem távolítható el."],
+    WORKFLOW_STAGE_IN_USE:["Move the active job out of this phase before removing it.","A fázis eltávolítása előtt helyezd át az aktív munkát másik fázisba."],
+    WORKFLOW_START_STAGE_FIXED:["The Received phase is the fixed workflow start.","A Beérkezett fázis a munkafolyamat rögzített kezdete."],
+    WORKFLOW_PHASE_NOT_AVAILABLE:["The selected workflow phase is not available for this job.","A kiválasztott munkafázis ennél a munkánál nem érhető el."],
+    WORKFLOW_PHASE_ALREADY_COMPLETED:["That workflow phase has already been completed.","Ez a munkafázis már lezárult."],
+    WORKFLOW_PHASES_REMAINING:["Complete the remaining intermediate phases before Admin Approval.","Az Admin jóváhagyás előtt zárd le a még nyitott köztes fázisokat."],
+    INVALID_CLOSED_WORKFLOW_TYPE:["Choose Completed or Cancelled workflows.","Válassz a Lezárt vagy Törölt munkafolyamatok közül."]
   };
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");

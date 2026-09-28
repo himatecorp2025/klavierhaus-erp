@@ -4,6 +4,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
+const vm=require("node:vm");
 
 const root=path.resolve(__dirname,"..");
 const round2=fs.readFileSync(path.join(root,"public","round2.js"),"utf8");
@@ -50,4 +51,23 @@ test("single-element selector helper is never iterated in active v6 workflow sur
     const invalid=source.match(/(^|[^$])\$\([^\n;]*\)\.forEach/gm)||[];
     assert.deepEqual(invalid,[],name+" contains $().forEach runtime hazards: "+invalid.join(" | "));
   }
+});
+
+
+test("CMS website upload previews use the current ERP origin",()=>{
+  const start=v6.indexOf("function v6CmsPreviewUrl");
+  const end=v6.indexOf("function v6CmsMeta",start);
+  assert.ok(start>=0&&end>start);
+  const source=v6.slice(start,end);
+  const context={window:{location:{origin:"https://erp-current.example.test"}},URL,result:null};
+  vm.runInNewContext(source+`;result=[
+    v6CmsPreviewUrl("/uploads/website/piano.jpg"),
+    v6CmsPreviewUrl("https://erp-old.example.test/uploads/website/piano.jpg?rev=2"),
+    v6CmsPreviewUrl("https://cdn.example.test/external.jpg")
+  ];`,context);
+  assert.deepEqual(Array.from(context.result),[
+    "/uploads/website/piano.jpg",
+    "/uploads/website/piano.jpg?rev=2",
+    "https://cdn.example.test/external.jpg"
+  ]);
 });

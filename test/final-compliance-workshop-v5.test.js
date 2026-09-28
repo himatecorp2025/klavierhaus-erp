@@ -67,7 +67,7 @@ test("v5 migration installs configurable workflow schema and default bilingual l
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='workshop_ux_schema_version'").get().setting_value,"5");
 });
 
-test("job-specific workflow skips disabled phases and Completed stays mandatory",async()=>{
+test("job-specific workflow skips disabled intermediates but keeps Admin Approval and Completed mandatory",async()=>{
   const admin=await login("admin.v5@example.com");
   const created=await request("/api/jobs",{token:admin,method:"POST",body:{
     client_id:globalThis.clientId,piano_id:globalThis.pianoId,title:"Selective workflow",
@@ -82,6 +82,7 @@ test("job-specific workflow skips disabled phases and Completed stays mandatory"
   }});
   assert.equal(created.status,201,JSON.stringify(created.payload));
   assert.equal(created.payload.stage,"received");
+  assert.equal(created.payload.workflow_phases.find(row=>row.stage_key==="admin_approval").enabled,true);
   assert.equal(created.payload.workflow_phases.find(row=>row.stage_key==="completed").enabled,true);
   assert.equal(created.payload.next_stage,"qa_review");
   globalThis.jobId=created.payload.id;globalThis.admin=admin;
@@ -90,12 +91,8 @@ test("job-specific workflow skips disabled phases and Completed stays mandatory"
   const handoff=await request("/api/jobs/"+globalThis.jobId+"/handoff",{token:worker,method:"POST",body:{phase_note:"Skip disabled phase"}});
   assert.equal(handoff.status,201,JSON.stringify(handoff.payload));
   assert.equal(handoff.payload.job.stage,"qa_review");
-  assert.equal(handoff.payload.job.next_stage,"completed");
-  assert.equal(handoff.payload.job.ready_for_closeout,true);
-
-  const blocked=await request("/api/jobs/"+globalThis.jobId+"/handoff",{token:worker,method:"POST",body:{}});
-  assert.equal(blocked.status,409);
-  assert.equal(blocked.payload.error,"ADMIN_CLOSEOUT_REQUIRED");
+  assert.equal(handoff.payload.job.next_stage,"admin_approval");
+  assert.equal(handoff.payload.job.ready_for_closeout,false);
 });
 
 test("calendar reschedule updates the same workflow job record",async()=>{
@@ -147,7 +144,12 @@ test("admins can rename English/Hungarian workflow labels without changing stage
   assert.equal(workflow.payload.stages.find(row=>row.key==="qa_review").label_hu,"Minőségi ellenőrzés");
 });
 
-test("admin closeout can finish a custom workflow directly at its mandatory Completed endpoint",async()=>{
+test("Admin Approval is the mandatory final active phase before Completed closeout",async()=>{
+  const approval=await request("/api/jobs/"+globalThis.jobId+"/handoff",{token:globalThis.worker,method:"POST",body:{phase_note:"QA complete; ready for Admin Approval"}});
+  assert.equal(approval.status,201,JSON.stringify(approval.payload));
+  assert.equal(approval.payload.job.stage,"admin_approval");
+  assert.equal(approval.payload.job.next_stage,"completed");
+  assert.equal(approval.payload.job.ready_for_closeout,true);
   const completed=await request("/api/jobs/"+globalThis.jobId+"/complete",{token:globalThis.admin,method:"POST",body:{invoice_mode:"draft",email_language:"en"}});
   assert.equal(completed.status,201,JSON.stringify(completed.payload));
   assert.equal(completed.payload.job.stage,"completed");
