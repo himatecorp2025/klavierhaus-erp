@@ -985,6 +985,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   scheduled_at TEXT,
   estimated_duration_min INTEGER NOT NULL DEFAULT 120 CHECK(estimated_duration_min > 0),
   stage TEXT NOT NULL DEFAULT 'planned' CHECK(stage IN ('planned','received','in_progress','qa_review','admin_approval','completed')),
+  workflow_stage_key TEXT,
   assigned_technician_id TEXT,
   total_labor_cost REAL NOT NULL DEFAULT 0 CHECK(total_labor_cost >= 0),
   total_material_cost REAL NOT NULL DEFAULT 0 CHECK(total_material_cost >= 0),
@@ -1011,20 +1012,25 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
-  stage_key TEXT PRIMARY KEY CHECK(stage_key IN ('received','in_progress','qa_review','admin_approval','completed')),
-  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 5),
+  stage_key TEXT PRIMARY KEY,
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 7),
   label_en TEXT NOT NULL,
   label_hu TEXT NOT NULL,
+  stage_type TEXT NOT NULL DEFAULT 'intermediate' CHECK(stage_type IN ('start','intermediate','approval','completed')),
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  removable INTEGER NOT NULL DEFAULT 0 CHECK(removable IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_by_user_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS idx_workflow_stage_active_position ON workflow_stage_definitions(active,position);
 
 CREATE TABLE IF NOT EXISTS job_workflow_phases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,
-  stage_key TEXT NOT NULL CHECK(stage_key IN ('received','in_progress','qa_review','admin_approval','completed')),
-  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 5),
+  stage_key TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 7),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
   due_at TEXT,
   blocker_code TEXT CHECK(blocker_code IS NULL OR blocker_code IN ('material_procurement','parts_procurement','material_issue','waiting_client','waiting_technician','waiting_admin','waiting_invoice','other')),
