@@ -101,11 +101,13 @@ function registerRound1CoreRoutes({ app, db, auth, permit, audit }) {
   app.get("/api/intake", auth, staff, (req, res) => {
     const status = text(req.query.status,30).toLowerCase();
     if (status && !["new","converted","archived"].includes(status)) return res.status(400).json({ error: "INVALID_INTAKE_STATUS" });
-    const rows = db.prepare(`SELECT i.*,c.name AS client_name,p.brand AS piano_brand,p.model AS piano_model,u.name AS assigned_technician_name
+    const rows = db.prepare(`SELECT i.*,c.name AS client_name,p.brand AS piano_brand,p.model AS piano_model,u.name AS assigned_technician_name,
+      j.id AS job_id,j.job_code AS job_code,j.status AS job_status
       FROM intake_leads i
       LEFT JOIN clients c ON c.id=i.client_id
       LEFT JOIN pianos p ON p.id=i.piano_id
       LEFT JOIN users u ON u.id=i.assigned_technician_id
+      LEFT JOIN jobs j ON j.intake_lead_id=i.id
       WHERE ?='' OR i.status=?
       ORDER BY CASE i.estimated_urgency WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,i.created_at DESC,i.id DESC`).all(status,status);
     res.json(rows);

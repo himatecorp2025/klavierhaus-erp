@@ -6,11 +6,11 @@ const esc=(value)=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&
 const state={
   token:sessionStorage.getItem("kh_token")||"",
   user:null,
-  view:(location.hash||"#intake").slice(1)||"intake",
+  view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",landing:[]
 };
-const activeViews=new Set(["intake","master","cms","profile"]);
+const activeViews=new Set(["workshop","planned","intake","master","cms","profile"]);
 const roleLabel=(role)=>role==="WORKER"?"Technikus":role==="SUPERADMIN"?"Super Admin":role==="ADMIN"?"Admin":role==="MANAGER"?"Manager":role||"";
 const initials=(name)=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 
@@ -26,7 +26,12 @@ function humanError(error){
     CLIENT_NAME_REQUIRED:"Az ügyfél neve kötelező.",INVALID_CLIENT_EMAIL:"Érvénytelen ügyfél e-mail.",
     PIANO_BRAND_REQUIRED:"A zongora márkája kötelező.",REPORTED_ISSUE_REQUIRED:"A hiba vagy igény leírása kötelező.",
     CLIENT_NAME_REQUIRED:"Az ügyfél neve szükséges a konverzióhoz.",PIANO_DETAILS_REQUIRED:"A konverzióhoz add meg a zongora márkáját.",
-    INVALID_PIANO_ID:"A kiválasztott zongora nem ehhez az ügyfélhez tartozik.",PERMISSION_DENIED:"Nincs jogosultság ehhez a művelethez."
+    INVALID_PIANO_ID:"A kiválasztott zongora nem ehhez az ügyfélhez tartozik.",PERMISSION_DENIED:"Nincs jogosultság ehhez a művelethez.",
+    JOB_TITLE_REQUIRED:"A munka megnevezése kötelező.",INVALID_JOB_STATUS:"Érvénytelen munkastátusz.",
+    TECHNICIAN_REQUIRED_FOR_SCHEDULE:"Ütemezéshez technikust kell választani.",TECHNICIAN_REQUIRED_FOR_STATUS:"Ehhez a státuszhoz technikus szükséges.",
+    SCHEDULE_REQUIRED_FOR_STATUS:"A munkát előbb ütemezni kell.",SCHEDULE_CONFLICT:"A technikusnak ebben az időpontban már van másik munkája.",
+    BLOCKED_REASON_REQUIRED:"A blokkolás okát add meg.",INVALID_SCHEDULE_RANGE:"A befejezésnek a kezdés után kell lennie.",
+    INTAKE_MUST_BE_CONVERTED:"Az igényt előbb törzsadattá kell konvertálni.",INTAKE_JOB_ALREADY_EXISTS:"Ehhez az igényhez már tartozik munka."
   };
   return map[code]||code.replaceAll("_"," ");
 }
@@ -94,7 +99,9 @@ $("#appDialog").addEventListener("click",event=>{if(event.target===$("#appDialog
 async function renderView(){
   const workspace=$("#workspace");workspace.innerHTML=loading();
   try{
-    if(state.view==="master")await renderMaster();
+    if(state.view==="workshop")await renderWorkshop();
+    else if(state.view==="planned")await renderPlanned();
+    else if(state.view==="master")await renderMaster();
     else if(state.view==="cms")await renderCms();
     else if(state.view==="profile")await renderProfile();
     else await renderIntake();
@@ -232,9 +239,10 @@ function renderIntakeList(){
       ${row.raw_contact?`<span class="badge">${esc(row.raw_contact)}</span>`:""}
       ${row.assigned_technician_name?`<span class="badge">👤 ${esc(row.assigned_technician_name)}</span>`:""}
       ${row.status==="converted"?'<span class="badge converted">Konvertált</span>':""}</div></div>
-    ${row.status==="new"?`<button class="secondary-button convert-button" type="button" data-convert-id="${row.id}">Konvertálás</button>`:""}
+    ${intakeAction(row)}
   </article>`).join("");
-  $$("[data-convert-id]",host).forEach(button=>button.addEventListener("click",()=>openConvertDialog(state.intake.find(row=>Number(row.id)===Number(button.dataset.convertId)))));
+  $("[data-convert-id]",host).forEach(button=>button.addEventListener("click",()=>openConvertDialog(state.intake.find(row=>Number(row.id)===Number(button.dataset.convertId)))));
+  $("[data-plan-intake]",host).forEach(button=>button.addEventListener("click",()=>createJobFromIntake(Number(button.dataset.planIntake))));
 }
 function openIntakeDialog(){
   const technicianOptions=state.users.filter(u=>["WORKER","MANAGER","ADMIN"].includes(u.role)).map(u=>`<option value="${esc(u.id)}">${esc(u.name)} · ${esc(roleLabel(u.role))}</option>`).join("");
@@ -354,8 +362,8 @@ async function renderProfile(){
       <section class="panel"><div class="panel-head"><h2>Csapat</h2><span class="badge">${users.length} fő</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span></div>`).join("")}</div></section>
     </div>
     <div style="margin-top:16px" class="coming-grid">
-      <article class="coming-card"><span>📋</span><h3>Műhely &amp; Naptár</h3><p class="muted">A 2. körben aktiváljuk.</p></article>
-      <article class="coming-card"><span>⏳</span><h3>Tervezett munkák</h3><p class="muted">A 2. körben aktiváljuk.</p></article>
+      <article class="coming-card"><span>📋</span><h3>Műhely &amp; Naptár</h3><p class="muted">Aktív · 5 oszlopos workflow és közös naptár.</p></article>
+      <article class="coming-card"><span>⏳</span><h3>Tervezett munkák</h3><p class="muted">Aktív · ütemezés előtti munkák.</p></article>
       <article class="coming-card"><span>💰</span><h3>Pénzügy</h3><p class="muted">A 3. körben aktiváljuk.</p></article>
     </div>`;
   $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}clearSession();showLogin();});
@@ -412,8 +420,8 @@ $("#backToLoginBtn").addEventListener("click",()=>{$("#activationForm").classLis
 async function boot(){
   await loadBranding();bindNavigation();
   if(!state.token){showLogin();return;}
-  try{state.user=await api("/api/me");showApp();if(!activeViews.has(state.view))state.view="intake";await renderView();}
+  try{state.user=await api("/api/me");showApp();if(!activeViews.has(state.view))state.view="workshop";await renderView();}
   catch(_error){clearSession();showLogin();}
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(()=>{}),{once:true});
 }
-void boot();
+// Round 2 UI extension invokes boot() after its functions are registered.

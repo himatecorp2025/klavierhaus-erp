@@ -1,4 +1,4 @@
-name: Klavierhaus ERP Round 1 CI
+name: Klavierhaus ERP Round 2 CI
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  round1-verify:
+  round2-verify:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -26,11 +26,11 @@ jobs:
         run: |
           npm run check:assets
           npm run check:assets:http
-      - name: Run Round 1 migration smoke
+      - name: Run migration smoke
         run: npm run check:migration
       - name: Check active JavaScript and schema
         run: npm run check
-      - name: Run Round 1 tests
+      - name: Run Round 1 + Round 2 tests
         run: npm test
       - name: Report baseline production dependency audit
         continue-on-error: true

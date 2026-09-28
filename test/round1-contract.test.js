@@ -23,12 +23,12 @@ test("zero-modification protected website server modules are byte-identical to R
   for(const [file,sha] of Object.entries(expected))assert.equal(gitBlobSha(file),sha,`${file} changed despite zero-modification policy`);
 });
 
-test("schema contains only preserved public/auth domain plus Round 1 master-data domain",()=>{
+test("schema preserves public/auth and Round 1 master-data while Round 2 adds central jobs",()=>{
   const schema=read("server/schema.sql");
   for(const table of ["clients","pianos","intake_leads","users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media"]){
     assert.match(schema,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\s*\\(`));
   }
-  for(const table of ["jobs","planned_jobs","inventory_items","workflow_finance_sources","financial_items","invoices","partners"]){
+  for(const table of ["planned_jobs","inventory_items","workflow_finance_sources","financial_items","invoices","partners"]){
     assert.doesNotMatch(schema,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\s*\\(`));
   }
   assert.match(schema,/idx_pianos_client/);
@@ -49,8 +49,8 @@ test("clean server wiring contains Round 1 and website routes but no retired ERP
 
 test("Round 1 PWA exposes active modules and keeps future modules visibly disabled",()=>{
   const html=read("public/index.html"),app=read("public/app.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
-  for(const label of ["Igényfelmérés","Törzsadatok","Weboldal CMS"])assert.ok(html.includes(label));
-  for(const round of ["2. kör","3. kör"])assert.ok(html.includes(round));
+  for(const label of ["Igényfelmérés","Törzsadatok","Weboldal CMS","Műhely &amp; Naptár","Tervezett munkák"])assert.ok(html.includes(label));
+  assert.ok(html.includes("3. kör"));
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.mobile-nav/);
   assert.match(css,/@media\(display-mode:standalone\)/);
