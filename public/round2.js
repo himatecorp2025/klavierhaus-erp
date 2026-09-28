@@ -134,7 +134,7 @@ function r2RenderPlannedList(){
 }
 
 async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
-  const [clients,settings]=await Promise.all([loadClients(),loadUsers().then(()=>null),api("/api/workflow/settings")]);
+  const [clients,,settings]=await Promise.all([loadClients(),loadUsers().then(()=>null),api("/api/workflow/settings")]);
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages};
   if(!clients.length){toast(tr("Create a client and piano first.","Előbb hozz létre ügyfelet és zongorát."),"error");return;}
   const scheduled=Boolean(defaults.date);
@@ -433,17 +433,7 @@ function r2BindCalendarPointer(host,jobs){
     }catch(error){toast(humanError(error),"error");}
     clean();await r2RenderCalendar(state.r2Workflow?.jobs||[]);
   }
-function r2BindCalendarCreate(host){
-  $("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
-    if(event.target.closest("[data-calendar-job],[data-new-calendar-job],.calendar-now-line"))return;
-    const date=column.dataset.calendarDate;if(!date)return;
-    if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
-    const rect=column.getBoundingClientRect();
-    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
-    r2OpenCreateJob(renderWorkshop,{date,datetime:r2MinutesInput(date,minutes)});
-  }));
-}
-  $("[data-calendar-job]",host).forEach(card=>{
+  $$("[data-calendar-job]",host).forEach(card=>{
     card.addEventListener("pointerdown",event=>{
       if(event.button!==undefined&&event.button!==0)return;
       const job=jobs.find(row=>String(row.id)===String(card.dataset.calendarJob));if(!job||job.stage==="completed")return;
@@ -457,6 +447,16 @@ function r2BindCalendarCreate(host){
     card.addEventListener("pointerup",finish);
     card.addEventListener("pointercancel",()=>{gesture?.card?.classList.remove("calendar-source-moving");clean();});
   });
+}
+function r2BindCalendarCreate(host){
+  $$("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
+    if(event.target.closest("[data-calendar-job],[data-new-calendar-job],.calendar-now-line"))return;
+    const date=column.dataset.calendarDate;if(!date)return;
+    if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
+    const rect=column.getBoundingClientRect();
+    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
+    r2OpenCreateJob(renderWorkshop,{date,datetime:r2MinutesInput(date,minutes)});
+  }));
 }
 async function r2RenderCalendar(){
   const host=$("#workshopContent");if(!host)return;
