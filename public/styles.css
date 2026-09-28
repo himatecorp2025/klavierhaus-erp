@@ -1103,3 +1103,22 @@ select option{background:var(--surface);color:var(--ink)}
 @media(display-mode:standalone){
   .app-header{padding-top:calc(7px + env(safe-area-inset-top,0px))}
 }
+
+
+/* V6 public website design controls */
+.website-design-panel{margin-top:16px;overflow:hidden}
+.website-design-form{padding:16px}
+.design-color-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.design-color-field{
+  display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:center;
+  padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);
+}
+.design-color-field input[type="color"]{
+  width:52px;height:44px;min-height:44px;padding:3px;border-radius:9px;cursor:pointer;
+}
+.design-color-field span{display:grid}
+.design-color-field strong{font-size:11px}
+.design-color-field small{margin-top:3px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px}
+.design-font-grid{margin-top:12px}
+@media(max-width:900px){.design-color-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.design-color-grid{grid-template-columns:1fr}}
