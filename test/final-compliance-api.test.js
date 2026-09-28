@@ -158,8 +158,8 @@ test("Pipeline activation feeds the Calendar and exact five-stage Workflow",asyn
   const workflow=await request("/api/jobs/workflow",{token});
   assert.equal(workflow.status,200,JSON.stringify(workflow.payload));
   assert.equal(workflow.payload.bucket,"active");
-  assert.deepEqual(workflow.payload.stages.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval"]);
-  assert.equal(workflow.payload.columns.length,4);
+  assert.deepEqual(workflow.payload.stages.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval","completed"]);
+  assert.deepEqual(workflow.payload.columns.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval"]);
   assert.ok(workflow.payload.jobs.some(job=>job.id===shared.job.id));
 
   const calendar=await request("/api/calendar?from=2035-05-10T00:00:00.000Z&to=2035-05-11T23:59:59.000Z",{token});
@@ -231,7 +231,8 @@ test("Admin closeout creates editable draft invoice from aggregated costs and re
   const closedWorkflow=await request("/api/jobs/workflow?bucket=closed",{token});
   assert.equal(closedWorkflow.status,200,JSON.stringify(closedWorkflow.payload));
   assert.equal(closedWorkflow.payload.bucket,"closed");
-  assert.deepEqual(closedWorkflow.payload.stages.map(stage=>stage.key),["completed"]);
+  assert.deepEqual(closedWorkflow.payload.stages.map(stage=>stage.key),["received","in_progress","qa_review","admin_approval","completed"]);
+  assert.deepEqual(closedWorkflow.payload.columns.map(stage=>stage.key),["completed"]);
   assert.ok(closedWorkflow.payload.jobs.some(job=>job.id===shared.job.id));
   shared.invoice=closeout.payload.invoice;
 
