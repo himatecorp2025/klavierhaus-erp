@@ -641,6 +641,7 @@ CREATE TABLE IF NOT EXISTS website_services (
   image_url TEXT NOT NULL,
   image_alt_en TEXT,
   image_alt_hu TEXT,
+  gallery_json TEXT NOT NULL DEFAULT '[]',
   visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
   featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
