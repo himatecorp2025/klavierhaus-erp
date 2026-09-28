@@ -178,6 +178,7 @@ db.pragma("foreign_keys = OFF");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
+ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 
 function seedWorkshopUxV5() {
   if (!tableExists("workflow_stage_definitions") || !tableExists("job_workflow_phases")) return;
