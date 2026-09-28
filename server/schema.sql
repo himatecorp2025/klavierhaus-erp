@@ -954,6 +954,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   internal_notes TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   ready_for_closeout_at TEXT,
+  closed_at TEXT,
+  closed_by_user_id TEXT,
   created_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -961,9 +963,123 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
   FOREIGN KEY (intake_lead_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   CHECK ((scheduled_start IS NULL AND scheduled_end IS NULL) OR (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL))
 );
+
+-- ============================================================================
+-- ROUND 3: JOB CLOSEOUT + INVOICE DISPATCHER + SIMPLE FINANCE
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS partners (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_name TEXT NOT NULL,
+  contact_name TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  tax_id TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS partner_contractors (
+  partner_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (partner_id,user_id),
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS invoice_sequences (
+  direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')),
+  sequence_year INTEGER NOT NULL,
+  last_value INTEGER NOT NULL DEFAULT 0 CHECK(last_value >= 0),
+  PRIMARY KEY (direction,sequence_year)
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_number TEXT NOT NULL UNIQUE,
+  direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')),
+  status TEXT NOT NULL DEFAULT 'issued' CHECK(status IN ('issued','partial','paid','void')),
+  source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','manual')),
+  source_id TEXT,
+  job_id INTEGER UNIQUE,
+  client_id INTEGER,
+  partner_id INTEGER,
+  counterparty_name TEXT NOT NULL,
+  counterparty_contact TEXT,
+  counterparty_email TEXT,
+  counterparty_phone TEXT,
+  counterparty_address TEXT,
+  counterparty_tax_id TEXT,
+  summary TEXT NOT NULL,
+  notes TEXT,
+  issue_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD' CHECK(currency='USD'),
+  tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0 AND tax_rate <= 100),
+  subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0),
+  tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
+  total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
+  paid_amount REAL NOT NULL DEFAULT 0 CHECK(paid_amount >= 0),
+  balance_due REAL NOT NULL DEFAULT 0 CHECK(balance_due >= 0),
+  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Cash','Check','Zelle','Bank Transfer / ACH','Credit Card')),
+  paid_at TEXT,
+  voided_at TEXT,
+  voided_by_user_id TEXT,
+  void_reason TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE RESTRICT,
+  FOREIGN KEY (voided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CHECK ((direction='receivable' AND client_id IS NOT NULL AND partner_id IS NULL) OR (direction='payable' AND partner_id IS NOT NULL AND client_id IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL,
+  item_description TEXT NOT NULL,
+  quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
+  unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0),
+  total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL,
+  amount REAL NOT NULL CHECK(amount > 0),
+  payment_method TEXT NOT NULL CHECK(payment_method IN ('Cash','Check','Zelle','Bank Transfer / ACH','Credit Card')),
+  reference TEXT,
+  paid_at TEXT NOT NULL,
+  notes TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_partners_name ON partners(lower(company_name),status);
+CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_direction_status ON invoices(direction,status,issue_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_job ON invoices(job_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id,issue_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_partner ON invoices(partner_id,issue_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id,paid_at,id);
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_date ON invoice_payments(paid_at,payment_method);
+CREATE INDEX IF NOT EXISTS idx_jobs_closed ON jobs(closed_at,status,updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id,created_at DESC);

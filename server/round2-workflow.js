@@ -68,7 +68,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   function findConflict(jobId,technicianId,start,end){
     if(!technicianId)return null;
     return db.prepare(`${selectJob}
-      WHERE j.id<>? AND j.assigned_technician_id=? AND j.status IN ('scheduled','in_progress','blocked')
+      WHERE j.id<>? AND j.closed_at IS NULL AND j.assigned_technician_id=? AND j.status IN ('scheduled','in_progress','blocked')
         AND j.scheduled_start IS NOT NULL AND j.scheduled_end IS NOT NULL
         AND j.scheduled_start < ? AND j.scheduled_end > ?
       ORDER BY j.scheduled_start,j.id LIMIT 1`).get(jobId||0,technicianId,end,start);
@@ -123,12 +123,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       if(status&&!WORKFLOW_KEYS.has(status))throw problem("INVALID_JOB_STATUS");
       const q=text(req.query.q,180).toLowerCase(),like=`%${q}%`;
       const technicianId=text(req.query.technician_id,160);
+      const includeClosed=req.query.include_closed==="1"?1:0;
       const rows=db.prepare(`${selectJob}
-        WHERE (?='' OR j.status=?)
+        WHERE (?=1 OR j.closed_at IS NULL)
+          AND (?='' OR j.status=?)
           AND (?='' OR j.assigned_technician_id=?)
           AND (?='' OR lower(j.title) LIKE ? OR lower(COALESCE(j.description,'')) LIKE ? OR lower(c.name) LIKE ? OR lower(p.brand||' '||COALESCE(p.model,'')) LIKE ? OR lower(COALESCE(j.job_code,'')) LIKE ?)
-        ORDER BY CASE j.status WHEN 'planned' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END,
-          COALESCE(j.scheduled_start,j.created_at),j.id`).all(status,status,technicianId,technicianId,q,like,like,like,like,like);
+        ORDER BY CASE WHEN j.closed_at IS NOT NULL THEN 5 ELSE CASE j.status WHEN 'planned' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END END,
+          COALESCE(j.closed_at,j.scheduled_start,j.created_at),j.id`).all(includeClosed,status,status,technicianId,technicianId,q,like,like,like,like,like);
       res.json(rows);
     }catch(error){respondError(res,error);}
   });
@@ -140,7 +142,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   });
 
   app.get("/api/planned-jobs",auth,staff,(_req,res)=>{
-    res.json(db.prepare(`${selectJob} WHERE j.status='planned' ORDER BY CASE j.priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,j.created_at,j.id`).all());
+    res.json(db.prepare(`${selectJob} WHERE j.closed_at IS NULL AND j.status='planned' ORDER BY CASE j.priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,j.created_at,j.id`).all());
   });
 
   app.get("/api/clients/:id/jobs",auth,staff,(req,res)=>{
@@ -151,6 +153,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
 
   app.get("/api/workshop",auth,staff,(_req,res)=>{
     const jobs=db.prepare(`${selectJob}
+      WHERE j.closed_at IS NULL
       ORDER BY CASE j.status WHEN 'planned' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END,
       CASE j.priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,COALESCE(j.scheduled_start,j.updated_at),j.id`).all();
     res.json({stages:WORKFLOW_STAGES,columns:WORKFLOW_STAGES.map(stage=>({...stage,jobs:jobs.filter(job=>job.status===stage.key)})),jobs});
@@ -163,7 +166,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       if(new Date(to).getTime()<=new Date(from).getTime())throw problem("INVALID_CALENDAR_RANGE");
       const technicianId=text(req.query.technician_id,160);
       const rows=db.prepare(`${selectJob}
-        WHERE j.scheduled_start IS NOT NULL AND j.scheduled_end IS NOT NULL
+        WHERE j.closed_at IS NULL AND j.scheduled_start IS NOT NULL AND j.scheduled_end IS NOT NULL
           AND j.scheduled_start < ? AND j.scheduled_end > ?
           AND (?='' OR j.assigned_technician_id=?)
         ORDER BY j.scheduled_start,j.scheduled_end,j.id`).all(to,from,technicianId,technicianId);
@@ -194,6 +197,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   app.put("/api/jobs/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&jobById(id);
     if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(before.closed_at)return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
     try{
       const title=text(req.body?.title ?? before.title,240);
       if(!title)throw problem("JOB_TITLE_REQUIRED");
@@ -219,6 +223,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   app.patch("/api/jobs/:id/schedule",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&jobById(id);
     if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(before.closed_at)return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
     try{
       if(req.body?.clear===true){
         const nextStatus=before.status==="ready_for_closeout"?"ready_for_closeout":"planned";
@@ -240,6 +245,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   app.patch("/api/jobs/:id/status",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&jobById(id);
     if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(before.closed_at)return res.status(409).json({error:"JOB_ALREADY_CLOSED"});
     try{
       const status=text(req.body?.status,40);
       if(!WORKFLOW_KEYS.has(status))throw problem("INVALID_JOB_STATUS");

@@ -54,18 +54,22 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
-  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items","invoices"]){
+  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM invoices").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM partners").get().c,0);
   assert.equal(db.pragma("foreign_key_check").length,0);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   db.close();
-  assert.ok(fs.readdirSync(backupDir).some(name=>name.startsWith("round1-pre-migration-")),"safety backup missing");
-  console.log("Round 1 + Round 2 migration smoke passed");
+  const backups=fs.readdirSync(backupDir);
+  assert.ok(backups.some(name=>name.startsWith("round1-pre-migration-")),"Round 1 safety backup missing");
+  assert.ok(backups.some(name=>name.startsWith("round3-pre-migration-")),"Round 3 safety backup missing");
+  console.log("Round 1 + Round 2 + Round 3 migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }

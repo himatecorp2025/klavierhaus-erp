@@ -10,7 +10,7 @@ const state={
   clients:[],selectedClientId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",landing:[]
 };
-const activeViews=new Set(["workshop","planned","intake","master","cms","profile"]);
+const activeViews=new Set(["workshop","planned","intake","master","finance","cms","profile"]);
 const roleLabel=(role)=>role==="WORKER"?"Technikus":role==="SUPERADMIN"?"Super Admin":role==="ADMIN"?"Admin":role==="MANAGER"?"Manager":role||"";
 const initials=(name)=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 
@@ -31,7 +31,15 @@ function humanError(error){
     TECHNICIAN_REQUIRED_FOR_SCHEDULE:"Ütemezéshez technikust kell választani.",TECHNICIAN_REQUIRED_FOR_STATUS:"Ehhez a státuszhoz technikus szükséges.",
     SCHEDULE_REQUIRED_FOR_STATUS:"A munkát előbb ütemezni kell.",SCHEDULE_CONFLICT:"A technikusnak ebben az időpontban már van másik munkája.",
     BLOCKED_REASON_REQUIRED:"A blokkolás okát add meg.",INVALID_SCHEDULE_RANGE:"A befejezésnek a kezdés után kell lennie.",
-    INTAKE_MUST_BE_CONVERTED:"Az igényt előbb törzsadattá kell konvertálni.",INTAKE_JOB_ALREADY_EXISTS:"Ehhez az igényhez már tartozik munka."
+    INTAKE_MUST_BE_CONVERTED:"Az igényt előbb törzsadattá kell konvertálni.",INTAKE_JOB_ALREADY_EXISTS:"Ehhez az igényhez már tartozik munka.",
+    JOB_NOT_READY_FOR_CLOSEOUT:"A munka még nincs Lezárásra vár állapotban.",JOB_ALREADY_CLOSED:"A munka már le van zárva.",
+    INVOICE_ITEMS_REQUIRED:"Adj hozzá legalább egy számlatételt.",INVOICE_ITEM_DESCRIPTION_REQUIRED:"A számlatétel megnevezése kötelező.",
+    INVALID_INVOICE_ITEM_QUANTITY:"A mennyiség legyen nagyobb nullánál.",INVALID_INVOICE_ITEM_PRICE:"Az egységár nem lehet negatív.",
+    INVALID_INVOICE_DIRECTION:"Érvénytelen számlairány.",INVALID_INVOICE_STATUS:"Érvénytelen számlastátusz.",INVALID_CLIENT_ID:"Érvénytelen ügyfél.",
+    INVALID_PARTNER_ID:"Érvénytelen partner.",PARTNER_INACTIVE:"Az inaktív partnerhez nem rögzíthető új költségszámla.",PARTNER_NAME_REQUIRED:"A partner neve kötelező.",
+    INVALID_PAYMENT_METHOD:"Érvénytelen fizetési mód.",INVALID_PAYMENT_AMOUNT:"A fizetési összeg hibás.",PAYMENT_EXCEEDS_BALANCE:"A fizetés meghaladja a nyitott egyenleget.",
+    INVOICE_ALREADY_PAID:"A számla már ki van fizetve.",INVOICE_VOID:"A voidolt számla nem módosítható.",INVOICE_HAS_PAYMENTS:"Fizetéssel rendelkező számla nem voidolható.",
+    VOID_REASON_REQUIRED:"A voidolás oka kötelező.",PARTNER_HAS_INVOICES:"Számlához kapcsolt partner nem törölhető.",SUPERADMIN_REQUIRED:"Ehhez Super Admin jogosultság szükséges."
   };
   return map[code]||code.replaceAll("_"," ");
 }
@@ -102,6 +110,7 @@ async function renderView(){
     if(state.view==="workshop")await renderWorkshop();
     else if(state.view==="planned")await renderPlanned();
     else if(state.view==="master")await renderMaster();
+    else if(state.view==="finance")await renderFinance();
     else if(state.view==="cms")await renderCms();
     else if(state.view==="profile")await renderProfile();
     else await renderIntake();
@@ -364,7 +373,7 @@ async function renderProfile(){
     <div style="margin-top:16px" class="coming-grid">
       <article class="coming-card"><span>📋</span><h3>Műhely &amp; Naptár</h3><p class="muted">Aktív · 5 oszlopos workflow és közös naptár.</p></article>
       <article class="coming-card"><span>⏳</span><h3>Tervezett munkák</h3><p class="muted">Aktív · ütemezés előtti munkák.</p></article>
-      <article class="coming-card"><span>💰</span><h3>Pénzügy</h3><p class="muted">A 3. körben aktiváljuk.</p></article>
+      <article class="coming-card"><span>💰</span><h3>Pénzügy</h3><p class="muted">Aktív · számlák, fizetések, partnerek és havi riport.</p></article>
     </div>`;
   $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}clearSession();showLogin();});
   $("#newUserBtn")?.addEventListener("click",openUserDialog);

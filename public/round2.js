@@ -114,12 +114,17 @@ function r2JobCard(job,compact=false){
     "<div class='job-actions'>"+
       "<button class='text-button' type='button' data-edit-job='"+job.id+"'>Szerkesztés</button>"+
       "<button class='secondary-button' type='button' data-schedule-job='"+job.id+"'>"+(job.scheduled_start?"Átütemezés":"Ütemezés")+"</button>"+
+      (!compact&&job.status==="ready_for_closeout"?"<button class='primary-button closeout-button' type='button' data-closeout-job='"+job.id+"'>Munkalap zárása</button>":"")+
       (compact?"":"<select class='job-status-select' data-job-status='"+job.id+"' aria-label='Munkastátusz'>"+r2StatusOptions(job.status)+"</select>")+
     "</div></article>";
 }
 function r2BindJobActions(root,jobs,refresh){
   $$("[data-edit-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenEditJob(jobs.find(job=>Number(job.id)===Number(button.dataset.editJob)),refresh)));
-  $$("[data-schedule-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenSchedule(jobs.find(job=>Number(job.id)===Number(button.dataset.scheduleJob)),refresh)));
+  $("[data-schedule-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenSchedule(jobs.find(job=>Number(job.id)===Number(button.dataset.scheduleJob)),refresh)));
+  $("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{
+    const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));
+    if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,refresh);
+  }));
   $$("[data-job-status]",root).forEach(select=>select.addEventListener("change",async()=>{
     const job=jobs.find(item=>Number(item.id)===Number(select.dataset.jobStatus));
     const next=select.value;
@@ -328,4 +333,4 @@ async function renderWorkshop(){
   await r2RenderCalendar(data.jobs||[]);
 }
 
-void boot();
+// Round 3 extension starts the application after Finance functions are registered.
