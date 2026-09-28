@@ -257,7 +257,7 @@ function r2OpenCancel(job,refresh=renderWorkshop){
 
 function r2WorkflowCard(job){
   const overdue=job.current_phase?.due_at&&new Date(job.current_phase.due_at)<new Date()&&job.stage!=="completed";
-  return `<article class="job-card stage-card ${overdue?"is-overdue":""}" draggable="true" data-job-id="${job.id}">
+  return `<article class="job-card stage-card ${overdue?"is-overdue":""} ${job.stage==="completed"?"is-locked":""}" draggable="${job.stage==="completed"?"false":"true"}" data-job-id="${job.id}">
     <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${esc(r2StageLabel(job.stage))}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
     <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>👤 ${esc(job.assigned_technician_name||tr("Unassigned","Nincs technikus"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
