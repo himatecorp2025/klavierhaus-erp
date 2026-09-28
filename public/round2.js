@@ -26,7 +26,8 @@ const R2_BLOCKERS={
 const r2IsAdmin=()=>["ADMIN","SUPERADMIN"].includes(state.user?.role);
 
 function r2Definitions(){return state.r2Workflow?.stages?.length?state.r2Workflow.stages:R2_STAGES.map(row=>({key:row.key,label_en:row.en,label_hu:row.hu,position:row.position}));}
-function r2StageLabel(stage){const row=r2Definitions().find(item=>item.key===stage)||R2_STAGES.find(item=>item.key===stage);return row?state.language==="hu"?(row.label_hu||row.hu):(row.label_en||row.en):stage||"";}
+function r2StageLabel(stage){if(stage==="cancelled")return tr("Cancelled","Törölt / megszakított");const row=r2Definitions().find(item=>item.key===stage)||R2_STAGES.find(item=>item.key===stage);return row?state.language==="hu"?(row.label_hu||row.hu):(row.label_en||row.en):stage||"";}
+function r2FixedStage(key){return ["received","admin_approval","completed"].includes(key);}
 function r2BlockerLabel(code){const pair=R2_BLOCKERS[code];return pair?(state.language==="hu"?pair[1]:pair[0]):tr("No delay reason","Nincs elakadás-ok");}
 function r2NyParts(date){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:R2_TZ,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date);
@@ -85,16 +86,16 @@ function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
 function r2WorkflowPlanRows(plan=null){
   const map=new Map((plan||[]).map(row=>[row.stage_key,row]));
   return r2Definitions().map(stage=>{
-    const existing=map.get(stage.key),enabled=stage.key==="completed"?true:(existing?Boolean(existing.enabled):true),due=existing?.due_at?r2IsoToNyInput(existing.due_at):"";
+    const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):true),due=existing?.due_at?r2IsoToNyInput(existing.due_at):"";
     return `<div class="workflow-plan-row" data-workflow-phase="${stage.key}">
-      <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${stage.key}" ${enabled?"checked":""} ${stage.key==="completed"?"disabled":""}><span><strong>${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><small>${stage.key==="completed"?tr("Mandatory final endpoint","Kötelező végpont"):tr("Include this phase","Fázis használata")}</small></span></label>
+      <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${stage.key}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):tr("Include this phase","Fázis használata")}</small></span></label>
       <label class="field"><span>${tr("Expected completion","Várható befejezés")}</span><input type="datetime-local" step="900" name="due_${stage.key}" value="${esc(due)}"></label>
     </div>`;
   }).join("");
 }
 function r2ReadWorkflowPlan(form){
   return r2Definitions().map(stage=>{
-    const enabled=stage.key==="completed"?true:Boolean(form.querySelector(`[name="phase_${stage.key}"]`)?.checked);
+    const enabled=r2FixedStage(stage.key)?true:Boolean(form.querySelector(`[name="phase_${stage.key}"]`)?.checked);
     const dueValue=form.querySelector(`[name="due_${stage.key}"]`)?.value||"";
     return {stage_key:stage.key,enabled,due_at:dueValue?r2NyInputToIso(dueValue):null};
   });
@@ -230,20 +231,20 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     try{await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
-function r2OpenHandoff(job,refresh=renderWorkshop){
-  const next=job.next_stage;
+function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
+  const next=targetStage||job.next_stage;
   if(!next||next==="completed"){toast(tr("This job is ready for Admin closeout.","A munka adminisztrátori lezárásra kész."),"error");return;}
   openDialog({title:tr("Complete Phase / Handoff","Fázis lezárása / Átadás"),eyebrow:`${r2StageLabel(job.stage)} → ${r2StageLabel(next)}`,body:`<form id="handoffForm" class="form-grid">
-    <div class="detail-note full">${tr("All fields below are optional. If you do not choose the next responsible person, the current technician continues automatically.","Az alábbi mezők mind opcionálisak. Ha nem jelölsz ki következő felelőst, automatikusan a jelenlegi technikus viszi tovább.")}</div>
+    <div class="detail-note full">${tr("Complete the current phase and move the job to the selected unfinished phase. Intermediate phases may be completed in a different order; Admin Approval remains the final active phase.","Zárd le az aktuális fázist, és helyezd át a munkát a kiválasztott, még nyitott fázisba. A köztes fázisok eltérő sorrendben is teljesíthetők; az Admin jóváhagyás mindig az utolsó aktív fázis.")}</div>
     <label class="field"><span>${tr("Labor / daily fee","Munkadíj / napi díj")} (USD)</span><input name="phase_labor_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field"><span>${tr("Material cost","Anyagköltség")} (USD)</span><input name="phase_material_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field full"><span>${tr("Internal handoff note","Belső átadási jegyzet")}</span><textarea name="phase_note"></textarea></label>
     <label class="field full"><span>${tr("Next responsible","Következő felelős")}</span><select name="assigned_to_user_id"><option value="">${tr("Keep current technician","Jelenlegi technikus marad")}</option>${r2TechnicianOptions("")}</select></label>
-    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Complete phase","Fázis lezárása")}</button></div></form>`});
+    <input type="hidden" name="to_stage" value="${esc(next)}">
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Complete & move","Lezárás és áthelyezés")}</button></div></form>`});
   $("#handoffForm").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.phase_labor_cost=Number(body.phase_labor_cost||0);body.phase_material_cost=Number(body.phase_material_cost||0);if(!body.assigned_to_user_id)delete body.assigned_to_user_id;
-    try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed.","Fázis lezárva."),"success");await refresh();}
-    catch(error){toast(humanError(error),"error");}
+    try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed and job moved.","Fázis lezárva, munka áthelyezve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
 function r2OpenCancel(job,refresh=renderWorkshop){
@@ -265,6 +266,7 @@ function r2WorkflowCard(job){
     ${job.current_phase?.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(job.current_phase.blocker_code))}${job.current_phase.blocker_note?` · ${esc(job.current_phase.blocker_note)}`:""}</div>`:""}
     ${job.stage==="completed"?`<div class="completed-note">✓ ${tr("Closed by","Lezárta")}: ${esc(job.completed_by_name||"Admin")}</div>`:""}
     <div class="job-actions">
+      <button class="text-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Details","Részletek")}</button>
       ${job.stage!=="completed"&&job.ready_for_closeout&&r2IsAdmin()?`<button class="primary-button closeout-button" type="button" data-closeout-job="${job.id}">${tr("Complete & Invoice","Lezárás és számlázás")}</button>`:""}
       ${job.stage!=="completed"&&!job.ready_for_closeout?`<button class="primary-button" type="button" data-handoff-job="${job.id}">${tr("Complete phase","Fázis lezárása")}</button>`:""}
       ${job.stage!=="completed"?`<button class="text-button" type="button" data-schedule-job="${job.id}">${tr("Schedule","Ütemezés")}</button><button class="text-button" type="button" data-blocker-job="${job.id}">${tr("Deadline / blocker","Határidő / elakadás")}</button>`:""}
@@ -273,12 +275,13 @@ function r2WorkflowCard(job){
   </article>`;
 }
 function r2BindWorkflowActions(root,jobs){
-  $$("[data-handoff-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenHandoff(jobs.find(job=>Number(job.id)===Number(button.dataset.handoffJob)))));
-  $$("[data-schedule-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenSchedule(jobs.find(job=>Number(job.id)===Number(button.dataset.scheduleJob)))));
-  $$("[data-blocker-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenBlocker(jobs.find(job=>Number(job.id)===Number(button.dataset.blockerJob)))));
-  $$("[data-plan-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowPlan(jobs.find(job=>Number(job.id)===Number(button.dataset.planJob)))));
-  $$("[data-cancel-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenCancel(jobs.find(job=>Number(job.id)===Number(button.dataset.cancelJob)))));
-  $$("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);}));
+  $("[data-handoff-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenHandoff(jobs.find(job=>Number(job.id)===Number(button.dataset.handoffJob)))));
+  $("[data-schedule-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenSchedule(jobs.find(job=>Number(job.id)===Number(button.dataset.scheduleJob)))));
+  $("[data-blocker-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenBlocker(jobs.find(job=>Number(job.id)===Number(button.dataset.blockerJob)))));
+  $("[data-plan-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowPlan(jobs.find(job=>Number(job.id)===Number(button.dataset.planJob)))));
+  $("[data-cancel-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenCancel(jobs.find(job=>Number(job.id)===Number(button.dataset.cancelJob)))));
+  $("[data-closeout-job]",root).forEach(button=>button.addEventListener("click",()=>{const job=jobs.find(item=>Number(item.id)===Number(button.dataset.closeoutJob));if(typeof r3OpenCloseout==="function")r3OpenCloseout(job,renderWorkshop);}));
+  $("[data-history-job]",root).forEach(button=>button.addEventListener("click",()=>r2OpenWorkflowHistory(Number(button.dataset.historyJob))));
 }
 function r2WorkflowColumn(column){
   const label=state.language==="hu"?column.label_hu:column.label_en;
