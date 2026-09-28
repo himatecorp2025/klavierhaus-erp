@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="hu">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -26,33 +26,33 @@
           <h1 id="loginTitle">ERP</h1>
         </div>
       </div>
-      <p class="login-copy">Jelentkezz be a Klavierhaus belső munkafelületére.</p>
+      <p class="login-copy" data-i18n="login_copy">Sign in to the Klavierhaus internal workspace.</p>
 
       <form id="loginForm" class="stack-form" autocomplete="on">
         <label>
-          <span>E-mail</span>
+          <span data-i18n="email">Email</span>
           <input name="email" type="email" autocomplete="username" required autofocus>
         </label>
         <label>
-          <span>Jelszó</span>
+          <span data-i18n="password">Password</span>
           <input name="password" type="password" autocomplete="current-password" required>
         </label>
-        <button class="primary-button" type="submit">Bejelentkezés</button>
+        <button class="primary-button" type="submit" data-i18n="sign_in">Sign in</button>
       </form>
 
       <form id="activationForm" class="stack-form hidden" autocomplete="one-time-code">
         <div>
-          <span class="eyebrow">FIÓK AKTIVÁLÁS</span>
-          <h2>Erősítsd meg a belépést</h2>
+          <span class="eyebrow" data-i18n="account_activation">ACCOUNT ACTIVATION</span>
+          <h2 data-i18n="confirm_login">Confirm your login</h2>
           <p id="activationHint" class="muted"></p>
         </div>
         <label>
-          <span>6 jegyű kód</span>
+          <span data-i18n="six_digit_code">6-digit code</span>
           <input id="activationCode" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required>
         </label>
-        <button class="primary-button" type="submit">Aktiválás</button>
-        <button id="resendActivationBtn" class="text-button" type="button">Új kód küldése</button>
-        <button id="backToLoginBtn" class="text-button" type="button">Vissza a belépéshez</button>
+        <button class="primary-button" type="submit" data-i18n="activate">Activate</button>
+        <button id="resendActivationBtn" class="text-button" type="button" data-i18n="resend_code">Send a new code</button>
+        <button id="backToLoginBtn" class="text-button" type="button" data-i18n="back_to_login">Back to login</button>
       </form>
     </section>
   </main>
@@ -61,19 +61,20 @@
     <header class="app-header">
       <a class="app-brand" href="#workshop" data-nav="workshop" aria-label="Klavierhaus ERP kezdőlap">
         <img id="headerBrandLogo" src="/icons/icon-192.png" alt="">
-        <span><strong>Klavierhaus</strong><small>ERP · Round 3</small></span>
+        <span><strong>Klavierhaus</strong><small>ERP · Final</small></span>
       </a>
 
       <nav class="desktop-nav" aria-label="Fő navigáció">
-        <button type="button" class="nav-item" data-nav="workshop"><span>📋</span>Műhely &amp; Naptár</button>
-        <button type="button" class="nav-item" data-nav="intake"><span>📥</span>Igényfelmérés</button>
-        <button type="button" class="nav-item" data-nav="planned"><span>⏳</span>Tervezett munkák</button>
-        <button type="button" class="nav-item" data-nav="master"><span>👥</span>Törzsadatok</button>
-        <button type="button" class="nav-item" data-nav="finance"><span>💰</span>Pénzügy</button>
-        <button type="button" class="nav-item" data-nav="cms"><span>🌐</span>Weboldal CMS</button>
+        <button type="button" class="nav-item" data-nav="workshop"><span>📋</span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
+        <button type="button" class="nav-item" data-nav="intake"><span>📥</span><span data-i18n="nav_intake">Intake</span></button>
+        <button type="button" class="nav-item" data-nav="planned"><span>⏳</span><span data-i18n="nav_planned">Planned Jobs</span></button>
+        <button type="button" class="nav-item" data-nav="master"><span>👥</span><span data-i18n="nav_master">Master Data</span></button>
+        <button type="button" class="nav-item" data-nav="finance"><span>💰</span><span data-i18n="nav_finance">Finance</span></button>
+        <button type="button" class="nav-item" data-nav="cms"><span>🌐</span><span data-i18n="nav_cms">Website CMS</span></button>
       </nav>
 
-      <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profil és beállítások">
+      <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
+      <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings">
         <span id="profileInitials">KH</span>
       </button>
     </header>
@@ -81,13 +82,13 @@
     <main id="workspace" class="workspace" tabindex="-1"></main>
 
     <nav class="mobile-nav" aria-label="Mobil gyorsnavigáció">
-      <button type="button" data-nav="workshop"><span>📋</span><small>Műhely</small></button>
-      <button type="button" data-nav="planned"><span>⏳</span><small>Tervezett</small></button>
-      <button type="button" data-nav="intake"><span>📥</span><small>Igény</small></button>
-      <button type="button" data-nav="master"><span>👥</span><small>Törzs</small></button>
-      <button type="button" data-nav="finance"><span>💰</span><small>Pénzügy</small></button>
+      <button type="button" data-nav="workshop"><span>📋</span><small data-i18n="mobile_workshop">Workshop</small></button>
+      <button type="button" data-nav="planned"><span>⏳</span><small data-i18n="mobile_planned">Planned</small></button>
+      <button type="button" data-nav="intake"><span>📥</span><small data-i18n="mobile_intake">Intake</small></button>
+      <button type="button" data-nav="master"><span>👥</span><small data-i18n="mobile_master">Master</small></button>
+      <button type="button" data-nav="finance"><span>💰</span><small data-i18n="mobile_finance">Finance</small></button>
       <button type="button" data-nav="cms"><span>🌐</span><small>CMS</small></button>
-      <button type="button" data-nav="profile"><span>👤</span><small>Profil</small></button>
+      <button type="button" data-nav="profile"><span>👤</span><small data-i18n="mobile_profile">Profile</small></button>
     </nav>
   </div>
 

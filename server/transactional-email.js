@@ -126,6 +126,24 @@ function buildInvoiceEmail({ purchaserName, event, invoiceNumber, payment }) {
   };
 }
 
+function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumber, totalAmount, language = "en" }) {
+  const hu=language==="hu";
+  const name=clientName||(hu?"Ügyfelünk":"Valued Client");
+  const pianoText=[piano?.brand,piano?.model,piano?.serial_number].filter(Boolean).join(" · ")||(hu?"az Ön zongorája":"your piano");
+  const amount=Number(totalAmount||0).toLocaleString("en-US",{style:"currency",currency:"USD"});
+  const subject=hu?`Klavierhaus számla · ${invoiceNumber}`:`Klavierhaus invoice · ${invoiceNumber}`;
+  const lead=hu
+    ? `Tisztelt ${name}! A megbeszélt munkálatokat elvégeztük a következő hangszeren: ${pianoText}.`
+    : `Dear ${name}, the agreed service work has been completed on ${pianoText}.`;
+  const detail=workSummary?(hu?`Elvégzett munka: ${workSummary}`:`Service completed: ${workSummary}`):"";
+  const closing=hu
+    ? "Mellékelten küldjük a hivatalos számlát. Köszönjük a bizalmát! — Klavierhaus"
+    : "Please find the official invoice attached. Thank you for your trust. — Klavierhaus";
+  const text=[lead,detail,`Invoice / Számla: ${invoiceNumber}`,`Total / Összesen: ${amount}`,closing].filter(Boolean).join("\n\n");
+  const html=`<!doctype html><html><body style="margin:0;background:#f6f3ec;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #d6c9aa;border-radius:18px;padding:30px"><p style="margin:0 0 12px;color:#8a6b2d;letter-spacing:.16em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:28px">${escapeHtml(subject)}</h1><p>${escapeHtml(lead)}</p>${detail?`<p><strong>${escapeHtml(detail)}</strong></p>`:""}<p style="padding:14px;border-radius:12px;background:#f7f4ed"><strong>${escapeHtml(invoiceNumber)}</strong><br>${escapeHtml(amount)}</p><p>${escapeHtml(closing)}</p></div></div></body></html>`;
+  return {subject,text,html};
+}
+
 function buildTicketDocumentsEmail({ name, event, language = "en" }) {
   const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
   return {
@@ -290,6 +308,23 @@ function createTransactionalEmail(env = process.env) {
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
+    async sendWorkshopInvoice({ to, clientName, piano, workSummary, invoiceNumber, totalAmount, invoicePdf, language = "en", idempotencyKey }) {
+      assertEnabled();
+      if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
+      const content=buildWorkshopInvoiceEmail({clientName,piano,workSummary,invoiceNumber,totalAmount,language});
+      const {data,error}=await resend.emails.send({
+        from,
+        to:[normalizeRecipient(to)],
+        subject:content.subject,
+        html:content.html,
+        text:content.text,
+        ...(replyTo?{replyTo}:{}),
+        attachments:[{filename:`${invoiceNumber}.pdf`,content:invoicePdf}],
+        tags:[{name:"category",value:"workshop_invoice"}]
+      },{idempotencyKey});
+      if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
+      return {providerMessageId:String(data.id)};
+    },
     async sendCustomerConversationAutoReply({ to, name, conversationUrl, language, idempotencyKey }) {
       assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
@@ -315,4 +350,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };

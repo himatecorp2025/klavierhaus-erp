@@ -888,7 +888,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 -- ============================================================================
--- INTERNAL ERP DOMAIN: CLIENTS + PIANOS + INTAKE + ROUND 2 JOBS
+-- INTERNAL ERP DOMAIN: 6-MODULE COMPLIANCE MODEL
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -923,8 +923,9 @@ CREATE TABLE IF NOT EXISTS intake_leads (
   raw_contact TEXT,
   service_location TEXT NOT NULL DEFAULT 'workshop' CHECK(service_location IN ('workshop','on_site')),
   reported_issue TEXT NOT NULL,
+  media_urls TEXT NOT NULL DEFAULT '[]',
   estimated_urgency TEXT NOT NULL DEFAULT 'normal' CHECK(estimated_urgency IN ('low','normal','urgent')),
-  status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','converted','archived')),
+  status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','under_review','converted','archived')),
   assigned_technician_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   converted_at TEXT,
@@ -939,38 +940,56 @@ CREATE TABLE IF NOT EXISTS jobs (
   job_code TEXT UNIQUE,
   client_id INTEGER NOT NULL,
   piano_id INTEGER NOT NULL,
-  intake_lead_id INTEGER UNIQUE,
+  intake_id INTEGER UNIQUE,
   title TEXT NOT NULL,
   description TEXT,
-  service_location TEXT NOT NULL DEFAULT 'workshop' CHECK(service_location IN ('workshop','on_site')),
-  service_address TEXT,
-  priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','urgent')),
-  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','scheduled','in_progress','blocked','ready_for_closeout')),
+  location_type TEXT NOT NULL DEFAULT 'workshop' CHECK(location_type IN ('workshop','on_site')),
+  site_address TEXT,
+  scheduled_at TEXT,
+  estimated_duration_min INTEGER NOT NULL DEFAULT 120 CHECK(estimated_duration_min > 0),
+  stage TEXT NOT NULL DEFAULT 'planned' CHECK(stage IN ('planned','received','in_progress','qa_review','admin_approval','completed')),
   assigned_technician_id TEXT,
-  scheduled_start TEXT,
-  scheduled_end TEXT,
-  timezone TEXT NOT NULL DEFAULT 'America/New_York',
-  blocked_reason TEXT,
+  total_labor_cost REAL NOT NULL DEFAULT 0 CHECK(total_labor_cost >= 0),
+  total_material_cost REAL NOT NULL DEFAULT 0 CHECK(total_material_cost >= 0),
   internal_notes TEXT,
-  position INTEGER NOT NULL DEFAULT 0,
-  ready_for_closeout_at TEXT,
-  closed_at TEXT,
-  closed_by_user_id TEXT,
+  cancelled_at TEXT,
+  cancelled_by_user_id TEXT,
+  cancelled_by_name TEXT,
+  cancelled_by_party TEXT CHECK(cancelled_by_party IS NULL OR cancelled_by_party IN ('client','klavierhaus','other')),
+  cancel_reason TEXT,
+  completed_at TEXT,
+  completed_by_user_id TEXT,
+  completed_by_name TEXT,
   created_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
-  FOREIGN KEY (intake_lead_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
+  FOREIGN KEY (intake_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY (closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  CHECK ((scheduled_start IS NULL AND scheduled_end IS NULL) OR (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL))
+  FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- ============================================================================
--- ROUND 3: JOB CLOSEOUT + INVOICE DISPATCHER + SIMPLE FINANCE
--- ============================================================================
+CREATE TABLE IF NOT EXISTS job_handoffs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  performed_by_user_id TEXT,
+  performed_by TEXT NOT NULL,
+  assigned_to_user_id TEXT,
+  assigned_to TEXT,
+  phase_note TEXT,
+  phase_labor_cost REAL NOT NULL DEFAULT 0 CHECK(phase_labor_cost >= 0),
+  phase_material_cost REAL NOT NULL DEFAULT 0 CHECK(phase_material_cost >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS partners (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   company_name TEXT NOT NULL,
@@ -1004,8 +1023,8 @@ CREATE TABLE IF NOT EXISTS invoice_sequences (
 CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_number TEXT NOT NULL UNIQUE,
-  direction TEXT NOT NULL CHECK(direction IN ('receivable','payable')),
-  status TEXT NOT NULL DEFAULT 'issued' CHECK(status IN ('issued','partial','paid','void')),
+  direction TEXT NOT NULL DEFAULT 'receivable' CHECK(direction IN ('receivable','payable')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','cancelled')),
   source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('job','manual')),
   source_id TEXT,
   job_id INTEGER UNIQUE,
@@ -1022,24 +1041,30 @@ CREATE TABLE IF NOT EXISTS invoices (
   issue_date TEXT NOT NULL,
   due_date TEXT NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD' CHECK(currency='USD'),
+  subtotal_labor REAL NOT NULL DEFAULT 0,
+  subtotal_material REAL NOT NULL DEFAULT 0,
+  subtotal_adjustment REAL NOT NULL DEFAULT 0,
   tax_rate REAL NOT NULL DEFAULT 0 CHECK(tax_rate >= 0 AND tax_rate <= 100),
-  subtotal REAL NOT NULL DEFAULT 0 CHECK(subtotal >= 0),
-  tax_amount REAL NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
+  tax_amount REAL NOT NULL DEFAULT 0,
   total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
-  paid_amount REAL NOT NULL DEFAULT 0 CHECK(paid_amount >= 0),
-  balance_due REAL NOT NULL DEFAULT 0 CHECK(balance_due >= 0),
-  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Cash','Check','Zelle','Bank Transfer / ACH','Credit Card')),
+  payment_method TEXT CHECK(payment_method IS NULL OR payment_method IN ('Cash','Credit Card / Stripe','Bank Transfer','Check')),
   paid_at TEXT,
-  voided_at TEXT,
-  voided_by_user_id TEXT,
-  void_reason TEXT,
+  pdf_path TEXT,
+  email_language TEXT NOT NULL DEFAULT 'en' CHECK(email_language IN ('en','hu')),
+  sent_at TEXT,
+  sent_by_user_id TEXT,
+  resend_message_id TEXT,
+  cancelled_at TEXT,
+  cancelled_by_user_id TEXT,
+  cancel_reason TEXT,
   created_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
   FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE RESTRICT,
-  FOREIGN KEY (voided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (sent_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   CHECK ((direction='receivable' AND client_id IS NOT NULL AND partner_id IS NULL) OR (direction='payable' AND partner_id IS NOT NULL AND client_id IS NULL))
 );
@@ -1047,10 +1072,11 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS invoice_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_id INTEGER NOT NULL,
+  item_type TEXT NOT NULL DEFAULT 'other' CHECK(item_type IN ('labor','material','adjustment','other')),
   item_description TEXT NOT NULL,
   quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
-  unit_price REAL NOT NULL DEFAULT 0 CHECK(unit_price >= 0),
-  total_price REAL NOT NULL DEFAULT 0 CHECK(total_price >= 0),
+  unit_price REAL NOT NULL DEFAULT 0,
+  total_price REAL NOT NULL DEFAULT 0,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
@@ -1060,7 +1086,7 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_id INTEGER NOT NULL,
   amount REAL NOT NULL CHECK(amount > 0),
-  payment_method TEXT NOT NULL CHECK(payment_method IN ('Cash','Check','Zelle','Bank Transfer / ACH','Credit Card')),
+  payment_method TEXT NOT NULL CHECK(payment_method IN ('Cash','Credit Card / Stripe','Bank Transfer','Check')),
   reference TEXT,
   paid_at TEXT NOT NULL,
   notes TEXT,
@@ -1070,6 +1096,58 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS direct_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount REAL NOT NULL CHECK(amount >= 0),
+  expense_date TEXT NOT NULL,
+  receipt_url TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS invoice_email_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL,
+  recipient TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  status TEXT NOT NULL CHECK(status IN ('sent','failed')),
+  provider_message_id TEXT,
+  error_code TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS kpi_summary_cache (
+  month_key TEXT PRIMARY KEY,
+  labor_revenue REAL NOT NULL DEFAULT 0,
+  material_direct_cost REAL NOT NULL DEFAULT 0,
+  net_workshop_result REAL NOT NULL DEFAULT 0,
+  outstanding_invoice_count INTEGER NOT NULL DEFAULT 0,
+  outstanding_invoice_amount REAL NOT NULL DEFAULT 0,
+  refreshed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(lower(name));
+CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(lower(email));
+CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
+CREATE INDEX IF NOT EXISTS idx_pianos_client ON pianos(client_id);
+CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
+CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_intake_client ON intake_leads(client_id);
+CREATE INDEX IF NOT EXISTS idx_intake_technician ON intake_leads(assigned_technician_id,status);
+CREATE INDEX IF NOT EXISTS idx_jobs_stage ON jobs(stage,cancelled_at,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_scheduled_at ON jobs(scheduled_at,cancelled_at,stage);
+CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_piano ON jobs(piano_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_intake ON jobs(intake_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_technician ON jobs(assigned_technician_id,stage,scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_job_handoffs_job ON job_handoffs(job_id,created_at,id);
+CREATE INDEX IF NOT EXISTS idx_job_handoffs_cost_date ON job_handoffs(created_at,job_id);
 CREATE INDEX IF NOT EXISTS idx_partners_name ON partners(lower(company_name),status);
 CREATE INDEX IF NOT EXISTS idx_partner_contractors_user ON partner_contractors(user_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_direction_status ON invoices(direction,status,issue_date DESC);
@@ -1078,23 +1156,8 @@ CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id,issue_date 
 CREATE INDEX IF NOT EXISTS idx_invoices_partner ON invoices(partner_id,issue_date DESC);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id,paid_at,id);
-CREATE INDEX IF NOT EXISTS idx_invoice_payments_date ON invoice_payments(paid_at,payment_method);
-CREATE INDEX IF NOT EXISTS idx_jobs_closed ON jobs(closed_at,status,updated_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status,updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_piano ON jobs(piano_id,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_intake ON jobs(intake_lead_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_technician_schedule ON jobs(assigned_technician_id,scheduled_start,scheduled_end);
-CREATE INDEX IF NOT EXISTS idx_jobs_calendar ON jobs(scheduled_start,scheduled_end,status);
-
-CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(lower(name));
-CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(lower(email));
-CREATE INDEX IF NOT EXISTS idx_pianos_client ON pianos(client_id);
-CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
-CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_intake_client ON intake_leads(client_id);
-CREATE INDEX IF NOT EXISTS idx_intake_technician ON intake_leads(assigned_technician_id,status);
+CREATE INDEX IF NOT EXISTS idx_direct_expenses_date ON direct_expenses(expense_date,category);
+CREATE INDEX IF NOT EXISTS idx_invoice_email_log_invoice ON invoice_email_log(invoice_id,created_at DESC);
 
 -- Preserved website/event indexes plus explicit public read-path indexes.
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
