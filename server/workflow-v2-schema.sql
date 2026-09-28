@@ -100,3 +100,29 @@ CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_phase ON workshop_subtasks(phas
 CREATE INDEX IF NOT EXISTS idx_wf2_assignees_user ON wf2_task_assignees(user_id,task_id);
 CREATE INDEX IF NOT EXISTS idx_wf2_calendar_workflow ON wf2_calendar_links(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_wf2_audit_workflow ON wf2_audit(workflow_id,created_at);
+
+-- Explicit foreign-key indexes for the Workflow V2 read/write paths.
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_client ON wf2_workflows(client_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_piano ON wf2_workflows(piano_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_creator ON wf2_workflows(creator_user_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_responsible ON wf2_workflows(main_responsible_user_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_invoice ON wf2_workflows(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_workflows_completed_by ON wf2_workflows(completed_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_phases_workflow ON wf2_phases(workflow_id,stage_code);
+CREATE INDEX IF NOT EXISTS idx_wf2_phases_stage_code ON wf2_phases(stage_code);
+CREATE INDEX IF NOT EXISTS idx_wf2_phases_completed_by ON wf2_phases(completed_by);
+CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_completed_by ON workshop_subtasks(completed_by);
+CREATE INDEX IF NOT EXISTS idx_workshop_subtasks_approved_by ON workshop_subtasks(approved_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_costs_phase ON wf2_costs(phase_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_costs_partner ON wf2_costs(partner_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_costs_finance_line ON wf2_costs(finance_line_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_costs_created_by ON wf2_costs(created_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_costs_approved_by ON wf2_costs(approved_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_checklist_phase ON wf2_checklist(phase_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_checklist_task ON wf2_checklist(task_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_checklist_checked_by ON wf2_checklist(checked_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_documents_phase ON wf2_documents(phase_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_documents_task ON wf2_documents(task_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_documents_uploaded_by ON wf2_documents(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_wf2_audit_actor ON wf2_audit(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_wf2_closeouts_actor ON wf2_closeouts(actor_user_id);

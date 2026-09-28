@@ -42,9 +42,12 @@ test("calendar status colors and warning icons follow the approved priority", ()
   assert.match(styles, /--calendar-failed:#6b7280/);
 });
 
-test("PWA push handlers remain present and the tuned shell cache is refreshed", () => {
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.7-workflow-date-picker-arrows/);
-  assert.match(serviceWorker, /if\(cached\)\{event\.waitUntil\(network/);
+test("PWA push handlers remain present and static shell uses stale-while-revalidate while APIs remain network-only", () => {
+  assert.match(serviceWorker, /klavierhaus-shell-swr-v2/);
+  assert.match(serviceWorker, /if\(url\.pathname\.startsWith\("\/api\/"\)\)return/);
+  assert.match(serviceWorker, /event\.waitUntil\(revalidate\.catch/);
+  assert.match(serviceWorker, /if\(cached\)return cached/);
+  assert.match(serviceWorker, /fetch\(request,\{cache:"no-cache"\}\)/);
   assert.match(serviceWorker, /addEventListener\('push'/);
   assert.match(serviceWorker, /addEventListener\('notificationclick'/);
   assert.match(serviceWorker, /ACKNOWLEDGE_NOTIFICATION/);
@@ -80,7 +83,7 @@ test("event administration is bilingual, admin-only, responsive, and available i
   assert.match(styles, /\.event-image-preview/);
   assert.match(styles, /\.event-data-section \.table-wrap\{[^}]*overflow-x:hidden/);
   assert.match(styles, /\.event-data-section table,\.event-data-section tbody,\.event-data-section tr,\.event-data-section td\{display:block/);
-  assert.match(serviceWorker, /klavierhaus-shell-v6\.7\.7-workflow-date-picker-arrows/);
+  assert.match(serviceWorker, /klavierhaus-shell-swr-v2/);
 });
 
 test("workflow responsibility cards use the approved status priority and phase-only drawer", () => {

@@ -1,8 +1,10 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const zlib = require("node:zlib");
+const { Worker } = require("node:worker_threads");
 const { createFontMetrics, jpegDimensions } = require("./guest-list-pdf");
 
 const GOLD = "0.95 0.73 0.18";
@@ -872,4 +874,117 @@ function generateFinancialStatementPdf({ statement = "income-statement", company
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
+const PDF_WORKER_GENERATORS = new Set([
+  "generateInvoicePdf","generateBusinessInvoicePdf","generateMonthlyInvoiceReportPdf","generateFinancialStatementPdf",
+  "generateTicketBackPdf","generateTicketDocumentPdf","generateTicketFrontPdf","generateTicketFullPdf","generateTicketPdf"
+]);
+
+function canonicalPdfCacheValue(value) {
+  if (value === null || value === undefined) return value ?? null;
+  if (Buffer.isBuffer(value)) return { __buffer: value.toString("base64") };
+  if (Array.isArray(value)) return value.map(canonicalPdfCacheValue);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalPdfCacheValue(value[key])]));
+  return value;
+}
+
+function pdfCacheChecksum(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(canonicalPdfCacheValue(value))).digest("hex").slice(0, 32);
+}
+
+function safePdfCachePart(value, fallback = "pdf") {
+  const normalized = String(value ?? "").trim().replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[_\.]+|[_\.]+$/g, "");
+  return normalized || fallback;
+}
+
+function renderPdfInWorker(moduleName, generatorName, args) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, "pdf-worker.js"), { workerData: { moduleName, generatorName, args } });
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
+    worker.once("message", (message) => {
+      if (!message?.ok) {
+        const error = new Error(message?.error?.message || "PDF_WORKER_FAILED");
+        if (message?.error?.code) error.code = message.error.code;
+        settle(reject, error);
+        return;
+      }
+      settle(resolve, Buffer.from(message.pdf));
+    });
+    worker.once("error", (error) => settle(reject, error));
+    worker.once("exit", (code) => { if (!settled && code !== 0) settle(reject, new Error(`PDF_WORKER_EXIT_${code}`)); });
+  });
+}
+
+function createPdfDiskCache({ rootDir = path.resolve(process.cwd(), "storage", "cache", "pdf") } = {}) {
+  const inFlight = new Map();
+  const absoluteRoot = path.resolve(rootDir);
+
+  async function fileExists(filePath) {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      return stat.isFile() && stat.size > 0;
+    } catch (error) {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
+  async function assetFingerprint(filePath) {
+    if (!filePath) return null;
+    try {
+      const stat = await fs.promises.stat(filePath);
+      return { filePath: path.resolve(filePath), size: stat.size, mtimeMs: Math.trunc(stat.mtimeMs) };
+    } catch (error) {
+      if (error?.code === "ENOENT") return { filePath: path.resolve(filePath), missing: true };
+      throw error;
+    }
+  }
+
+  async function pruneOldVersions(type, id, keepPath) {
+    const prefix = `${safePdfCachePart(type)}_${safePdfCachePart(id)}_`;
+    let names = [];
+    try { names = await fs.promises.readdir(absoluteRoot); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    await Promise.all(names.filter((name) => name.startsWith(prefix) && name.endsWith(".pdf") && path.join(absoluteRoot, name) !== keepPath)
+      .map((name) => fs.promises.unlink(path.join(absoluteRoot, name)).catch((error) => { if (error?.code !== "ENOENT") throw error; })));
+  }
+
+  async function render({ type, id, source, moduleName = "document-pdf", generatorName, args = {} }) {
+    if (moduleName === "document-pdf" && !PDF_WORKER_GENERATORS.has(generatorName)) throw new Error("PDF_GENERATOR_NOT_ALLOWED");
+    if (moduleName === "guest-list-pdf" && !["generateGuestDataPdf", "generateGuestListPdf"].includes(generatorName)) throw new Error("PDF_GENERATOR_NOT_ALLOWED");
+    if (!["document-pdf", "guest-list-pdf"].includes(moduleName)) throw new Error("PDF_MODULE_NOT_ALLOWED");
+
+    const logo = await assetFingerprint(args?.logoPath);
+    const checksum = pdfCacheChecksum({ moduleName, generatorName, source: source ?? args, logo });
+    const fileName = `${safePdfCachePart(type)}_${safePdfCachePart(id)}_${checksum}.pdf`;
+    const filePath = path.join(absoluteRoot, fileName);
+    if (await fileExists(filePath)) return { filePath, checksum, cacheHit: true };
+    if (inFlight.has(filePath)) return inFlight.get(filePath);
+
+    const task = (async () => {
+      await fs.promises.mkdir(absoluteRoot, { recursive: true });
+      if (await fileExists(filePath)) return { filePath, checksum, cacheHit: true };
+      const pdf = await renderPdfInWorker(moduleName, generatorName, args);
+      const tempPath = `${filePath}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+      try {
+        await fs.promises.writeFile(tempPath, pdf, { flag: "wx" });
+        await fs.promises.rename(tempPath, filePath);
+      } finally {
+        await fs.promises.unlink(tempPath).catch((error) => { if (error?.code !== "ENOENT") throw error; });
+      }
+      await pruneOldVersions(type, id, filePath);
+      return { filePath, checksum, cacheHit: false };
+    })().finally(() => inFlight.delete(filePath));
+
+    inFlight.set(filePath, task);
+    return task;
+  }
+
+  return Object.freeze({ rootDir: absoluteRoot, render });
+}
+
+module.exports = { BOARDING_PASS, LETTER, createPdf, createPdfDiskCache, pdfCacheChecksum, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };

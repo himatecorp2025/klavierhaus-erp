@@ -14,3 +14,4 @@ backups/
 *.sqlite-wal
 *.log
 .DS_Store
+storage/cache/pdf/
