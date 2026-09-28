@@ -304,7 +304,6 @@ async function openIntakeDialog(){
     <label class="field full"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${technicianOptions}</select></label>
     <label class="field full"><span>${tr("Requested service / issue","Jelzett probléma / igény")} *</span><textarea name="reported_issue" required autofocus></textarea></label>
     <label class="field full"><span>${tr("Photos / videos","Fotók / videók")}</span><input id="intakeMediaFiles" type="file" multiple accept="image/*,video/mp4,video/quicktime,video/webm"></label>
-    <label class="field full"><span>${tr("Media URLs — one per line","Média URL-ek — soronként egy")}</span><textarea id="intakeMediaUrls" placeholder="https://…"></textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save intake","Igény rögzítése")}</button></div>
   </form>`});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
@@ -325,11 +324,11 @@ async function openIntakeDialog(){
   $("#intakeEditor").addEventListener("submit",async event=>{
     event.preventDefault();const form=event.currentTarget,body=Object.fromEntries(new FormData(form));
     if(!body.client_id)delete body.client_id;if(!body.piano_id)delete body.piano_id;if(!body.assigned_technician_id)delete body.assigned_technician_id;
-    const manual=$("#intakeMediaUrls").value.split(/\n+/).map(value=>value.trim()).filter(Boolean);let uploaded=[];
+    let uploaded=[];
     try{
       const files=[...$("#intakeMediaFiles").files||[]];
       if(files.length){const data=new FormData();files.forEach(file=>data.append("media",file));uploaded=(await api("/api/intake/media",{method:"POST",body:data})).urls||[];}
-      body.media_urls=[...new Set([...uploaded,...manual])];
+      body.media_urls=[...new Set(uploaded)];
       await api("/api/intake",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Intake saved.","Igény rögzítve."),"success");await renderIntake();
     }catch(error){toast(humanError(error),"error");}
   });
