@@ -76,7 +76,7 @@ test("Round 3 schema and APIs implement draft-send-paid invoices, direct expense
 
 test("PWA is English-first, bilingual and implements required operational controls",()=>{
   const html=read("public/index.html"),app=read("public/app.js"),round2=read("public/round2.js"),round3=read("public/round3.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
-  assert.match(html,/<html lang="en">/);
+  assert.match(html,/<html lang="en"/);
   assert.match(html,/id="languageToggle"/);
   assert.match(app,/state\.language/);
   assert.match(app,/localStorage\.getItem\("kh_language"\)/);
@@ -98,7 +98,7 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.segmented-control/);
   assert.match(css,/\.typeahead-menu/);
-  assert.match(sw,/klavierhaus-workshop-v5-shell-v1/);
+  assert.match(sw,/klavierhaus-admin-v6-shell-v1/);
   assert.match(sw,/url\.pathname\.startsWith\("\/api\/"\)/);
 });
 

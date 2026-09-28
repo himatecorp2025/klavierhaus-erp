@@ -1,23 +1,26 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f6f7f9">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark light">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Klavierhaus">
   <title>Klavierhaus ERP</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon-192.png">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link id="appFavicon" rel="icon" href="/icons/icon-192.png">
+  <link id="appTouchIcon" rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <main id="loginScreen" class="login-screen">
+    <button id="loginThemeToggle" class="theme-switch login-theme-switch" type="button" aria-label="Theme">
+      <span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span>
+    </button>
     <section class="login-card" aria-labelledby="loginTitle">
       <div class="brand-lockup">
         <img id="loginBrandLogo" src="/icons/icon-192.png" alt="">
@@ -58,46 +61,57 @@
   </main>
 
   <div id="appShell" class="app-shell hidden">
-    <header class="app-header">
-      <a class="app-brand" href="#workshop" data-nav="workshop" aria-label="Klavierhaus ERP kezdőlap">
-        <img id="headerBrandLogo" src="/icons/icon-192.png" alt="">
-        <span><strong>Klavierhaus</strong><small>ERP · Final</small></span>
-      </a>
-
-      <nav class="desktop-nav" aria-label="Fő navigáció">
-        <button type="button" class="nav-item" data-nav="workshop"><span>📋</span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
-        <button type="button" class="nav-item" data-nav="intake"><span>📥</span><span data-i18n="nav_intake">Intake</span></button>
-        <button type="button" class="nav-item" data-nav="planned"><span>⏳</span><span data-i18n="nav_planned">Planned Jobs</span></button>
-        <button type="button" class="nav-item" data-nav="master"><span>👥</span><span data-i18n="nav_master">Master Data</span></button>
-        <button type="button" class="nav-item" data-nav="finance"><span>💰</span><span data-i18n="nav_finance">Finance</span></button>
-        <button type="button" class="nav-item" data-nav="cms"><span>🌐</span><span data-i18n="nav_cms">Website CMS</span></button>
-      </nav>
-
-      <div class="header-tools">
-        <div class="ny-clock" aria-live="off">
-          <span data-i18n="new_york_time">New York time</span>
-          <strong id="newYorkClock">--:--</strong>
-          <small id="newYorkDate">---</small>
-        </div>
-        <div class="header-actions">
-          <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
-          <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings">
-            <span id="profileInitials">KH</span>
-          </button>
-        </div>
+    <aside id="appSidebar" class="app-sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand-row">
+        <a class="app-brand sidebar-brand" href="#workshop" data-nav="workshop" aria-label="Klavierhaus ERP">
+          <img id="headerBrandLogo" src="/icons/icon-192.png" alt="">
+          <span><strong>Klavierhaus</strong><small>ERP</small></span>
+        </a>
+        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Collapse navigation">‹</button>
       </div>
-    </header>
+      <nav class="sidebar-nav">
+        <button type="button" class="nav-item" data-nav="workshop"><span class="nav-icon">▦</span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
+        <button type="button" class="nav-item" data-nav="intake"><span class="nav-icon">✓</span><span data-i18n="nav_intake">Intake</span></button>
+        <button type="button" class="nav-item" data-nav="planned"><span class="nav-icon">◷</span><span data-i18n="nav_planned">Planned Jobs</span></button>
+        <button type="button" class="nav-item" data-nav="master"><span class="nav-icon">◫</span><span data-i18n="nav_master">Master Data</span></button>
+        <button type="button" class="nav-item" data-nav="finance"><span class="nav-icon">$</span><span data-i18n="nav_finance">Finance</span></button>
+        <button type="button" class="nav-item" data-nav="cms"><span class="nav-icon">◎</span><span data-i18n="nav_cms">Website CMS</span></button>
+      </nav>
+      <div class="sidebar-footer"><small>KLAVIERHAUS · NEW YORK</small></div>
+    </aside>
 
-    <main id="workspace" class="workspace" tabindex="-1"></main>
+    <div class="app-main-column">
+      <header class="app-header">
+        <button id="mobileBrandButton" class="mobile-brand-button" type="button" data-nav="workshop" aria-label="Klavierhaus ERP">
+          <img id="mobileBrandLogo" src="/icons/icon-192.png" alt="">
+        </button>
+        <div class="header-spacer"></div>
+        <div class="header-tools">
+          <div class="ny-clock" aria-live="off">
+            <span data-i18n="new_york_time">New York time</span>
+            <strong id="newYorkClock">--:--</strong>
+            <small id="newYorkDate">---</small>
+          </div>
+          <button id="themeToggle" class="theme-switch" type="button" aria-label="Theme">
+            <span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span>
+          </button>
+          <div class="header-actions">
+            <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
+            <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings"><span id="profileInitials">KH</span></button>
+          </div>
+        </div>
+      </header>
 
-    <nav class="mobile-nav" aria-label="Mobil gyorsnavigáció">
-      <button type="button" data-nav="workshop"><span>📋</span><small data-i18n="mobile_workshop">Workshop</small></button>
-      <button type="button" data-nav="planned"><span>⏳</span><small data-i18n="mobile_planned">Planned</small></button>
-      <button type="button" data-nav="intake"><span>📥</span><small data-i18n="mobile_intake">Intake</small></button>
-      <button type="button" data-nav="master"><span>👥</span><small data-i18n="mobile_master">Master</small></button>
-      <button type="button" data-nav="finance"><span>💰</span><small data-i18n="mobile_finance">Finance</small></button>
-      <button type="button" data-nav="cms"><span>🌐</span><small>CMS</small></button>
-      <button type="button" data-nav="profile"><span>👤</span><small data-i18n="mobile_profile">Profile</small></button>
+      <main id="workspace" class="workspace" tabindex="-1"></main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Mobile navigation">
+      <button type="button" data-nav="workshop"><span>▦</span><small data-i18n="mobile_workshop">Workshop</small></button>
+      <button type="button" data-nav="planned"><span>◷</span><small data-i18n="mobile_planned">Planned</small></button>
+      <button type="button" class="mobile-intake-primary" data-nav="intake"><span>＋</span><small data-i18n="mobile_intake">Intake</small></button>
+      <button type="button" data-nav="master"><span>◫</span><small data-i18n="mobile_master">Master</small></button>
+      <button type="button" data-nav="finance"><span>$</span><small data-i18n="mobile_finance">Finance</small></button>
+      <button type="button" id="mobileMoreButton"><span>•••</span><small data-i18n="mobile_more">More</small></button>
     </nav>
   </div>
 
@@ -117,5 +131,6 @@
   <script src="/app.js"></script>
   <script src="/round2.js"></script>
   <script src="/round3.js"></script>
+  <script src="/v6.js"></script>
 </body>
 </html>

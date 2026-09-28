@@ -146,7 +146,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <label class="field"><span>${tr("Location","Helyszín")}</span><select name="location_type"><option value="workshop">${tr("Workshop","Műhely")}</option><option value="on_site">${tr("On site","Helyszíni")}</option></select></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
     <label class="field full"><span>${tr("Service address","Szervizcím")}</span><input name="site_address"></label>
-    ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(r2DefaultInput(defaults.date))}" required></label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
+    ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(defaults.datetime||r2DefaultInput(defaults.date))}" required></label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Choose the phases this job actually needs. Completed is always mandatory.","Jelöld ki, mely fázisokra van szüksége ennek a munkának. A Lezárva mindig kötelező.")}</p></div></div>${r2WorkflowPlanRows()}</section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
   </form>`});
@@ -342,11 +342,15 @@ function r2CurrentLine(date){
 function r2RenderTimeGrid(range,jobs){
   const labels=Array.from({length:14},(_,index)=>7+index);
   return `<div class="time-calendar mode-${state.r2CalendarMode}" style="--calendar-columns:${range.days.length}">
-    <div class="time-calendar-head"><div class="time-gutter-head">NYC</div>${range.days.map(date=>`<button type="button" class="time-day-head" data-new-calendar-job="${date}"><strong>${esc(r2FormatDate(date,{weekday:"short"}))}</strong><span>${esc(r2FormatDate(date,{month:"short",day:"numeric"}))}</span></button>`).join("")}</div>
-    <div class="time-calendar-scroll"><div class="time-calendar-body" style="--calendar-columns:${range.days.length}">
-      <div class="time-gutter">${labels.map(hour=>`<span style="top:${(hour*60-R2_DAY_START)*R2_PX_PER_MIN}px">${r2Pad(hour)}:00</span>`).join("")}</div>
-      <div class="time-day-columns">${range.days.map(date=>`<section class="time-day-column" data-calendar-date="${date}">${r2CurrentLine(date)}${jobs.map(job=>r2CalendarEvent(job,date)).join("")}</section>`).join("")}</div>
-    </div></div>
+    <div class="time-calendar-scroll">
+      <div class="time-calendar-inner" style="--calendar-columns:${range.days.length}">
+        <div class="time-calendar-head"><div class="time-gutter-head">NYC</div>${range.days.map(date=>`<button type="button" class="time-day-head" data-new-calendar-job="${date}"><strong>${esc(r2FormatDate(date,{weekday:"short"}))}</strong><span>${esc(r2FormatDate(date,{month:"short",day:"numeric"}))}</span></button>`).join("")}</div>
+        <div class="time-calendar-body">
+          <div class="time-gutter">${labels.map(hour=>`<span style="top:${(hour*60-R2_DAY_START)*R2_PX_PER_MIN}px">${r2Pad(hour)}:00</span>`).join("")}</div>
+          <div class="time-day-columns">${range.days.map(date=>`<section class="time-day-column" data-calendar-date="${date}">${r2CurrentLine(date)}${jobs.map(job=>r2CalendarEvent(job,date)).join("")}</section>`).join("")}</div>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 function r2JobTouchesDate(job,date){
@@ -429,7 +433,17 @@ function r2BindCalendarPointer(host,jobs){
     }catch(error){toast(humanError(error),"error");}
     clean();await r2RenderCalendar(state.r2Workflow?.jobs||[]);
   }
-  $$("[data-calendar-job]",host).forEach(card=>{
+function r2BindCalendarCreate(host){
+  $("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
+    if(event.target.closest("[data-calendar-job],[data-new-calendar-job],.calendar-now-line"))return;
+    const date=column.dataset.calendarDate;if(!date)return;
+    if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
+    const rect=column.getBoundingClientRect();
+    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
+    r2OpenCreateJob(renderWorkshop,{date,datetime:r2MinutesInput(date,minutes)});
+  }));
+}
+  $("[data-calendar-job]",host).forEach(card=>{
     card.addEventListener("pointerdown",event=>{
       if(event.button!==undefined&&event.button!==0)return;
       const job=jobs.find(row=>String(row.id)===String(card.dataset.calendarJob));if(!job||job.stage==="completed")return;
@@ -462,7 +476,7 @@ async function r2RenderCalendar(){
   $$("[data-calendar-mode]",host).forEach(button=>button.addEventListener("click",()=>{state.r2CalendarMode=button.dataset.calendarMode;localStorage.setItem("kh_calendar_mode",state.r2CalendarMode);void r2RenderCalendar();}));
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
   $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
-  r2BindCalendarPointer(host,data.jobs||[]);r2UpdateCalendarNowLine();
+  r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();
   clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(r2UpdateCalendarNowLine,30000);
 }
 async function r2RenderWorkflow(data){

@@ -69,7 +69,7 @@ try{
   for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
@@ -79,6 +79,11 @@ try{
   assert.equal(db.prepare("SELECT COUNT(*) c FROM direct_expenses").get().c,0);
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'final_compliance_schema_version\'").get().setting_value,"4");
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'workshop_ux_schema_version\'").get().setting_value,"5");
+  assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'admin_ux_schema_version\'").get().setting_value,"6");
+  assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'ui_default_theme\'").get().setting_value,"dark");
+  assert.equal(db.prepare("SELECT theme_preference FROM users WHERE id='U1'").get().theme_preference,"dark");
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_catalog_items").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_assessment_items").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM workflow_stage_definitions").get().c,5);
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'ui_default_language\'").get().setting_value,"en");
   assert.equal(db.pragma("foreign_key_check").length,0);
@@ -90,6 +95,7 @@ try{
   assert.ok(backups.some(name=>name.startsWith("round3-pre-migration-")),"Round 3 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("final-compliance-pre-migration-")),"Final compliance safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("workshop-ux-v5-pre-migration-")),"Workshop UX v5 safety backup missing");
+  assert.ok(backups.some(name=>name.startsWith("admin-ux-v6-pre-migration-")),"Admin UX v6 safety backup missing");
   console.log("Final six-module migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});

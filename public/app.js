@@ -69,7 +69,16 @@ function humanError(error){
     INVOICE_NOT_SENT:["Only a sent invoice can be marked paid.","Csak elküldött számla jelölhető fizetettnek."],INVALID_PAYMENT_METHOD:["Choose a valid payment method.","Válassz érvényes fizetési módot."],
     PAID_INVOICE_CANNOT_BE_CANCELLED:["A paid invoice cannot be cancelled.","Fizetett számla nem érvényteleníthető."],PARTNER_HAS_INVOICES:["This partner is linked to invoices.","A partner számlához kapcsolódik."],
     SUPERADMIN_REQUIRED:["Super Admin permission is required.","Super Admin jogosultság szükséges."],INVALID_INTAKE_MEDIA_TYPE:["Use a supported photo or video file.","Támogatott fotó- vagy videófájlt válassz."],
-    TOO_MANY_INTAKE_MEDIA:["Maximum 20 media links are allowed.","Legfeljebb 20 média csatolható."],INVALID_INTAKE_MEDIA_URL:["Invalid media URL.","Érvénytelen média URL."],
+    TOO_MANY_INTAKE_MEDIA:["Maximum 20 media files are allowed.","Legfeljebb 20 médiafájl csatolható."],INVALID_INTAKE_MEDIA_URL:["Invalid media attachment.","Érvénytelen médiacsatolmány."],
+    INVALID_THEME:["Choose light or dark mode.","Válassz világos vagy sötét módot."],
+    INTAKE_CATALOG_REQUIRED_FIELDS:["Category and both English/Hungarian titles are required.","A kategória, valamint az angol és magyar megnevezés kötelező."],
+    INVALID_INTAKE_CATALOG_PRICE:["The assessment price is invalid.","Az igényfelmérési ár érvénytelen."],
+    INTAKE_CATALOG_ITEM_NOT_FOUND:["The selected assessment item no longer exists.","A kiválasztott igényfelmérési tétel már nem létezik."],
+    INVALID_RECEIPT_FILE_TYPE:["Upload an image, PDF or supported office document.","Képet, PDF-et vagy támogatott irodai dokumentumot tölts fel."],
+    RECEIPT_FILE_REQUIRED:["Choose a receipt or document first.","Előbb válassz nyugtát vagy dokumentumot."],
+    CANNOT_DELETE_SELF:["You cannot delete your own account.","A saját felhasználói fiókodat nem törölheted."],
+    LAST_ADMIN_CANNOT_BE_DELETED:["The last active Admin cannot be deleted.","Az utolsó aktív Admin nem törölhető."],
+    HIDDEN_OWNER_PROTECTED:["This protected owner account cannot be deleted.","Ez a védett tulajdonosi fiók nem törölhető."],
     WORKFLOW_REQUIRES_ACTIVE_PHASE:["Choose at least one working phase before Completed.","A Lezárva előtt legalább egy munkafázist válassz."],
     WORKFLOW_LABEL_REQUIRED:["Both English and Hungarian workflow names are required.","Az angol és magyar fázisnév is kötelező."],
     CURRENT_WORKFLOW_PHASE_REQUIRED:["The current phase cannot be removed from an active workflow.","Az aktuális fázis nem távolítható el az aktív munkafolyamatból."],
@@ -304,7 +313,6 @@ async function openIntakeDialog(){
     <label class="field full"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${technicianOptions}</select></label>
     <label class="field full"><span>${tr("Requested service / issue","Jelzett probléma / igény")} *</span><textarea name="reported_issue" required autofocus></textarea></label>
     <label class="field full"><span>${tr("Photos / videos","Fotók / videók")}</span><input id="intakeMediaFiles" type="file" multiple accept="image/*,video/mp4,video/quicktime,video/webm"></label>
-    <label class="field full"><span>${tr("Media URLs — one per line","Média URL-ek — soronként egy")}</span><textarea id="intakeMediaUrls" placeholder="https://…"></textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save intake","Igény rögzítése")}</button></div>
   </form>`});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
@@ -325,11 +333,11 @@ async function openIntakeDialog(){
   $("#intakeEditor").addEventListener("submit",async event=>{
     event.preventDefault();const form=event.currentTarget,body=Object.fromEntries(new FormData(form));
     if(!body.client_id)delete body.client_id;if(!body.piano_id)delete body.piano_id;if(!body.assigned_technician_id)delete body.assigned_technician_id;
-    const manual=$("#intakeMediaUrls").value.split(/\n+/).map(value=>value.trim()).filter(Boolean);let uploaded=[];
+    let uploaded=[];
     try{
       const files=[...$("#intakeMediaFiles").files||[]];
       if(files.length){const data=new FormData();files.forEach(file=>data.append("media",file));uploaded=(await api("/api/intake/media",{method:"POST",body:data})).urls||[];}
-      body.media_urls=[...new Set([...uploaded,...manual])];
+      body.media_urls=[...new Set(uploaded)];
       await api("/api/intake",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Intake saved.","Igény rögzítve."),"success");await renderIntake();
     }catch(error){toast(humanError(error),"error");}
   });

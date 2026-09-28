@@ -349,4 +349,4 @@ async function renderFinance(){
   $("#partnersBtn")?.addEventListener("click",()=>r3OpenPartnerManager(renderFinance));$("#financeSettingsBtn")?.addEventListener("click",()=>r3OpenFinanceSettings(renderFinance));r3FilterInvoices();
 }
 
-void boot();
+// V6 bootstrap is invoked by public/v6.js after UI overrides are installed.
