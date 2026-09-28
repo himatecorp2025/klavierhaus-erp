@@ -888,7 +888,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 -- ============================================================================
--- NEW INTERNAL ERP DOMAIN: CLIENTS + PIANOS + INTAKE
+-- INTERNAL ERP DOMAIN: CLIENTS + PIANOS + INTAKE + ROUND 2 JOBS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -933,6 +933,44 @@ CREATE TABLE IF NOT EXISTS intake_leads (
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_code TEXT UNIQUE,
+  client_id INTEGER NOT NULL,
+  piano_id INTEGER NOT NULL,
+  intake_lead_id INTEGER UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT,
+  service_location TEXT NOT NULL DEFAULT 'workshop' CHECK(service_location IN ('workshop','on_site')),
+  service_address TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','urgent')),
+  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','scheduled','in_progress','blocked','ready_for_closeout')),
+  assigned_technician_id TEXT,
+  scheduled_start TEXT,
+  scheduled_end TEXT,
+  timezone TEXT NOT NULL DEFAULT 'America/New_York',
+  blocked_reason TEXT,
+  internal_notes TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  ready_for_closeout_at TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+  FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
+  FOREIGN KEY (intake_lead_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CHECK ((scheduled_start IS NULL AND scheduled_end IS NULL) OR (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_piano ON jobs(piano_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_intake ON jobs(intake_lead_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_technician_schedule ON jobs(assigned_technician_id,scheduled_start,scheduled_end);
+CREATE INDEX IF NOT EXISTS idx_jobs_calendar ON jobs(scheduled_start,scheduled_end,status);
 
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(lower(name));
 CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(lower(email));
