@@ -15,6 +15,8 @@ function problem(code,status=400,extra=null){const error=new Error(code);error.s
 function respondError(res,error){res.status(Number(error?.status||400)).json({error:error?.message||"FINANCE_REQUEST_FAILED",...(error?.extra||{})});}
 function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||""))&&!Number.isNaN(new Date(String(value)+"T12:00:00Z").getTime());}
 function validMonth(value){return /^\d{4}-\d{2}$/.test(String(value||""));}
+function normalizeEmail(value){return text(value,320).toLowerCase();}
+function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));}
 function nyDate(value=new Date()){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(value instanceof Date?value:new Date(value));
   const p=Object.fromEntries(parts.filter(part=>part.type!=="literal").map(part=>[part.type,part.value]));
@@ -90,6 +92,14 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`);
     for(const key of COMPANY_KEYS)save.run("finance_company_"+key,text(values?.[key],key.includes("address")?1000:320),user?.name||user?.id||"SYSTEM");
     return company();
+  }
+  function persistClientEmail(clientId,value){
+    const email=normalizeEmail(value);
+    if(!email)return null;
+    if(!validEmail(email))throw problem("INVALID_CLIENT_EMAIL");
+    const client=clientById(clientId);if(!client)throw problem("INVALID_CLIENT_ID");
+    if(normalizeEmail(client.email)!==email)db.prepare("UPDATE clients SET email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(email,clientId);
+    return email;
   }
   function invoiceDetail(id){
     const row=db.prepare(`${selectInvoice} WHERE i.id=?`).get(id);
@@ -216,18 +226,26 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare("UPDATE pianos SET last_serviced_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nyDate(),before.piano_id);
     return jobForInvoice(jobId);
   }
-  async function sendInvoice(invoiceId,actor,languageOverride){
-    const invoice=invoiceDetail(invoiceId);if(!invoice)throw problem("INVOICE_NOT_FOUND",404);
+  async function sendInvoice(invoiceId,actor,languageOverride,recipientOverride){
+    let invoice=invoiceDetail(invoiceId);if(!invoice||invoice.deleted_at)throw problem("INVOICE_NOT_FOUND",404);
     if(invoice.direction!=="receivable")throw problem("PAYABLE_INVOICE_EMAIL_NOT_SUPPORTED",409);
     if(invoice.status==="paid")return invoice;
     if(invoice.status==="cancelled")throw problem("INVOICE_CANCELLED",409);
     if(invoice.status==="sent")return invoice;
-    if(!invoice.counterparty_email)throw problem("CLIENT_EMAIL_REQUIRED",409);
+    const currentClient=invoice.client_id?clientById(invoice.client_id):null;
+    const recipient=normalizeEmail(recipientOverride||invoice.counterparty_email||currentClient?.email);
+    if(!recipient)throw problem("CLIENT_EMAIL_REQUIRED",409);
+    if(!validEmail(recipient))throw problem("INVALID_CLIENT_EMAIL");
+    if(invoice.client_id)persistClientEmail(invoice.client_id,recipient);
+    if(normalizeEmail(invoice.counterparty_email)!==recipient){
+      db.prepare("UPDATE invoices SET counterparty_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(recipient,invoice.id);
+      invoice=invoiceDetail(invoice.id);
+    }
     const language=["en","hu"].includes(languageOverride)?languageOverride:invoice.email_language||"en";
     const persisted=persistPdf(invoice.id);
     try{
       const delivery=await transactionalEmail.sendWorkshopInvoice({
-        to:invoice.counterparty_email,clientName:invoice.counterparty_name,
+        to:recipient,clientName:invoice.counterparty_name,
         piano:{brand:invoice.piano_brand,model:invoice.piano_model,serial_number:invoice.piano_serial_number},
         workSummary:invoice.summary,invoiceNumber:invoice.invoice_number,totalAmount:invoice.total_amount,invoicePdf:persisted.pdf,language,
         idempotencyKey:`workshop-invoice-${invoice.id}-${invoice.updated_at||invoice.created_at}`
@@ -236,13 +254,13 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         db.prepare(`UPDATE invoices SET status='sent',email_language=?,sent_at=CURRENT_TIMESTAMP,sent_by_user_id=?,resend_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(language,actor.id,delivery.providerMessageId,invoice.id);
         db.prepare("INSERT INTO invoice_email_log(invoice_id,recipient,language,status,provider_message_id,created_by_user_id) VALUES(?,?,?,'sent',?,?)")
-          .run(invoice.id,invoice.counterparty_email,language,delivery.providerMessageId,actor.id);
+          .run(invoice.id,recipient,language,delivery.providerMessageId,actor.id);
         if(invoice.job_id)completeJob(invoice.job_id,actor);
       })();
       return invoiceDetail(invoice.id);
     }catch(error){
       db.prepare("INSERT INTO invoice_email_log(invoice_id,recipient,language,status,error_code,created_by_user_id) VALUES(?,?,?,'failed',?,?)")
-        .run(invoice.id,invoice.counterparty_email,language,text(error?.code||error?.message||"EMAIL_DELIVERY_FAILED",120),actor.id);
+        .run(invoice.id,recipient,language,text(error?.code||error?.message||"EMAIL_DELIVERY_FAILED",120),actor.id);
       throw problem(error?.code==="EMAIL_DELIVERY_NOT_CONFIGURED"?"EMAIL_DELIVERY_NOT_CONFIGURED":"EMAIL_DELIVERY_FAILED",error?.code==="EMAIL_DELIVERY_NOT_CONFIGURED"?503:502);
     }
   }
