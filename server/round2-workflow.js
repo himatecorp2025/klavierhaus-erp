@@ -1,17 +1,15 @@
 "use strict";
 
-const {convertIntakeLead}=require("./round1-core");
-
 const PIPELINE_STAGE="planned";
 const WORKFLOW_STAGES=Object.freeze([
-  {key:"received",label_en:"Received / Scheduled",label_hu:"Beérkezett / Ütemezve"},
-  {key:"in_progress",label_en:"In Progress",label_hu:"Folyamatban"},
-  {key:"qa_review",label_en:"QA / Handoff",label_hu:"Minőségellenőrzés / Átadás"},
-  {key:"admin_approval",label_en:"Admin Approval",label_hu:"Admin Jóváhagyás"},
-  {key:"completed",label_en:"Completed",label_hu:"Lezárva"}
+  {key:"received",label_en:"Received / Scheduled",label_hu:"Beérkezett / Ütemezve",position:1},
+  {key:"in_progress",label_en:"In Progress",label_hu:"Folyamatban",position:2},
+  {key:"qa_review",label_en:"QA / Handoff",label_hu:"Minőségellenőrzés / Átadás",position:3},
+  {key:"admin_approval",label_en:"Admin Approval",label_hu:"Admin jóváhagyás",position:4},
+  {key:"completed",label_en:"Completed",label_hu:"Lezárva",position:5}
 ]);
 const ACTIVE_STAGE_KEYS=new Set(WORKFLOW_STAGES.map(stage=>stage.key));
-const NEXT_STAGE=Object.freeze({received:"in_progress",in_progress:"qa_review",qa_review:"admin_approval"});
+const BLOCKER_CODES=new Set(["material_procurement","parts_procurement","material_issue","waiting_client","waiting_technician","waiting_admin","waiting_invoice","other"]);
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function integerId(value){const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:null;}
@@ -23,6 +21,10 @@ function iso(value,code="INVALID_SCHEDULE_TIME"){
   const raw=text(value,80);if(!raw)throw problem(code);
   const date=new Date(raw);if(Number.isNaN(date.getTime()))throw problem(code);
   return date.toISOString();
+}
+function optionalIso(value,code="INVALID_WORKFLOW_DUE_AT"){
+  if(value===null||value===undefined||String(value).trim()==="")return null;
+  return iso(value,code);
 }
 function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="SUPERADMIN"||Number(user.is_superadmin||0)===1));}
 function newYorkYear(){return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date());}
@@ -41,7 +43,29 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     JOIN pianos p ON p.id=j.piano_id
     LEFT JOIN users u ON u.id=j.assigned_technician_id`;
 
-  const jobById=id=>db.prepare(`${selectJob} WHERE j.id=?`).get(id);
+  function stageDefinitions(){
+    const rows=db.prepare("SELECT stage_key key,position,label_en,label_hu FROM workflow_stage_definitions ORDER BY position").all();
+    return rows.length===WORKFLOW_STAGES.length?rows:WORKFLOW_STAGES.map(row=>({...row}));
+  }
+  function phasesForJob(jobId){
+    const rows=db.prepare(`SELECT id,job_id,stage_key,position,enabled,due_at,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at
+      FROM job_workflow_phases WHERE job_id=? ORDER BY position`).all(jobId);
+    if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled)}));
+    return WORKFLOW_STAGES.map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,due_at:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+  }
+  function nextEnabledPhase(jobId,currentStage){
+    const phases=phasesForJob(jobId),current=phases.find(row=>row.stage_key===currentStage);
+    if(!current)return null;
+    return phases.find(row=>row.enabled&&row.position>current.position)||null;
+  }
+  function decorateJob(row){
+    if(!row)return null;
+    const workflow_phases=phasesForJob(row.id);
+    const current_phase=workflow_phases.find(phase=>phase.stage_key===row.stage)||null;
+    const next_phase=row.stage==="planned"||row.stage==="completed"?null:nextEnabledPhase(row.id,row.stage);
+    return {...row,workflow_phases,current_phase,next_stage:next_phase?.stage_key||null,ready_for_closeout:Boolean(next_phase&&next_phase.stage_key==="completed")};
+  }
+  const jobById=id=>decorateJob(db.prepare(`${selectJob} WHERE j.id=?`).get(id));
 
   function requireClientPiano(clientId,pianoId){
     const client=clientId&&db.prepare("SELECT * FROM clients WHERE id=?").get(clientId);
@@ -57,7 +81,6 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(!row)throw problem("INVALID_TECHNICIAN_ID");
     return row;
   }
-  function activeForSchedule(job){return !job.cancelled_at&&job.stage!=="completed"&&job.stage!=="planned"&&job.scheduled_at;}
   function findConflict(jobId,technicianId,start,duration){
     if(!technicianId||!start)return null;
     const wantedStart=new Date(start).getTime(),wantedEnd=new Date(endAt(start,duration)).getTime();
@@ -68,6 +91,40 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       return rowStart<wantedEnd&&rowEnd>wantedStart;
     })||null;
   }
+  function normalizePlan(input){
+    const supplied=Array.isArray(input)?input:null;
+    const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
+    const plan=WORKFLOW_STAGES.map(stage=>{
+      const item=byKey.get(stage.key);
+      const enabled=stage.key==="completed"?true:(supplied?Boolean(item?.enabled):true);
+      return {stage_key:stage.key,position:stage.position,enabled,due_at:item?optionalIso(item.due_at):null};
+    });
+    if(!plan.some(row=>row.stage_key!=="completed"&&row.enabled))throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
+    return plan;
+  }
+  function writePlan(jobId,plan,{preserveProgress=false}={}){
+    const existing=new Map(phasesForJob(jobId).map(row=>[row.stage_key,row]));
+    const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,due_at,activated_at,completed_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(job_id,stage_key) DO UPDATE SET position=excluded.position,enabled=excluded.enabled,due_at=excluded.due_at,
+      activated_at=CASE WHEN ?=1 THEN job_workflow_phases.activated_at ELSE excluded.activated_at END,
+      completed_at=CASE WHEN ?=1 THEN job_workflow_phases.completed_at ELSE excluded.completed_at END,
+      updated_at=CURRENT_TIMESTAMP`);
+    for(const row of plan){
+      const old=existing.get(row.stage_key);
+      upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.due_at,preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
+    }
+  }
+  function firstEnabledStage(jobId){
+    return phasesForJob(jobId).find(row=>row.enabled&&row.stage_key!=="completed")?.stage_key||null;
+  }
+  function activatePhase(jobId,stageKey){
+    db.prepare("UPDATE job_workflow_phases SET activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(jobId,stageKey);
+  }
+  function completePhase(jobId,stageKey){
+    db.prepare("UPDATE job_workflow_phases SET completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(jobId,stageKey);
+  }
+
   function createJob(body,req,defaults={}){
     const clientId=integerId(body?.client_id??defaults.client_id),pianoId=integerId(body?.piano_id??defaults.piano_id);
     const {client}=requireClientPiano(clientId,pianoId);
@@ -84,14 +141,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(!["workshop","on_site"].includes(locationType))throw problem("INVALID_SERVICE_LOCATION");
     const assigned=technician(body?.assigned_technician_id??defaults.assigned_technician_id,{optional:true});
     const duration=positiveDuration(body?.estimated_duration_min??defaults.estimated_duration_min??120);
-    const rawSchedule=text(body?.scheduled_at??defaults.scheduled_at,80);
+    const rawSchedule=text(body?.scheduled_at??defaults.scheduled_at,80),plan=normalizePlan(body?.workflow_phases??defaults.workflow_phases);
     let scheduledAt=null,stage=PIPELINE_STAGE;
     if(rawSchedule){
       scheduledAt=iso(rawSchedule);
       if(!assigned)throw problem("TECHNICIAN_REQUIRED_FOR_SCHEDULE");
       const conflict=findConflict(0,assigned.id,scheduledAt,duration);
       if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
-      stage="received";
+      stage=plan.find(row=>row.enabled&&row.stage_key!=="completed")?.stage_key||"received";
     }
     const siteAddress=text(body?.site_address??body?.service_address??defaults.site_address??(locationType==="on_site"?client.address:""),1200)||null;
     const info=db.prepare(`INSERT INTO jobs(
@@ -103,6 +160,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     );
     const id=Number(info.lastInsertRowid);
     db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${newYorkYear()}-${String(id).padStart(5,"0")}`,id);
+    writePlan(id,plan);
+    if(stage!==PIPELINE_STAGE)activatePhase(id,stage);
     const created=jobById(id);audit(req,"CREATE","jobs",String(id),null,created);return created;
   }
 
@@ -113,6 +172,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(existing)return {idempotent:true,job:jobById(Number(existing.id))};
     let converted={lead,client:lead.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(lead.client_id):null,piano:lead.piano_id?db.prepare("SELECT * FROM pianos WHERE id=?").get(lead.piano_id):null};
     if(lead.status!=="converted"||!converted.client||!converted.piano){
+      const {convertIntakeLead}=require("./round1-core");
       converted=convertIntakeLead(db,lead,body||{});
       audit(req,"CONVERT","intake",String(intakeId),lead,converted.lead);
     }
@@ -123,17 +183,34 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       location_type:converted.lead.service_location,
       site_address:body?.site_address||converted.client.address,
       assigned_technician_id:body?.assigned_technician_id||converted.lead.assigned_technician_id,
-      estimated_duration_min:body?.estimated_duration_min||120
+      estimated_duration_min:body?.estimated_duration_min||120,
+      workflow_phases:body?.workflow_phases
     },req);
     return {idempotent:false,job,client:converted.client,piano:converted.piano,lead:converted.lead};
   }
+
+  app.get("/api/workflow/settings",auth,staff,(_req,res)=>res.json({stages:stageDefinitions(),blocker_codes:[...BLOCKER_CODES]}));
+  app.put("/api/workflow/settings",auth,admin,(req,res)=>{
+    try{
+      const updates=Array.isArray(req.body?.stages)?req.body.stages:[];
+      const before=stageDefinitions(),byKey=new Map(updates.map(row=>[String(row?.key||row?.stage_key||""),row]));
+      const update=db.prepare("UPDATE workflow_stage_definitions SET label_en=?,label_hu=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=?");
+      for(const stage of before){
+        const incoming=byKey.get(stage.key);if(!incoming)continue;
+        const labelEn=text(incoming.label_en,80),labelHu=text(incoming.label_hu,80);
+        if(!labelEn||!labelHu)throw problem("WORKFLOW_LABEL_REQUIRED");
+        update.run(labelEn,labelHu,req.user.id,stage.key);
+      }
+      const after=stageDefinitions();audit(req,"UPDATE","workflow_settings","stages",before,after);res.json({stages:after});
+    }catch(error){respondError(res,error);}
+  });
 
   app.get("/api/jobs",auth,staff,(req,res)=>{
     try{
       const q=text(req.query.q,180).toLowerCase(),like=`%${q}%`,includeCancelled=req.query.include_cancelled==="1"?1:0;
       const rows=db.prepare(`${selectJob} WHERE (?=1 OR j.cancelled_at IS NULL)
         AND (?='' OR lower(j.title) LIKE ? OR lower(COALESCE(j.description,'')) LIKE ? OR lower(c.name) LIKE ? OR lower(p.brand||' '||COALESCE(p.model,'')) LIKE ? OR lower(COALESCE(j.job_code,'')) LIKE ?)
-        ORDER BY j.created_at DESC,j.id DESC`).all(includeCancelled,q,like,like,like,like,like);
+        ORDER BY j.created_at DESC,j.id DESC`).all(includeCancelled,q,like,like,like,like,like).map(decorateJob);
       res.json(rows);
     }catch(error){respondError(res,error);}
   });
@@ -146,27 +223,49 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   app.get("/api/clients/:id/jobs",auth,staff,(req,res)=>{
     const clientId=integerId(req.params.id);
     if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    res.json(db.prepare(`${selectJob} WHERE j.client_id=? ORDER BY j.created_at DESC,j.id DESC`).all(clientId));
+    res.json(db.prepare(`${selectJob} WHERE j.client_id=? ORDER BY j.created_at DESC,j.id DESC`).all(clientId).map(decorateJob));
   });
 
   app.get("/api/jobs/pipeline",auth,staff,(_req,res)=>{
-    res.json(db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage='planned' AND j.scheduled_at IS NULL ORDER BY j.created_at,j.id`).all());
+    res.json(db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage='planned' AND j.scheduled_at IS NULL ORDER BY j.created_at,j.id`).all().map(decorateJob));
   });
   app.get("/api/planned-jobs",auth,staff,(_req,res)=>{
-    res.json(db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage='planned' AND j.scheduled_at IS NULL ORDER BY j.created_at,j.id`).all());
+    res.json(db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage='planned' AND j.scheduled_at IS NULL ORDER BY j.created_at,j.id`).all().map(decorateJob));
   });
 
   app.get("/api/jobs/workflow",auth,staff,(_req,res)=>{
     const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage IN ('received','in_progress','qa_review','admin_approval','completed')
       ORDER BY CASE j.stage WHEN 'received' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'qa_review' THEN 2 WHEN 'admin_approval' THEN 3 ELSE 4 END,
-      COALESCE(j.scheduled_at,j.updated_at),j.id`).all();
-    res.json({stages:WORKFLOW_STAGES,columns:WORKFLOW_STAGES.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
+      COALESCE(j.scheduled_at,j.updated_at),j.id`).all().map(decorateJob);
+    const stages=stageDefinitions();
+    res.json({stages,columns:stages.map(stage=>({...stage,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
   });
   app.get("/api/workshop",auth,staff,(_req,res)=>{
     const jobs=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage IN ('received','in_progress','qa_review','admin_approval','completed')
       ORDER BY CASE j.stage WHEN 'received' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'qa_review' THEN 2 WHEN 'admin_approval' THEN 3 ELSE 4 END,
-      COALESCE(j.scheduled_at,j.updated_at),j.id`).all();
-    res.json({stages:WORKFLOW_STAGES,columns:WORKFLOW_STAGES.map(stage=>({...stage,key:stage.key,label:stage.label_en,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
+      COALESCE(j.scheduled_at,j.updated_at),j.id`).all().map(decorateJob);
+    const stages=stageDefinitions();
+    res.json({stages,columns:stages.map(stage=>({...stage,label:stage.label_en,jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
+  });
+
+  app.get("/api/workshop/overview",auth,staff,(_req,res)=>{
+    const all=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL ORDER BY COALESCE(j.scheduled_at,j.updated_at),j.id`).all().map(decorateJob);
+    const active=all.filter(job=>job.stage!=="planned"&&job.stage!=="completed");
+    const now=Date.now();
+    const overdue=active.filter(job=>job.current_phase?.due_at&&new Date(job.current_phase.due_at).getTime()<now);
+    const invoiceRows=db.prepare("SELECT id,job_id,invoice_number,status,total_amount,due_date FROM invoices WHERE direction='receivable' AND job_id IS NOT NULL AND status IN ('draft','sent') ORDER BY id DESC").all();
+    const invoiceByJob=new Map();for(const row of invoiceRows)if(!invoiceByJob.has(Number(row.job_id)))invoiceByJob.set(Number(row.job_id),row);
+    const openInvoice=all.filter(job=>job.ready_for_closeout||invoiceByJob.has(Number(job.id))).map(job=>({...job,invoice:invoiceByJob.get(Number(job.id))||null,invoice_issue:job.ready_for_closeout&&!invoiceByJob.has(Number(job.id))?"awaiting_closeout":invoiceByJob.get(Number(job.id))?.status==="draft"?"invoice_draft":"invoice_sent"}));
+    const activeFinancial=active.map(job=>({...job,financial_total:money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0))}));
+    res.json({
+      kpis:{
+        active_workflows:active.length,
+        overdue_workflows:overdue.length,
+        active_financial_total:money(activeFinancial.reduce((sum,row)=>sum+row.financial_total,0)),
+        open_invoice_actions:openInvoice.length
+      },
+      details:{active_workflows:active,overdue_workflows:overdue,active_financial:activeFinancial,open_invoice_actions:openInvoice}
+    });
   });
 
   app.get("/api/calendar",auth,staff,(req,res)=>{
@@ -175,15 +274,16 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       if(new Date(to).getTime()<=new Date(from).getTime())throw problem("INVALID_CALENDAR_RANGE");
       const technicianId=text(req.query.technician_id,160);
       const rows=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage<>'planned' AND j.scheduled_at IS NOT NULL
-        AND j.scheduled_at>=? AND j.scheduled_at<? AND (?='' OR j.assigned_technician_id=?)
-        ORDER BY j.scheduled_at,j.id`).all(from,to,technicianId,technicianId)
-        .map(row=>({...row,scheduled_end:endAt(row.scheduled_at,row.estimated_duration_min)}));
+        AND j.scheduled_at<? AND datetime(j.scheduled_at,'+'||j.estimated_duration_min||' minutes')>datetime(?)
+        AND (?='' OR j.assigned_technician_id=?)
+        ORDER BY j.scheduled_at,j.id`).all(to,from,technicianId,technicianId)
+        .map(row=>decorateJob({...row,scheduled_end:endAt(row.scheduled_at,row.estimated_duration_min)}));
       res.json({from,to,timezone:"America/New_York",jobs:rows});
     }catch(error){respondError(res,error);}
   });
 
   app.post("/api/jobs",auth,staff,(req,res)=>{
-    try{res.status(201).json(createJob(req.body||{},req));}catch(error){respondError(res,error);}
+    try{res.status(201).json(db.transaction(()=>createJob(req.body||{},req))());}catch(error){respondError(res,error);}
   });
 
   app.post("/api/intake/:id/convert-to-job",auth,staff,(req,res)=>{
@@ -201,6 +301,42 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     }catch(error){respondError(res,error);}
   });
 
+  app.get("/api/jobs/:id/workflow-phases",auth,staff,(req,res)=>{
+    const id=integerId(req.params.id),job=id&&jobById(id);if(!job)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    res.json({job_id:id,current_stage:job.stage,ready_for_closeout:job.ready_for_closeout,phases:job.workflow_phases,definitions:stageDefinitions()});
+  });
+  app.put("/api/jobs/:id/workflow-phases",auth,admin,(req,res)=>{
+    const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
+    try{
+      const incoming=normalizePlan(req.body?.phases),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
+      const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
+      const safe=incoming.map(row=>{
+        const old=oldByKey.get(row.stage_key);
+        if(currentPhase&&row.position<=currentPhase.position)return {...row,enabled:Boolean(old?.enabled),due_at:row.due_at??old?.due_at??null};
+        return row;
+      });
+      if(currentPhase&&!safe.find(row=>row.stage_key===before.stage)?.enabled)throw problem("CURRENT_WORKFLOW_PHASE_REQUIRED",409);
+      writePlan(id,safe,{preserveProgress:true});
+      const after=jobById(id);audit(req,"UPDATE_WORKFLOW_PLAN","jobs",String(id),before,after);res.json(after);
+    }catch(error){respondError(res,error);}
+  });
+  app.patch("/api/jobs/:id/workflow-phases/:stage",auth,staff,(req,res)=>{
+    const id=integerId(req.params.id),stage=text(req.params.stage,40),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(!ACTIVE_STAGE_KEYS.has(stage))return res.status(400).json({error:"INVALID_WORKFLOW_STAGE"});
+    const phase=before.workflow_phases.find(row=>row.stage_key===stage);if(!phase)return res.status(404).json({error:"WORKFLOW_PHASE_NOT_FOUND"});
+    if(req.user.role==="WORKER"&&stage!==before.stage)return res.status(403).json({error:"PERMISSION_DENIED"});
+    try{
+      const dueAt=req.body?.due_at===undefined?phase.due_at:optionalIso(req.body.due_at);
+      let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
+      const blockerNote=req.body?.blocker_note===undefined?phase.blocker_note:text(req.body.blocker_note,2000)||null;
+      if(blockerCode&&!BLOCKER_CODES.has(blockerCode))throw problem("INVALID_BLOCKER_CODE");
+      db.prepare("UPDATE job_workflow_phases SET due_at=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
+        .run(dueAt,blockerCode,blockerNote,id,stage);
+      const after=jobById(id);audit(req,"UPDATE_PHASE_STATUS","jobs",String(id),before,after);res.json(after);
+    }catch(error){respondError(res,error);}
+  });
+
   app.post("/api/jobs/activate/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
     if(before.cancelled_at)return res.status(409).json({error:"JOB_CANCELLED"});
@@ -209,8 +345,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const scheduledAt=iso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:false});
       const conflict=findConflict(id,assigned.id,scheduledAt,duration);if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
-      db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage='received',updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(scheduledAt,duration,assigned.id,id);
+      const stage=firstEnabledStage(id);if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
+      db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(scheduledAt,duration,assigned.id,stage,id);
+      activatePhase(id,stage);
       const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
@@ -223,9 +361,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const scheduledAt=iso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:false});
       const conflict=findConflict(id,assigned.id,scheduledAt,duration);if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
-      const stage=before.stage==="planned"?"received":before.stage;
+      const stage=before.stage==="planned"?firstEnabledStage(id):before.stage;
+      if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,stage,id);
+      if(before.stage==="planned")activatePhase(id,stage);
       const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
@@ -256,10 +396,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(before.cancelled_at)return res.status(409).json({error:"JOB_CANCELLED"});
     if(before.stage==="planned")return res.status(409).json({error:"JOB_MUST_BE_ACTIVATED"});
     if(before.stage==="completed")return res.status(409).json({error:"JOB_ALREADY_COMPLETED"});
-    if(before.stage==="admin_approval")return res.status(409).json({error:"ADMIN_CLOSEOUT_REQUIRED"});
+    if(before.ready_for_closeout)return res.status(409).json({error:"ADMIN_CLOSEOUT_REQUIRED"});
     if(req.user.role==="WORKER"&&before.assigned_technician_id&&String(before.assigned_technician_id)!==String(req.user.id))return res.status(403).json({error:"JOB_ASSIGNED_TO_ANOTHER_TECHNICIAN"});
     try{
-      const toStage=NEXT_STAGE[before.stage];if(!toStage)throw problem("INVALID_HANDOFF_STAGE");
+      const next=nextEnabledPhase(id,before.stage),toStage=next?.stage_key;if(!toStage)throw problem("INVALID_HANDOFF_STAGE");
+      if(toStage==="completed")throw problem("ADMIN_CLOSEOUT_REQUIRED",409);
       const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0);
       if(!(labor>=0)||!(material>=0))throw problem("INVALID_HANDOFF_COST");
       const fallbackAssignee=before.assigned_technician_id||req.user.id;
@@ -268,6 +409,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const result=db.transaction(()=>{
         const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,phase_labor_cost,phase_material_cost,created_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,assigned.id,assigned.name,note,labor,material);
+        completePhase(id,before.stage);activatePhase(id,toStage);
         db.prepare(`UPDATE jobs SET stage=?,assigned_technician_id=?,total_labor_cost=ROUND(total_labor_cost+?,2),total_material_cost=ROUND(total_material_cost+?,2),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(toStage,assigned.id,labor,material,id);
         return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),job:jobById(id)};
