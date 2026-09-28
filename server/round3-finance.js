@@ -72,7 +72,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   const invoiceDir=path.join(uploadDir,"invoices");
   fs.mkdirSync(invoiceDir,{recursive:true});
 
-  const selectInvoice=`SELECT i.*,c.name AS client_name,p.company_name AS partner_name,j.job_code,j.title AS job_title,
+  const selectInvoice=`SELECT i.*,c.name AS client_name,c.email AS client_master_email,p.company_name AS partner_name,j.job_code,j.title AS job_title,
     pi.brand AS piano_brand,pi.model AS piano_model,pi.serial_number AS piano_serial_number
     FROM invoices i
     LEFT JOIN clients c ON c.id=i.client_id
