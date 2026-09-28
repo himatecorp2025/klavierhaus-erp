@@ -103,6 +103,15 @@ function v6CmsPathRead(value){try{return JSON.parse(decodeURIComponent(value));}
 function v6CmsGet(path){return path.reduce((node,key)=>node?.[key],state.cmsDraft);}
 function v6CmsSet(path,value){if(!path.length)return;let node=state.cmsDraft;for(let i=0;i<path.length-1;i+=1)node=node[path[i]];node[path.at(-1)]=value;}
 function v6CmsImageKey(key){const value=String(key||"");return !/alt/i.test(value)&&/(^image$|image_url|imageurl|portrait_url|portraiturl|logoimage|logo_url|background|hero_image|photo|thumbnail)/i.test(value);}
+function v6CmsPreviewUrl(value){
+  const raw=String(value||"").trim();if(!raw)return "";
+  if(raw.startsWith("/uploads/website/"))return raw;
+  try{
+    const url=new URL(raw,window.location.origin);
+    if(url.pathname.startsWith("/uploads/website/"))return url.pathname+url.search;
+  }catch(_error){}
+  return raw;
+}
 function v6CmsMeta(){
   if(!state.cmsDraft._cms_media||typeof state.cmsDraft._cms_media!=="object")state.cmsDraft._cms_media={};
   return state.cmsDraft._cms_media;
@@ -117,7 +126,7 @@ function v6CmsImageField(value,path,key){
   const src=String(value||"");
   return `<article class="cms-media-card">
     <div class="cms-media-preview" style="--focal-x:${Number(meta.focal_x??50)}%;--focal-y:${Number(meta.focal_y??50)}%">
-      ${src?`<img src="${esc(src)}" alt="">`:`<div class="cms-media-empty">＋<span>${tr("No image","Nincs kép")}</span></div>`}
+      ${src?`<img src="${esc(v6CmsPreviewUrl(src))}" data-cms-original-src="${esc(src)}" alt="">`:`<div class="cms-media-empty">＋<span>${tr("No image","Nincs kép")}</span></div>`}
     </div>
     <div class="cms-media-body">
       <strong>${esc(v6CmsSectionTitle(key,0))}</strong>
@@ -190,13 +199,13 @@ async function v6LoadCmsPage(){
   $("#saveCmsBtn").addEventListener("click",async()=>{try{await api(`/api/website-content/${encodeURIComponent(state.cmsPage)}`,{method:"PUT",body:JSON.stringify({language:state.cmsLanguage,content:state.cmsDraft})});toast(tr("Website content published.","Weboldal tartalma publikálva."),"success");}catch(error){toast(humanError(error),"error");}});
 }
 
-function v6MediaUrlCard(url){return url?`<div class="collection-image-preview"><img src="${esc(url)}" alt=""></div>`:`<div class="collection-image-preview empty">＋</div>`;}
+function v6MediaUrlCard(url){return url?`<div class="collection-image-preview"><img src="${esc(v6CmsPreviewUrl(url))}" data-cms-original-src="${esc(url)}" alt=""></div>`:`<div class="collection-image-preview empty">＋</div>`;}
 async function v6CollectionImageUpload(input,setter){
   const file=input.files?.[0];if(!file)return;try{const result=await v6UploadWebsiteImage(file);setter(result.absolute_url||result.image_url);toast(tr("Image uploaded.","Kép feltöltve."),"success");}catch(error){toast(humanError(error),"error");}
 }
 function v6GalleryParse(value){try{const rows=Array.isArray(value)?value:JSON.parse(value||"[]");return rows.map(item=>typeof item==="string"?{url:item,alt_en:"",alt_hu:""}:item).filter(item=>item?.url);}catch(_error){return [];}}
 function v6GalleryMarkup(rows){
-  return `<div class="cms-gallery-grid">${rows.map((row,index)=>`<article><img src="${esc(row.url)}" alt=""><input data-gallery-alt-en="${index}" placeholder="Alt text EN" value="${esc(row.alt_en||"")}"><input data-gallery-alt-hu="${index}" placeholder="Alt text HU" value="${esc(row.alt_hu||"")}"><button type="button" class="text-button danger-text" data-gallery-remove="${index}">${tr("Remove","Eltávolítás")}</button></article>`).join("")}<label class="file-picker gallery-add"><input id="galleryFiles" type="file" accept="image/*" multiple><span>＋ ${tr("Add gallery images","Galériaképek hozzáadása")}</span></label></div>`;
+  return `<div class="cms-gallery-grid">${rows.map((row,index)=>`<article><img src="${esc(v6CmsPreviewUrl(row.url))}" data-cms-original-src="${esc(row.url)}" alt=""><input data-gallery-alt-en="${index}" placeholder="Alt text EN" value="${esc(row.alt_en||"")}"><input data-gallery-alt-hu="${index}" placeholder="Alt text HU" value="${esc(row.alt_hu||"")}"><button type="button" class="text-button danger-text" data-gallery-remove="${index}">${tr("Remove","Eltávolítás")}</button></article>`).join("")}<label class="file-picker gallery-add"><input id="galleryFiles" type="file" accept="image/*" multiple><span>＋ ${tr("Add gallery images","Galériaképek hozzáadása")}</span></label></div>`;
 }
 async function v6OpenCollectionEditor(type,row=null,refresh){
   const definitions={
