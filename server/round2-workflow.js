@@ -138,7 +138,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     }catch(error){respondError(res,error);}
   });
 
-  app.get("/api/jobs/:id",auth,staff,(req,res)=>{
+  app.get("/api/jobs/:id(\\d+)",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),row=id&&jobById(id);if(!row)return res.status(404).json({error:"JOB_NOT_FOUND"});
     res.json({...row,handoffs:db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(id)});
   });
