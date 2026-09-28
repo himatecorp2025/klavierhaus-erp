@@ -451,3 +451,96 @@ test("Admin and Super Admin invoice controls move deleted drafts to the document
   assert.equal(companyDocuments.status,200);
   assert.ok(companyDocuments.payload.rows.some(row=>row.id===createdDocument.payload.id));
 });
+
+
+test("Dynamic workflow supports two extra reorderable intermediate phases and cancelled history",async()=>{
+  const token=shared.adminToken;
+  const initial=await request("/api/workflow/settings",{token});
+  assert.equal(initial.status,200,JSON.stringify(initial.payload));
+  assert.equal(initial.payload.stages.length,5);
+  assert.equal(initial.payload.max_stages,7);
+  assert.equal(initial.payload.can_add_stage,true);
+
+  const firstAdd=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Voicing",label_hu:"Intonálás"}});
+  assert.equal(firstAdd.status,201,JSON.stringify(firstAdd.payload));
+  assert.equal(firstAdd.payload.stages.length,6);
+  const voicing=firstAdd.payload.stages.find(stage=>stage.label_en==="Voicing");
+  assert.ok(voicing);
+  assert.equal(voicing.removable,true);
+
+  const secondAdd=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Final Polish",label_hu:"Végső finomítás"}});
+  assert.equal(secondAdd.status,201,JSON.stringify(secondAdd.payload));
+  assert.equal(secondAdd.payload.stages.length,7);
+  assert.equal(secondAdd.payload.can_add_stage,false);
+  const polish=secondAdd.payload.stages.find(stage=>stage.label_en==="Final Polish");
+  assert.ok(polish);
+
+  const deniedThird=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Extra Eighth",label_hu:"Nyolcadik extra"}});
+  assert.equal(deniedThird.status,409,JSON.stringify(deniedThird.payload));
+  assert.equal(deniedThird.payload.error,"WORKFLOW_STAGE_LIMIT_REACHED");
+
+  const middle=[polish.key,"qa_review","in_progress",voicing.key];
+  const reordered=await request("/api/workflow/stages/order",{token,method:"PUT",body:{stage_keys:middle}});
+  assert.equal(reordered.status,200,JSON.stringify(reordered.payload));
+  assert.deepEqual(reordered.payload.stages.map(stage=>stage.key),["received",...middle,"admin_approval","completed"]);
+
+  const created=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Flexible dynamic workflow test"
+  }});
+  assert.equal(created.status,201,JSON.stringify(created.payload));
+  assert.equal(created.payload.stage,"planned");
+  assert.equal(created.payload.workflow_phases.filter(phase=>phase.enabled).length,7);
+
+  const activated=await request("/api/jobs/activate/"+created.payload.id,{token,method:"POST",body:{
+    scheduled_at:futureIso(6,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"
+  }});
+  assert.equal(activated.status,200,JSON.stringify(activated.payload));
+  assert.equal(activated.payload.stage,"received");
+
+  const jumpToVoicing=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{
+    to_stage:voicing.key,phase_note:"Voicing is ready before the earlier intermediate phases"
+  }});
+  assert.equal(jumpToVoicing.status,201,JSON.stringify(jumpToVoicing.payload));
+  assert.equal(jumpToVoicing.payload.job.stage,voicing.key);
+
+  const toQa=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"qa_review"}});
+  assert.equal(toQa.status,201,JSON.stringify(toQa.payload));
+  assert.equal(toQa.payload.job.stage,"qa_review");
+
+  const prematureApproval=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"admin_approval"}});
+  assert.equal(prematureApproval.status,409,JSON.stringify(prematureApproval.payload));
+  assert.equal(prematureApproval.payload.error,"WORKFLOW_PHASES_REMAINING");
+
+  const toPolish=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:polish.key}});
+  assert.equal(toPolish.status,201,JSON.stringify(toPolish.payload));
+  const toProgress=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"in_progress"}});
+  assert.equal(toProgress.status,201,JSON.stringify(toProgress.payload));
+  const toApproval=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"admin_approval"}});
+  assert.equal(toApproval.status,201,JSON.stringify(toApproval.payload));
+  assert.equal(toApproval.payload.job.stage,"admin_approval");
+  assert.equal(toApproval.payload.job.ready_for_closeout,true);
+
+  const historyBeforeCancel=await request("/api/jobs/"+created.payload.id+"/history",{token});
+  assert.equal(historyBeforeCancel.status,200,JSON.stringify(historyBeforeCancel.payload));
+  assert.equal(historyBeforeCancel.payload.handoffs.length,5);
+  assert.ok(historyBeforeCancel.payload.phases.find(phase=>phase.stage_key===voicing.key)?.completed_at);
+  assert.ok(historyBeforeCancel.payload.events.length>=1);
+
+  const cancelled=await request("/api/jobs/"+created.payload.id+"/cancel",{token,method:"POST",body:{party:"klavierhaus",reason:"Dynamic workflow cancellation audit test"}});
+  assert.equal(cancelled.status,200,JSON.stringify(cancelled.payload));
+
+  const cancelledClosed=await request("/api/jobs/workflow?bucket=closed&closed_type=cancelled",{token});
+  assert.equal(cancelledClosed.status,200,JSON.stringify(cancelledClosed.payload));
+  assert.equal(cancelledClosed.payload.closed_type,"cancelled");
+  assert.ok(cancelledClosed.payload.jobs.some(job=>job.id===created.payload.id));
+  const completedClosed=await request("/api/jobs/workflow?bucket=closed&closed_type=completed",{token});
+  assert.equal(completedClosed.status,200);
+  assert.equal(completedClosed.payload.jobs.some(job=>job.id===created.payload.id),false);
+  assert.ok(completedClosed.payload.jobs.some(job=>job.id===shared.job.id));
+
+  const removeVoicing=await request("/api/workflow/stages/"+encodeURIComponent(voicing.key),{token,method:"DELETE"});
+  assert.equal(removeVoicing.status,200,JSON.stringify(removeVoicing.payload));
+  const removePolish=await request("/api/workflow/stages/"+encodeURIComponent(polish.key),{token,method:"DELETE"});
+  assert.equal(removePolish.status,200,JSON.stringify(removePolish.payload));
+  assert.deepEqual(removePolish.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
+});
