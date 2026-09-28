@@ -157,6 +157,59 @@ input:focus,textarea:focus,select:focus{border-color:#8aabff;box-shadow:0 0 0 4p
 .loading::before{content:"";width:20px;height:20px;margin-right:10px;border:2px solid #d8dce3;border-top-color:#303641;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+
+
+/* Round 2: Planned Jobs + Workshop & Calendar */
+.workflow-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.workflow-scroll{overflow-x:auto;padding-bottom:8px;margin-bottom:18px;overscroll-behavior-inline:contain}
+.workflow-board{display:grid;grid-template-columns:repeat(5,minmax(255px,1fr));gap:12px;min-width:1320px;align-items:start}
+.workflow-column{min-height:380px;border:1px solid var(--line);border-radius:17px;background:#f0f2f5;padding:10px;transition:.15s border-color,.15s background}
+.workflow-column>header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 7px 12px}
+.workflow-column>header h2{margin:0;font-size:16px;letter-spacing:-.02em}
+.workflow-column.drag-over{border-color:#88a8ff;background:#eaf1ff}
+.column-count{display:grid;place-items:center;min-width:31px;height:31px;padding:0 7px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12px;font-weight:800}
+.workflow-stack{display:grid;gap:9px}
+.workflow-empty{display:grid;place-items:center;min-height:105px;padding:16px;border:1px dashed #cfd4dc;border-radius:13px;color:var(--muted);font-size:12px;text-align:center}
+.job-card{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 2px 9px rgba(20,28,42,.035)}
+.job-card.dragging{opacity:.52}
+.job-card.priority-urgent{border-left:4px solid #d84a4a}
+.job-card.priority-low{border-left:4px solid #63a37e}
+.job-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.job-code{font-size:10px;font-weight:850;letter-spacing:.08em;color:var(--muted)}
+.priority-chip{display:inline-flex;align-items:center;min-height:26px;padding:0 8px;border-radius:999px;background:var(--surface-2);font-size:10px;font-weight:800}
+.priority-chip.urgent{background:#fff0f0;color:#a82929}
+.priority-chip.low{background:#edf8f1;color:#20724d}
+.job-card h3{margin:0;font-size:15px;line-height:1.28}
+.job-party{margin:0;color:#4f5662;font-size:12px;font-weight:700}
+.job-description{margin:0;color:var(--muted);font-size:12px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.job-meta{display:grid;gap:5px;color:#616873;font-size:11px}
+.blocked-note{padding:9px 10px;border-radius:10px;background:#fff5e7;color:#8b5a0b;font-size:11px;line-height:1.4}
+.job-actions{display:grid;grid-template-columns:auto 1fr;gap:7px;align-items:center;padding-top:2px}
+.job-actions .job-status-select{grid-column:1/-1;min-height:42px;padding-top:7px;padding-bottom:7px}
+.job-actions .text-button{justify-self:start}
+.planned-toolbar{display:grid;grid-template-columns:1fr auto;gap:12px;margin-bottom:16px}
+.planned-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.planned-grid .job-card{min-height:100%}
+.calendar-panel{overflow:hidden}
+.calendar-toolbar{display:grid;grid-template-columns:auto 1fr minmax(170px,230px);align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.calendar-toolbar>strong{text-align:center;font-size:14px}
+.calendar-nav{display:flex;gap:7px}
+.calendar-nav button{min-width:48px;padding:0 13px}
+.calendar-scroll{overflow-x:auto;overscroll-behavior-inline:contain}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(155px,1fr));min-width:1085px}
+.calendar-day{min-height:330px;border-right:1px solid var(--line);background:#fff}
+.calendar-day:last-child{border-right:0}
+.calendar-day>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:52px;padding:9px 11px;border-bottom:1px solid var(--line);background:#fafbfc}
+.calendar-day>header strong{text-transform:capitalize;font-size:12px}
+.calendar-day>header span{font-size:11px;color:var(--muted)}
+.calendar-day-body{display:grid;align-content:start;gap:7px;padding:8px}
+.calendar-job{display:grid;gap:4px;min-height:72px;padding:9px 9px 9px 11px;border:1px solid var(--line);border-left:4px solid var(--tech-color,#66707b);border-radius:11px;background:#fff;text-align:left;color:inherit}
+.calendar-job:hover{background:#f8faff}
+.calendar-job strong{font-size:11px}
+.calendar-job span{font-size:12px;font-weight:750;line-height:1.25}
+.calendar-job small{font-size:10px;color:var(--muted);line-height:1.25}
+.calendar-empty{display:grid;place-items:center;min-height:70px;color:#c1c5cc}
+
 @media(max-width:1180px){
   .desktop-nav .nav-item{padding:0 9px;font-size:12px}
   .desktop-nav .nav-item span{display:none}
@@ -198,3 +251,21 @@ input:focus,textarea:focus,select:focus{border-color:#8aabff;box-shadow:0 0 0 4p
   .login-screen{padding-top:calc(24px + env(safe-area-inset-top,0px))}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
+
+@media(max-width:1100px){
+  .planned-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .mobile-nav{grid-template-columns:repeat(6,minmax(62px,1fr));overflow-x:auto}
+  .workflow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .calendar-toolbar{grid-template-columns:1fr;align-items:stretch}
+  .calendar-toolbar>strong{text-align:left}
+  .planned-toolbar{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .planned-grid{grid-template-columns:1fr}
+  .workflow-stats{grid-template-columns:1fr 1fr}
+  .job-actions{grid-template-columns:1fr}
+  .job-actions .job-status-select{grid-column:auto}
+  .job-actions button,.job-actions select{width:100%}
+}
