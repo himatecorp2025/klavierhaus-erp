@@ -2,13 +2,15 @@
 
 const PIPELINE_STAGE="planned";
 const WORKFLOW_STAGES=Object.freeze([
-  {key:"received",label_en:"Received / Scheduled",label_hu:"Beérkezett / Ütemezve",position:1},
-  {key:"in_progress",label_en:"In Progress",label_hu:"Folyamatban",position:2},
-  {key:"qa_review",label_en:"QA / Handoff",label_hu:"Minőségellenőrzés / Átadás",position:3},
-  {key:"admin_approval",label_en:"Admin Approval",label_hu:"Admin jóváhagyás",position:4},
-  {key:"completed",label_en:"Completed",label_hu:"Lezárva",position:5}
+  {key:"received",label_en:"Received / Scheduled",label_hu:"Beérkezett / Ütemezve",position:1,stage_type:"start",active:1,removable:0},
+  {key:"in_progress",label_en:"In Progress",label_hu:"Folyamatban",position:2,stage_type:"intermediate",active:1,removable:0},
+  {key:"qa_review",label_en:"QA / Handoff",label_hu:"Minőségellenőrzés / Átadás",position:3,stage_type:"intermediate",active:1,removable:0},
+  {key:"admin_approval",label_en:"Admin Approval",label_hu:"Admin jóváhagyás",position:4,stage_type:"approval",active:1,removable:0},
+  {key:"completed",label_en:"Completed",label_hu:"Lezárva",position:5,stage_type:"completed",active:1,removable:0}
 ]);
 const ACTIVE_STAGE_KEYS=new Set(WORKFLOW_STAGES.map(stage=>stage.key));
+const MAX_WORKFLOW_STAGES=7;
+const FIXED_STAGE_KEYS=new Set(["received","admin_approval","completed"]);
 const BLOCKER_CODES=new Set(["material_procurement","parts_procurement","material_issue","waiting_client","waiting_technician","waiting_admin","waiting_invoice","other"]);
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
@@ -43,27 +45,47 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     JOIN pianos p ON p.id=j.piano_id
     LEFT JOIN users u ON u.id=j.assigned_technician_id`;
 
-  function stageDefinitions(){
-    const rows=db.prepare("SELECT stage_key key,position,label_en,label_hu FROM workflow_stage_definitions ORDER BY position").all();
-    return rows.length===WORKFLOW_STAGES.length?rows:WORKFLOW_STAGES.map(row=>({...row}));
+  function stageDefinitions({includeInactive=false}={}){
+    const rows=db.prepare(`SELECT stage_key key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_at
+      FROM workflow_stage_definitions ${includeInactive?"":"WHERE active=1"} ORDER BY position,created_at,stage_key`).all();
+    return rows.length?rows.map(row=>({...row,active:Boolean(row.active),removable:Boolean(row.removable)})):WORKFLOW_STAGES.map(row=>({...row,active:true,removable:false}));
+  }
+  function stageByKey(key,{includeInactive=false}={}){
+    return stageDefinitions({includeInactive}).find(stage=>stage.key===key)||null;
+  }
+  function logicalStage(row){return row?.workflow_stage_key||row?.stage||PIPELINE_STAGE;}
+  function storageStage(stageKey){
+    if(["received","in_progress","qa_review","admin_approval","completed"].includes(stageKey))return stageKey;
+    return "in_progress";
   }
   function phasesForJob(jobId){
     const rows=db.prepare(`SELECT id,job_id,stage_key,position,enabled,due_at,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at
-      FROM job_workflow_phases WHERE job_id=? ORDER BY position`).all(jobId);
+      FROM job_workflow_phases WHERE job_id=? ORDER BY position,id`).all(jobId);
     if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled)}));
-    return WORKFLOW_STAGES.map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,due_at:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,due_at:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+  }
+  function pendingWorkingPhases(jobId,currentStage){
+    return phasesForJob(jobId).filter(row=>row.enabled&&!row.completed_at&&row.stage_key!==currentStage&&row.stage_key!=="completed"&&row.stage_key!=="admin_approval");
   }
   function nextEnabledPhase(jobId,currentStage){
     const phases=phasesForJob(jobId),current=phases.find(row=>row.stage_key===currentStage);
     if(!current)return null;
-    return phases.find(row=>row.enabled&&row.position>current.position)||null;
+    const pending=pendingWorkingPhases(jobId,currentStage);
+    if(pending.length)return pending.sort((a,b)=>a.position-b.position)[0];
+    const approval=phases.find(row=>row.enabled&&row.stage_key==="admin_approval"&&!row.completed_at);
+    if(approval&&currentStage!=="admin_approval")return approval;
+    return phases.find(row=>row.enabled&&row.stage_key==="completed")||null;
+  }
+  function readyForCloseout(jobId,currentStage){
+    if(currentStage!=="admin_approval")return false;
+    return !phasesForJob(jobId).some(row=>row.enabled&&!row.completed_at&&!["admin_approval","completed"].includes(row.stage_key));
   }
   function decorateJob(row){
     if(!row)return null;
-    const workflow_phases=phasesForJob(row.id);
-    const current_phase=workflow_phases.find(phase=>phase.stage_key===row.stage)||null;
-    const next_phase=row.stage==="planned"||row.stage==="completed"?null:nextEnabledPhase(row.id,row.stage);
-    return {...row,workflow_phases,current_phase,next_stage:next_phase?.stage_key||null,ready_for_closeout:Boolean(next_phase&&next_phase.stage_key==="completed")};
+    const stage=logicalStage(row),workflow_phases=phasesForJob(row.id);
+    const current_phase=workflow_phases.find(phase=>phase.stage_key===stage)||null;
+    const next_phase=stage==="planned"||stage==="completed"?null:nextEnabledPhase(row.id,stage);
+    return {...row,storage_stage:row.stage,stage,workflow_phases,current_phase,next_stage:next_phase?.stage_key||null,ready_for_closeout:readyForCloseout(row.id,stage)};
   }
   const jobById=id=>decorateJob(db.prepare(`${selectJob} WHERE j.id=?`).get(id));
 
@@ -85,7 +107,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(!technicianId||!start)return null;
     const wantedStart=new Date(start).getTime(),wantedEnd=new Date(endAt(start,duration)).getTime();
     const rows=db.prepare(`${selectJob} WHERE j.id<>? AND j.assigned_technician_id=? AND j.cancelled_at IS NULL
-      AND j.stage IN ('received','in_progress','qa_review','admin_approval') AND j.scheduled_at IS NOT NULL`).all(jobId||0,technicianId);
+      AND j.stage NOT IN ('planned','completed') AND j.scheduled_at IS NOT NULL`).all(jobId||0,technicianId);
     return rows.find(row=>{
       const rowStart=new Date(row.scheduled_at).getTime(),rowEnd=new Date(endAt(row.scheduled_at,row.estimated_duration_min)).getTime();
       return rowStart<wantedEnd&&rowEnd>wantedStart;
@@ -94,12 +116,13 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   function normalizePlan(input){
     const supplied=Array.isArray(input)?input:null;
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
-    const plan=WORKFLOW_STAGES.map(stage=>{
+    const plan=stageDefinitions().map(stage=>{
       const item=byKey.get(stage.key);
-      const enabled=stage.key==="completed"?true:(supplied?Boolean(item?.enabled):true);
+      const mandatory=FIXED_STAGE_KEYS.has(stage.key);
+      const enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
       return {stage_key:stage.key,position:stage.position,enabled,due_at:item?optionalIso(item.due_at):null};
     });
-    if(!plan.some(row=>row.stage_key!=="completed"&&row.enabled))throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
+    for(const key of ["received","admin_approval","completed"])if(!plan.find(row=>row.stage_key===key)?.enabled)throw problem("WORKFLOW_FIXED_STAGE_REQUIRED");
     return plan;
   }
   function writePlan(jobId,plan,{preserveProgress=false}={}){
@@ -116,7 +139,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     }
   }
   function firstEnabledStage(jobId){
-    return phasesForJob(jobId).find(row=>row.enabled&&row.stage_key!=="completed")?.stage_key||null;
+    return phasesForJob(jobId).find(row=>row.enabled&&row.stage_key==="received")?.stage_key||null;
   }
   function activatePhase(jobId,stageKey){
     db.prepare("UPDATE job_workflow_phases SET activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(jobId,stageKey);
