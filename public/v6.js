@@ -343,8 +343,8 @@ async function v6RenderArchive(){
   $("#archiveCategory").addEventListener("change",async event=>{state.archiveCategory=event.target.value;state.archiveQuery="";await v6RenderArchive();});
   $("#archiveSearch").addEventListener("input",debounce(async event=>{state.archiveQuery=event.target.value.trim();await v6RenderArchive();},220));
   $("#archiveAddDocument").addEventListener("click",()=>v6OpenArchiveUpload(v6RenderArchive));
-  $("[data-archive-download]",main).forEach(button=>button.addEventListener("click",()=>v6DownloadArchive(rows.find(row=>String(row.id)===button.dataset.archiveDownload))));
-  $("[data-archive-details]",main).forEach(button=>button.addEventListener("click",()=>{
+  $$("[data-archive-download]",main).forEach(button=>button.addEventListener("click",()=>v6DownloadArchive(rows.find(row=>String(row.id)===button.dataset.archiveDownload))));
+  $$("[data-archive-details]",main).forEach(button=>button.addEventListener("click",()=>{
     const row=rows.find(item=>String(item.id)===button.dataset.archiveDetails),invoice=row?.metadata?.invoice;
     openDialog({title:row?.title||tr("Archive record","Archív tétel"),eyebrow:v6ArchiveLabel(row?.category||""),body:`<div class="archive-detail">${row?.description?`<p>${esc(row.description)}</p>`:""}${invoice?`<div class="invoice-detail-kpis"><div><small>${tr("Invoice","Számla")}</small><strong>${esc(invoice.invoice_number||"")}</strong></div><div><small>${tr("Client","Ügyfél")}</small><strong>${esc(invoice.counterparty_name||"")}</strong></div><div><small>${tr("Total","Összesen")}</small><strong>${typeof r3Money==="function"?r3Money(invoice.total_amount):esc(invoice.total_amount)}</strong></div></div>`:""}<div class="detail-note">${tr("Archived","Archiválva")}: ${esc(v6ArchiveDate(row?.archived_at))}</div></div>`});
   }));
