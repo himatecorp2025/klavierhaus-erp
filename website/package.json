@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/event-client.js && node --check public/app.js"
+    "check": "node --check server/index.js && node --check server/event-client.js && node --check public/app.js",
+    "check:assets": "node test/check-public-assets.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "adm-zip": "0.6.0",
