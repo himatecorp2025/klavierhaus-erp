@@ -1,4 +1,4 @@
-name: Klavierhaus ERP Round 3 CI
+name: Klavierhaus ERP Final Compliance CI
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  round3-verify:
+  final-compliance-verify:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -30,7 +30,7 @@ jobs:
         run: npm run check:migration
       - name: Check active JavaScript and schema
         run: npm run check
-      - name: Run full acceptance suite five times
+      - name: Run final acceptance suite five times
         run: |
           for run in 1 2 3 4 5; do
             echo "Acceptance run ${run}/5"
