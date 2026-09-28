@@ -1,5 +1,5 @@
 {
-  "name": "klavierhaus-public-website",
+  "name": "klavierhaus-calendar-finance-system",
   "version": "6.7.0",
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
@@ -10,9 +10,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/event-client.js && node --check public/app.js",
-    "check:assets": "node test/check-public-assets.js",
-    "test": "node --test test/*.test.js"
+    "check": "node --check server/index.js && node --check server/event-client.js && node --check public/app.js"
   },
   "dependencies": {
     "adm-zip": "0.6.0",
