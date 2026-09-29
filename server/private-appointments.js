@@ -9,6 +9,7 @@ const validEmail=value=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(value,320).toLow
 const tokenHash=token=>crypto.createHash("sha256").update(String(token)).digest("hex");
 function encryptionKey(env=process.env){const secret=String(env.CONVERSATION_TOKEN_ENCRYPTION_KEY||env.JWT_SECRET||"").trim();return crypto.createHash("sha256").update(secret||"klavierhaus-conversation-key-not-for-production").digest();}
 function encryptToken(token,key){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key,iv),ciphertext=Buffer.concat([cipher.update(String(token),"utf8"),cipher.final()]);return [iv,cipher.getAuthTag(),ciphertext].map(part=>part.toString("base64url")).join(".");}
+function decryptToken(value,key){try{const [iv,tag,data]=String(value||"").split(".");if(!iv||!tag||!data)return "";const decipher=crypto.createDecipheriv("aes-256-gcm",key,Buffer.from(iv,"base64url"));decipher.setAuthTag(Buffer.from(tag,"base64url"));return Buffer.concat([decipher.update(Buffer.from(data,"base64url")),decipher.final()]).toString("utf8");}catch(_error){return "";}}
 function formatNy(date){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"})
     .formatToParts(date).reduce((out,part)=>(out[part.type]=part.value,out),{});
@@ -133,7 +134,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   function ensureConversationForRequest(request,actor){
     if(request.conversation_id){
       const row=db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(request.conversation_id);
-      if(row)return {conversation:row,token:null};
+      if(row)return {conversation:row,token:decryptToken(row.public_token_encrypted,tokenKey)||null};
     }
     const conversationId=rid("CONV"),token=crypto.randomBytes(32).toString("base64url"),messageId=rid("MSG");
     const body=`Private appointment request · ${formatNy(new Date(request.requested_at))} ET${request.note?` · ${request.note}`:""}`;
@@ -165,6 +166,10 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   });
 
   app.get("/api/private-appointment-requests",auth,staff,(req,res)=>{
+    db.prepare(`UPDATE private_appointment_requests SET status='REQUESTED',updated_at=CURRENT_TIMESTAMP
+      WHERE status='PROPOSED' AND proposal_id IN (
+        SELECT id FROM customer_appointment_proposals WHERE status='CANCELLED' AND private_appointment_id IS NULL
+      )`).run();
     const status=clean(req.query.status,30).toUpperCase(),clauses=[],args=[];
     if(status){const statuses=status.split(",").map(item=>item.trim()).filter(Boolean);if(statuses.some(item=>!["REQUESTED","PROPOSED","APPROVED","DECLINED","CANCELLED"].includes(item)))return res.status(400).json({error:"INVALID_PRIVATE_APPOINTMENT_REQUEST_STATUS"});clauses.push(`r.status IN (${statuses.map(()=>"?").join(",")})`);args.push(...statuses);}
     res.json(db.prepare(`${requestSql} ${clauses.length?"WHERE "+clauses.join(" AND "):""} ORDER BY CASE r.status WHEN 'REQUESTED' THEN 0 WHEN 'PROPOSED' THEN 1 ELSE 2 END,r.requested_at,r.created_at`).all(...args));
@@ -176,10 +181,11 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const before=requestById(req.params.id);if(!before)return res.status(404).json({error:"PRIVATE_APPOINTMENT_REQUEST_NOT_FOUND"});
     if(!["REQUESTED","PROPOSED"].includes(before.status))return res.status(409).json({error:"PRIVATE_APPOINTMENT_REQUEST_ALREADY_RESOLVED"});
     const body={...before,...req.body,name:before.name,email:before.email,phone:before.phone,piano_id:before.piano_id,service_id:before.service_id,scheduled_at:req.body?.scheduled_at||before.requested_at,duration_min:req.body?.duration_min||before.requested_duration_min,language:before.language,source_path:before.source_path};
-    const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",email:before.email}))();
+    const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",email:before.email,excludeProposalId:before.proposal_id||null}))();
     if(result.error)return res.status(result.status).json({error:result.error,details:result.details});
     db.prepare(`UPDATE private_appointment_requests SET status='APPROVED',private_appointment_id=?,assigned_user_id=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(result.row.id,result.row.assigned_user_id||null,req.user.id,before.id);
+    if(before.proposal_id)db.prepare("UPDATE customer_appointment_proposals SET status='CANCELLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND private_appointment_id IS NULL").run(before.proposal_id);
     const after=requestById(before.id);notify(result.row,{kind:"created",actor:req.user});notifyRequest(after,{kind:"approved",actor:req.user});
     const emailDelivery=await sendDecisionEmail({...after,scheduled_at:result.row.scheduled_at,scheduled_end_at:result.row.scheduled_end_at,duration_min:result.row.duration_min},"APPROVED");
     audit(req,"APPROVE","private_appointment_requests",before.id,before,after);res.json({...after,appointment:result.row,email_delivery:emailDelivery});
