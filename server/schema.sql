@@ -1068,7 +1068,6 @@ CREATE TABLE IF NOT EXISTS clients (
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
   client_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
-  customer_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(customer_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
   vip_updated_by_user_id TEXT,
   vip_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1571,7 +1570,7 @@ CREATE TABLE IF NOT EXISTS kpi_summary_cache (
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(lower(name));
 CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(lower(email));
 CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
-CREATE INDEX IF NOT EXISTS idx_clients_customer_type ON clients(customer_type,is_vip,lower(name));
+CREATE INDEX IF NOT EXISTS idx_clients_client_type ON clients(client_type,is_vip,lower(name));
 CREATE INDEX IF NOT EXISTS idx_pianos_client ON pianos(client_id);
 CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
 CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at DESC);
