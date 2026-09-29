@@ -538,6 +538,27 @@ test("Deleting an Intake archives a complete snapshot and PDF while client and l
 });
 
 
+
+test("Website recovery API enforces backup creation and destructive-action permissions",async()=>{
+  const adminToken=shared.adminToken;
+  const manual=await request("/api/website-recovery/backups",{token:adminToken,method:"POST",body:{label:"Pre-launch golden state"}});
+  assert.equal(manual.status,201,JSON.stringify(manual.payload));
+  assert.equal(manual.payload.trigger_type,"MANUAL");
+  const status=await request("/api/website-recovery",{token:adminToken});
+  assert.equal(status.status,200,JSON.stringify(status.payload));
+  assert.ok(status.payload.backups.some(row=>row.id===manual.payload.id));
+
+  const deniedFull=await request("/api/website-recovery/factory-reset",{token:adminToken,method:"POST",body:{scope:"all",confirmation:"RESET WEBSITE"}});
+  assert.equal(deniedFull.status,403,JSON.stringify(deniedFull.payload));
+  assert.equal(deniedFull.payload.error,"SUPERADMIN_REQUIRED");
+
+  const superToken=await login("owner.final@example.com");
+  const badRestore=await request("/api/website-recovery/backups/"+encodeURIComponent(manual.payload.id)+"/restore",{token:superToken,method:"POST",body:{confirmation:"WRONG"}});
+  assert.equal(badRestore.status,409,JSON.stringify(badRestore.payload));
+  assert.equal(badRestore.payload.error,"WEBSITE_RESTORE_CONFIRMATION_REQUIRED");
+});
+
+
 test("Dynamic workflow supports two extra reorderable intermediate phases and cancelled history",async()=>{
   const token=shared.adminToken;
   const initial=await request("/api/workflow/settings",{token});
