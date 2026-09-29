@@ -5,7 +5,8 @@ const path=require("node:path");
 const crypto=require("node:crypto");
 const multer=require("multer");
 
-const CATEGORIES=new Set(["deleted_invoice","internal_correspondence","company_message","company_document"]);
+const CATEGORIES=new Set(["deleted_invoice","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
+const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","intake_assessment"]);
 const EXTENSIONS=new Set([".pdf",".doc",".docx",".xls",".xlsx",".csv",".txt",".jpg",".jpeg",".png",".webp",".gif"]);
 const MIMES=new Set([
   "application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -61,7 +62,7 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
       if(error)return respond(res,error);
       try{
         const category=text(req.body?.category,80),title=text(req.body?.title,300),description=text(req.body?.description,5000);
-        if(!CATEGORIES.has(category)||category==="deleted_invoice")throw problem("INVALID_ARCHIVE_CATEGORY");
+        if(!CATEGORIES.has(category)||SYSTEM_ONLY_CATEGORIES.has(category))throw problem("INVALID_ARCHIVE_CATEGORY");
         if(!title)throw problem("ARCHIVE_TITLE_REQUIRED");
         const file=req.file||null,publicPath=file?`/uploads/archive/${path.basename(file.path)}`:null;
         const info=db.prepare(`INSERT INTO document_archive(category,title,description,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
