@@ -52,7 +52,7 @@ function createAutomationOutbox({db,notifications,maxAttempts=5}){
       db.prepare("UPDATE automation_outbox SET status='completed',completed_at=CURRENT_TIMESTAMP,locked_at=NULL,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
       return rowById(id);
     }catch(error){
-      const attempts=Number(row.attempts||0)+1,terminal=attempts>=maxAttempts,delay=delays[Math.min(attempts-1,delays.length-1)];
+      const attempts=Number(row.attempts||0)+1,terminal=error?.retryable===false||attempts>=maxAttempts,delay=delays[Math.min(attempts-1,delays.length-1)];
       db.prepare("UPDATE automation_outbox SET status=?,attempts=?,available_at=?,locked_at=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(terminal?"failed":"pending",attempts,sqlTime(new Date(Date.now()+delay*1000)),text(error?.code||error?.message||"AUTOMATION_FAILED",1000),id);
       const after=rowById(id);if(terminal)notifyTerminal(after,error);

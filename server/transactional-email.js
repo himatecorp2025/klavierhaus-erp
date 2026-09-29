@@ -162,6 +162,50 @@ function buildIntakeAssessmentEmail({ clientName, piano, issue, items = [], esti
   return {subject,text,html};
 }
 
+function buildCustomerMilestoneEmail({ eventType, clientName, job = {}, invoice = {}, language = "en" }) {
+  const hu=language==="hu",name=clientName||(hu?"Ügyfelünk":"Valued Client");
+  const localDate=value=>{
+    if(!value)return "";
+    const raw=String(value),date=new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw)?raw+"T12:00:00Z":raw);
+    if(!Number.isFinite(date.getTime()))return raw;
+    return new Intl.DateTimeFormat(hu?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"long",...(raw.includes("T")?{timeStyle:"short"}:{})}).format(date);
+  };
+  const jobRef=[job.job_code,job.title].filter(Boolean).join(" · "),schedule=localDate(job.scheduled_at),due=localDate(invoice.due_date);
+  const amount=Number(invoice.total_amount||0).toLocaleString("en-US",{style:"currency",currency:"USD"});
+  const copy={
+    JOB_CONFIRMED:hu
+      ?["Klavierhaus · Munka jóváhagyva","Tisztelt "+name+"! Az igényfelmérés alapján jóváhagyott munka bekerült a Klavierhaus munkafolyamatába.",jobRef]
+      :["Klavierhaus · Service approved","Dear "+name+", the service approved from your assessment has been added to the Klavierhaus workshop workflow.",jobRef],
+    APPOINTMENT_SCHEDULED:hu
+      ?["Klavierhaus · Időpont visszaigazolás","Tisztelt "+name+"! A szolgáltatás időpontját rögzítettük.",schedule]
+      :["Klavierhaus · Appointment confirmed","Dear "+name+", your service appointment has been scheduled.",schedule],
+    APPOINTMENT_REMINDER:hu
+      ?["Klavierhaus · Időpont-emlékeztető","Tisztelt "+name+"! Emlékeztetjük a közelgő Klavierhaus időpontra.",schedule]
+      :["Klavierhaus · Appointment reminder","Dear "+name+", this is a reminder about your upcoming Klavierhaus appointment.",schedule],
+    WORK_STARTED:hu
+      ?["Klavierhaus · A munka megkezdődött","Tisztelt "+name+"! Megkezdtük a jóváhagyott munkát a hangszerén.",jobRef]
+      :["Klavierhaus · Service work started","Dear "+name+", we have started the approved service work on your piano.",jobRef],
+    WORK_COMPLETED:hu
+      ?["Klavierhaus · A munka elkészült","Tisztelt "+name+"! A jóváhagyott munka elkészült. A számlát külön küldjük, amikor azt az adminisztrátor jóváhagyja küldésre.",jobRef]
+      :["Klavierhaus · Service work completed","Dear "+name+", the approved service work has been completed. Your invoice will be sent separately when an administrator approves it for delivery.",jobRef],
+    INVOICE_DUE_3_DAYS:hu
+      ?["Klavierhaus · Számla hamarosan esedékes","Tisztelt "+name+"! Emlékeztetjük, hogy a "+(invoice.invoice_number||"")+" számú számla három nap múlva esedékes.","Határidő: "+due+" · Összeg: "+amount]
+      :["Klavierhaus · Invoice due soon","Dear "+name+", this is a reminder that invoice "+(invoice.invoice_number||"")+" is due in three days.","Due: "+due+" · Amount: "+amount],
+    INVOICE_DUE_TODAY:hu
+      ?["Klavierhaus · Számla ma esedékes","Tisztelt "+name+"! A "+(invoice.invoice_number||"")+" számú számla ma esedékes.","Határidő: "+due+" · Összeg: "+amount]
+      :["Klavierhaus · Invoice due today","Dear "+name+", invoice "+(invoice.invoice_number||"")+" is due today.","Due: "+due+" · Amount: "+amount],
+    INVOICE_OVERDUE_7_DAYS:hu
+      ?["Klavierhaus · Lejárt számla emlékeztető","Tisztelt "+name+"! A "+(invoice.invoice_number||"")+" számú számla hét napja lejárt. Kérjük, ellenőrizze a fizetés állapotát.","Határidő: "+due+" · Összeg: "+amount]
+      :["Klavierhaus · Overdue invoice reminder","Dear "+name+", invoice "+(invoice.invoice_number||"")+" is now seven days overdue. Please review the payment status.","Due: "+due+" · Amount: "+amount]
+  };
+  const selected=copy[eventType]||[hu?"Klavierhaus értesítés":"Klavierhaus update",hu?"Tisztelt "+name+"! Frissítés érkezett a szolgáltatásával kapcsolatban.":"Dear "+name+", there is an update about your Klavierhaus service.",""];
+  const [subject,lead,detail]=selected;
+  const closing=hu?"Köszönjük bizalmát! — Klavierhaus":"Thank you for your trust. — Klavierhaus";
+  const text=[lead,detail,closing].filter(Boolean).join("\n\n");
+  const html='<!doctype html><html><body style="margin:0;background:#f6f7f9;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:30px"><p style="margin:0 0 12px;color:#4b5563;letter-spacing:.12em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-size:25px">'+escapeHtml(subject)+'</h1><p>'+escapeHtml(lead)+'</p>'+(detail?'<p style="padding:13px;border-radius:10px;background:#f3f4f6"><strong>'+escapeHtml(detail)+'</strong></p>':'')+'<p style="color:#4b5563">'+escapeHtml(closing)+'</p></div></div></body></html>';
+  return {subject,text,html};
+}
+
 function buildTicketDocumentsEmail({ name, event, language = "en" }) {
   const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
   return {
@@ -361,6 +405,17 @@ function createTransactionalEmail(env = process.env) {
       return {providerMessageId:String(data.id)};
     },
 
+    async sendCustomerMilestone({ to, eventType, clientName, job, invoice, language = "en", idempotencyKey }) {
+      assertEnabled();
+      if(!apiKey||!from)throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"),{code:"EMAIL_DELIVERY_NOT_CONFIGURED"});
+      const content=buildCustomerMilestoneEmail({eventType,clientName,job,invoice,language});
+      const {data,error}=await resend.emails.send({
+        from,to:[normalizeRecipient(to)],subject:content.subject,html:content.html,text:content.text,
+        ...(replyTo?{replyTo}:{}),tags:[{name:"category",value:"customer_milestone"}]
+      },{idempotencyKey});
+      if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
+      return {providerMessageId:String(data.id)};
+    },
     async sendCustomerConversationAutoReply({ to, name, conversationUrl, language, idempotencyKey }) {
       assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
@@ -386,4 +441,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };

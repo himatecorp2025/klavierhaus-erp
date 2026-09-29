@@ -32,9 +32,13 @@ function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="S
 function newYorkYear(){return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date());}
 function endAt(start,duration){return new Date(new Date(start).getTime()+positiveDuration(duration)*60000).toISOString();}
 
-function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
+function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation=null}){
   const staff=permit("ADMIN","MANAGER","WORKER");
   const admin=permit("ADMIN");
+  function customerMilestone(job,eventType,options){
+    if(!customerAutomation||!job?.id)return null;
+    try{return customerAutomation.enqueueJobMilestone(job.id,eventType,options);}catch(error){console.warn("[CUSTOMER-MILESTONE]",eventType,job.id,error.message);return null;}
+  }
   const selectJob=`SELECT j.*,
     c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
     p.brand AS piano_brand,p.model AS piano_model,p.serial_number AS piano_serial_number,p.location_notes AS piano_location_notes,
@@ -348,7 +352,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       FROM invoices WHERE job_id=? OR (source_type='job' AND source_id=?) ORDER BY id DESC`).all(id,String(id));
     const events=db.prepare(`SELECT id,event_time,user_id,user_name,user_role,action,module,record_id,success,details
       FROM audit_log WHERE module='jobs' AND record_id=? ORDER BY event_time,id`).all(String(id));
-    res.json({job,phases,handoffs,invoices,events});
+    const communications=db.prepare("SELECT * FROM customer_communication_log WHERE job_id=? ORDER BY created_at,id").all(id);
+    res.json({job,phases,handoffs,invoices,communications,events});
   });
 
   app.get("/api/clients/:id/jobs",auth,staff,(req,res)=>{
@@ -420,13 +425,18 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   });
 
   app.post("/api/jobs",auth,staff,(req,res)=>{
-    try{res.status(201).json(db.transaction(()=>createJob(req.body||{},req))());}catch(error){respondError(res,error);}
+    try{
+      const created=db.transaction(()=>createJob(req.body||{},req))();
+      if(created.stage!=="planned"){customerMilestone(created,"JOB_CONFIRMED");if(created.scheduled_at)customerMilestone(created,"APPOINTMENT_SCHEDULED");}
+      res.status(201).json(created);
+    }catch(error){respondError(res,error);}
   });
 
   app.post("/api/intake/:id/convert-to-job",auth,staff,(req,res)=>{
     try{
       const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
       const result=db.transaction(()=>convertToJob(id,req.body||{},req))();
+      if(!result.idempotent){customerMilestone(result.job,"JOB_CONFIRMED");if(result.job?.scheduled_at)customerMilestone(result.job,"APPOINTMENT_SCHEDULED");}
       res.status(result.idempotent?200:201).json({ok:true,...result});
     }catch(error){respondError(res,error);}
   });
@@ -434,6 +444,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     try{
       const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
       const result=db.transaction(()=>convertToJob(id,req.body||{},req))();
+      if(!result.idempotent){customerMilestone(result.job,"JOB_CONFIRMED");if(result.job?.scheduled_at)customerMilestone(result.job,"APPOINTMENT_SCHEDULED");}
       res.status(result.idempotent?200:201).json({ok:true,...result});
     }catch(error){respondError(res,error);}
   });
@@ -491,7 +502,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
       db.prepare("UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,?),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       activatePhase(id,stage);
-      const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);res.json(after);
+      const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);
+      customerMilestone(after,"JOB_CONFIRMED");customerMilestone(after,"APPOINTMENT_SCHEDULED");
+      res.json(after);
     }catch(error){respondError(res,error);}
   });
 
@@ -509,7 +522,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
       if(stage==="received")db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='received'").run(scheduledAt,id);
       if(before.stage==="planned")activatePhase(id,stage);
-      const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);res.json(after);
+      const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);
+      if(before.stage==="planned")customerMilestone(after,"JOB_CONFIRMED");
+      if(before.scheduled_at!==after.scheduled_at)customerMilestone(after,"APPOINTMENT_SCHEDULED");
+      res.json(after);
     }catch(error){respondError(res,error);}
   });
 
@@ -572,7 +588,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
           .run(storageStage(toStage),toStage,resourceTechnician,labor,material,id);
         return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),job:jobById(id)};
       })();
-      audit(req,"HANDOFF","jobs",String(id),before,result.job);res.status(201).json(result);
+      audit(req,"HANDOFF","jobs",String(id),before,result.job);
+      if(before.stage==="received")customerMilestone(result.job,"WORK_STARTED");
+      res.status(201).json(result);
     }catch(error){respondError(res,error);}
   });
 
