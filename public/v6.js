@@ -405,8 +405,9 @@ function v6AssessmentTotal(){return v6AssessmentCollect().reduce((sum,row)=>sum+
 function v6AssessmentRefreshTotal(){const node=$("#assessmentTotal");if(node)node.textContent=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(v6AssessmentTotal());}
 async function v6OpenIntakeCenter(){
   const rows=await api("/api/intake-catalog?include_inactive=1");
-  openDialog({title:tr("Intake Center","Igényközpont"),eyebrow:tr("ASSESSMENT CATALOG","IGÉNYFELMÉRÉSI KATALÓGUS"),body:`<div class="intake-center"><div class="panel-head inline-panel-head"><p>${tr("Create reusable piano issue/work items with a default quoted price.","Hozz létre újrahasználható zongorahiba-/munkatételeket alapértelmezett ajánlati árral.")}</p><button id="newCatalogItem" class="primary-button" type="button">＋ ${tr("New item","Új tétel")}</button></div><div class="catalog-admin-list">${rows.map(row=>`<button class="catalog-admin-row ${Number(row.active)?"":"inactive"}" type="button" data-catalog-edit="${row.id}"><span><strong>${esc(state.language==="hu"?row.title_hu:row.title_en)}</strong><small>${esc(row.category)} · ${r3Money(row.default_price)} · ${Number(row.active)?tr("Active","Aktív"):tr("Inactive","Inaktív")}</small></span><span>›</span></button>`).join("")||`<div class="empty-state">${tr("No catalog items yet.","Még nincs katalógustétel.")}</div>`}</div></div>`});
+  openDialog({title:tr("Intake Center","Igényközpont"),eyebrow:tr("ASSESSMENT CATALOG","IGÉNYFELMÉRÉSI KATALÓGUS"),body:`<div class="intake-center"><div class="panel-head inline-panel-head"><p>${tr("Create reusable piano issue/work items with a default quoted price.","Hozz létre újrahasználható zongorahiba-/munkatételeket alapértelmezett ajánlati árral.")}</p><div class="page-actions"><button id="handoffPresetCenterBtn" class="secondary-button" type="button">⚙ ${tr("Handoff presets","Átadási presetek")}</button><button id="newCatalogItem" class="primary-button" type="button">＋ ${tr("New item","Új tétel")}</button></div></div><div class="catalog-admin-list">${rows.map(row=>`<button class="catalog-admin-row ${Number(row.active)?"":"inactive"}" type="button" data-catalog-edit="${row.id}"><span><strong>${esc(state.language==="hu"?row.title_hu:row.title_en)}</strong><small>${esc(row.category)} · ${r3Money(row.default_price)} · ${Number(row.active)?tr("Active","Aktív"):tr("Inactive","Inaktív")}</small></span><span>›</span></button>`).join("")||`<div class="empty-state">${tr("No catalog items yet.","Még nincs katalógustétel.")}</div>`}</div></div>`});
   const edit=row=>v6OpenCatalogEditor(row,v6OpenIntakeCenter);
+  $("#handoffPresetCenterBtn").addEventListener("click",v6OpenHandoffPresetCenter);
   $("#newCatalogItem").addEventListener("click",()=>edit(null));
   $$("[data-catalog-edit]").forEach(button=>button.addEventListener("click",()=>edit(rows.find(row=>Number(row.id)===Number(button.dataset.catalogEdit)))));
 }
@@ -420,6 +421,32 @@ function v6OpenCatalogEditor(row,back){
   $("#catalogEditor").addEventListener("submit",async event=>{event.preventDefault();const fd=new FormData(event.currentTarget),body=Object.fromEntries(fd);body.default_price=Number(body.default_price);body.active=fd.get("active")==="on";try{await api(row?`/api/intake-catalog/${row.id}`:"/api/intake-catalog",{method:row?"PUT":"POST",body:JSON.stringify(body)});toast(tr("Catalog item saved.","Katalógustétel mentve."),"success");await back();}catch(error){toast(humanError(error),"error");}});
   $("#deleteCatalogItem")?.addEventListener("click",async()=>{try{await api(`/api/intake-catalog/${row.id}`,{method:"DELETE"});toast(tr("Catalog item removed.","Katalógustétel eltávolítva."),"success");await back();}catch(error){toast(humanError(error),"error");}});
 }
+async function v6OpenHandoffPresetCenter(){
+  const rows=await api("/api/handoff-presets?include_inactive=1");
+  openDialog({title:tr("Handoff presets","Átadási presetek"),eyebrow:tr("WORKFLOW QUICK ENTRY","MUNKAFOLYAMAT GYORSBEVITEL"),body:`<div class="intake-center"><div class="panel-head inline-panel-head"><p>${tr("Reusable labor/material/duration values for fast mobile handoff.","Újrahasználható munka-/anyag-/időtartam értékek gyors mobilos átadáshoz.")}</p><button id="newHandoffPreset" class="primary-button" type="button">＋ ${tr("New preset","Új preset")}</button></div><div class="catalog-admin-list">${rows.map(row=>`<button class="catalog-admin-row ${Number(row.active)?"":"inactive"}" type="button" data-handoff-preset-edit="${row.id}"><span><strong>${esc(state.language==="hu"?row.title_hu:row.title_en)}</strong><small>${r3Money(row.default_labor_cost)} + ${r3Money(row.default_material_cost)} ${tr("materials","anyag")} · ${Number(row.default_duration_min||0)} min</small></span><span>›</span></button>`).join("")||`<div class="empty-state">${tr("No handoff presets yet.","Még nincs átadási preset.")}</div>`}</div></div>`});
+  const edit=row=>v6OpenHandoffPresetEditor(row,v6OpenHandoffPresetCenter);
+  $("#newHandoffPreset").addEventListener("click",()=>edit(null));
+  $$("[data-handoff-preset-edit]").forEach(button=>button.addEventListener("click",()=>edit(rows.find(row=>Number(row.id)===Number(button.dataset.handoffPresetEdit)))));
+}
+function v6OpenHandoffPresetEditor(row,back){
+  openDialog({title:row?tr("Edit handoff preset","Átadási preset szerkesztése"):tr("New handoff preset","Új átadási preset"),eyebrow:tr("WORKFLOW PRESET","MUNKAFOLYAMAT PRESET"),body:`<form id="handoffPresetEditor" class="form-grid">
+    <label class="field"><span>Title EN *</span><input name="title_en" value="${esc(row?.title_en||"")}" required></label>
+    <label class="field"><span>Cím HU *</span><input name="title_hu" value="${esc(row?.title_hu||"")}" required></label>
+    <label class="field"><span>${tr("Labor","Munkadíj")} (USD)</span><input name="default_labor_cost" type="number" min="0" step="0.01" value="${Number(row?.default_labor_cost||0)}"></label>
+    <label class="field"><span>${tr("Materials","Anyag")} (USD)</span><input name="default_material_cost" type="number" min="0" step="0.01" value="${Number(row?.default_material_cost||0)}"></label>
+    <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="default_duration_min" type="number" min="0" step="15" value="${Number(row?.default_duration_min||0)}"></label>
+    <label class="field"><span>${tr("Sort order","Sorrend")}</span><input name="sort_order" type="number" step="1" value="${Number(row?.sort_order||0)}"></label>
+    <label class="cms-toggle-row full"><span>${tr("Active","Aktív")}</span><input name="active" type="checkbox" ${row?.active===0?"":"checked"}></label>
+    <div class="form-actions full">${row?`<button id="archiveHandoffPreset" class="danger-button" type="button">${tr("Archive","Archiválás")}</button>`:""}<button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div>
+  </form>`});
+  $("#handoffPresetEditor").addEventListener("submit",async event=>{
+    event.preventDefault();const fd=new FormData(event.currentTarget),body=Object.fromEntries(fd);
+    body.default_labor_cost=Number(body.default_labor_cost||0);body.default_material_cost=Number(body.default_material_cost||0);body.default_duration_min=Number(body.default_duration_min||0);body.sort_order=Number(body.sort_order||0);body.active=fd.get("active")==="on";
+    try{await api(row?`/api/handoff-presets/${row.id}`:"/api/handoff-presets",{method:row?"PUT":"POST",body:JSON.stringify(body)});toast(tr("Handoff preset saved.","Átadási preset mentve."),"success");await back();}catch(error){toast(humanError(error),"error");}
+  });
+  $("#archiveHandoffPreset")?.addEventListener("click",async()=>{try{await api(`/api/handoff-presets/${row.id}`,{method:"DELETE"});toast(tr("Handoff preset archived.","Átadási preset archiválva."),"success");await back();}catch(error){toast(humanError(error),"error");}});
+}
+
 renderIntake=async function(){
   const workspace=$("#workspace"),[intake,clients]=await Promise.all([api("/api/intake"),loadClients(),loadUsers()]);
   state.intake=intake;const open=intake.filter(row=>["new","under_review"].includes(row.status)),urgent=open.filter(row=>row.estimated_urgency==="urgent"),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
