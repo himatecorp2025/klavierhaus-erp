@@ -390,8 +390,8 @@ async function r2SaveStageOrder(stageKeys,refresh=renderWorkshop){
 }
 function r2BindStageColumnReorder(root){
   if(!r2IsAdmin())return;
-  $("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragstart",event=>{event.stopPropagation();const column=handle.closest("[data-stage-column]"),ghost=column?r2CreateDragGhost(column,"workflow-column-drag-ghost"):null;handle._r2Ghost=ghost;event.dataTransfer.setData("text/stage-key",handle.dataset.stageDrag);event.dataTransfer.effectAllowed="move";if(ghost)try{event.dataTransfer.setDragImage(ghost,80,28);}catch(_error){};column?.classList.add("dragging");}));
-  $("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragend",()=>{handle._r2Ghost?.remove();handle._r2Ghost=null;handle.closest("[data-stage-column]")?.classList.remove("dragging");r2ClearDropHighlights(root);}));
+  $$("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragstart",event=>{event.stopPropagation();const column=handle.closest("[data-stage-column]"),ghost=column?r2CreateDragGhost(column,"workflow-column-drag-ghost"):null;handle._r2Ghost=ghost;event.dataTransfer.setData("text/stage-key",handle.dataset.stageDrag);event.dataTransfer.effectAllowed="move";if(ghost)try{event.dataTransfer.setDragImage(ghost,80,28);}catch(_error){};column?.classList.add("dragging");}));
+  $$("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragend",()=>{handle._r2Ghost?.remove();handle._r2Ghost=null;handle.closest("[data-stage-column]")?.classList.remove("dragging");r2ClearDropHighlights(root);}));
   $$("[data-stage-column]",root).forEach(column=>{
     column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/stage-key")&&!r2FixedStage(column.dataset.stageColumn))event.preventDefault();});
     column.addEventListener("drop",event=>{
