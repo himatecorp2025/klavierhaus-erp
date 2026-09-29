@@ -1371,3 +1371,7 @@ select option{background:var(--surface);color:var(--ink)}
 .calendar-event-block.status-cancelled,.month-event-pill.status-cancelled{border-left-color:#e55c62;background:color-mix(in srgb,#e55c62 15%,var(--surface))}
 .intake-card-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .icon-text-button{white-space:nowrap}
+
+.archive-intake-items{display:grid;gap:6px;margin-top:10px}
+.archive-intake-items>div{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.archive-intake-items span{min-width:0;overflow-wrap:anywhere}
