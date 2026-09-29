@@ -210,6 +210,7 @@ ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(est
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
 ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("jobs","workflow_owner_user_id","TEXT");
+ensureColumn("jobs","completion_document_id","INTEGER");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
 ensureColumn("job_handoffs","phase_duration_min","INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0)");
@@ -239,6 +240,7 @@ ensureColumn("invoice_items","labor_amount","REAL NOT NULL DEFAULT 0");
 ensureColumn("invoice_items","material_amount","REAL NOT NULL DEFAULT 0");
 ensureColumn("invoice_items","phase_key","TEXT");
 ensureColumn("invoices","archive_document_id","INTEGER");
+ensureColumn("invoices","issued_document_id","INTEGER");
 
 function seedWorkshopUxV5() {
   if (!tableExists("workflow_stage_definitions") || !tableExists("job_workflow_phases")) return;
