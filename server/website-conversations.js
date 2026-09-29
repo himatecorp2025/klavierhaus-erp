@@ -50,7 +50,7 @@ function registerWebsiteConversationRoutes({
     return db.prepare("SELECT id,original_name,stored_name,mime_type,file_size FROM customer_message_attachments WHERE message_id=? ORDER BY created_at,id").all(messageId).map(row=>({
       ...row,
       url:token
-        ?`/api/public/customer-conversations/${encodeURIComponent(token)}/attachments/${encodeURIComponent(row.id)}`
+        ?`/api/site/customer-conversations/${encodeURIComponent(token)}/attachments/${encodeURIComponent(row.id)}`
         :`/api/customer-conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(row.id)}`
     }));
   }
