@@ -43,19 +43,28 @@ function v6ToggleSidebar(){
   const shell=$("#appShell"),collapsed=!shell.classList.contains("sidebar-collapsed");
   shell.classList.toggle("sidebar-collapsed",collapsed);localStorage.setItem(v6SidebarKey(),collapsed?"1":"0");
 }
+function v6CloseMore(){
+  const popover=$("#mobileMorePopover");if(!popover)return;
+  popover.hidden=true;$("#mobileMoreButton")?.setAttribute("aria-expanded","false");
+}
 function v6OpenMore(){
-  openDialog({title:tr("More","Továbbiak"),eyebrow:"KLAVIERHAUS ERP",body:`<div class="mobile-more-grid">
+  const popover=$("#mobileMorePopover"),grid=$("#mobileMoreGrid");if(!popover||!grid)return;
+  if(!popover.hidden){v6CloseMore();return;}
+  grid.innerHTML=`
+    <button class="mobile-more-card" type="button" data-nav="planned"><span>◷</span><strong>${tr("Planned Jobs","Tervezett munkák")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="finance"><span>$</span><strong>${tr("Finance","Pénzügy")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>
-  </div>`});
+    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>`;
+  popover.hidden=false;$("#mobileMoreButton")?.setAttribute("aria-expanded","true");
 }
 function v6BindShell(){
   $("#themeToggle")?.addEventListener("click",v6ToggleTheme);
   $("#loginThemeToggle")?.addEventListener("click",v6ToggleTheme);
   $("#sidebarToggle")?.addEventListener("click",v6ToggleSidebar);
-  $("#mobileMoreButton")?.addEventListener("click",v6OpenMore);
+  $("#mobileMoreButton")?.addEventListener("click",event=>{event.stopPropagation();v6OpenMore();});
+  $("#mobileMoreClose")?.addEventListener("click",v6CloseMore);
+  document.addEventListener("click",event=>{const popover=$("#mobileMorePopover");if(popover&&!popover.hidden&&!event.target.closest("#mobileMorePopover,#mobileMoreButton"))v6CloseMore();});
 }
 showLogin=function(){
   v6Original.showLogin();
