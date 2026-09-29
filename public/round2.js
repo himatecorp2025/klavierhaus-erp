@@ -82,6 +82,17 @@ function r2ResponsibleOptions(selected=""){
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
 }
+function r2ComputedStatus(job,now=Date.now()){
+  const phase=job?.current_phase||{};
+  if(job?.cancelled_at)return "cancelled";
+  if(job?.stage==="completed"||phase.completed_at)return "completed";
+  const due=phase.due_at?new Date(phase.due_at).getTime():NaN;if(Number.isFinite(due)&&due<now)return "overdue";
+  if(phase.blocker_code)return "blocked";
+  const plannedStart=phase.starts_at||(job?.stage==="received"?job?.scheduled_at:null)||phase.activated_at;
+  const start=plannedStart?new Date(plannedStart).getTime():NaN;
+  if(Number.isFinite(start)&&start>now)return "scheduled";
+  return job?.stage==="planned"?"planned":"in_progress";
+}
 function r2JobPiano(job){return [job.piano_brand,job.piano_model,job.piano_serial_number].filter(Boolean).join(" · ");}
 function r2Money(value){return new Intl.NumberFormat(state.language==="hu"?"hu-HU":"en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(Number(value||0));}
 function r2TimeMinutes(value){const p=r2NyParts(new Date(value));return Number(p.hour)*60+Number(p.minute);}
@@ -286,7 +297,7 @@ function r2OpenCancel(job,refresh=renderWorkshop){
 }
 
 function r2WorkflowCard(job){
-  const status=job.workflow_status||"in_progress",phase=job.current_phase||{};
+  const status=r2ComputedStatus(job),phase=job.current_phase||{};
   return `<article class="job-card stage-card status-${esc(status)}" draggable="false" data-job-id="${job.id}">
     <div class="job-card-top job-drag-handle" draggable="true" data-job-drag-handle="${job.id}" title="${tr("Drag this card to another phase","Húzd a kártyát egy másik fázisba")}"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip status-chip status-${esc(status)}">${esc(r2StatusLabel(status))}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
@@ -462,7 +473,7 @@ function r2EventSegment(job,date){
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
   const color=job.assigned_technician_color||"#8d6a2c";
-  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
+  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} status-${esc(r2ComputedStatus(job))} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
     <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ${esc(job.title)}</strong>
     <span>${esc(job.client_name)} · ${esc(job.assigned_technician_name||"—")}</span>
     <small>${esc(r2StageLabel(job.stage))}</small>
@@ -501,8 +512,14 @@ function r2RenderMonthGrid(range,jobs){
     return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
+function r2RefreshCalendarStatuses(host,jobs){
+  const byId=new Map((jobs||[]).map(job=>[String(job.id),job])),statuses=["scheduled","in_progress","blocked","overdue","completed","cancelled"];
+  $("[data-calendar-job]",host).forEach(node=>{
+    const job=byId.get(String(node.dataset.calendarJob));if(!job)return;statuses.forEach(status=>node.classList.remove("status-"+status));node.classList.add("status-"+r2ComputedStatus(job));
+  });
+}
 function r2UpdateCalendarNowLine(){
-  $$("[data-now-line]").forEach(line=>{
+  $("[data-now-line]").forEach(line=>{
     const column=line.closest("[data-calendar-date]");if(!column||column.dataset.calendarDate!==r2Today()){line.hidden=true;return;}
     const p=r2NyParts(new Date()),minutes=Number(p.hour)*60+Number(p.minute);
     line.hidden=minutes<R2_DAY_START||minutes>R2_DAY_END;line.style.setProperty("--now-top",`${(minutes-R2_DAY_START)*R2_PX_PER_MIN}px`);
@@ -613,8 +630,8 @@ async function r2RenderCalendar(){
   $$("[data-calendar-mode]",host).forEach(button=>button.addEventListener("click",()=>{state.r2CalendarMode=button.dataset.calendarMode;localStorage.setItem("kh_calendar_mode",state.r2CalendarMode);void r2RenderCalendar();}));
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
   $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
-  r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();
-  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(r2UpdateCalendarNowLine,30000);
+  r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);
+  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);},30000);
 }
 async function r2LoadWorkflowBucket(bucket,closedType=null){
   const next=["active","closed"].includes(bucket)?bucket:"active",type=closedType||state.r2ClosedType||"completed";
