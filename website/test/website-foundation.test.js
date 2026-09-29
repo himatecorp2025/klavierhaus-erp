@@ -288,7 +288,7 @@ test("private appointment forms are minimal and preserve selected context",()=>{
   assert.match(privateForm,/name="note"/);
   assert.match(privateForm,/name="piano_id"/);
   assert.match(privateForm,/name="service_id"/);
-  assert.doesNotMatch(privateForm,/name="email"/);
+  assert.match(privateForm,/name="email" type="email"/);
   assert.doesNotMatch(privateForm,/name="service_address"/);
   assert.doesNotMatch(privateForm,/name="consent_contact"/);
   assert.match(source,/data-piano-id=/);
