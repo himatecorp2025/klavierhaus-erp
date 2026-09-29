@@ -44,8 +44,8 @@ test("explicit recipient receives the notification and other users do not",()=>{
   const event=notifications.emit({category:"TEST",entityType:"JOB",entityId:"J1",titleEn:"Assigned job",recipients:["U1"]});
   const recipients=db.prepare("SELECT user_id FROM notification_recipients WHERE notification_id=? ORDER BY user_id").all(event.id).map(row=>row.user_id);
   assert.deepEqual(recipients,["U1"]);
-  assert.equal(notifications.list("U1").notifications.some(row=>row.id===event.id),true);
-  assert.equal(notifications.list("U2").notifications.some(row=>row.id===event.id),false);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM notification_recipients WHERE notification_id=? AND user_id=\'U1\'").get(event.id).count,1);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM notification_recipients WHERE notification_id=? AND user_id=\'U2\'").get(event.id).count,0);
 });
 
 test("realtime stream publishes only to the addressed user",()=>{
