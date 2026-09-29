@@ -113,7 +113,7 @@ function bindMessengerConversation(conversation){
     try{
       if(conversation.linked_intake){state.pendingIntakeEditId=conversation.linked_intake.id;navTo("intake");return;}
       const draft=await api(`/api/customer-conversations/${conversation.id}/intake-draft`);
-      await openIntakeDialog({seed:draft,sourceConversationId:conversation.id,onSaved:async lead=>{toast(tr("Intake saved from Messenger.","Igényfelmérés elmentve a Messengerből."),"success");state.pendingIntakeEditId=lead.id;navTo("intake");}});
+      await openIntakeDialog({seed:draft,sourceConversationId:conversation.id,onSaved:async()=>{toast(tr("Intake saved from Messenger.","Igényfelmérés elmentve a Messengerből."),"success");navTo("intake");}});
     }catch(error){toast(humanError(error),"error");}
   });
 }
