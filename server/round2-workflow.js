@@ -557,7 +557,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0);
       if(!(labor>=0)||!(material>=0))throw problem("INVALID_HANDOFF_COST");
       const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
-      const resourceTechnician=["WORKER","MANAGER","ADMIN"].includes(responsible.role)?responsible.id:before.assigned_technician_id;
+      const resourceTechnician=before.assigned_technician_id;
       const note=text(req.body?.phase_note,5000)||null;
       const result=db.transaction(()=>{
         const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,phase_labor_cost,phase_material_cost,created_at)
