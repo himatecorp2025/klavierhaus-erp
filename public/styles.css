@@ -1403,7 +1403,7 @@ select option{background:var(--surface);color:var(--ink)}
 .header-tools{grid-template-columns:auto auto auto}
 .notification-bell{position:relative;display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:13px;background:var(--surface);color:var(--ink);font-size:18px}
 .notification-bell:hover,.notification-bell[aria-expanded="true"]{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));background:var(--surface-2)}
-.notification-bell-icon{transform:rotate(45deg);font-weight:900}
+.notification-bell-icon{display:grid;place-items:center;width:20px;height:20px}.notification-bell-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .notification-badge{position:absolute;top:-6px;right:-7px;min-width:21px;height:21px;padding:0 5px;border:2px solid var(--surface);border-radius:999px;background:#cf2f38;color:#fff;font-size:10px;font-weight:900;line-height:17px;text-align:center}
 .notification-backdrop{position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.2);backdrop-filter:blur(2px);animation:notificationFadeIn .18s ease both}
 .notification-drawer{position:fixed;z-index:10030;top:0;right:0;width:min(430px,calc(100vw - 18px));height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 70px rgba(0,0,0,.22);transform:translateX(105%);opacity:.75;pointer-events:none;transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
