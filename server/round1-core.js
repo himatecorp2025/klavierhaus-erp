@@ -123,10 +123,20 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     audit(req,"UPDATE","clients",String(id),before,row);res.json(row);
   });
 
+  app.get("/api/pianos",auth,staff,(_req,res)=>{
+    res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
+      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
+      FROM pianos p JOIN clients c ON c.id=p.client_id
+      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all());
+  });
+
   app.get("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const id=integerId(req.params.id);
     if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    res.json(db.prepare("SELECT * FROM pianos WHERE client_id=? ORDER BY lower(brand),lower(COALESCE(model,'')),id").all(id));
+    res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
+      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
+      FROM pianos p JOIN clients c ON c.id=p.client_id
+      WHERE p.client_id=? ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all(id));
   });
 
   app.post("/api/clients/:id/pianos",auth,staff,(req,res)=>{

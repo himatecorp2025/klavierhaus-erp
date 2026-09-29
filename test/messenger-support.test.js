@@ -26,16 +26,21 @@ test("Manual support holiday overrides are honored",()=>{
   assert.equal(supportState({db:forcedOpen,date:new Date("2026-07-03T14:00:00Z")}).open,true);
 });
 
-test("Public Messenger exposes only the approved seven topics and styled attachments",()=>{
-  const website=read("website/server/index.js");
+test("Public Messenger exposes approved topics and icon-only attachment composer",()=>{
+  const website=read("website/server/index.js"),browser=read("website/public/app.js"),css=read("website/public/styles.css");
   const select=website.match(/<select name="category">([\s\S]*?)<\/select>/)?.[1]||"";
   const values=[...select.matchAll(/option value="([A-Z_]+)"/g)].map(match=>match[1]);
   assert.deepEqual(values,["SERVICE","TECHNICAL","PIANO","REPAIR","PRIVATE_CONSULTATION","BILLING","OTHER"]);
   assert.doesNotMatch(select,/TICKET|REFUND|EVENT|GENERAL/);
-  assert.match(website,/customer-chat__file-picker/);
-  assert.match(read("website/public/styles.css"),/\.customer-chat__file-picker/);
-  assert.match(read("website/public/app.js"),/data-proposal-decision/);
-  assert.match(read("website/public/app.js"),/\/api\/site\/support-status/);
+  assert.match(website,/data-chat-intake-fields/);
+  assert.match(website,/customer-chat__composer/);
+  assert.match(website,/customer-chat__attach-button/);
+  assert.doesNotMatch(website,/Image, PDF or document|Kép, PDF vagy dokumentum|<strong>\$\{language === "hu" \? "Csatolás"/);
+  assert.match(browser,/applyCustomerChatMode\(true,conversation\)/);
+  assert.match(css,/customer-chat__message--staff/);
+  assert.match(css,/customer-chat__message--customer/);
+  assert.match(browser,/data-proposal-decision/);
+  assert.match(browser,/\/api\/site\/support-status/);
 });
 
 test("ERP Messenger is a dedicated view and mobile Planned moves under compact More",()=>{

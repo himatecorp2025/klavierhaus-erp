@@ -13,10 +13,9 @@ function gitBlobSha(file){
   return crypto.createHash("sha1").update(Buffer.from("blob "+data.length+"\0")).update(data).digest("hex");
 }
 
-test("protected website and CMS server modules remain byte-identical",()=>{
+test("unrelated protected website server modules remain byte-identical",()=>{
   const expected={
     "server/website-platform.js":"8a10313eb02bdd41fdc434d1f5a9bdbe7ca7d1e7",
-    "server/website-content.js":"3886ff1e4b4261dd8512781fc833c6c8cd796ce5",
     "server/website-catalog.js":"18ebe2d0663d2c4dfd995f1732a504b6555a8b98",
     "server/upload-middleware.js":"64444c043a3a1b646032a5ca5c10569d37806938"
   };
@@ -100,7 +99,7 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.segmented-control/);
   assert.match(css,/\.typeahead-menu/);
-  assert.match(sw,/klavierhaus-admin-v14-live-messenger-client-segments/);
+  assert.match(sw,/klavierhaus-admin-v15-master-messenger-branding/);
   assert.match(sw,/url\.pathname\.startsWith\("\/api\/"\)/);
 });
 

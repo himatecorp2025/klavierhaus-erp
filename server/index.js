@@ -153,12 +153,15 @@ function setSetting(key,value,user="SYSTEM") {
     ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(key,String(value??""),user);
 }
 function getBranding() {
+  const legacyLogo=setting("logo_url","/icons/icon-512.png");
   return {
     company_name:setting("company_name","Klavierhaus"),
     short_name:setting("short_name","KH ERP"),
-    logo_url:setting("logo_url","/icons/icon-512.png"),
+    logo_url:legacyLogo,
+    erp_logo_dark_url:setting("erp_logo_dark_url",legacyLogo),
+    erp_logo_light_url:setting("erp_logo_light_url",legacyLogo),
     favicon_url:setting("favicon_url","/icons/icon-192.png"),
-    app_icon_url:setting("app_icon_url",setting("logo_url","/icons/icon-512.png")),
+    app_icon_url:setting("app_icon_url","/icons/icon-512.png"),
     login_background_url:setting("login_background_url",""),
     branding_version:setting("branding_version","1")
   };
@@ -342,7 +345,7 @@ app.post("/api/settings/branding/logo",auth,permit("ADMIN"),brandingUpload.singl
   if(!req.file)return res.status(400).json({error:"INVALID_FILE_TYPE"});
   const details=inspectImageFile(req.file.path);
   if(!details||details.width<192||details.height<192){try{fs.unlinkSync(req.file.path);}catch(_e){}return res.status(400).json({error:"PWA_LOGO_REQUIREMENTS"});}
-  const before=getBranding();setSetting("logo_url",`/uploads/${path.basename(req.file.path)}`,req.user.name);bumpBranding(req.user.name);
+  const before=getBranding(),url=`/uploads/${path.basename(req.file.path)}`;setSetting("logo_url",url,req.user.name);setSetting("erp_logo_dark_url",url,req.user.name);bumpBranding(req.user.name);
   const after=getBranding();audit(req,"UPDATE","branding","logo",before,after);res.json(after);
 });
 app.post("/api/settings/branding/background",auth,permit("ADMIN"),brandingUpload.single("background"),(req,res)=>{

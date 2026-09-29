@@ -16,6 +16,7 @@ async function applyPublishedDesignSettings() {
     if (settings.display) root.style.setProperty("--display", settings.display);
     if (settings.sans) root.style.setProperty("--sans", settings.sans);
     if (settings.logo_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.logo_url)) document.querySelectorAll(".brand-logo").forEach(image => { image.src = settings.logo_url; });
+    if (settings.favicon_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.favicon_url)) document.querySelectorAll('link[rel~="icon"]').forEach(link => { link.href = settings.favicon_url; });
   } catch (_error) { /* design settings are optional and must not block rendering */ }
 }
 applyPublishedDesignSettings();
@@ -455,6 +456,19 @@ let customerConversationToken = "";
 let customerChatPollTimer = null;
 let customerConversationSnapshot = "";
 
+function applyCustomerChatMode(active,conversation=null){
+  if(!customerChat||!customerChatForm)return;
+  const isActive=Boolean(active);
+  customerChat.classList.toggle("is-active",isActive);
+  customerChatForm.dataset.chatMode=isActive?"active":"new";
+  const intake=customerChatForm.querySelector("[data-chat-intake-fields]");
+  if(intake){intake.hidden=isActive;intake.querySelectorAll("input,select").forEach(control=>{control.disabled=isActive;});}
+  if(customerChatLookupForm)customerChatLookupForm.hidden=isActive;
+  if(isActive&&conversation){
+    const heading=customerChat.querySelector(".customer-chat__heading h2");
+    if(heading)heading.textContent=conversation.name||(language==="hu"?"Beszélgetés":"Conversation");
+  }
+}
 function renderCustomerMessages(messages = [], conversation = null) {
   if (!customerChatMessages) return;
   customerChatMessages.replaceChildren();
@@ -467,11 +481,9 @@ function renderCustomerMessages(messages = [], conversation = null) {
   messages.forEach((message) => {
     const item = document.createElement("article");
     item.className = `customer-chat__message customer-chat__message--${message.direction === "STAFF" ? "staff" : "customer"}`;
-    const author = document.createElement("strong");
-    author.textContent = message.sender_name || "Klavierhaus";
     const body = document.createElement("p");
     body.textContent = message.body || "";
-    item.append(author, body);
+    item.append(body);
     (message.attachments || []).forEach((attachment) => {
       const link = document.createElement("a");
       link.href = attachment.url || "#";
@@ -521,15 +533,14 @@ async function loadCustomerConversation(token) {
     customerConversationToken = token;
     const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(","),(conversation.private_appointments||[]).map(item=>item.id+":"+item.status).join(",")]);
     renderSupportStatus(conversation.support||{});
+    applyCustomerChatMode(true,conversation);
     renderCustomerMessages(conversation.messages || [], conversation);
-    if (nextSnapshot !== customerConversationSnapshot && customerChatResult) customerChatResult.textContent = conversation.status === "CLOSED" ? (language === "hu" ? "A beszélgetés lezárult." : "The conversation is closed.") : (language === "hu" ? "A beszélgetés betöltve." : "Conversation loaded.");
+    if (nextSnapshot !== customerConversationSnapshot && customerChatResult) customerChatResult.textContent = conversation.status === "CLOSED" ? (language === "hu" ? "A beszélgetés lezárult." : "The conversation is closed.") : "";
     customerConversationSnapshot = nextSnapshot;
-    const name = customerChatForm?.elements.name;
-    const email = customerChatForm?.elements.email;
-    if (name) name.value = conversation.name || "";
-    if (email) email.value = conversation.email || "";
   } catch (_error) {
     if (!new URLSearchParams(location.search).get("conversation")) localStorage.removeItem(customerConversationKey);
+    customerConversationToken="";
+    applyCustomerChatMode(false);
   }
 }
 
@@ -561,6 +572,7 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
   window.setTimeout(() => customerChatWelcome?.classList.add("is-dismissed"), 9000);
   try { customerConversationToken = localStorage.getItem(customerConversationKey) || new URLSearchParams(location.search).get("conversation") || ""; } catch (_error) { customerConversationToken = ""; }
   loadSupportStatus();
+  applyCustomerChatMode(Boolean(customerConversationToken));
   loadCustomerConversation(customerConversationToken);
   customerChatForm.elements.attachments?.addEventListener("change",renderCustomerChatFiles);
   customerChatMessages?.addEventListener("click",async event=>{
@@ -613,8 +625,9 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
       }
       const conversation = result.conversation || result;
       customerConversationSnapshot = "";
-      renderCustomerMessages(conversation.messages || [], conversation);
       customerChatForm.reset();renderCustomerChatFiles();
+      applyCustomerChatMode(Boolean(customerConversationToken),conversation);
+      renderCustomerMessages(conversation.messages || [], conversation);
       renderSupportStatus(conversation.support||{});
       if (customerConversationToken) localStorage.setItem(customerConversationKey, customerConversationToken);
       if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Köszönjük, üzenetét rögzítettük." : "Thank you, your message has been received.";

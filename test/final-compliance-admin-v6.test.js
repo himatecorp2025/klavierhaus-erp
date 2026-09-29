@@ -186,8 +186,9 @@ test("direct-expense receipt endpoint accepts a real PDF upload and returns a pe
   assert.ok(fs.existsSync(path.join(env.UPLOAD_DIR,"receipts",path.basename(uploaded.payload.url))));
 });
 
-test("branding assets expose separate favicon, PWA icon, login background and ERP logo slots",async()=>{
+test("branding assets expose independent ERP dark/light, PWA and login slots",async()=>{
   const assets=await request("/api/settings/branding/assets",{token:ids.admin});
   assert.equal(assets.status,200);
-  for(const key of ["favicon_url","app_icon_url","login_background_url","logo_url","branding_version"])assert.ok(Object.prototype.hasOwnProperty.call(assets.payload,key),key);
+  for(const key of ["favicon_url","app_icon_url","login_background_url","logo_url","erp_logo_dark_url","erp_logo_light_url","branding_version"])assert.ok(Object.prototype.hasOwnProperty.call(assets.payload,key),key);
+  assert.equal(assets.payload.app_icon_url,"/icons/icon-512.png");
 });

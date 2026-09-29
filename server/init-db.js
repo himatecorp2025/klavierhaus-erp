@@ -356,6 +356,9 @@ db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated
   ('company_name','Klavierhaus','SYSTEM'),
   ('short_name','KH ERP','SYSTEM'),
   ('logo_url','/icons/icon-512.png','SYSTEM'),
+  ('erp_logo_dark_url','/icons/icon-512.png','SYSTEM'),
+  ('erp_logo_light_url','/icons/icon-512.png','SYSTEM'),
+  ('app_icon_url','/icons/icon-512.png','SYSTEM'),
   ('login_background_url','','SYSTEM'),
   ('branding_version','1','SYSTEM')`).run();
 
