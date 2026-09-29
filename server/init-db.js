@@ -180,7 +180,20 @@ if(dynamicWorkflowNeedsMigration){
   if(tableExists("workflow_stage_definitions"))db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_dynamic_legacy_workflow_stage_definitions"');
   console.log("[WORKFLOW-DYNAMIC] Legacy five-stage workflow tables isolated");
 }
+const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("financial_document");
+if(archiveCategoryNeedsMigration){
+  if(tableExists("_documents_legacy_archive"))db.exec('DROP TABLE "_documents_legacy_archive"');
+  db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
+  console.log("[DOCUMENTS] Legacy archive category table isolated");
+}
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+if(tableExists("_documents_legacy_archive")){
+  db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
+    SELECT id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at FROM _documents_legacy_archive`);
+  db.exec('DROP TABLE "_documents_legacy_archive"');
+  console.log("[DOCUMENTS] Archive categories migrated");
+}
+
 // schema.sql enables FK enforcement for normal runtime use. The migration must keep
 // it disabled until all legacy parent/child tables have been retired, otherwise
 // DROP TABLE on an obsolete parent can fire SQLite's FK constraint triggers.
