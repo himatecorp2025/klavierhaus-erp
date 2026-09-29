@@ -2,7 +2,7 @@
 
 const fs=require("node:fs");
 const path=require("node:path");
-const {generateBusinessInvoicePdf,generateMonthlyInvoiceReportPdf}=require("./document-pdf");
+const {generateBusinessInvoicePdf,generateJobCompletionReportPdf,generateMonthlyInvoiceReportPdf}=require("./document-pdf");
 
 const PAYMENT_METHODS=Object.freeze(["Cash","Credit Card / Stripe","Bank Transfer","Check"]);
 const INVOICE_STATUSES=Object.freeze(["draft","sent","paid","cancelled"]);
@@ -80,8 +80,8 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     if(!customerAutomation||!jobId)return null;
     try{return customerAutomation.enqueueJobMilestone(jobId,eventType);}catch(error){console.warn("[CUSTOMER-MILESTONE]",eventType,jobId,error.message);return null;}
   }
-  const invoiceDir=path.join(uploadDir,"invoices");
-  fs.mkdirSync(invoiceDir,{recursive:true});
+  const invoiceDir=path.join(uploadDir,"invoices"),documentDir=path.join(uploadDir,"archive");
+  fs.mkdirSync(invoiceDir,{recursive:true});fs.mkdirSync(documentDir,{recursive:true});
 
   const selectInvoice=`SELECT i.*,c.name AS client_name,c.email AS client_master_email,p.company_name AS partner_name,j.job_code,j.title AS job_title,
     pi.brand AS piano_brand,pi.model AS piano_model,pi.serial_number AS piano_serial_number
@@ -163,11 +163,11 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     if(!rows.length)rows.push({item_type:"labor",item_description:job.title||"Klavierhaus service",quantity:1,unit_price:0,labor_amount:0,material_amount:0});
     return rows;
   }
-  function persistPdf(invoiceId){
+  function persistPdf(invoiceId,{statusOverride=null}={}){
     const invoice=invoiceDetail(invoiceId);if(!invoice)throw problem("INVOICE_NOT_FOUND",404);
     const snapshot=invoice.snapshot||{},info=snapshot.issuer&&Object.keys(snapshot.issuer).length?snapshot.issuer:company(),logoPath=resolveLogoPath(info.logo_url,uploadDir);
     const party=snapshot.counterparty||{},instrument=snapshot.instrument||{},job=snapshot.job||{};
-    const printable={...invoice,
+    const printable={...invoice,status:statusOverride||invoice.status,
       counterparty_name:party.name||invoice.counterparty_name,counterparty_address:party.address||invoice.counterparty_address,
       counterparty_email:party.email||invoice.counterparty_email,counterparty_phone:party.phone||invoice.counterparty_phone,
       piano_brand:instrument.brand||invoice.piano_brand,piano_model:instrument.model||invoice.piano_model,piano_serial_number:instrument.serial_number||invoice.piano_serial_number,
@@ -181,6 +181,61 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare("UPDATE invoices SET pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(publicPath,invoiceId);
     return {pdf,path:publicPath,invoice:invoiceDetail(invoiceId)};
   }
+  function archiveIssuedInvoice(invoiceId,actorId=null){
+    const invoice=invoiceDetail(invoiceId);if(!invoice)throw problem("INVOICE_NOT_FOUND",404);
+    if(!["sent","paid"].includes(invoice.status))throw problem("ISSUED_INVOICE_REQUIRED",409);
+    if(invoice.issued_document_id){
+      const existing=db.prepare("SELECT * FROM document_archive WHERE id=?").get(invoice.issued_document_id);
+      if(existing)return existing;
+    }
+    const source=invoice.pdf_path?.startsWith("/uploads/")?path.join(uploadDir,invoice.pdf_path.replace(/^\/uploads\//,"")):null;
+    if(!source||!fs.existsSync(source))persistPdf(invoiceId,{statusOverride:"sent"});
+    const current=invoiceDetail(invoiceId),sourcePath=current.pdf_path?.startsWith("/uploads/")?path.join(uploadDir,current.pdf_path.replace(/^\/uploads\//,"")):null;
+    if(!sourcePath||!fs.existsSync(sourcePath))throw problem("INVOICE_PDF_NOT_FOUND",500);
+    const pdf=fs.readFileSync(sourcePath),filename=`issued-${current.invoice_number}-${current.id}.pdf`,absolute=path.join(documentDir,filename),publicPath=`/uploads/archive/${filename}`;
+    if(!fs.existsSync(absolute))fs.writeFileSync(absolute,pdf,{flag:"wx"});
+    const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+      VALUES('financial_document',?,?,?,?,?,?,?,?,?,?,?)`).run(
+      `Issued Invoice ${current.invoice_number}`,"Immutable issued customer invoice","invoice",String(current.id),filename,filename,"application/pdf",pdf.length,publicPath,
+      JSON.stringify({document_type:"issued_invoice",invoice_id:current.id,job_id:current.job_id,status_at_issue:"sent",sent_at:current.sent_at}),actorId
+    );
+    const archiveId=Number(info.lastInsertRowid);db.prepare("UPDATE invoices SET issued_document_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(archiveId,current.id);
+    return db.prepare("SELECT * FROM document_archive WHERE id=?").get(archiveId);
+  }
+  function archiveJobCompletionReport(jobId,actorId=null){
+    const job=jobForInvoice(jobId);if(!job)throw problem("JOB_NOT_FOUND",404);
+    if(job.stage!=="completed")throw problem("JOB_NOT_COMPLETED",409);
+    if(job.completion_document_id){
+      const existing=db.prepare("SELECT * FROM document_archive WHERE id=?").get(job.completion_document_id);
+      if(existing)return existing;
+    }
+    const handoffs=db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(jobId);
+    const phases=db.prepare("SELECT * FROM job_workflow_phases WHERE job_id=? ORDER BY position,id").all(jobId);
+    const infoCompany=company(),logoPath=resolveLogoPath(infoCompany.logo_url,uploadDir);
+    const pdf=generateJobCompletionReportPdf({company:infoCompany,job,handoffs,phases,logoPath});
+    const safeCode=String(job.job_code||job.id).replace(/[^A-Za-z0-9_-]/g,"-"),filename=`job-completion-${safeCode}-${job.id}.pdf`,absolute=path.join(documentDir,filename),publicPath=`/uploads/archive/${filename}`;
+    if(!fs.existsSync(absolute))fs.writeFileSync(absolute,pdf,{flag:"wx"});
+    const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+      VALUES('exported_report',?,?,?,?,?,?,?,?,?,?,?)`).run(
+      `Job Completion ${job.job_code||("#"+job.id)}`,job.title||"Completed Klavierhaus workshop job","job",String(job.id),filename,filename,"application/pdf",pdf.length,publicPath,
+      JSON.stringify({document_type:"job_completion_report",job_id:job.id,client_id:job.client_id,piano_id:job.piano_id,completed_at:job.completed_at,handoff_ids:handoffs.map(row=>row.id)}),actorId
+    );
+    const archiveId=Number(info.lastInsertRowid);db.prepare("UPDATE jobs SET completion_document_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(archiveId,job.id);
+    return db.prepare("SELECT * FROM document_archive WHERE id=?").get(archiveId);
+  }
+  function queueDocument(eventType,entityType,entityId,payload,dedupeKey){
+    if(!automationOutbox){
+      if(eventType==="GENERATE_JOB_COMPLETION_REPORT")return archiveJobCompletionReport(Number(payload.job_id),payload.actor_user_id||null);
+      if(eventType==="ARCHIVE_ISSUED_INVOICE")return archiveIssuedInvoice(Number(payload.invoice_id),payload.actor_user_id||null);
+      return null;
+    }
+    return automationOutbox.enqueue({eventType,entityType,entityId:String(entityId),payload,dedupeKey});
+  }
+  if(automationOutbox){
+    automationOutbox.register("GENERATE_JOB_COMPLETION_REPORT",async payload=>archiveJobCompletionReport(Number(payload.job_id),payload.actor_user_id||null));
+    automationOutbox.register("ARCHIVE_ISSUED_INVOICE",async payload=>archiveIssuedInvoice(Number(payload.invoice_id),payload.actor_user_id||null));
+  }
+
   function archiveInvalidatedInvoice(invoiceId,reason,actor){
     return db.transaction(()=>{
       const existing=invoiceDetail(invoiceId);if(!existing)throw problem("INVOICE_NOT_FOUND",404);
@@ -309,7 +364,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       workshopPayments.ensurePaymentLink(invoice.id);
       invoice=invoiceDetail(invoice.id);
     }
-    const persisted=persistPdf(invoice.id);
+    const persisted=persistPdf(invoice.id,{statusOverride:"sent"});
     try{
       const delivery=await transactionalEmail.sendWorkshopInvoice({
         to:recipient,clientName:invoice.counterparty_name,
@@ -324,6 +379,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
           .run(invoice.id,recipient,language,delivery.providerMessageId,actor.id);
         if(invoice.job_id)completeJob(invoice.job_id,actor);
       })();
+      queueDocument("ARCHIVE_ISSUED_INVOICE","invoice",invoice.id,{invoice_id:invoice.id,actor_user_id:actor?.id||null},`issued-invoice-document-${invoice.id}`);
       return invoiceDetail(invoice.id);
     }catch(error){
       db.prepare("INSERT INTO invoice_email_log(invoice_id,recipient,language,status,error_code,created_by_user_id) VALUES(?,?,?,'failed',?,?)")
@@ -490,6 +546,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         return {invoice,job};
       })();
       audit(req,"COMPLETE","jobs",String(id),before,result.job);
+      queueDocument("GENERATE_JOB_COMPLETION_REPORT","job",id,{job_id:id,actor_user_id:req.user?.id||null},`job-completion-document-${id}`);
       customerMilestone(id,"WORK_COMPLETED");
       if(mode==="send"){
         try{result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language,req.body?.recipient_email);}
@@ -509,6 +566,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         return {invoice:generateFromJob(id,req.body,req.user),job:completeJob(id,req.user)};
       })();
       audit(req,"COMPLETE","jobs",String(id),before,result.job);
+      queueDocument("GENERATE_JOB_COMPLETION_REPORT","job",id,{job_id:id,actor_user_id:req.user?.id||null},`job-completion-document-${id}`);
       customerMilestone(id,"WORK_COMPLETED");
       if(mode==="send")result.invoice=await sendInvoice(result.invoice.id,req.user,req.body?.email_language,req.body?.recipient_email);
       res.status(201).json({ok:true,invoice_mode:mode,...result});
