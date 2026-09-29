@@ -106,7 +106,19 @@ test("PWA is English-first, bilingual and implements required operational contro
 
 test("retired ERP domains and duplicate calendar/workflow tables are absent from active schema",()=>{
   const schema=read("server/schema.sql");
-  for(const table of ["planned_jobs","calendar_jobs","workflow_jobs","financial_items","workflow_finance_sources","journal_entries","journal_lines","inventory_items"]){
+  for(const table of ["planned_jobs","calendar_jobs","workflow_jobs","financial_items","workflow_finance_sources","journal_entries","journal_lines"]){
     assert.doesNotMatch(schema,new RegExp("CREATE TABLE IF NOT EXISTS "+table+"\\s*\\("),table);
   }
 });
+
+test("Round J uses the canonical stock catalog instead of the retired legacy inventory shape",()=>{
+  const schema=read("server/schema.sql"),inventory=read("server/inventory.js");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS inventory_items\s*\([\s\S]*?sku TEXT NOT NULL UNIQUE[\s\S]*?quantity_on_hand REAL NOT NULL[\s\S]*?reorder_point REAL NOT NULL/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS handoff_preset_materials/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS purchase_requests/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS job_material_usage/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS inventory_movements/);
+  assert.match(inventory,/INSUFFICIENT_INVENTORY/);
+  assert.match(inventory,/ensurePurchaseRequest/);
+});
+
