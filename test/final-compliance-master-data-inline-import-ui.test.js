@@ -59,13 +59,24 @@ test("client address remains editable and launches Apple Maps or Google Maps rou
   assert.match(app,/data-open-map/);
 });
 
-test("unsaved desktop Master Data changes are guarded before navigation or record switches",()=>{
+test("unsaved desktop Master Data uses Save Discard Cancel and saves before continuing",()=>{
   const app=read("public/app.js");
   assert.match(app,/masterDirty:false/);
-  assert.match(app,/function masterConfirmDiscard\(\)/);
-  assert.match(app,/You have unsaved changes\. Discard them and continue\?/);
+  assert.match(app,/async function masterSaveCurrentInlineForm/);
+  assert.match(app,/function masterUnsavedDecision\(\)/);
+  assert.match(app,/async function masterConfirmDiscard\(\)/);
+  assert.match(app,/data-master-unsaved-action="save"/);
+  assert.match(app,/data-master-unsaved-action="discard"/);
+  assert.match(app,/data-master-unsaved-action="cancel"/);
+  assert.match(app,/Discard changes/);
+  assert.match(app,/Módosítások elvetése/);
+  assert.doesNotMatch(app,/window\.confirm\(/);
+  assert.match(app,/\/api\/clients\/\$\{state\.selectedClientId\}/);
+  assert.match(app,/\/api\/pianos\/\$\{state\.selectedPianoId\}/);
+  assert.match(app,/decision==="save"/);
+  assert.match(app,/decision==="discard"/);
+  assert.match(app,/await masterConfirmDiscard\(\)/);
   assert.match(app,/beforeunload/);
-  assert.match(app,/if\(!masterConfirmDiscard\(\)\)return/);
 });
 
 test("left client cards are visibly separated and approximately 25 percent larger",()=>{
@@ -85,5 +96,5 @@ test("piano-specific location remains optional and client address stays the effe
 });
 
 test("PWA cache is bumped for Master Data reconciliation UI",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v16-master-reconcile-inline-edit/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v17-unsaved-three-way-dialog/);
 });
