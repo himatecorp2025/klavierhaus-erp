@@ -54,23 +54,7 @@ jobs:
         run: |
           git fetch origin develop --depth=1
           changed="$(git diff --name-only origin/develop -- .)"
-          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(website/server/index\.js|website/server/event-client\.js|website/public/app\.js|website/public/styles\.css|website/test/website-foundation\.test\.js)
-      - name: Use Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.18.0
-          cache: npm
-          cache-dependency-path: website/package-lock.json
-      - name: Install locked website dependencies
-        run: npm ci
-      - name: Check website JavaScript syntax
-        run: npm run check
-      - name: Run preserved public event-page contract
-        run: node --test test/event-pages.test.js
-      - name: Report immutable website dependency baseline
-        continue-on-error: true
-        run: npm audit --omit=dev --audit-level=high
- || true)"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(website/server/index\.js|website/server/event-client\.js|website/public/app\.js|website/public/styles\.css|website/test/website-foundation\.test\.js)$' || true)"
           if [ -n "$unexpected" ]; then
             echo "Unexpected website changes:"
             printf '%s\n' "$unexpected"
@@ -88,6 +72,8 @@ jobs:
         run: npm run check
       - name: Run preserved public event-page contract
         run: node --test test/event-pages.test.js
-      - name: Report immutable website dependency baseline
+      - name: Run private appointment website contract
+        run: node --test test/website-foundation.test.js
+      - name: Report website dependency baseline
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
