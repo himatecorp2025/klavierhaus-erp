@@ -1317,6 +1317,7 @@ select option{background:var(--surface);color:var(--ink)}
 .stage-card.status-blocked{border-left:4px solid #9666ff;background:color-mix(in srgb,#9666ff 10%,var(--surface))}
 .stage-card.status-overdue{border-left:4px solid #e55c62;background:color-mix(in srgb,#e55c62 10%,var(--surface))}
 .stage-card.status-completed{border-left:4px solid #2f9b68;background:color-mix(in srgb,#2f9b68 9%,var(--surface))}
+.stage-card.status-cancelled{border-left:4px solid #e55c62;background:color-mix(in srgb,#e55c62 11%,var(--surface));border-color:color-mix(in srgb,#e55c62 38%,var(--line))}
 .status-chip.status-scheduled{color:#69a2ff;background:color-mix(in srgb,#2f7cff 15%,var(--surface))}
 .status-chip.status-in_progress{color:#e6ad2f;background:color-mix(in srgb,#e6ad2f 14%,var(--surface))}
 .status-chip.status-blocked{color:#b695ff;background:color-mix(in srgb,#9666ff 14%,var(--surface))}
