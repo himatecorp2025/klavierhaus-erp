@@ -27,6 +27,20 @@ function sha256(buffer){return crypto.createHash("sha256").update(buffer).digest
 function tableExists(db,table){return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));}
 function tableRows(db,table){return tableExists(db,table)?db.prepare(`SELECT * FROM "${table}" ORDER BY rowid`).all():[];}
 function currentColumns(db,table){return tableExists(db,table)?db.prepare(`PRAGMA table_info("${table}")`).all().map(row=>row.name):[];}
+function snapshotLinks(db){
+  const specs=[
+    ["events",["id","artist_id"]],
+    ["customer_conversations",["id","service_id","piano_id"]],
+    ["website_contact_leads",["id","service_id"]],
+    ["private_appointments",["id","service_id","piano_id"]],
+    ["private_appointment_requests",["id","service_id","piano_id"]]
+  ];
+  return Object.fromEntries(specs.map(([table,columns])=>{
+    if(!tableExists(db,table))return [table,[]];
+    const available=new Set(currentColumns(db,table)),selected=columns.filter(column=>available.has(column));
+    return [table,selected.length?db.prepare(`SELECT ${selected.map(column=>`"${column}"`).join(",")} FROM "${table}" ORDER BY rowid`).all():[]];
+  }));
+}
 function snapshotSettings(db){
   if(!tableExists(db,"app_settings"))return [];
   const marks=ALL_SETTING_KEYS.map(()=>"?").join(",");
@@ -53,6 +67,7 @@ function buildSnapshot(db,{reason="",scope="all"}={}){
       website_reviews:tableRows(db,"website_reviews")
     },
     settings:snapshotSettings(db),
+    foreign_links:snapshotLinks(db),
     counts:counts(db)
   };
 }
@@ -99,8 +114,20 @@ function replaceSettings(db,keys,rows){
   const allowed=new Set(keys),insert=db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,COALESCE(?,CURRENT_TIMESTAMP))");
   for(const row of rows||[])if(allowed.has(row.setting_key))insert.run(row.setting_key,row.setting_value,row.updated_by||"RESTORE",row.updated_at||null);
 }
+function restoreLinks(db,links){
+  for(const [table,rows] of Object.entries(links||{})){
+    if(!tableExists(db,table)||!rows?.length)continue;
+    const available=new Set(currentColumns(db,table));
+    for(const row of rows){
+      if(row.id===undefined||row.id===null)continue;
+      const fields=Object.keys(row).filter(key=>key!=="id"&&available.has(key));
+      if(!fields.length)continue;
+      db.prepare(`UPDATE "${table}" SET ${fields.map(key=>`"${key}"=?`).join(",")} WHERE id=?`).run(...fields.map(key=>row[key]),row.id);
+    }
+  }
+}
 function restoreSnapshot(db,snapshot){
-  const tables=snapshot.tables||{},settings=snapshot.settings||[];
+  const tables=snapshot.tables||{},settings=snapshot.settings||[],links=snapshot.foreign_links||{};
   db.transaction(()=>{
     if(tableExists(db,"website_preview_tokens"))db.prepare("DELETE FROM website_preview_tokens").run();
     for(const table of ["website_content_versions","website_content_pages","landing_sections"])if(tableExists(db,table))db.prepare(`DELETE FROM "${table}"`).run();
@@ -115,6 +142,7 @@ function restoreSnapshot(db,snapshot){
     insertRows(db,"website_reviews",tables.website_reviews||[]);
 
     replaceSettings(db,ALL_SETTING_KEYS,settings);
+    restoreLinks(db,links);
     db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('branding_version',?,'RESTORE',CURRENT_TIMESTAMP)
       ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by='RESTORE',updated_at=CURRENT_TIMESTAMP`).run(String(Date.now()));
   })();
@@ -211,6 +239,6 @@ function registerWebsiteBackupResetRoutes({app,db,auth,permit,requireSuperadmin,
 
 module.exports={
   registerWebsiteBackupResetRoutes,
-  createWebsiteBackup,readWebsiteBackup,restoreSnapshot,factoryReset,buildSnapshot,
+  createWebsiteBackup,readWebsiteBackup,restoreSnapshot,factoryReset,buildSnapshot,restoreLinks,
   TABLE_GROUPS,ALL_SETTING_KEYS,SNAPSHOT_VERSION
 };
