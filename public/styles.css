@@ -1461,3 +1461,359 @@ html.notification-layer-open{overflow:hidden}
 @media(prefers-reduced-motion:reduce){
   .notification-layer,.notification-drawer,.notification-card,.notification-backdrop{transition:none!important;animation:none!important}
 }
+
+
+/* RESPONSIVE PWA V11
+   Final override layer: compact Intake tiles + tablet/mobile-first ERP/PWA layout. */
+html,body{max-width:100%;overflow-x:hidden}
+*,*::before,*::after{box-sizing:border-box}
+img,svg,video,canvas{max-width:100%}
+.workspace,.panel,.dialog-card,.cms-editor,.client-detail,.finance-column,.archive-row-main{min-width:0}
+input,select,textarea,button{max-width:100%}
+
+/* Compact intake work selection: deliberately not full-width laptop tiles. */
+.assessment-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(142px,156px));
+  justify-content:start;
+  align-items:start;
+  gap:8px;
+}
+.assessment-option{
+  position:relative;
+  width:100%;
+  max-width:156px;
+  aspect-ratio:1/1;
+  min-height:0;
+  padding:10px;
+  border-radius:14px;
+  display:grid;
+  grid-template-columns:1fr;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  align-content:start;
+  overflow:hidden;
+}
+.assessment-option>input{top:8px;right:8px;width:19px;height:19px}
+.assessment-option>span{padding-right:23px;min-width:0}
+.assessment-option>span strong{
+  font-size:11px;
+  line-height:1.2;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.assessment-option>span small{
+  margin-top:4px;
+  font-size:9px;
+  line-height:1.25;
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.assessment-price{gap:3px;margin-top:5px;min-width:0}
+.assessment-price>span{font-size:13px}
+.assessment-price input{min-height:31px;height:31px;padding:4px 5px;font-size:10px}
+
+/* Global component resilience. */
+.page-head,.panel-head,.detail-title,.archive-toolbar,.workflow-view-toolbar,.cms-fieldset-head,.cms-repeat-head{
+  min-width:0;
+}
+.page-head>*,.panel-head>*,.detail-title>*,.archive-toolbar>*,.workflow-view-toolbar>*{min-width:0}
+.page-actions,.job-actions,.team-actions,.archive-row-actions,.intake-card-actions,.form-actions,.calendar-toolbar-right{
+  max-width:100%;
+  flex-wrap:wrap;
+}
+.search-field,.search-field input,.field,.field input,.field select,.field textarea{min-width:0;width:100%}
+.overview-table-wrap,.workflow-scroll,.time-calendar-scroll,.calendar-scroll{max-width:100%;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
+.overview-table-wrap{overflow:auto}
+
+/* Tablet */
+@media(max-width:1180px){
+  .workspace{width:100%;padding:24px 20px 72px}
+  .stats-grid,.workshop-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .planned-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .coming-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .finance-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .finance-kpis.four{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .master-layout,.profile-grid,.cms-layout,.finance-split{grid-template-columns:1fr}
+  .client-list{max-height:none}
+  .cms-sidebar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .cms-page-button{text-align:center;padding:8px;min-height:44px}
+  .assessment-grid{grid-template-columns:repeat(4,minmax(0,152px))}
+  .assessment-option{max-width:152px}
+}
+
+/* Tablet / PWA landscape */
+@media(max-width:900px){
+  .workspace{padding:18px 14px calc(94px + var(--safe-bottom))}
+  .app-header{
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:10px;
+    min-height:62px;
+    padding:8px 12px;
+  }
+  .header-spacer{min-width:0}
+  .header-tools{gap:7px;min-width:0}
+  .ny-clock{min-width:102px;padding-right:8px}
+  .ny-clock strong{font-size:14px}
+  .theme-switch{transform:scale(.92);transform-origin:center right}
+  .notification-bell{width:39px;height:39px}
+  .page-head{gap:14px;margin-bottom:18px}
+  .page-head h1{font-size:clamp(24px,5vw,34px)}
+  .stats-grid,.workshop-kpis{gap:9px}
+  .stat-card,.workshop-kpi{padding:14px;min-height:0}
+  .workshop-kpi strong{font-size:24px}
+  .planned-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .piano-grid,.cms-object-grid,.branding-grid,.design-color-grid,.cms-collection-grid,.private-appointments-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+  .archive-filters{grid-template-columns:1fr 1fr}
+  .finance-controls{grid-template-columns:1fr 1fr}
+  .finance-controls .search-field{grid-column:1/-1}
+  .workflow-scroll{scroll-snap-type:x proximity}
+  .workflow-board{
+    min-width:0!important;
+    width:max-content;
+    max-width:none;
+    grid-template-columns:repeat(var(--workflow-columns),minmax(280px,300px))!important;
+  }
+  .workflow-column,.workflow-add-column{scroll-snap-align:start;min-width:0}
+  .time-calendar{min-width:0!important}
+  .time-calendar-scroll{width:100%;max-width:100%}
+  .month-calendar{min-width:0!important;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .month-weekdays,.month-calendar-grid{min-width:700px}
+  .calendar-toolbar{grid-template-columns:1fr!important;align-items:stretch}
+  .calendar-toolbar>strong{text-align:left}
+  .calendar-toolbar-right{display:flex;justify-content:space-between;gap:8px}
+  .calendar-toolbar-right select{min-width:0;flex:1}
+  .app-dialog{width:min(760px,calc(100vw - 24px));max-width:calc(100vw - 24px)}
+  .app-dialog:has(.overview-table-wrap){width:calc(100vw - 24px);max-width:calc(100vw - 24px)}
+  .dialog-card{max-width:100%}
+  .cms-upload{grid-template-columns:1fr}
+  .cms-upload button{min-width:0;width:100%}
+  .assessment-grid{grid-template-columns:repeat(3,minmax(0,150px));gap:8px}
+  .assessment-option{max-width:150px}
+}
+
+/* Phone / portrait PWA */
+@media(max-width:640px){
+  body{font-size:14px}
+  .app-header{
+    grid-template-columns:40px minmax(0,1fr) auto;
+    gap:7px;
+    padding:7px 9px;
+  }
+  .mobile-brand-button{width:38px;height:38px}
+  .header-tools{gap:5px}
+  .ny-clock{min-width:70px;padding-right:6px}
+  .ny-clock span,.ny-clock small{display:none}
+  .ny-clock strong{margin:0;font-size:13px}
+  .notification-bell{width:36px;height:36px;border-radius:11px}
+  .notification-bell-icon svg{width:18px;height:18px}
+  .theme-switch{transform:scale(.82);transform-origin:center right}
+  .header-actions{display:none}
+  .workspace{
+    width:100%;
+    padding:14px 10px calc(90px + var(--safe-bottom));
+  }
+  .page-head{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    margin-bottom:14px;
+  }
+  .page-head h1{font-size:25px;line-height:1.08}
+  .page-head p{margin-top:5px;font-size:12px;line-height:1.45}
+  .page-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;width:100%}
+  .page-actions>*{min-width:0!important;width:100%}
+  .panel{border-radius:14px}
+  .panel-head{
+    align-items:stretch;
+    flex-direction:column;
+    padding:12px;
+  }
+  .stats-grid,.workshop-kpis,.finance-kpis,.finance-kpis.four{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:7px;
+  }
+  .stat-card{padding:12px}
+  .stat-card strong{font-size:20px}
+  .workshop-kpi{padding:12px;min-height:102px;border-radius:15px}
+  .workshop-kpi strong{font-size:22px}
+  .planned-toolbar,.intake-toolbar,.finance-controls{
+    grid-template-columns:1fr!important;
+    gap:8px;
+  }
+  .planned-toolbar>*,
+  .intake-toolbar>*,
+  .finance-controls>*{grid-column:auto!important;width:100%}
+  .planned-grid,.piano-grid,.cms-object-grid,.branding-grid,.design-color-grid,.cms-collection-grid,.private-appointments-grid{
+    grid-template-columns:1fr!important;
+  }
+  .master-layout,.profile-grid,.cms-layout,.finance-split{gap:10px}
+  .client-detail,.profile-card,.cms-editor{padding:14px}
+  .client-list{max-height:none}
+  .detail-title{display:grid;grid-template-columns:1fr;gap:8px}
+  .contact-line{gap:5px}
+  .contact-pill{font-size:10px;max-width:100%;overflow-wrap:anywhere}
+  .intake-card{
+    grid-template-columns:5px minmax(0,1fr);
+    gap:9px;
+    padding:12px;
+  }
+  .intake-card-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .intake-card-actions>*{width:100%;min-width:0}
+  .intake-meta{gap:5px}
+  .badge{font-size:9px;min-height:25px;padding:0 7px}
+  .archive-toolbar,.workflow-view-toolbar{
+    align-items:stretch;
+    flex-direction:column;
+    gap:10px;
+  }
+  .archive-filters{grid-template-columns:1fr}
+  .archive-row{
+    grid-template-columns:34px minmax(0,1fr);
+    gap:8px;
+    padding:10px;
+  }
+  .archive-row-icon{width:34px;height:34px}
+  .archive-row-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}
+  .archive-row-actions>*{width:100%}
+  .workflow-view-controls{display:grid;grid-template-columns:1fr;align-items:stretch}
+  .workflow-view-controls .segmented-control{width:100%;overflow-x:auto;justify-content:flex-start}
+  .workflow-board{
+    grid-template-columns:repeat(var(--workflow-columns),minmax(82vw,82vw))!important;
+    gap:9px;
+  }
+  .workflow-column{min-height:300px;padding:8px;border-radius:14px}
+  .workflow-column>header{padding:6px 5px 9px}
+  .workflow-add-column{min-height:300px}
+  .job-card{padding:11px;border-radius:13px}
+  .job-actions{gap:6px}
+  .job-actions button{min-height:36px;flex:1 1 46%;padding-left:8px;padding-right:8px}
+  .calendar-nav{display:grid;grid-template-columns:44px 1fr 44px;width:100%}
+  .calendar-nav button{min-width:0;width:100%;padding:0 6px}
+  .calendar-toolbar-right{display:grid;grid-template-columns:1fr;gap:7px}
+  .calendar-toolbar-right>.segmented-control{width:100%;display:grid;grid-template-columns:repeat(3,1fr)}
+  .calendar-toolbar-right>.segmented-control button{min-width:0;padding:0 6px}
+  .calendar-drag-help{display:none}
+  .time-calendar{min-width:0!important}
+  .time-calendar-inner{min-width:100%}
+  .time-calendar.mode-day .time-calendar-head,
+  .time-calendar.mode-day .time-calendar-body{min-width:100%!important}
+  .time-calendar.mode-day .time-day-columns{grid-template-columns:1fr!important}
+  .time-calendar.mode-day .time-calendar-head{grid-template-columns:50px 1fr!important}
+  .time-calendar-body{grid-template-columns:50px minmax(0,1fr)}
+  .time-gutter-head{width:50px}
+  .time-gutter span{right:5px;font-size:8px}
+  .month-calendar{max-width:100%;overflow-x:auto}
+  .month-weekdays,.month-calendar-grid{min-width:620px}
+  .overview-table{min-width:760px}
+  .overview-table-wrap{max-height:60dvh}
+  .cms-sidebar{
+    display:flex;
+    overflow-x:auto;
+    gap:6px;
+    padding:6px;
+    scroll-snap-type:x proximity;
+  }
+  .cms-page-button{flex:0 0 auto;width:auto;min-width:120px;scroll-snap-align:start}
+  .cms-toolbar{align-items:stretch}
+  .cms-toolbar>*{flex:1 1 100%}
+  .cms-publish-bar{bottom:calc(84px + var(--safe-bottom));align-items:stretch;flex-direction:column}
+  .landing-row{align-items:flex-start}
+  .team-row{grid-template-columns:minmax(0,1fr);gap:7px}
+  .team-actions{justify-content:flex-start}
+  .notification-drawer{width:100vw;max-width:none}
+  .notification-drawer-header{padding:14px}
+  .notification-drawer-controls{padding:10px 14px}
+  .notification-list{padding:9px}
+  .notification-card{padding:11px 34px 11px 9px;grid-template-columns:30px minmax(0,1fr)}
+  .notification-card-actions{display:grid;grid-template-columns:1fr 1fr}
+  .notification-card-actions>*{width:100%}
+  .app-dialog,
+  .app-dialog:has(.overview-table-wrap){
+    width:100vw!important;
+    max-width:100vw!important;
+    height:100dvh;
+    max-height:100dvh;
+    margin:0;
+    padding:0;
+    border-radius:0;
+  }
+  .dialog-card{
+    width:100%;
+    height:100dvh;
+    max-height:100dvh;
+    border-radius:0;
+    border-left:0;
+    border-right:0;
+    display:grid;
+    grid-template-rows:auto minmax(0,1fr);
+  }
+  .dialog-header{padding:13px 14px}
+  .dialog-header h2{font-size:19px}
+  .dialog-body{min-height:0;overflow:auto;padding:13px 12px calc(18px + var(--safe-bottom))}
+  .form-grid{grid-template-columns:1fr!important;gap:10px}
+  .form-grid .full{grid-column:auto}
+  .form-actions{
+    position:sticky;
+    z-index:2;
+    bottom:calc(-13px - var(--safe-bottom));
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    margin:12px -12px calc(-18px - var(--safe-bottom));
+    padding:10px 12px calc(10px + var(--safe-bottom));
+    background:color-mix(in srgb,var(--surface) 96%,transparent);
+    backdrop-filter:blur(10px);
+  }
+  .form-actions>*{width:100%;min-width:0}
+  .field input,.field select,.field textarea{font-size:16px}
+  .cms-toggle-row{align-items:flex-start}
+  .assessment-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    width:min(100%,328px);
+    max-width:328px;
+    gap:7px;
+  }
+  .assessment-option{
+    max-width:none;
+    padding:9px;
+    border-radius:13px;
+  }
+  .assessment-option>span strong{font-size:10.5px}
+  .assessment-option>span small{-webkit-line-clamp:2;font-size:8.5px}
+  .assessment-price input{height:29px;min-height:29px}
+  .toast-region{left:10px;right:10px;top:68px}
+}
+
+/* Very small phones */
+@media(max-width:390px){
+  .workspace{padding-left:8px;padding-right:8px}
+  .page-actions{grid-template-columns:1fr}
+  .stats-grid,.workshop-kpis,.finance-kpis,.finance-kpis.four{grid-template-columns:1fr 1fr!important}
+  .ny-clock{min-width:58px}
+  .theme-switch{transform:scale(.75)}
+  .assessment-grid{width:100%;max-width:100%}
+  .assessment-option{padding:8px}
+  .assessment-option>span small{display:none}
+  .workflow-board{grid-template-columns:repeat(var(--workflow-columns),minmax(88vw,88vw))!important}
+  .form-actions{grid-template-columns:1fr}
+}
+
+/* Coarse pointers: touch-safe targets without making cards visually oversized. */
+@media(pointer:coarse){
+  button,.nav-item,.secondary-button,.primary-button,.text-button,.danger-button{min-height:42px}
+  .assessment-option{touch-action:manipulation}
+  input[type="checkbox"],input[type="radio"]{min-width:20px;min-height:20px}
+}
+
+/* Standalone PWA: keep content and overlays clear of device safe areas. */
+@media(display-mode:standalone){
+  .app-header{padding-top:max(8px,var(--safe-top))}
+  .workspace{padding-bottom:calc(96px + var(--safe-bottom))}
+  .mobile-nav{bottom:calc(8px + var(--safe-bottom))}
+  .notification-drawer{padding-top:var(--safe-top);padding-bottom:var(--safe-bottom)}
+}
