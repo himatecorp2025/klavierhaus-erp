@@ -17,8 +17,12 @@ function createAutomationOutbox({db,notifications,maxAttempts=5}){
   function enqueue({eventType,entityType,entityId,payload={},dedupeKey,availableAt=null}){
     const type=text(eventType,120),entity=text(entityType,120),entityKey=text(entityId,240),dedupe=text(dedupeKey,500);
     if(!type||!entity||!entityKey||!dedupe)throw new Error("OUTBOX_EVENT_INVALID");
-    const existing=db.prepare("SELECT id FROM automation_outbox WHERE dedupe_key=?").get(dedupe);
-    if(existing)return rowById(existing.id);
+    const existing=db.prepare("SELECT id,status FROM automation_outbox WHERE dedupe_key=?").get(dedupe);
+    if(existing){
+      if(existing.status!=="completed")db.prepare("UPDATE automation_outbox SET payload_json=?,status='pending',available_at=?,locked_at=NULL,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(JSON.stringify(payload||{}),availableAt||sqlTime(),existing.id);
+      return rowById(existing.id);
+    }
     const id="OUT-"+crypto.randomUUID();
     db.prepare(`INSERT INTO automation_outbox(id,event_type,entity_type,entity_id,payload_json,status,attempts,available_at,dedupe_key)
       VALUES(?,?,?,?,?,'pending',0,?,?)`).run(id,type,entity,entityKey,JSON.stringify(payload||{}),availableAt||sqlTime(),dedupe);
