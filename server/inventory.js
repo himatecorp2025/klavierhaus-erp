@@ -69,7 +69,7 @@ function createInventoryService({db,notifications=null}={}){
       notifications?.resolveEntity?.("INVENTORY_ITEM",String(item.id));
       return null;
     }
-    let request=db.prepare("SELECT * FROM purchase_requests WHERE inventory_item_id=? AND status='open' ORDER BY id DESC LIMIT 1").get(item.id);
+    let request=db.prepare("SELECT * FROM purchase_requests WHERE inventory_item_id=? AND status IN ('open','approved','ordered') ORDER BY id DESC LIMIT 1").get(item.id);
     if(!request){
       const quantity=Math.max(Number(item.reorder_quantity||1),0.001);
       const info=db.prepare(`INSERT INTO purchase_requests(inventory_item_id,status,requested_quantity,reason,created_by_user_id,updated_by_user_id)
@@ -200,8 +200,7 @@ function registerInventoryRoutes({app,db,auth,permit,audit,inventoryService}={})
           .run(status,receivedQuantity,req.user.id,id);
       })();
       const after=db.prepare("SELECT * FROM purchase_requests WHERE id=?").get(id),item=service.itemById(after.inventory_item_id);
-      if(Number(item.quantity_on_hand)>Number(item.reorder_point))service.ensurePurchaseRequest(item.id,req.user.id);
-      else service.ensurePurchaseRequest(item.id,req.user.id);
+      if(status==="received"||status==="cancelled")service.ensurePurchaseRequest(item.id,req.user.id);
       audit(req,"STATUS","purchase_requests",String(id),before,after);res.json({request:after,item});
     }catch(error){respond(res,error);}
   });
