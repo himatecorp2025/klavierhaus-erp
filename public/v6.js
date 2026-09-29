@@ -328,7 +328,7 @@ async function v6RenderBranding(){
 function v6BrandAssetCard(kind,title,url,description){
   return `<section class="panel branding-card"><div class="branding-preview ${kind==="loginBackground"?"wide":""}">${url?`<img src="${esc(url)}" alt="">`:`<div class="cms-media-empty">＋</div>`}</div><div><span class="eyebrow">${esc(kind.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(description)}</p><label class="file-picker"><input type="file" accept="image/*" data-brand-file="${kind}"><span>↑ ${tr(url?"Replace":"Upload",url?"Csere":"Feltöltés")}</span></label></div></section>`;
 }
-const V6_ARCHIVE_CATEGORIES=const V6_ARCHIVE_CATEGORIES={
+const V6_ARCHIVE_CATEGORIES={
   deleted_invoice:["Invalidated / deleted invoices","Érvénytelenített / törölt számlák"],
   financial_document:["Financial documents","Pénzügyi dokumentumok"],
   contract:["Contracts","Szerződések"],
