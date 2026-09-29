@@ -241,25 +241,34 @@ function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
 }
 function r2OpenBlocker(job,refresh=renderWorkshop){
   const phase=job.current_phase||{};
-  openDialog({title:tr("Deadline & delay reason","Határidő és elakadás oka"),eyebrow:r2StageLabel(job.stage),body:`<form id="blockerForm" class="form-grid">
+  openDialog({title:tr("Phase timing & responsibility","Fázis időzítése és felelőse"),eyebrow:r2StageLabel(job.stage),body:`<form id="blockerForm" class="form-grid">
+    <div class="detail-note full">${tr("Start and finish times may always be moved backward or forward. The card color is recalculated from the saved times every time the workflow renders.","A kezdési és befejezési idő mindig vissza- vagy előre módosítható. A kártya színe minden megjelenítéskor a mentett időkből újraszámolódik.")}</div>
+    <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
+    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span><input name="starts_at" type="datetime-local" step="900" value="${esc(phase.starts_at?r2IsoToNyInput(phase.starts_at):"")}"></label>
     <label class="field full"><span>${tr("Expected completion","Várható befejezés")}</span><input name="due_at" type="datetime-local" step="900" value="${esc(phase.due_at?r2IsoToNyInput(phase.due_at):"")}"></label>
     <label class="field full"><span>${tr("Delay / blocker reason","Elakadás / késés oka")}</span><select name="blocker_code"><option value="">${tr("No blocker","Nincs elakadás")}</option>${Object.entries(R2_BLOCKERS).map(([code,pair])=>`<option value="${code}" ${phase.blocker_code===code?"selected":""}>${esc(state.language==="hu"?pair[1]:pair[0])}</option>`).join("")}</select></label>
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
   $("#blockerForm").addEventListener("submit",async event=>{
-    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={due_at:form.due_at?r2NyInputToIso(form.due_at):null,blocker_code:form.blocker_code||null,blocker_note:form.blocker_note||null};
+    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={
+      starts_at:form.starts_at?r2NyInputToIso(form.starts_at):null,
+      due_at:form.due_at?r2NyInputToIso(form.due_at):null,
+      responsible_user_id:form.responsible_user_id||null,
+      blocker_code:form.blocker_code||null,blocker_note:form.blocker_note||null
+    };
     try{await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
 function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
   const next=targetStage||job.next_stage;
   if(!next||next==="completed"){toast(tr("This job is ready for Admin closeout.","A munka adminisztrátori lezárásra kész."),"error");return;}
+  const targetPhase=(job.workflow_phases||[]).find(phase=>phase.stage_key===next)||{};
   openDialog({title:tr("Complete Phase / Handoff","Fázis lezárása / Átadás"),eyebrow:`${r2StageLabel(job.stage)} → ${r2StageLabel(next)}`,body:`<form id="handoffForm" class="form-grid">
     <div class="detail-note full">${tr("Complete the current phase and move the job to the selected unfinished phase. Intermediate phases may be completed in a different order; Admin Approval remains the final active phase.","Zárd le az aktuális fázist, és helyezd át a munkát a kiválasztott, még nyitott fázisba. A köztes fázisok eltérő sorrendben is teljesíthetők; az Admin jóváhagyás mindig az utolsó aktív fázis.")}</div>
     <label class="field"><span>${tr("Labor / daily fee","Munkadíj / napi díj")} (USD)</span><input name="phase_labor_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field"><span>${tr("Material cost","Anyagköltség")} (USD)</span><input name="phase_material_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field full"><span>${tr("Internal handoff note","Belső átadási jegyzet")}</span><textarea name="phase_note"></textarea></label>
-    <label class="field full"><span>${tr("Next responsible","Következő felelős")}</span><select name="assigned_to_user_id"><option value="">${tr("Keep current technician","Jelenlegi technikus marad")}</option>${r2TechnicianOptions("")}</select></label>
+    <label class="field full"><span>${tr("Next phase responsible","Következő fázis felelőse")}</span><select name="assigned_to_user_id" required>${r2ResponsibleOptions(targetPhase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
     <input type="hidden" name="to_stage" value="${esc(next)}">
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Complete & move","Lezárás és áthelyezés")}</button></div></form>`});
   $("#handoffForm").addEventListener("submit",async event=>{
