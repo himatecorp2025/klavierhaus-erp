@@ -184,6 +184,8 @@ function createNotificationCenter({db,env=process.env}={}){
     const allowedPrefixes=["clients","pianos","intake","jobs","invoices","document","website_leads","events"];
     if(!allowedPrefixes.some(prefix=>mod.startsWith(prefix)))return null;
     const label=mod.replaceAll("_"," ").replace(/\b\w/g,m=>m.toUpperCase());
+    const terminal=/COMPLETE|CLOSE|CANCEL|DELETE|ARCHIVE/.test(act);
+    if(terminal&&recordId!==undefined&&recordId!==null)resolveEntity(mod.toUpperCase(),String(recordId));
     const severity=/CANCEL|DELETE|FAIL|OVERDUE/.test(act)?"WARNING":/COMPLETE|PAID|CLOSE/.test(act)?"SUCCESS":"INFO";
     const bodyEn=`${user?.name||"System"} · ${act.replaceAll("_"," ")}`;
     const bodyHu=`${user?.name||"Rendszer"} · ${act.replaceAll("_"," ")}`;
