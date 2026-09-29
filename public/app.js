@@ -202,7 +202,11 @@ function renderNotificationDrawer(){
   $$("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
     if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
     try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
-    if(row?.action_url){if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));}
+    if(row?.action_url){
+      closeNotificationDrawer({restoreFocus:false});
+      if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}
+      else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));
+    }
     card.classList.remove("is-unread");card.classList.add("is-read");
   }));
 }
@@ -219,13 +223,18 @@ async function refreshNotifications({allowSound=true}={}){
   }catch(_error){}
 }
 function openNotificationDrawer(){
-  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
-  drawer.classList.add("open");drawer.setAttribute("aria-hidden","false");if(backdrop)backdrop.hidden=false;if(bell)bell.setAttribute("aria-expanded","true");
+  const layer=$("#notificationLayer"),drawer=$("#notificationDrawer"),bell=$("#notificationBell");if(!layer||!drawer)return;
+  clearTimeout(layer._hideTimer);layer.hidden=false;layer.setAttribute("aria-hidden","false");drawer.setAttribute("aria-hidden","false");
+  if(bell)bell.setAttribute("aria-expanded","true");document.documentElement.classList.add("notification-layer-open");
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{layer.classList.add("open");drawer.classList.add("open");drawer.focus({preventScroll:true});}));
   void refreshNotifications({allowSound:false});void ensurePushSubscription();
 }
-function closeNotificationDrawer(){
-  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
-  drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");if(backdrop)backdrop.hidden=true;if(bell)bell.setAttribute("aria-expanded","false");
+function closeNotificationDrawer({restoreFocus=true}={}){
+  const layer=$("#notificationLayer"),drawer=$("#notificationDrawer"),bell=$("#notificationBell");if(!layer||!drawer)return;
+  clearTimeout(layer._hideTimer);layer.classList.remove("open");drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");
+  if(bell)bell.setAttribute("aria-expanded","false");document.documentElement.classList.remove("notification-layer-open");
+  const finish=()=>{if(!layer.classList.contains("open")){layer.hidden=true;layer.setAttribute("aria-hidden","true");if(restoreFocus&&bell&&!$("#loginScreen")?.classList.contains("hidden"))return;if(restoreFocus&&bell)bell.focus({preventScroll:true});}};
+  layer._hideTimer=setTimeout(finish,window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches?0:300);
 }
 async function snoozeNotification(id,hours=3,until=null){
   try{await api("/api/notifications/"+encodeURIComponent(id)+"/snooze",{method:"POST",body:JSON.stringify(until?{until}:{hours})});await refreshNotifications({allowSound:false});}
@@ -262,8 +271,9 @@ async function ensurePushSubscription(){
 }
 function bindNotificationUi(){
   if(state.notificationUiBound)return;state.notificationUiBound=true;
-  $("#notificationBell")?.addEventListener("click",()=>$("#notificationDrawer")?.classList.contains("open")?closeNotificationDrawer():openNotificationDrawer());
-  $("#notificationDrawerClose")?.addEventListener("click",closeNotificationDrawer);$("#notificationBackdrop")?.addEventListener("click",closeNotificationDrawer);
+  $("#notificationBell")?.addEventListener("click",()=>$("#notificationLayer")?.classList.contains("open")?closeNotificationDrawer():openNotificationDrawer());
+  $("#notificationDrawerClose")?.addEventListener("click",()=>closeNotificationDrawer());$("#notificationBackdrop")?.addEventListener("click",()=>closeNotificationDrawer());
+  document.addEventListener("keydown",event=>{if(event.key==="Escape"&&$("#notificationLayer")?.classList.contains("open")){event.preventDefault();closeNotificationDrawer();}});
   $("#notificationSoundToggle")?.addEventListener("change",event=>setNotificationSound(event.target.checked));
   $("#notificationSnoozeAll")?.addEventListener("click",async()=>{
     try{await api("/api/notifications/snooze-all",{method:"POST",body:JSON.stringify({hours:3})});closeNotificationDrawer();await refreshNotifications({allowSound:false});toast(tr("Notifications will return in 3 hours.","Az értesítések 3 óra múlva újra megjelennek."),"success");}
