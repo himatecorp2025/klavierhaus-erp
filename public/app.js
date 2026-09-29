@@ -25,7 +25,7 @@ const chromeText={
   nav_workshop:["Workshop & Calendar","Műhely & Naptár"],nav_intake:["Intake","Igényfelmérés"],nav_planned:["Planned Jobs","Tervezett munkák"],
   nav_master:["Master Data","Törzsadatok"],nav_finance:["Finance","Pénzügy"],nav_documents:["Documents","Dokumentumok"],nav_cms:["Website CMS","Weboldal CMS"],
   mobile_workshop:["Workshop","Műhely"],mobile_planned:["Planned","Tervezett"],mobile_intake:["Intake","Igény"],mobile_master:["Master","Törzs"],
-  mobile_finance:["Finance","Pénzügy"],mobile_profile:["Profile","Profil"],new_york_time:["New York time","New York-i idő"]
+  mobile_finance:["Finance","Pénzügy"],mobile_more:["More","Továbbiak"],mobile_profile:["Profile","Profil"],new_york_time:["New York time","New York-i idő"]
 };
 function applyChromeLanguage(){
   document.documentElement.lang=state.language;
@@ -315,10 +315,14 @@ async function loadBranding(){
     document.title=`${branding.company_name||"Klavierhaus"} ERP`;
   }catch(_error){}
 }
+function syncNavigationState(view=state.view){
+  $(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
+  $("#mobileMoreButton")?.classList.toggle("active",["finance","documents","cms","profile"].includes(view));
+}
 function navTo(view){
   if(!activeViews.has(view))return;
   state.view=view;history.replaceState({},"",`#${view}`);
-  $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
+  syncNavigationState(view);
   void renderView();
 }
 function bindNavigation(){
@@ -355,7 +359,7 @@ async function renderView(){
     else if(state.view==="profile")await renderProfile();
     else await renderIntake();
     workspace.focus({preventScroll:true});
-    $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===state.view));
+    syncNavigationState(state.view);
   }catch(error){
     workspace.innerHTML=`<section class="panel empty-state"><strong>${tr("The view could not be loaded.","Nem sikerült betölteni a nézetet.")}</strong><p>${esc(humanError(error))}</p><button class="secondary-button" type="button" id="retryView">${tr("Retry","Újrapróbálás")}</button></section>`;
     $("#retryView")?.addEventListener("click",()=>renderView());

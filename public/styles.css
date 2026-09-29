@@ -218,7 +218,7 @@ input:focus,textarea:focus,select:focus{border-color:#8aabff;box-shadow:0 0 0 4p
   .desktop-nav{display:none}
   .app-header{grid-template-columns:1fr auto;min-height:64px;padding:8px 16px}
   .workspace{padding:22px 14px calc(96px + var(--safe-bottom))}
-  .mobile-nav{position:fixed;z-index:50;left:10px;right:10px;bottom:calc(10px + var(--safe-bottom));display:grid;grid-template-columns:repeat(4,1fr);padding:6px;border:1px solid rgba(17,19,24,.1);border-radius:20px;background:rgba(255,255,255,.94);box-shadow:0 14px 40px rgba(20,26,36,.16);backdrop-filter:blur(18px)}
+  .mobile-nav{position:fixed;z-index:50;left:10px;right:10px;bottom:calc(10px + var(--safe-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:6px;border:1px solid rgba(17,19,24,.1);border-radius:20px;background:rgba(255,255,255,.94);box-shadow:0 14px 40px rgba(20,26,36,.16);backdrop-filter:blur(18px)}
   .mobile-nav button{display:grid;place-items:center;gap:2px;min-height:54px;border:0;border-radius:14px;background:transparent;color:#66707b}
   .mobile-nav button span{font-size:20px}
   .mobile-nav button small{font-size:10px;font-weight:750}
@@ -256,7 +256,7 @@ input:focus,textarea:focus,select:focus{border-color:#8aabff;box-shadow:0 0 0 4p
   .planned-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:900px){
-  .mobile-nav{grid-template-columns:repeat(6,minmax(62px,1fr));overflow-x:auto}
+  .mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr));overflow:visible}
   .workflow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .calendar-toolbar{grid-template-columns:1fr;align-items:stretch}
   .calendar-toolbar>strong{text-align:left}
@@ -336,7 +336,7 @@ select[multiple]{min-height:112px}
   .finance-controls #financeSettingsBtn{grid-column:3}
 }
 @media(max-width:900px){
-  .mobile-nav{grid-template-columns:repeat(7,minmax(62px,1fr))}
+  .mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr));overflow:visible}
   .finance-controls{grid-template-columns:1fr 1fr}
   .finance-controls .search-field{grid-column:1/-1}
   .finance-split{grid-template-columns:1fr}
@@ -1047,7 +1047,7 @@ select option{background:var(--surface);color:var(--ink)}
   .workspace{padding:20px 14px calc(94px + var(--safe-bottom))}
   .mobile-nav{
     position:fixed;z-index:70;left:8px;right:8px;bottom:calc(8px + var(--safe-bottom));
-    display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+    display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
     padding:5px;border:1px solid var(--line);border-radius:18px;background:var(--glass);
     box-shadow:0 14px 40px rgba(0,0,0,.25);backdrop-filter:blur(18px);overflow:visible;
   }
@@ -1816,4 +1816,16 @@ input,select,textarea,button{max-width:100%}
   .workspace{padding-bottom:calc(96px + var(--safe-bottom))}
   .mobile-nav{bottom:calc(8px + var(--safe-bottom))}
   .notification-drawer{padding-top:var(--safe-top);padding-bottom:var(--safe-bottom)}
+}
+
+
+/* Canonical mobile/tablet navigation contract: five fixed destinations. */
+@media(max-width:1024px){
+  .mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important;overflow:visible!important}
+  .mobile-nav button{min-width:0}
+  .mobile-more-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:390px){
+  .mobile-nav button{padding-inline:2px}
+  .mobile-nav button small{font-size:7.5px}
 }
