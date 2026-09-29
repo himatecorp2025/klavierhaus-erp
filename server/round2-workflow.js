@@ -352,7 +352,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       FROM invoices WHERE job_id=? OR (source_type='job' AND source_id=?) ORDER BY id DESC`).all(id,String(id));
     const events=db.prepare(`SELECT id,event_time,user_id,user_name,user_role,action,module,record_id,success,details
       FROM audit_log WHERE module='jobs' AND record_id=? ORDER BY event_time,id`).all(String(id));
-    res.json({job,phases,handoffs,invoices,events});
+    const communications=db.prepare("SELECT * FROM customer_communication_log WHERE job_id=? ORDER BY created_at,id").all(id);
+    res.json({job,phases,handoffs,invoices,communications,events});
   });
 
   app.get("/api/clients/:id/jobs",auth,staff,(req,res)=>{
