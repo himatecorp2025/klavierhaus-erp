@@ -416,7 +416,10 @@ registerWebsitePlatformRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   transactionalEmail,env:process.env,notifications:notificationCenter
 });
-registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir:UPLOAD_DIR,notifications:notificationCenter});
+registerWebsiteConversationRoutes({
+  app,db,auth,permit,customerConversationUpload,uploadDir:UPLOAD_DIR,notifications:notificationCenter,transactionalEmail,
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",env:process.env
+});
 
 app.use(uploadErrorHandler);
 app.use((err,req,res,next)=>{
