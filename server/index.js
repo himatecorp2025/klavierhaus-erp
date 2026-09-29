@@ -34,6 +34,8 @@ const { registerRound3FinanceRoutes } = require("./round3-finance");
 const { registerAdminUxV6Routes } = require("./admin-ux-v6");
 const { registerArchiveCenterRoutes } = require("./archive-center");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
+const { registerNotificationCenterRoutes } = require("./notification-center");
+const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -119,6 +121,7 @@ function requireSuperadmin(req,res,next) {
   if (isSuperadmin(req.user)) return next();
   res.status(403).json({error:"SUPERADMIN_REQUIRED"});
 }
+let notificationCenter=null;
 function audit(req,action,module,recordId,oldValue=null,newValue=null,success=1,details="") {
   try {
     db.prepare(`INSERT INTO audit_log(id,user_id,user_name,user_role,action,module,record_id,old_value,new_value,success,details,audit_type)
@@ -129,6 +132,7 @@ function audit(req,action,module,recordId,oldValue=null,newValue=null,success=1,
   } catch (error) {
     console.warn("[AUDIT]",error.message);
   }
+  try{notificationCenter?.fromAudit({action,module,recordId,oldValue,newValue,user:req?.user||null,success:Boolean(success)});}catch(error){console.warn("[NOTIFICATION-AUDIT]",error.message);}
 }
 function setting(key,fallback="") {
   return db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(key)?.setting_value ?? fallback;
@@ -339,6 +343,8 @@ app.post("/api/settings/branding/background",auth,permit("ADMIN"),brandingUpload
 app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{setSetting("logo_url","/icons/icon-512.png",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
+notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
+registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
@@ -362,9 +368,9 @@ registerWebsitePlatformRoutes({
   app,db,auth,permit,requireSuperadmin,audit,websiteImageUpload,websiteImageDir:WEBSITE_IMAGE_DIR,
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
-  transactionalEmail,env:process.env
+  transactionalEmail,env:process.env,notifications:notificationCenter
 });
-registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir:UPLOAD_DIR});
+registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir:UPLOAD_DIR,notifications:notificationCenter});
 
 app.use(uploadErrorHandler);
 app.use((err,req,res,next)=>{

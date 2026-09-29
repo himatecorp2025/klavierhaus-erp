@@ -731,6 +731,90 @@ CREATE TABLE IF NOT EXISTS website_contact_leads (
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS private_appointments (
+  id TEXT PRIMARY KEY,
+  appointment_type TEXT NOT NULL CHECK(appointment_type IN ('PRIVATE_VISIT','PIANO_VIEWING','SERVICE_CONSULTATION')),
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  scheduled_at TEXT NOT NULL,
+  note TEXT,
+  piano_id TEXT,
+  service_id TEXT,
+  status TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK(status IN ('SCHEDULED','COMPLETED','CANCELLED')),
+  assigned_user_id TEXT,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  source_path TEXT,
+  created_source TEXT NOT NULL DEFAULT 'PUBLIC' CHECK(created_source IN ('PUBLIC','ERP')),
+  created_by_user_id TEXT,
+  completed_at TEXT,
+  cancelled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
+  FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_private_appointments_time ON private_appointments(scheduled_at,status);
+CREATE INDEX IF NOT EXISTS idx_private_appointments_context ON private_appointments(appointment_type,piano_id,service_id);
+
+CREATE TABLE IF NOT EXISTS notification_events (
+  id TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  body_en TEXT NOT NULL DEFAULT '',
+  body_hu TEXT NOT NULL DEFAULT '',
+  action_url TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL DEFAULT 'INFO' CHECK(severity IN ('INFO','SUCCESS','WARNING','URGENT')),
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_at TEXT,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notification_events_entity ON notification_events(entity_type,entity_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_events_open ON notification_events(resolved_at,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS notification_recipients (
+  notification_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  read_at TEXT,
+  snoozed_until TEXT,
+  acknowledged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(notification_id,user_id),
+  FOREIGN KEY(notification_id) REFERENCES notification_events(id) ON DELETE CASCADE,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_notification_recipient_active ON notification_recipients(user_id,acknowledged_at,snoozed_until);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id TEXT PRIMARY KEY,
+  notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK(notifications_enabled IN (0,1)),
+  sound_enabled INTEGER NOT NULL DEFAULT 1 CHECK(sound_enabled IN (0,1)),
+  disabled_by_user_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(disabled_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth_secret TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_sent_at TEXT,
+  last_error TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+
 CREATE TABLE IF NOT EXISTS website_content_versions (
   id TEXT PRIMARY KEY,
   page_key TEXT NOT NULL,
@@ -899,6 +983,9 @@ CREATE TABLE IF NOT EXISTS clients (
   phone TEXT,
   address TEXT,
   notes TEXT,
+  is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
+  vip_updated_by_user_id TEXT,
+  vip_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

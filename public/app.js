@@ -9,7 +9,8 @@ const state={
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,intake:[],users:[],
-  cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null
+  cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
+  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
 const activeViews=new Set(["workshop","planned","intake","master","finance","documents","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
@@ -127,6 +128,7 @@ function setSession(payload){
 }
 function clearSession(){
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
+  clearInterval(state.notificationTimer);state.notificationTimer=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
 }
 function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");}
 function updateNewYorkClock(){
@@ -143,8 +145,139 @@ function startNewYorkClock(){
 function showApp(){
   $("#loginScreen").classList.add("hidden");$("#appShell").classList.remove("hidden");
   $("#profileInitials").textContent=initials(state.user?.name);
-  startNewYorkClock();
+  startNewYorkClock();initNotificationCenter();
 }
+function notificationText(row,field){
+  return String(state.language==="hu"?(row?.[field+"_hu"]||row?.[field+"_en"]||""):(row?.[field+"_en"]||row?.[field+"_hu"]||""));
+}
+function notificationDate(value){
+  if(!value)return "";
+  try{return new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value));}
+  catch(_error){return String(value||"");}
+}
+function notificationSeverityIcon(value){
+  return ({URGENT:"!",WARNING:"!",SUCCESS:"✓",INFO:"•"})[String(value||"INFO").toUpperCase()]||"•";
+}
+function updateAppBadge(count){
+  const value=Math.max(0,Number(count)||0);
+  const badge=$("#notificationBadge");if(badge){badge.hidden=value<=0;badge.textContent=value>99?"99+":String(value);}
+  try{
+    if(value>0&&navigator.setAppBadge)void navigator.setAppBadge(value);
+    else if(value<=0&&navigator.clearAppBadge)void navigator.clearAppBadge();
+  }catch(_error){}
+}
+function playNotificationSound(){
+  if(!state.notificationPreferences?.sound_enabled)return;
+  try{
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
+    const ctx=new AudioCtx(),gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.12,ctx.currentTime+.02);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.42);gain.connect(ctx.destination);
+    const a=ctx.createOscillator(),b=ctx.createOscillator();a.type="sine";b.type="sine";a.frequency.setValueAtTime(660,ctx.currentTime);b.frequency.setValueAtTime(880,ctx.currentTime+.12);a.connect(gain);b.connect(gain);a.start();b.start(ctx.currentTime+.12);a.stop(ctx.currentTime+.22);b.stop(ctx.currentTime+.42);setTimeout(()=>ctx.close().catch(()=>{}),700);
+  }catch(_error){}
+}
+function notificationCard(row){
+  const title=notificationText(row,"title"),body=notificationText(row,"body"),severity=String(row.severity||"INFO").toLowerCase();
+  return `<article class="notification-card severity-${esc(severity)} ${row.read_at?"is-read":"is-unread"}" data-notification-card="${esc(row.id)}">
+    <button class="notification-card-close" type="button" data-notification-snooze="${esc(row.id)}" title="${tr("Dismiss for 3 hours","Bezárás 3 órára")}" aria-label="${tr("Dismiss for 3 hours","Bezárás 3 órára")}">×</button>
+    <div class="notification-card-icon" aria-hidden="true">${esc(notificationSeverityIcon(row.severity))}</div>
+    <div class="notification-card-body"><div class="notification-card-title"><strong>${esc(title)}</strong><small>${esc(notificationDate(row.created_at))}</small></div>
+      ${body?`<p>${esc(body)}</p>`:""}
+      <div class="notification-card-actions">
+        <button class="text-button" type="button" data-notification-remind="${esc(row.id)}">${tr("Remind later","Értesíts később")}</button>
+        <button class="primary-button compact-button" type="button" data-notification-done="${esc(row.id)}">✓ ${tr("Done","Tudomásul vettem")}</button>
+      </div>
+    </div>
+  </article>`;
+}
+function renderNotificationDrawer(){
+  const list=$("#notificationList");if(!list)return;
+  const rows=state.notifications||[];
+  list.innerHTML=rows.length?rows.map(notificationCard).join(""):`<div class="notification-empty"><span>✓</span><strong>${tr("You're up to date.","Minden naprakész.")}</strong><p>${tr("No active notifications need attention.","Nincs aktív értesítés, amellyel foglalkozni kell.")}</p></div>`;
+  const title=$("#notificationDrawerTitle");if(title)title.textContent=tr("Notifications","Értesítések");
+  const soundLabel=$("#notificationSoundLabel");if(soundLabel)soundLabel.textContent=tr("Sound","Hang");
+  const snoozeAll=$("#notificationSnoozeAll");if(snoozeAll)snoozeAll.textContent=tr("Dismiss all · 3h","Összes bezárása · 3 óra");
+  const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
+  $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
+  $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
+  $$("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
+  $$("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
+    if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
+    try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
+    if(row?.action_url){if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));}
+    card.classList.remove("is-unread");card.classList.add("is-read");
+  }));
+}
+async function refreshNotifications({allowSound=true}={}){
+  if(!state.token||!state.user)return;
+  try{
+    const payload=await api("/api/notifications");
+    const rows=Array.isArray(payload.notifications)?payload.notifications:[],previous=state.notificationSeen;
+    state.notifications=rows;state.notificationPreferences=payload.preferences||state.notificationPreferences;
+    const ids=new Set(rows.map(row=>String(row.id))),newRows=state.notificationInitialized?rows.filter(row=>!previous.has(String(row.id))):[];
+    state.notificationSeen=ids;state.notificationInitialized=true;
+    updateAppBadge(payload.active_count??rows.length);renderNotificationDrawer();
+    if(allowSound&&newRows.length)playNotificationSound();
+  }catch(_error){}
+}
+function openNotificationDrawer(){
+  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
+  drawer.classList.add("open");drawer.setAttribute("aria-hidden","false");if(backdrop)backdrop.hidden=false;if(bell)bell.setAttribute("aria-expanded","true");
+  void refreshNotifications({allowSound:false});void ensurePushSubscription();
+}
+function closeNotificationDrawer(){
+  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
+  drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");if(backdrop)backdrop.hidden=true;if(bell)bell.setAttribute("aria-expanded","false");
+}
+async function snoozeNotification(id,hours=3,until=null){
+  try{await api("/api/notifications/"+encodeURIComponent(id)+"/snooze",{method:"POST",body:JSON.stringify(until?{until}:{hours})});await refreshNotifications({allowSound:false});}
+  catch(error){toast(humanError(error),"error");}
+}
+async function acknowledgeNotification(id){
+  try{const card=$(`[data-notification-card="${CSS.escape(String(id))}"]`);card?.classList.add("is-leaving");await api("/api/notifications/"+encodeURIComponent(id)+"/acknowledge",{method:"POST",body:"{}"});setTimeout(()=>void refreshNotifications({allowSound:false}),180);}
+  catch(error){toast(humanError(error),"error");}
+}
+function openNotificationReminder(id){
+  const now=new Date(Date.now()+3*3600000),pad=value=>String(value).padStart(2,"0");
+  const initial=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  openDialog({title:tr("Remind me later","Értesíts később"),eyebrow:tr("NOTIFICATION","ÉRTESÍTÉS"),body:`<form id="notificationReminderForm" class="form-grid"><label class="field full"><span>${tr("Show this notification again at","Az értesítés újra megjelenjen ekkor")}</span><input name="until" type="datetime-local" value="${esc(initial)}" required></label><div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Schedule reminder","Emlékeztető beállítása")}</button></div></form>`});
+  $("#notificationReminderForm").addEventListener("submit",async event=>{event.preventDefault();const value=event.currentTarget.elements.until.value,date=new Date(value);if(Number.isNaN(date.getTime()))return;closeDialog();await snoozeNotification(id,3,date.toISOString());});
+}
+async function setNotificationSound(enabled){
+  try{const pref=await api("/api/notifications/preferences/sound",{method:"PUT",body:JSON.stringify({sound_enabled:Boolean(enabled)})});state.notificationPreferences=pref;renderNotificationDrawer();if(enabled)playNotificationSound();}
+  catch(error){toast(humanError(error),"error");}
+}
+function base64UrlToUint8(value){
+  const padding="=".repeat((4-value.length%4)%4),base64=(value+padding).replace(/-/g,"+").replace(/_/g,"/"),raw=atob(base64);return Uint8Array.from([...raw].map(ch=>ch.charCodeAt(0)));
+}
+async function ensurePushSubscription(){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)||!state.token)return;
+  try{
+    const config=await api("/api/push/config");if(!config.enabled||!config.public_key)return;
+    let permission=Notification.permission;
+    if(permission==="default")permission=await Notification.requestPermission();
+    if(permission!=="granted")return;
+    const registration=await navigator.serviceWorker.ready;let subscription=await registration.pushManager.getSubscription();
+    if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:base64UrlToUint8(config.public_key)});
+    await api("/api/push/subscriptions",{method:"POST",body:JSON.stringify({subscription:subscription.toJSON()})});
+  }catch(_error){}
+}
+function bindNotificationUi(){
+  if(state.notificationUiBound)return;state.notificationUiBound=true;
+  $("#notificationBell")?.addEventListener("click",()=>$("#notificationDrawer")?.classList.contains("open")?closeNotificationDrawer():openNotificationDrawer());
+  $("#notificationDrawerClose")?.addEventListener("click",closeNotificationDrawer);$("#notificationBackdrop")?.addEventListener("click",closeNotificationDrawer);
+  $("#notificationSoundToggle")?.addEventListener("change",event=>setNotificationSound(event.target.checked));
+  $("#notificationSnoozeAll")?.addEventListener("click",async()=>{
+    try{await api("/api/notifications/snooze-all",{method:"POST",body:JSON.stringify({hours:3})});closeNotificationDrawer();await refreshNotifications({allowSound:false});toast(tr("Notifications will return in 3 hours.","Az értesítések 3 óra múlva újra megjelennek."),"success");}
+    catch(error){toast(humanError(error),"error");}
+  });
+  navigator.serviceWorker?.addEventListener?.("message",event=>{if(event.data?.type==="NOTIFICATION_OPENED"&&event.data?.id)void api("/api/notifications/"+encodeURIComponent(event.data.id)+"/read",{method:"POST",body:"{}"}).catch(()=>{});});
+}
+function initNotificationCenter(){
+  if(!state.token||!state.user)return;
+  bindNotificationUi();clearInterval(state.notificationTimer);state.notificationTimer=setInterval(()=>void refreshNotifications(),60000);
+  void refreshNotifications({allowSound:false});
+  if("Notification" in window&&Notification.permission==="granted")void ensurePushSubscription();
+}
+
 async function loadBranding(){
   try{
     const branding=await fetch("/api/public/branding",{cache:"no-store"}).then(response=>response.json());
@@ -206,8 +339,9 @@ async function renderMaster(){
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients, pianos and service history in one fast view.","Ügyfelek, zongorák és szerviztörténet egyetlen gyors nézetben."),
     `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
-    `<div class="master-layout"><section class="panel"><div class="panel-head"><div class="search-field"><input id="clientSearch" type="search" placeholder="${tr("Name, email or phone…","Név, e-mail vagy telefon…")}"></div></div><div id="clientList" class="client-list"></div></section><section id="clientDetail" class="panel client-detail"></section></div>`;
+    `<div class="master-layout"><section class="panel"><div class="panel-head client-list-toolbar"><div class="search-field"><input id="clientSearch" type="search" placeholder="${tr("Name, email or phone…","Név, e-mail vagy telefon…")}"></div><button id="clientVipFilter" class="secondary-button ${state.clientVipOnly?"active":""}" type="button">★ VIP</button></div><div id="clientList" class="client-list"></div></section><section id="clientDetail" class="panel client-detail"></section></div>`;
   $("#addClientBtn").addEventListener("click",()=>openClientDialog());
+  $("#clientVipFilter").addEventListener("click",()=>{state.clientVipOnly=!state.clientVipOnly;renderMaster();});
   $("#clientSearch").addEventListener("input",debounce(async event=>{
     await loadClients(event.target.value);renderClientList();
     if(state.selectedClientId&&!state.clients.some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=state.clients[0]?.id||null;
@@ -217,9 +351,10 @@ async function renderMaster(){
 }
 function renderClientList(){
   const host=$("#clientList");if(!host)return;
-  if(!state.clients.length){host.innerHTML=`<div class="empty-state">${tr("No results.","Nincs találat.")}</div>`;return;}
-  host.innerHTML=state.clients.map(client=>`<button type="button" class="client-row ${Number(client.id)===Number(state.selectedClientId)?"active":""}" data-client-id="${client.id}">
-    <span><strong>${esc(client.name)}</strong><small>${esc([client.email,client.phone].filter(Boolean).join(" · ")||tr("No contact details","Nincs elérhetőség"))}</small></span><span class="count">${Number(client.piano_count||0)}</span>
+  const rows=(state.clients||[]).filter(client=>!state.clientVipOnly||Number(client.is_vip||0)===1);
+  if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No results.","Nincs találat.")}</div>`;return;}
+  host.innerHTML=rows.map(client=>`<button type="button" class="client-row ${Number(client.id)===Number(state.selectedClientId)?"active":""}" data-client-id="${client.id}">
+    <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</strong><small>${esc([client.email,client.phone].filter(Boolean).join(" · ")||tr("No contact details","Nincs elérhetőség"))}</small></span><span class="count">${Number(client.piano_count||0)}</span>
   </button>`).join("");
   $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedClientId=Number(button.dataset.clientId);renderClientList();await renderClientDetail();}));
 }
@@ -229,7 +364,7 @@ async function renderClientDetail(){
   if(!client){host.innerHTML=`<div class="empty-state">${tr("Select a client.","Válassz ügyfelet.")}</div>`;return;}
   host.innerHTML=loading();
   const [pianos,jobs]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[])]);
-  host.innerHTML=`<div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${esc(client.name)}</h2></div><div class="page-actions"><button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button><button id="addPianoBtn" class="primary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
+  host.innerHTML=`<div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</h2></div><div class="page-actions"><button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button><button id="addPianoBtn" class="primary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
     <div class="contact-line">${client.email?`<span class="contact-pill">✉ ${esc(client.email)}</span>`:""}${client.phone?`<span class="contact-pill">☎ ${esc(client.phone)}</span>`:""}${client.address?`<span class="contact-pill">⌂ ${esc(client.address)}</span>`:""}</div>
     ${client.notes?`<div class="detail-note">${esc(client.notes)}</div>`:""}
     <div class="panel-head inline-panel-head"><h3>${tr("Pianos","Zongorák")}</h3><span class="badge">${pianos.length}</span></div>
@@ -253,6 +388,7 @@ function clientForm(client={}){
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(client.phone||"")}"></label>
     <label class="field"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(client.address||"")}"></label>
     <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(client.notes||"")}</textarea></label>
+    <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong><small>${tr("Mark this client as a VIP client.","Jelöld VIP ügyfélként.")}</small></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Save","Mentés")}</button></div>
   </form>`;
 }
@@ -260,7 +396,7 @@ function openClientDialog(client=null){
   openDialog({title:client?tr("Edit client","Ügyfél szerkesztése"):tr("New client","Új ügyfél"),eyebrow:tr("MASTER DATA","TÖRZSADATOK"),body:clientForm(client||{})});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
   $("#clientEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.is_vip=Boolean(event.currentTarget.elements.is_vip?.checked);
     try{
       const saved=await api(client?`/api/clients/${client.id}`:"/api/clients",{method:client?"PUT":"POST",body:JSON.stringify(body)});
       state.selectedClientId=Number(saved.id);closeDialog();toast(tr("Client saved.","Ügyfél mentve."),"success");await renderMaster();
@@ -491,11 +627,16 @@ async function renderProfile(){
     `<div class="profile-grid"><section class="panel profile-card"><div class="profile-avatar">${esc(initials(state.user?.name))}</div><h2>${esc(state.user?.name)}</h2><p class="muted">${esc(state.user?.email||"")}</p><span class="role-chip">${esc(roleLabel(state.user?.role))}</span><div class="form-actions"><button id="logoutBtn" class="danger-button" type="button">${tr("Sign out","Kijelentkezés")}</button></div></section>
     <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span>${canManage?`<button class="secondary-button team-edit-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>`:""}</div>`).join("")}</div></section></div>`;
   $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}clearSession();showLogin();});
-  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
-  $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
+  $("#newUserBtn")?.addEventListener("click",()=>void openUserDialog());
+  $("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>void openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
 }
-function openUserDialog(user=null){
-  const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id);
+async function openUserDialog(user=null){
+  const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  let notificationDelivery=true;
+  if(editing&&canManageNotifications){
+    try{const pref=await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery");notificationDelivery=Boolean(pref.notifications_enabled);}
+    catch(_error){notificationDelivery=true;}
+  }
   openDialog({title:editing?tr("Edit team member","Csapattag szerkesztése"):tr("New user","Új felhasználó"),eyebrow:tr("USER MANAGEMENT","FELHASZNÁLÓKEZELÉS"),body:`<form id="userEditor" class="form-grid">
     <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user?.name||"")}" required autofocus></label>
     <label class="field"><span>${tr("Role","Szerepkör")} *</span><select name="role"><option value="WORKER" ${user?.role==="WORKER"?"selected":""}>${tr("Technician","Technikus")}</option><option value="MANAGER" ${user?.role==="MANAGER"?"selected":""}>${tr("Manager","Menedzser")}</option><option value="ADMIN" ${user?.role==="ADMIN"?"selected":""}>${tr("Admin","Admin")}</option></select></label>
@@ -503,6 +644,7 @@ function openUserDialog(user=null){
     <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")} ${editing?"":"*"}</span><input name="contact_email" type="email" value="${esc(user?.contact_email||"")}" ${editing?"":"required"}></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user?.phone||"")}"></label>
     <label class="field"><span>${tr("Status","Státusz")}</span><select name="status" ${isSelf?"disabled":""}><option value="Active" ${user?.status!=="Inactive"?"selected":""}>${tr("Active","Aktív")}</option><option value="Inactive" ${user?.status==="Inactive"?"selected":""}>${tr("Inactive","Inaktív")}</option></select></label>
+    ${editing&&canManageNotifications?`<label class="cms-toggle-row full notification-delivery-admin"><span><strong>${tr("Notifications","Értesítések")}</strong><small>${tr("Only an administrator can disable notification delivery for this employee.","Az értesítések kézbesítését csak adminisztrátor tilthatja le ennél a munkavállalónál.")}</small></span><input name="notifications_enabled" type="checkbox" ${notificationDelivery?"checked":""}></label>`:""}
     <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user?.address||"")}"></label>
     <label class="field"><span>${editing?tr("New password (optional)","Új jelszó (opcionális)"):tr("Temporary password","Ideiglenes jelszó")} ${editing?"":"*"}</span><input name="password" type="password" minlength="8" ${editing?"":"required"}></label>
     <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
@@ -511,8 +653,11 @@ function openUserDialog(user=null){
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     if(editing&&!body.password){delete body.password;delete body.password_confirmation;}
     if(editing&&isSelf)delete body.status;
+    const notificationsEnabled=editing&&canManageNotifications?Boolean(event.currentTarget.elements.notifications_enabled?.checked):null;
+    delete body.notifications_enabled;
     try{
       const updated=await api(editing?`/api/users/${encodeURIComponent(user.id)}`:"/api/users",{method:editing?"PUT":"POST",body:JSON.stringify(body)});
+      if(editing&&canManageNotifications)await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery",{method:"PUT",body:JSON.stringify({notifications_enabled:notificationsEnabled})});
       closeDialog();toast(editing?tr("Team member updated.","Csapattag frissítve."):tr("User created.","Felhasználó létrehozva."),"success");
       if(editing&&isSelf){state.user={...state.user,...updated};$("#profileInitials").textContent=initials(state.user.name);}
       await renderProfile();

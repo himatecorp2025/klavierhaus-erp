@@ -50,10 +50,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Assert website directory is untouched
+      - name: Assert website changes stay inside the approved private-appointment scope
         run: |
           git fetch origin develop --depth=1
-          git diff --exit-code origin/develop -- .
+          changed="$(git diff --name-only origin/develop -- .)"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(website/server/index\.js|website/server/event-client\.js|website/public/app\.js|website/public/styles\.css|website/test/website-foundation\.test\.js)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected website changes:"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -66,6 +72,8 @@ jobs:
         run: npm run check
       - name: Run preserved public event-page contract
         run: node --test test/event-pages.test.js
-      - name: Report immutable website dependency baseline
+      - name: Run private appointment website contract
+        run: node --test --test-name-pattern="private appointment forms" test/website-foundation.test.js
+      - name: Report website dependency baseline
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high

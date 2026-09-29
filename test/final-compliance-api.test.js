@@ -646,3 +646,136 @@ test("Intake assessment PDF is exported and retained in Documents",async()=>{
   const archivedPdf=Buffer.from(await fileResponse.arrayBuffer());
   assert.match(archivedPdf.subarray(0,8).toString("latin1"),/^%PDF-1\.[0-9]$/);
 });
+
+
+test("Private appointments preserve exact piano/service context and do not consume workshop capacity",async()=>{
+  const token=shared.adminToken;
+  appDb.prepare(`INSERT OR REPLACE INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,title_en,title_hu,image_url,availability_status,published)
+    VALUES('WP-PRIVATE-1','private-steinway-b','private-steinway-b-hu','Steinway & Sons','B','Steinway B','Steinway B','/uploads/website/private-b.jpg','AVAILABLE',1)`).run();
+  appDb.prepare(`INSERT OR REPLACE INTO website_services(id,slug_en,slug_hu,title_en,title_hu,image_url,visible)
+    VALUES('WS-PRIVATE-1','private-tuning','private-hangolas','Concert Tuning','Koncerthangolás','/uploads/website/tuning.jpg',1)`).run();
+
+  const job=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Capacity overlap proof",
+    scheduled_at:"2035-08-20T14:00:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"
+  }});
+  assert.equal(job.status,201,JSON.stringify(job.payload));
+
+  const pianoResponse=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+    name:"Private Piano Guest",phone:"+1 212 555 0101",scheduled_at:"2035-08-20T10:00",note:"Please prepare the piano in the main showroom.",piano_id:"WP-PRIVATE-1",language:"en",source_path:"/pianos/private-steinway-b"
+  })});
+  assert.equal(pianoResponse.status,201);
+  const pianoPayload=await pianoResponse.json();
+  assert.equal(pianoPayload.appointment.appointment_type,"PIANO_VIEWING");
+  assert.equal(pianoPayload.appointment.piano_id,"WP-PRIVATE-1");
+  assert.equal(pianoPayload.appointment.service_id,null);
+  assert.equal(pianoPayload.appointment.note,"Please prepare the piano in the main showroom.");
+  assert.equal(pianoPayload.appointment.scheduled_at,"2035-08-20T14:00:00.000Z");
+  shared.privateAppointmentId=pianoPayload.appointment.id;
+
+  const serviceResponse=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+    name:"Private Service Guest",phone:"+1 212 555 0102",scheduled_at:"2035-08-21T11:30",note:"Discuss tuning before a recital.",service_id:"WS-PRIVATE-1",language:"en",source_path:"/services/private-tuning"
+  })});
+  assert.equal(serviceResponse.status,201);
+  const servicePayload=await serviceResponse.json();
+  assert.equal(servicePayload.appointment.appointment_type,"SERVICE_CONSULTATION");
+  assert.equal(servicePayload.appointment.service_id,"WS-PRIVATE-1");
+
+  const generic=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+    name:"Private Visit Guest",phone:"+1 212 555 0103",scheduled_at:"2035-08-22T12:00",note:"General private visit.",language:"en",source_path:"/"
+  })});
+  assert.equal(generic.status,201);
+  const genericPayload=await generic.json();
+  assert.equal(genericPayload.appointment.appointment_type,"PRIVATE_VISIT");
+
+  const list=await request("/api/private-appointments?status=SCHEDULED",{token});
+  assert.equal(list.status,200,JSON.stringify(list.payload));
+  assert.ok(list.payload.some(row=>row.id===pianoPayload.appointment.id&&row.piano_title_en==="Steinway B"));
+  assert.ok(list.payload.some(row=>row.id===servicePayload.appointment.id&&row.service_title_en==="Concert Tuning"));
+
+  const completed=await request("/api/private-appointments/"+encodeURIComponent(servicePayload.appointment.id),{token,method:"PUT",body:{
+    status:"COMPLETED",scheduled_at:"2035-08-21T11:30",name:"Private Service Guest",phone:"+1 212 555 0102",note:"Completed",assigned_user_id:"U-F-MANAGER"
+  }});
+  assert.equal(completed.status,200,JSON.stringify(completed.payload));
+  assert.equal(completed.payload.status,"COMPLETED");
+  assert.equal(completed.payload.assigned_user_id,"U-F-MANAGER");
+});
+
+test("VIP client status is durable, filterable data and can be switched both directions",async()=>{
+  const token=shared.adminToken,id=shared.client.id;
+  const before=await request("/api/clients/"+id,{token});
+  assert.equal(before.status,404,"No standalone client GET is required; list remains the canonical master-data source");
+
+  const vip=await request("/api/clients/"+id,{token,method:"PUT",body:{
+    name:shared.client.name,email:shared.client.email||"",phone:shared.client.phone||"",address:shared.client.address||"",notes:shared.client.notes||"",is_vip:true
+  }});
+  assert.equal(vip.status,200,JSON.stringify(vip.payload));
+  assert.equal(Number(vip.payload.is_vip),1);
+  assert.equal(vip.payload.vip_updated_by_user_id,"U-F-ADMIN");
+  assert.ok(vip.payload.vip_updated_at);
+
+  const listed=await request("/api/clients",{token});
+  assert.equal(listed.status,200);
+  assert.equal(Number(listed.payload.find(row=>row.id===id).is_vip),1);
+
+  const normal=await request("/api/clients/"+id,{token,method:"PUT",body:{...vip.payload,is_vip:false}});
+  assert.equal(normal.status,200,JSON.stringify(normal.payload));
+  assert.equal(Number(normal.payload.is_vip),0);
+});
+
+test("Unified notifications support 3-hour dismiss, permanent Done, sound preference and admin-only delivery",async()=>{
+  const admin=shared.adminToken,worker=await login("tech.final@example.com");
+  const payload=await request("/api/notifications",{token:admin});
+  assert.equal(payload.status,200,JSON.stringify(payload.payload));
+  const row=payload.payload.notifications.find(item=>item.entity_type==="PRIVATE_APPOINTMENT"&&item.entity_id===shared.privateAppointmentId);
+  assert.ok(row,JSON.stringify(payload.payload.notifications));
+
+  const snooze=await request("/api/notifications/"+encodeURIComponent(row.id)+"/snooze",{token:admin,method:"POST",body:{hours:3}});
+  assert.equal(snooze.status,200,JSON.stringify(snooze.payload));
+  assert.ok(new Date(snooze.payload.snoozed_until).getTime()>Date.now()+2.5*3600000);
+  const hidden=await request("/api/notifications",{token:admin});
+  assert.equal(hidden.payload.notifications.some(item=>item.id===row.id),false);
+
+  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
+  const returned=await request("/api/notifications",{token:admin});
+  assert.equal(returned.payload.notifications.some(item=>item.id===row.id),true);
+
+  const done=await request("/api/notifications/"+encodeURIComponent(row.id)+"/acknowledge",{token:admin,method:"POST",body:{}});
+  assert.equal(done.status,200);
+  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
+  const gone=await request("/api/notifications",{token:admin});
+  assert.equal(gone.payload.notifications.some(item=>item.id===row.id),false);
+
+  const soundOff=await request("/api/notifications/preferences/sound",{token:worker,method:"PUT",body:{sound_enabled:false}});
+  assert.equal(soundOff.status,200,JSON.stringify(soundOff.payload));
+  assert.equal(Number(soundOff.payload.sound_enabled),0);
+  const soundOn=await request("/api/notifications/preferences/sound",{token:worker,method:"PUT",body:{sound_enabled:true}});
+  assert.equal(Number(soundOn.payload.sound_enabled),1);
+
+  const forbidden=await request("/api/admin/users/U-F-WORKER/notification-delivery",{token:worker,method:"PUT",body:{notifications_enabled:false}});
+  assert.equal(forbidden.status,403);
+  const disabled=await request("/api/admin/users/U-F-WORKER/notification-delivery",{token:admin,method:"PUT",body:{notifications_enabled:false}});
+  assert.equal(disabled.status,200,JSON.stringify(disabled.payload));
+  assert.equal(Number(disabled.payload.notifications_enabled),0);
+  const workerHidden=await request("/api/notifications",{token:worker});
+  assert.equal(workerHidden.status,200);
+  assert.deepEqual(workerHidden.payload.notifications,[]);
+  const reenabled=await request("/api/admin/users/U-F-WORKER/notification-delivery",{token:admin,method:"PUT",body:{notifications_enabled:true}});
+  assert.equal(Number(reenabled.payload.notifications_enabled),1);
+});
+
+test("Timed notification sweep deduplicates overdue private appointment alerts",async()=>{
+  const admin=shared.adminToken,id=shared.privateAppointmentId;
+  appDb.prepare("UPDATE private_appointments SET scheduled_at=datetime('now','-10 minutes'),status='SCHEDULED',completed_at=NULL,cancelled_at=NULL WHERE id=?").run(id);
+  const first=await request("/api/notifications",{token:admin});
+  assert.equal(first.status,200);
+  const due=first.payload.notifications.filter(item=>item.category==="APPOINTMENT_DUE"&&item.entity_id===id);
+  assert.equal(due.length,1);
+  const second=await request("/api/notifications",{token:admin});
+  assert.equal(second.payload.notifications.filter(item=>item.category==="APPOINTMENT_DUE"&&item.entity_id===id).length,1);
+
+  const future=new Date(Date.now()+24*3600000).toISOString();
+  appDb.prepare("UPDATE private_appointments SET scheduled_at=? WHERE id=?").run(future,id);
+  const after=await request("/api/notifications",{token:admin});
+  assert.equal(after.payload.notifications.some(item=>item.category==="APPOINTMENT_DUE"&&item.entity_id===id),false);
+});

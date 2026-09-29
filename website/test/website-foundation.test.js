@@ -273,3 +273,28 @@ test("standalone private consultation is deleted and replaced by modal triggers"
   assert.match(source, /data-private-viewing-open/);
   assert.match(source, /renderPrivateViewingDialog/);
 });
+
+
+test("private appointment forms are minimal and preserve selected context",()=>{
+  const source=fs.readFileSync(path.join(__dirname,"..","server","index.js"),"utf8");
+  const browser=fs.readFileSync(path.join(__dirname,"..","public","app.js"),"utf8");
+  const privateStart=source.indexOf("function renderPrivateViewingDialog");
+  const privateEnd=source.indexOf("function renderDocument",privateStart);
+  assert.ok(privateStart>=0&&privateEnd>privateStart);
+  const privateForm=source.slice(privateStart,privateEnd);
+  assert.match(privateForm,/name="name"/);
+  assert.match(privateForm,/name="phone"/);
+  assert.match(privateForm,/name="scheduled_at" type="datetime-local"/);
+  assert.match(privateForm,/name="note"/);
+  assert.match(privateForm,/name="piano_id"/);
+  assert.match(privateForm,/name="service_id"/);
+  assert.doesNotMatch(privateForm,/name="email"/);
+  assert.doesNotMatch(privateForm,/name="service_address"/);
+  assert.doesNotMatch(privateForm,/name="consent_contact"/);
+  assert.match(source,/data-piano-id=/);
+  assert.match(source,/data-service-id=/);
+  assert.match(source,/Appointment time · New York/);
+  assert.match(browser,/\/api\/site\/private-appointments/);
+  assert.match(browser,/form\.elements\.piano_id\.value=button\.dataset\.pianoId/);
+  assert.match(browser,/form\.elements\.service_id\.value=button\.dataset\.serviceId/);
+});

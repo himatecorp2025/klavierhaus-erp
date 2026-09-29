@@ -82,6 +82,15 @@ function r2ResponsibleOptions(selected=""){
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
 }
+function r2PrivateContext(row){
+  return row?.piano_id?(state.language==="hu"?(row.piano_title_hu||[row.piano_brand,row.piano_model].filter(Boolean).join(" ")):(row.piano_title_en||[row.piano_brand,row.piano_model].filter(Boolean).join(" "))):
+    row?.service_id?(state.language==="hu"?(row.service_title_hu||"Szolgáltatás"):(row.service_title_en||"Service")):tr("Private visit","Privát látogatás");
+}
+function r2PrivateCalendarRow(row){
+  return {...row,id:"private:"+row.id,private_appointment:true,private_id:row.id,title:r2PrivateContext(row),client_name:row.name,scheduled_end:new Date(new Date(row.scheduled_at).getTime()+60*60000).toISOString(),estimated_duration_min:60,assigned_technician_name:row.assigned_user_name||"",assigned_technician_color:"#c99a45",location_type:"private",stage:"private",workflow_status:"private"};
+}
+function r2PrivateStatusLabel(status){return ({SCHEDULED:tr("Scheduled","Ütemezve"),COMPLETED:tr("Completed","Lezárva"),CANCELLED:tr("Cancelled","Törölt")})[status]||status||"";}
+
 function r2ComputedStatus(job,now=Date.now()){
   const phase=job?.current_phase||{};
   if(job?.cancelled_at)return "cancelled";
@@ -472,6 +481,12 @@ function r2EventSegment(job,date){
 }
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
+  if(job.private_appointment){
+    return `<button type="button" class="calendar-event-block private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:#c99a45">
+      <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ◈ ${esc(job.title)}</strong>
+      <span>${esc(job.client_name)} · ${esc(job.phone||"")}</span><small>${esc(r2PrivateStatusLabel(job.status))}</small>
+    </button>`;
+  }
   const color=job.assigned_technician_color||"#8d6a2c";
   return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} status-${esc(r2ComputedStatus(job))} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
     <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ${esc(job.title)}</strong>
@@ -509,7 +524,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2RefreshCalendarStatuses(host,jobs){
@@ -618,20 +633,71 @@ async function r2RenderCalendar(){
   if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode="week";
   state.r2CalendarDate=state.r2CalendarDate||r2Today();
   const range=r2Range(state.r2CalendarDate,state.r2CalendarMode),tech=state.r2CalendarTech||"";
-  const data=await api(`/api/calendar?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${tech?`&technician_id=${encodeURIComponent(tech)}`:""}`);
+  const [data,privateAppointments]=await Promise.all([
+    api(`/api/calendar?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${tech?`&technician_id=${encodeURIComponent(tech)}`:""}`),
+    api(`/api/private-appointments?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)
+  ]);
+  const privateRows=(privateAppointments||[]).map(r2PrivateCalendarRow),jobRows=data.jobs||[],calendarRows=state.r2CalendarPrivateOnly?privateRows:[...jobRows,...privateRows];
   host.innerHTML=`<section class="panel calendar-panel"><div class="calendar-toolbar"><div class="calendar-nav"><button id="calendarPrev" class="secondary-button" type="button" aria-label="${tr("Previous","Előző")}">←</button><button id="calendarToday" class="secondary-button" type="button">${tr("Today","Ma")}</button><button id="calendarNext" class="secondary-button" type="button" aria-label="${tr("Next","Következő")}">→</button></div>
     <strong class="calendar-range-title">${esc(r2CalendarTitle(range,state.r2CalendarMode))}</strong>
-    <div class="calendar-toolbar-right"><div class="segmented-control compact"><button type="button" data-calendar-mode="day" class="${state.r2CalendarMode==="day"?"active":""}">${tr("Day","Nap")}</button><button type="button" data-calendar-mode="week" class="${state.r2CalendarMode==="week"?"active":""}">${tr("Week","Hét")}</button><button type="button" data-calendar-mode="month" class="${state.r2CalendarMode==="month"?"active":""}">${tr("Month","Hónap")}</button></div><select id="calendarTechFilter"><option value="">${tr("All technicians","Minden technikus")}</option>${r2TechnicianOptions(tech)}</select></div></div>
+    <div class="calendar-toolbar-right"><button id="calendarPrivateFilter" class="secondary-button private-filter-button ${state.r2CalendarPrivateOnly?"active":""}" type="button">◈ ${tr("Private","Privát")}</button><div class="segmented-control compact"><button type="button" data-calendar-mode="day" class="${state.r2CalendarMode==="day"?"active":""}">${tr("Day","Nap")}</button><button type="button" data-calendar-mode="week" class="${state.r2CalendarMode==="week"?"active":""}">${tr("Week","Hét")}</button><button type="button" data-calendar-mode="month" class="${state.r2CalendarMode==="month"?"active":""}">${tr("Month","Hónap")}</button></div><select id="calendarTechFilter"><option value="">${tr("All technicians","Minden technikus")}</option>${r2TechnicianOptions(tech)}</select></div></div>
     <div class="calendar-drag-help">${tr("Desktop: drag events to another time/day and resize from the lower edge. Mobile: press and hold for 1.5 seconds, then drag.","Asztali gépen húzd az eseményt másik időpontra/napra, az alsó élén pedig méretezheted. Mobilon tartsd nyomva 1,5 másodpercig, majd húzd át.")}</div>
-    ${state.r2CalendarMode==="month"?r2RenderMonthGrid(range,data.jobs||[]):r2RenderTimeGrid(range,data.jobs||[])}
+    ${state.r2CalendarMode==="month"?r2RenderMonthGrid(range,calendarRows):r2RenderTimeGrid(range,calendarRows)}
   </section>`;
   const move=delta=>{state.r2CalendarDate=state.r2CalendarMode==="month"?r2MonthAdd(state.r2CalendarDate,delta):r2DateAdd(range.startDate,state.r2CalendarMode==="day"?delta:delta*7);void r2RenderCalendar();};
   $("#calendarPrev").addEventListener("click",()=>move(-1));$("#calendarToday").addEventListener("click",()=>{state.r2CalendarDate=r2Today();void r2RenderCalendar();});$("#calendarNext").addEventListener("click",()=>move(1));
   $$("[data-calendar-mode]",host).forEach(button=>button.addEventListener("click",()=>{state.r2CalendarMode=button.dataset.calendarMode;localStorage.setItem("kh_calendar_mode",state.r2CalendarMode);void r2RenderCalendar();}));
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
+  $("#calendarPrivateFilter").addEventListener("click",()=>{state.r2CalendarPrivateOnly=!state.r2CalendarPrivateOnly;void r2RenderCalendar();});
   $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
-  r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);
-  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);},30000);
+  $$("[data-private-appointment]",host).forEach(button=>button.addEventListener("click",()=>{const row=(privateAppointments||[]).find(item=>String(item.id)===String(button.dataset.privateAppointment));if(row)r2OpenPrivateAppointment(row,r2RenderCalendar);}));
+  r2BindCalendarPointer(host,jobRows);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);
+  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);},30000);
+}
+function r2PrivateAppointmentCard(row){
+  const status=String(row.status||"SCHEDULED").toUpperCase();
+  return `<article class="job-card private-appointment-card private-status-${status.toLowerCase()}" data-private-card="${esc(row.id)}">
+    <div class="job-card-top"><span class="job-code">◈ ${esc(r2PrivateContext(row))}</span><span class="priority-chip private-status-chip">${esc(r2PrivateStatusLabel(status))}</span></div>
+    <h3>${esc(row.name)}</h3>
+    <p class="job-party">☎ ${esc(row.phone||"—")}</p>
+    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(row.scheduled_at))}</span><span>👤 ${esc(row.assigned_user_name||tr("Unassigned","Nincs felelős"))}</span></div>
+    ${row.note?`<div class="detail-note private-note">${esc(row.note)}</div>`:""}
+    <div class="job-actions"><button class="secondary-button" type="button" data-private-edit="${esc(row.id)}">ⓘ ${tr("Details","Részletek")}</button></div>
+  </article>`;
+}
+function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(state.r2PrivateStatus||"")){
+  openDialog({title:row.name,eyebrow:`◈ ${tr("PRIVATE APPOINTMENT","PRIVÁT IDŐPONT")}`,body:`<form id="privateAppointmentEditor" class="form-grid">
+    <div class="detail-note full private-context-note"><strong>${esc(r2PrivateContext(row))}</strong></div>
+    <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
+    <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
+    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(r2IsoToNyInput(row.scheduled_at))}" required></label>
+    <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
+    <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
+    <label class="field full"><span>${tr("Status","Státusz")}</span><select name="status"><option value="SCHEDULED" ${row.status==="SCHEDULED"?"selected":""}>${tr("Scheduled","Ütemezve")}</option><option value="COMPLETED" ${row.status==="COMPLETED"?"selected":""}>${tr("Completed","Lezárva")}</option><option value="CANCELLED" ${row.status==="CANCELLED"?"selected":""}>${tr("Cancelled","Törölt")}</option></select></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div>
+  </form>`});
+  $("#privateAppointmentEditor").addEventListener("submit",async event=>{
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);if(!body.assigned_user_id)body.assigned_user_id=null;
+    try{await api("/api/private-appointments/"+encodeURIComponent(row.id),{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Private appointment updated.","Privát időpont frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+  });
+}
+async function r2LoadPrivateAppointments(status=""){
+  state.r2WorkflowBucket="private";state.r2PrivateStatus=status;
+  const rows=await api("/api/private-appointments"+(status?"?status="+encodeURIComponent(status):""));
+  state.r2PrivateAppointments=rows;await r2RenderPrivateAppointments(rows,status);
+}
+async function r2RenderPrivateAppointments(rows,status=""){
+  const host=$("#workshopContent");if(!host)return;
+  host.innerHTML=`<div class="workflow-view-toolbar private-workflow-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
+    <button type="button" data-workflow-bucket="active">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="closed">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="private" class="active private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
+  </div><div class="segmented-control compact private-status-switch"><button type="button" data-private-status="" class="${!status?"active":""}">${tr("All","Mind")}</button><button type="button" data-private-status="SCHEDULED" class="${status==="SCHEDULED"?"active":""}">${tr("Scheduled","Ütemezve")}</button><button type="button" data-private-status="COMPLETED" class="${status==="COMPLETED"?"active":""}">${tr("Completed","Lezárt")}</button><button type="button" data-private-status="CANCELLED" class="${status==="CANCELLED"?"active":""}">${tr("Cancelled","Törölt")}</button></div></div>
+    <small>${tr("Private piano viewings and service consultations. These do not consume workshop scheduling capacity.","Privát zongoramegtekintések és szolgáltatási konzultációk. Ezek nem foglalják a műhely kapacitását.")}</small></div>
+    <div class="private-appointments-grid">${rows.length?rows.map(r2PrivateAppointmentCard).join(""):`<div class="empty-state">${tr("No private appointments in this filter.","Nincs privát időpont ebben a szűrésben.")}</div>`}</div>`;
+  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const bucket=button.dataset.workflowBucket;if(bucket==="private")return;if(bucket==="closed")void r2LoadWorkflowBucket("closed","completed");else void r2LoadWorkflowBucket("active");}));
+  $$("[data-private-status]",host).forEach(button=>button.addEventListener("click",()=>r2LoadPrivateAppointments(button.dataset.privateStatus||"")));
+  $$("[data-private-edit]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.privateEdit));if(row)r2OpenPrivateAppointment(row);}));
 }
 async function r2LoadWorkflowBucket(bucket,closedType=null){
   const next=["active","closed"].includes(bucket)?bucket:"active",type=closedType||state.r2ClosedType||"completed";
@@ -645,9 +711,10 @@ async function r2RenderWorkflow(data){
   host.innerHTML=`<div class="workflow-view-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
     <button type="button" data-workflow-bucket="active" class="${bucket==="active"?"active":""}">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="private" class="private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
   </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
   <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column,{closed:bucket==="closed"})).join("")}${canAdd?r2AddStageColumn():""}</div></div>`;
-  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>button.dataset.workflowBucket==="closed"?r2LoadWorkflowBucket("closed","completed"):r2LoadWorkflowBucket("active")));
+  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const value=button.dataset.workflowBucket;if(value==="private")return r2LoadPrivateAppointments();if(value==="closed")return r2LoadWorkflowBucket("closed","completed");return r2LoadWorkflowBucket("active");}));
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
   $("#workflowAddStageCard")?.addEventListener("click",r2OpenAddStage);
   const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);}

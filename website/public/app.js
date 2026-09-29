@@ -331,84 +331,54 @@ document.querySelectorAll("[data-service-card]").forEach((card) => {
 document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
   if (!serviceDialog) return;
   serviceDialogTrigger = button;
-  const form = serviceDialog.querySelector("[data-service-form]");
-  form?.reset();
-  serviceDialog.querySelector('[name="service_id"]').value = button.dataset.serviceId || "";
-  serviceDialog.querySelector("[data-service-title]").textContent = button.dataset.serviceTitle || "";
-  const image = serviceDialog.querySelector("[data-service-image]");
-  if (image) { image.src = button.dataset.serviceImage || ""; image.alt = button.dataset.serviceTitle || "Klavierhaus service"; image.hidden = !button.dataset.serviceImage; }
-  const concertService = /concert|koncert/i.test(button.dataset.serviceTitle || "");
-  serviceDialog.querySelectorAll("[data-concert-field]").forEach((field) => {
-    field.hidden = !concertService;
-    field.querySelectorAll("input, textarea, select").forEach((control) => { control.required = concertService; });
-  });
-  const message = form?.elements.message;
-  if (message) message.value = language === "hu" ? `A(z) ${button.dataset.serviceTitle || "kiválasztott"} szolgáltatás iránt érdeklődöm.` : `I would like to enquire about the ${button.dataset.serviceTitle || "selected"} service.`;
-  serviceDialog.showModal();
-  serviceDialog.querySelector('input[name="name"]')?.focus();
-  recordFirstPartyEvent("service_enquiry_open", { service_id: button.dataset.serviceId || "" });
+  const form = serviceDialog.querySelector("[data-service-form]");form?.reset();
+  if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
+  const title=serviceDialog.querySelector("[data-service-title]");if(title)title.textContent=button.dataset.serviceTitle||"";
+  const image=serviceDialog.querySelector("[data-service-image]");
+  if(image){image.src=button.dataset.serviceImage||"";image.alt=button.dataset.serviceTitle||"Klavierhaus service";image.hidden=!button.dataset.serviceImage;}
+  serviceDialog.showModal();form?.querySelector('[name="name"]')?.focus();
+  recordFirstPartyEvent("private_appointment_open",{service_id:button.dataset.serviceId||"",context:"service"});
 }));
-serviceDialog?.addEventListener("click", (event) => {
-  if (event.target === serviceDialog) serviceDialog.close("cancel");
-});
-serviceDialog?.addEventListener("close", () => serviceDialogTrigger?.focus());
-document.querySelector("[data-service-form]")?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const result = form.querySelector("[data-service-result]");
-  const values = Object.fromEntries(new FormData(form).entries());
-  values.consent_contact = form.elements.consent_contact.checked;
-  values.consent_marketing = form.elements.consent_marketing.checked;
-  values.language = language;
-  values.source_path = location.pathname;
-  if (result) result.textContent = language === "hu" ? "Küldés…" : "Sending…";
-  try {
-    const response = await fetch("/api/site/contact-leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-    if (!response.ok) throw new Error("LEAD_FAILED");
-    if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan személyesen jelentkezünk." : "Thank you. We will contact you personally shortly.";
-    recordFirstPartyEvent("service_enquiry_submit", { service_id: values.service_id || "" });
-    form.reset();
-    window.setTimeout(() => { if (serviceDialog?.open) serviceDialog.close("success"); }, 850);
-  } catch (_error) {
-    if (result) result.textContent = language === "hu" ? "A küldés nem sikerült. Kérjük, próbálja újra." : "We could not send your request. Please try again.";
-  }
+serviceDialog?.addEventListener("click",(event)=>{if(event.target===serviceDialog)serviceDialog.close("cancel");});
+serviceDialog?.addEventListener("close",()=>serviceDialogTrigger?.focus());
+document.querySelector("[data-service-form]")?.addEventListener("submit",async(event)=>{
+  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-service-result]"),values=Object.fromEntries(new FormData(form).entries());
+  values.language=language;values.source_path=location.pathname;
+  if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
+  try{
+    const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
+    if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
+    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontot rögzítettük.":"Thank you. Your appointment has been booked.";
+    recordFirstPartyEvent("private_appointment_submit",{service_id:values.service_id||"",context:"service"});
+    form.reset();window.setTimeout(()=>{if(serviceDialog?.open)serviceDialog.close("success");},850);
+  }catch(_error){if(result)result.textContent=language==="hu"?"A rögzítés nem sikerült. Kérjük, próbálja újra.":"We could not book the appointment. Please try again.";}
 });
 
-const privateViewingDialog = document.querySelector("[data-private-viewing-dialog]");
-let privateViewingTrigger = null;
-document.querySelectorAll("[data-private-viewing-open]").forEach((button) => button.addEventListener("click", () => {
-  if (!privateViewingDialog) return;
-  privateViewingTrigger = button;
-  const form = privateViewingDialog.querySelector("[data-private-viewing-form]");
-  if (form) {
-    form.reset();
-    form.elements.piano_brand.value = button.dataset.pianoBrand || "";
-    form.elements.piano_model.value = button.dataset.pianoModel || "";
-    form.elements.service_id.value = button.dataset.serviceId || "";
-  }
-  const context = privateViewingDialog.querySelector("[data-private-viewing-context]");
-  if (context) context.textContent = button.dataset.pianoModel ? `${button.dataset.pianoBrand || ""} ${button.dataset.pianoModel}`.trim() : "";
-  privateViewingDialog.showModal();
-  form?.querySelector('[name="name"]')?.focus();
+const privateViewingDialog=document.querySelector("[data-private-viewing-dialog]");
+let privateViewingTrigger=null;
+document.querySelectorAll("[data-private-viewing-open]").forEach((button)=>button.addEventListener("click",()=>{
+  if(!privateViewingDialog)return;privateViewingTrigger=button;
+  const form=privateViewingDialog.querySelector("[data-private-viewing-form]");form?.reset();
+  if(form?.elements.piano_id)form.elements.piano_id.value=button.dataset.pianoId||"";
+  if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
+  const context=privateViewingDialog.querySelector("[data-private-viewing-context]");
+  if(context)context.textContent=button.dataset.contextTitle||[button.dataset.pianoBrand,button.dataset.pianoModel].filter(Boolean).join(" ");
+  privateViewingDialog.showModal();form?.querySelector('[name="name"]')?.focus();
+  recordFirstPartyEvent("private_appointment_open",{piano_id:button.dataset.pianoId||"",service_id:button.dataset.serviceId||"",context:button.dataset.pianoId?"piano":button.dataset.serviceId?"service":"general"});
 }));
-privateViewingDialog?.addEventListener("click", (event) => { if (event.target === privateViewingDialog) privateViewingDialog.close("cancel"); });
-privateViewingDialog?.addEventListener("close", () => privateViewingTrigger?.focus());
-privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const result = form.querySelector("[data-private-viewing-result]");
-  const values = Object.fromEntries(new FormData(form).entries());
-  values.consent_contact = form.elements.consent_contact.checked;
-  values.language = language;
-  values.source_path = location.pathname;
-  if (result) result.textContent = language === "hu" ? "Küldés…" : "Sending…";
-  try {
-    const response = await fetch("/api/site/contact-leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-    if (!response.ok) throw new Error("LEAD_FAILED");
-    if (result) result.textContent = language === "hu" ? "Köszönjük. Hamarosan jelentkezünk." : "Thank you. We will contact you shortly.";
-    form.reset();
-    window.setTimeout(() => { if (privateViewingDialog?.open) privateViewingDialog.close("success"); }, 850);
-  } catch (_error) { if (result) result.textContent = language === "hu" ? "A küldés nem sikerült." : "We could not send your request."; }
+privateViewingDialog?.addEventListener("click",(event)=>{if(event.target===privateViewingDialog)privateViewingDialog.close("cancel");});
+privateViewingDialog?.addEventListener("close",()=>privateViewingTrigger?.focus());
+privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventListener("submit",async(event)=>{
+  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-private-viewing-result]"),values=Object.fromEntries(new FormData(form).entries());
+  values.language=language;values.source_path=location.pathname;
+  if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
+  try{
+    const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
+    if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
+    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontot rögzítettük.":"Thank you. Your appointment has been booked.";
+    recordFirstPartyEvent("private_appointment_submit",{piano_id:values.piano_id||"",service_id:values.service_id||""});
+    form.reset();window.setTimeout(()=>{if(privateViewingDialog?.open)privateViewingDialog.close("success");},850);
+  }catch(_error){if(result)result.textContent=language==="hu"?"A rögzítés nem sikerült.":"We could not book the appointment.";}
 });
 
 const interestDialog = document.querySelector("[data-interest-dialog]");
