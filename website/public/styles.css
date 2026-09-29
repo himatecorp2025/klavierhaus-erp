@@ -2096,3 +2096,27 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 .private-date-hint{display:block;margin-top:.25rem;color:var(--ivory-muted);font-size:.62rem;letter-spacing:0;text-transform:none}
 .customer-chat__proposal-status{color:var(--ivory-muted);font-size:.66rem}.customer-chat__proposal.is-scheduled{border-color:rgba(88,194,126,.58);background:rgba(88,194,126,.09)}.customer-chat__proposal.is-scheduled .customer-chat__proposal-status{color:#9fe0b3}.customer-chat__proposal.is-declined{opacity:.72}
 @media(max-width:480px){.customer-chat__attachment-row{align-items:flex-start;flex-direction:column}.customer-chat__attach-button{width:auto}}
+
+/* Customer Messenger V2: intake once, continuous chat afterwards. */
+.customer-chat__intake{display:grid;gap:.65rem}
+.customer-chat__composer{display:grid;grid-template-columns:minmax(0,1fr) 2.75rem 2.75rem;gap:.45rem;align-items:end}
+.customer-chat__composer textarea{min-height:2.75rem!important;max-height:8rem;resize:none;padding:.72rem .8rem!important}
+.customer-chat__attach-button,.customer-chat__send-button{display:grid!important;place-items:center;width:2.75rem;height:2.75rem;min-height:2.75rem!important;padding:0!important;border:1px solid rgba(201,169,94,.5)!important;border-radius:50%!important;background:rgba(183,154,96,.08)!important;color:var(--gold-bright)!important;cursor:pointer}
+.customer-chat__send-button{border-color:var(--gold-bright)!important;background:var(--gold-bright)!important;color:#080807!important;font-size:1rem}
+.customer-chat__attach-button input{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
+.customer-chat__attach-button span{font-size:1.05rem}
+.customer-chat__file-list{display:flex!important;gap:.35rem!important;overflow:auto}
+.customer-chat__file-chip{max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-chat.is-active .customer-chat__heading>p:not(.eyebrow):not([data-chat-support-status]){display:none}
+.customer-chat.is-active .customer-chat__messages{max-height:38vh;min-height:12rem;margin-bottom:.6rem;padding:.35rem;align-content:start}
+.customer-chat__message{max-width:82%;padding:.62rem .8rem!important;border:1px solid rgba(255,255,255,.08)!important;border-left:0!important;border-radius:16px 16px 16px 5px!important;background:rgba(255,255,255,.06)!important}
+.customer-chat__message--staff{justify-self:start;background:rgba(255,255,255,.07)!important;color:var(--cream)}
+.customer-chat__message--customer{justify-self:end;border-color:rgba(201,169,94,.28)!important;border-radius:16px 16px 5px 16px!important;background:rgba(201,169,94,.16)!important;color:var(--ivory)}
+.customer-chat__message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.customer-chat__message a{display:block;margin-top:.35rem;color:var(--gold-bright);font-size:.68rem}
+.customer-chat__proposal{max-width:90%;justify-self:center}
+.customer-chat__lookup[hidden],.customer-chat__intake[hidden]{display:none!important}
+@media(max-width:560px){
+  .customer-chat__panel{max-height:82dvh}
+  .customer-chat.is-active .customer-chat__messages{max-height:48dvh;min-height:15rem}
+}
