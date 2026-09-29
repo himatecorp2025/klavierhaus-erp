@@ -14,7 +14,7 @@ function id(prefix){return `${prefix}-${Date.now()}-${crypto.randomBytes(6).toSt
 function hash(token){return crypto.createHash("sha256").update(String(token)).digest("hex");}
 function removeFiles(files){for(const file of files||[]){if(file?.path)try{fs.unlinkSync(file.path);}catch(_error){}}}
 
-function registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir}) {
+function registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir,notifications=null}) {
   const upload = customerConversationUpload ? customerConversationUpload.array("attachments",10) : (_req,_res,next)=>next();
 
   function byToken(token){return db.prepare("SELECT * FROM customer_conversations WHERE public_token_hash=?").get(hash(token));}
@@ -56,6 +56,13 @@ function registerWebsiteConversationRoutes({app,db,customerConversationUpload,up
       })();
     }catch(error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_CREATE_FAILED"});}
     const row=db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(conversationId);
+    notifications?.emit({
+      category:"CUSTOMER_CONVERSATION",entityType:"CUSTOMER_CONVERSATION",entityId:conversationId,
+      titleEn:"New customer message",titleHu:"Új ügyfélüzenet",
+      bodyEn:`${name||"Website visitor"} · ${category.replaceAll("_"," ")} · ${message.slice(0,220)}`,
+      bodyHu:`${name||"Weboldali látogató"} · ${category.replaceAll("_"," ")} · ${message.slice(0,220)}`,
+      actionUrl:"#cms",severity:"INFO"
+    });
     res.status(201).json({...payload(row,token),access_token:token,outside_support_hours:false,auto_reply_delivery:{status:"NOT_CONFIGURED"}});
   });
 
@@ -82,6 +89,12 @@ function registerWebsiteConversationRoutes({app,db,customerConversationUpload,up
         event(row.id,"CUSTOMER_MESSAGE",{message_id:messageId});
       })();
     }catch(error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_MESSAGE_FAILED"});}
+    notifications?.emit({
+      category:"CUSTOMER_CONVERSATION",entityType:"CUSTOMER_CONVERSATION",entityId:row.id,
+      titleEn:"New customer reply",titleHu:"Új ügyfélválasz",
+      bodyEn:`${row.name||"Website visitor"} · ${body.slice(0,220)}`,bodyHu:`${row.name||"Weboldali látogató"} · ${body.slice(0,220)}`,
+      actionUrl:"#cms",severity:"INFO"
+    });
     res.status(201).json(payload(db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(row.id),req.params.token));
   });
 
