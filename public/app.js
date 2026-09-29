@@ -676,24 +676,41 @@ function openClientDialog(client=null){
     }catch(error){toast(humanError(error),"error");}
   });
 }
-function openPianoDialog(client=null,piano=null){
+function openPianoDialog(client=null,piano=null,review=null){
   const owner=client||state.clients.find(row=>Number(row.id)===Number(piano?.client_id))||state.clients[0]||{};
-  openDialog({title:piano?tr("Edit piano","Zongora szerkesztése"):tr("New piano","Új zongora"),eyebrow:owner.name||tr("MASTER DATA","TÖRZSADATOK"),body:`<form id="pianoEditor" class="form-grid">
+  const seed={
+    brand:piano?.brand||review?.source_brand||"",
+    model:piano?.model||review?.source_model||"",
+    serial_number:piano?.serial_number||review?.source_serial_number||"",
+    build_year:piano?.build_year||review?.source_build_year||"",
+    finish:piano?.finish||"",
+    size_display:piano?.size_display||"",
+    color:piano?.color||"",
+    location_notes:piano?.location_notes||"",
+    last_serviced_at:piano?.last_serviced_at||"",
+    notes:piano?.notes||review?.source_note||""
+  };
+  openDialog({title:piano?tr("Edit piano","Zongora szerkesztése"):review?tr("Classify piano","Zongora besorolása"):tr("New piano","Új zongora"),eyebrow:owner.name||tr("MASTER DATA","TÖRZSADATOK"),body:`<form id="pianoEditor" class="form-grid">
     <label class="field"><span>${tr("Owner","Tulajdonos")} *</span><select name="client_id" required>${state.clients.map(row=>`<option value="${row.id}" ${Number(row.id)===Number(piano?.client_id||owner.id)?"selected":""}>${esc(row.name)}</option>`).join("")}</select></label>
-    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required autofocus value="${esc(piano?.brand||"")}" placeholder="Steinway & Sons"></label>
-    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(piano?.model||"")}" placeholder="B-211"></label>
-    <label class="field"><span>${tr("Serial","Gyári szám")}</span><input name="serial_number" value="${esc(piano?.serial_number||"")}"></label>
-    <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(piano?.finish||"")}" placeholder="Ebony"></label>
-    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(piano?.location_notes||"")}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")}</small></label>
-    <label class="field"><span>${tr("Last service","Utolsó szerviz")}</span><input name="last_serviced_at" type="date" value="${esc(piano?.last_serviced_at||"")}"></label>
+    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required autofocus value="${esc(seed.brand)}" placeholder="Steinway & Sons"></label>
+    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(seed.model)}" placeholder="B-211"></label>
+    <label class="field"><span>${tr("Serial","Gyári szám")}</span><input name="serial_number" value="${esc(seed.serial_number)}"></label>
+    <label class="field"><span>${tr("Year","Év")}</span><input name="build_year" type="number" min="1700" max="2100" value="${esc(seed.build_year)}"></label>
+    <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(seed.finish)}" placeholder="Ebony"></label>
+    <label class="field"><span>${tr("Size","Méret")}</span><input name="size_display" value="${esc(seed.size_display)}"></label>
+    <label class="field"><span>${tr("Color","Szín")}</span><input name="color" value="${esc(seed.color)}"></label>
+    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(seed.location_notes)}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")}</small></label>
+    <label class="field"><span>${tr("Last service","Utolsó szerviz")}</span><input name="last_serviced_at" type="date" value="${esc(seed.last_serviced_at)}"></label>
+    <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(seed.notes)}</textarea></label>
+    ${review?`<input type="hidden" name="review_id" value="${review.id}">`:""}
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save piano","Zongora mentése")}</button></div>
   </form>`});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
   $("#pianoEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);if(body.build_year==="")body.build_year=null;if(body.review_id)body.review_id=Number(body.review_id);
     try{
       const saved=await api(piano?`/api/pianos/${piano.id}`:`/api/clients/${body.client_id}/pianos`,{method:piano?"PUT":"POST",body:JSON.stringify(body)});
-      state.selectedPianoId=Number(saved.id);state.masterDetailKind="PIANO";closeDialog();toast(piano?tr("Piano updated.","Zongora frissítve."):tr("Piano added.","Zongora hozzáadva."),"success");await renderMaster();openMasterMobileDetail();
+      state.selectedPianoId=Number(saved.id);state.masterDetailKind="PIANO";closeDialog();toast(piano?tr("Piano updated.","Zongora frissítve."):tr("Piano saved.","Zongora mentve."),"success");await renderMaster();openMasterMobileDetail();
     }catch(error){toast(humanError(error),"error");}
   });
 }
