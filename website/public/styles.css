@@ -2089,3 +2089,10 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
   .customer-chat__proposal-actions{grid-template-columns:1fr}
   .customer-chat__file-picker{min-height:4.25rem}
 }
+
+/* Live customer Messenger + deterministic localized private-date input */
+.customer-chat__attachment-row{display:flex;align-items:center;gap:.5rem;min-width:0}.customer-chat__attachment-row>small{color:var(--ivory-muted);font-size:.6rem;line-height:1.25}
+.customer-chat__attach-button{display:inline-flex!important;align-items:center!important;gap:.4rem!important;min-height:2.35rem!important;padding:.45rem .65rem!important;border:1px solid rgba(201,169,94,.62)!important;background:rgba(183,154,96,.07)!important;color:var(--ivory)!important;cursor:pointer!important}.customer-chat__attach-button:hover{border-color:var(--gold-bright)!important;background:rgba(183,154,96,.12)!important}.customer-chat__attach-button input{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}.customer-chat__attach-button span{font-size:1rem}.customer-chat__attach-button strong{color:var(--gold-bright);font-size:.64rem;letter-spacing:.05em;text-transform:uppercase}
+.private-date-hint{display:block;margin-top:.25rem;color:var(--ivory-muted);font-size:.62rem;letter-spacing:0;text-transform:none}
+.customer-chat__proposal-status{color:var(--ivory-muted);font-size:.66rem}.customer-chat__proposal.is-scheduled{border-color:rgba(88,194,126,.58);background:rgba(88,194,126,.09)}.customer-chat__proposal.is-scheduled .customer-chat__proposal-status{color:#9fe0b3}.customer-chat__proposal.is-declined{opacity:.72}
+@media(max-width:480px){.customer-chat__attachment-row{align-items:flex-start;flex-direction:column}.customer-chat__attach-button{width:auto}}
