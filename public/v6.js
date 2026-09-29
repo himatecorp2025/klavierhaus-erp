@@ -428,8 +428,18 @@ renderIntake=async function(){
 function v6RenderIntakeList(){
   const host=$("#intakeList"),q=String($("#intakeSearch")?.value||"").trim().toLowerCase(),status=$("#intakeStatusFilter")?.value||"";
   const rows=state.intake.filter(row=>(!status||row.status===status)&&(!q||`${row.raw_client_name||""} ${row.client_name||""} ${row.raw_contact||""} ${row.reported_issue||""}`.toLowerCase().includes(q)));
-  host.innerHTML=rows.length?rows.map(row=>`<article class="intake-card ${esc(row.estimated_urgency)}"><div class="urgency-bar"></div><div><h3>${esc(row.client_name||row.raw_client_name||tr("New prospect","Új érdeklődő"))}</h3><p>${esc(row.reported_issue)}</p><div class="intake-meta"><span class="badge">${esc(intakeStatusLabel(row.status))}</span><span class="badge">📎 ${Array.isArray(row.media_urls)?row.media_urls.length:0}</span><span class="badge estimate-badge">${tr("Estimate","Becsült ár")}: ${r3Money(row.estimated_total||0)}</span></div></div>${row.job_id?`<button class="secondary-button" type="button" data-nav="planned">✓ ${esc(row.job_code||tr("Job","Munka"))}</button>`:row.status!=="archived"?`<button class="primary-button" type="button" data-convert-job="${row.id}">${tr("Approve / create job","Jóváhagyás / munka létrehozása")}</button>`:""}</article>`).join(""):`<section class="panel empty-state">${tr("No intake requests to display.","Nincs megjeleníthető igény.")}</section>`;
-  $$("[data-convert-job]",host).forEach(button=>button.addEventListener("click",()=>openConvertToJobDialog(state.intake.find(row=>Number(row.id)===Number(button.dataset.convertJob)))));
+  host.innerHTML=rows.length?rows.map(row=>`<article class="intake-card ${esc(row.estimated_urgency)}"><div class="urgency-bar"></div><div><h3>${esc(row.client_name||row.raw_client_name||tr("New prospect","Új érdeklődő"))}</h3><p>${esc(row.reported_issue)}</p><div class="intake-meta"><span class="badge">${esc(intakeStatusLabel(row.status))}</span><span class="badge">📎 ${Array.isArray(row.media_urls)?row.media_urls.length:0}</span><span class="badge estimate-badge">${tr("Estimate","Becsült ár")}: ${r3Money(row.estimated_total||0)}</span></div></div><div class="intake-card-actions"><button class="secondary-button icon-text-button" type="button" data-intake-pdf="${row.id}" title="${tr("Export PDF and archive it","PDF export és archiválás")}">📄 PDF</button>${row.job_id?`<button class="secondary-button" type="button" data-nav="planned">✓ ${esc(row.job_code||tr("Job","Munka"))}</button>`:row.status!=="archived"?`<button class="primary-button" type="button" data-convert-job="${row.id}">${tr("Approve / create job","Jóváhagyás / munka létrehozása")}</button>`:""}</div></article>`).join(""):`<section class="panel empty-state">${tr("No intake requests to display.","Nincs megjeleníthető igény.")}</section>`;
+  $("[data-convert-job]",host).forEach(button=>button.addEventListener("click",()=>openConvertToJobDialog(state.intake.find(row=>Number(row.id)===Number(button.dataset.convertJob)))));
+  $("[data-intake-pdf]",host).forEach(button=>button.addEventListener("click",()=>v6ExportIntakePdf(Number(button.dataset.intakePdf))));
+}
+async function v6ExportIntakePdf(id){
+  try{
+    const response=await fetch("/api/intake/"+id+"/export-pdf",{method:"POST",headers:{Authorization:"Bearer "+state.token},cache:"no-store"});
+    if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.error||("HTTP_"+response.status));}
+    const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement("a");
+    link.href=url;link.download="intake-assessment-"+id+".pdf";document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+    toast(tr("Assessment PDF exported and saved to Documents.","Az igényfelmérési PDF elkészült és a Dokumentumok közé került."),"success");
+  }catch(error){toast(humanError(error),"error");}
 }
 openIntakeDialog=async function(){
   const [catalog]=await Promise.all([api("/api/intake-catalog"),loadUsers()]);
