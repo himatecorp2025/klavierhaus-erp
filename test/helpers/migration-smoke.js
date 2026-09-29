@@ -45,6 +45,28 @@ try{
       SELECT CASE WHEN (SELECT i.revenue_recognition_status FROM invoices i WHERE i.id=NEW.invoice_id)='DEFERRED'
         THEN RAISE(ABORT,'IMMUTABLE_CREDIT_MEMO') END;
     END;
+    CREATE TABLE private_appointments (
+      id TEXT PRIMARY KEY,
+      appointment_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      note TEXT,
+      piano_id TEXT,
+      service_id TEXT,
+      status TEXT NOT NULL DEFAULT 'SCHEDULED',
+      assigned_user_id TEXT,
+      language TEXT NOT NULL DEFAULT 'en',
+      source_path TEXT,
+      created_source TEXT NOT NULL DEFAULT 'PUBLIC',
+      created_by_user_id TEXT,
+      completed_at TEXT,
+      cancelled_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO private_appointments(id,appointment_type,name,phone,scheduled_at,note,status,language,created_source)
+      VALUES('PA-LEGACY-1','PRIVATE_VISIT','Legacy Appointment','212-555-0199','2031-05-10T14:00:00.000Z','Preserve me','SCHEDULED','en','PUBLIC');
     CREATE TABLE legacy_fk_parent(id INTEGER PRIMARY KEY,label TEXT);
     CREATE TABLE legacy_fk_child(id INTEGER PRIMARY KEY,parent_id INTEGER NOT NULL,FOREIGN KEY(parent_id) REFERENCES legacy_fk_parent(id));
     INSERT INTO legacy_fk_parent(id,label) VALUES(1,'parent');
@@ -64,6 +86,11 @@ try{
     assert.ok(columns.includes("sku"),"canonical inventory_items.sku missing after legacy retirement");
     assert.ok(columns.includes("quantity_on_hand"),"canonical inventory_items.quantity_on_hand missing after legacy retirement");
     assert.equal(migrated.prepare("SELECT COUNT(*) c FROM inventory_items").get().c,0,"legacy inventory rows must not leak into the canonical stock catalog");
+    const appointmentColumns=migrated.prepare("PRAGMA table_info(private_appointments)").all().map(row=>row.name);
+    assert.ok(appointmentColumns.includes("scheduled_end_at"),"legacy private_appointments.scheduled_end_at must be added before schema indexes");
+    assert.ok(appointmentColumns.includes("conversation_id"),"legacy private_appointments.conversation_id must be added before schema indexes");
+    assert.equal(migrated.prepare("SELECT name FROM private_appointments WHERE id='PA-LEGACY-1'").get().name,"Legacy Appointment","legacy appointment data must survive Messenger migration");
+    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_private_appointments_conversation'").get(),"Messenger private appointment index must exist");
     migrated.prepare(`INSERT INTO inventory_items(sku,name_en,name_hu,unit,quantity_on_hand,reorder_point,reorder_quantity,unit_cost,active)
       VALUES('INV-SENTINEL','Migration sentinel','Migrációs sentinel','pcs',7,2,4,1.5,1)`).run();
     migrated.close();
@@ -113,6 +140,7 @@ try{
   assert.ok(backups.some(name=>name.startsWith("final-compliance-pre-migration-")),"Final compliance safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("workshop-ux-v5-pre-migration-")),"Workshop UX v5 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("admin-ux-v6-pre-migration-")),"Admin UX v6 safety backup missing");
+  assert.ok(backups.some(name=>name.startsWith("messenger-v12-pre-migration-")),"Messenger v12 safety backup missing");
   console.log("Final six-module migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
