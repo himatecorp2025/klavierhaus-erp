@@ -1996,3 +1996,9 @@ input,select,textarea,button{max-width:100%}
   .assessment-option>small{display:none!important}
   .assessment-option{grid-template-rows:22px 1fr 31px!important}
 }
+
+@media(max-width:700px){
+  .assessment-grid .assessment-option>.assessment-option-icon{padding:0!important;padding-right:0!important}
+  .assessment-option>small{display:none!important}
+  .assessment-option{grid-template-rows:22px minmax(18px,1fr) 32px!important}
+}
