@@ -508,7 +508,7 @@ async function renderMaster(){
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
-  $("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>void handleMasterTool(button.dataset.masterTool)));
+  $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>void handleMasterTool(button.dataset.masterTool)));
   $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
   renderMasterList();
   await renderMasterDetail();
@@ -517,7 +517,7 @@ function updateMasterToolbar(){
   const reveal=$("#masterSearchReveal");
   reveal?.classList.toggle("open",Boolean(state.masterSearchOpen));
   const active=state.masterMode==="PIANOS"?"PIANOS":state.clientMasterFilter||"ALL";
-  $$("[data-master-tool]").forEach(button=>{
+  $$$("[data-master-tool]").forEach(button=>{
     const kind=button.dataset.masterTool;
     button.classList.toggle("active",kind==="SEARCH"?Boolean(state.masterSearchOpen):(kind==="CLIENTS"?active==="ALL":kind===active));
   });
@@ -571,7 +571,7 @@ function renderClientList(){
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
   </article>`).join("");
-  $("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
+  $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
   $$("[data-client-contact]",host).forEach(button=>button.addEventListener("click",()=>runClientContactAction(Number(button.dataset.clientId),button.dataset.clientContact)));
 }
 function runClientContactAction(clientId,kind){
@@ -593,7 +593,7 @@ function renderPianoList(){
     <small>${tr("Owner","Tulajdonos")}: ${esc(piano.client_name||"—")}</small>
     <small>${tr("Location","Hely")}: ${esc(piano.effective_location||"—")}</small>
   </button>`).join("");
-  $("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
+  $$("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
 }
 function openMasterMobileDetail(){$("#masterLayout")?.classList.add("detail-open");}
 function closeMasterMobileDetail(){$("#masterLayout")?.classList.remove("detail-open");}
@@ -635,8 +635,8 @@ async function renderClientDetail(){
   $("#editClientBtn")?.addEventListener("click",()=>openClientDialog(client));
   $("#addPianoBtn")?.addEventListener("click",async()=>{if(await masterConfirmDiscard())openPianoDialog(client);});
   $$("[data-open-map]",host).forEach(button=>button.addEventListener("click",()=>{const address=inline?$("#clientInlineForm")?.elements?.address?.value:client.address;openMasterMap(address);}));
-  $("[data-classify-review]",host).forEach(button=>button.addEventListener("click",async()=>{const item=reviews.find(row=>Number(row.id)===Number(button.dataset.classifyReview));if(await masterConfirmDiscard())openPianoDialog(client,null,item);}));
-  $("[data-piano-card]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedPianoId=Number(button.dataset.pianoCard);state.masterDetailKind="PIANO";await renderPianoDetail();openMasterMobileDetail();}));
+  $$("[data-classify-review]",host).forEach(button=>button.addEventListener("click",async()=>{const item=reviews.find(row=>Number(row.id)===Number(button.dataset.classifyReview));if(await masterConfirmDiscard())openPianoDialog(client,null,item);}));
+  $$("[data-piano-card]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedPianoId=Number(button.dataset.pianoCard);state.masterDetailKind="PIANO";await renderPianoDetail();openMasterMobileDetail();}));
   const form=$("#clientInlineForm");
   if(form){
     form.addEventListener("input",()=>setMasterDirty(true));form.addEventListener("change",()=>setMasterDirty(true));
