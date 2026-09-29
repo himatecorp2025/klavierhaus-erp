@@ -2067,3 +2067,25 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
   .private-appointment-dialog .private-appointment-grid{grid-template-columns:1fr}
   .private-appointment-dialog .service-field-wide{grid-column:auto}
 }
+
+
+/* Customer Messenger live-support refinements. */
+.customer-chat__heading .customer-chat__status{margin:.35rem 0 .15rem;padding:.5rem .6rem;border:1px solid var(--line-soft);color:var(--ivory-soft);font-size:.7rem;line-height:1.35}
+.customer-chat__heading .customer-chat__status.is-live{border-color:rgba(88,194,126,.48);color:#9fe0b3;background:rgba(88,194,126,.08)}
+.customer-chat__attachments{display:grid;gap:.35rem;color:var(--ivory-soft);font-size:.68rem;letter-spacing:.06em}
+.customer-chat__file-picker{position:relative;display:grid!important;gap:.18rem;place-items:center;min-height:4.65rem;padding:.75rem;border:1px dashed rgba(201,169,94,.62);background:rgba(183,154,96,.06);color:var(--ivory)!important;text-align:center;cursor:pointer}
+.customer-chat__file-picker:hover{border-color:var(--gold-bright);background:rgba(183,154,96,.12)}
+.customer-chat__file-picker input[type="file"]{position:absolute;width:1px;height:1px;min-height:0;opacity:0;pointer-events:none}
+.customer-chat__file-picker strong{color:var(--gold-bright);font-size:.76rem;letter-spacing:.04em}
+.customer-chat__file-picker small{color:var(--ivory-muted);font-size:.62rem;letter-spacing:0}
+.customer-chat__file-list{display:flex;flex-wrap:wrap;gap:.32rem}
+.customer-chat__file-chip{display:inline-flex;max-width:100%;padding:.28rem .45rem;border:1px solid var(--line-soft);background:rgba(255,255,255,.035);color:var(--ivory-soft);font-size:.62rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-chat__proposal{display:grid;gap:.5rem;padding:.75rem;border:1px solid rgba(201,169,94,.62);background:rgba(183,154,96,.08);color:var(--ivory);font-size:.76rem}
+.customer-chat__proposal>strong{color:var(--gold-bright);letter-spacing:.08em;text-transform:uppercase;font-size:.67rem}
+.customer-chat__proposal p{margin:0;line-height:1.45}
+.customer-chat__proposal-actions{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
+.customer-chat__proposal-actions .button{min-height:2.3rem;padding:.5rem .6rem;gap:.35rem;font-size:.58rem}
+@media(max-width:480px){
+  .customer-chat__proposal-actions{grid-template-columns:1fr}
+  .customer-chat__file-picker{min-height:4.25rem}
+}
