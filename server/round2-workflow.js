@@ -71,9 +71,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
   function phaseVisualStatus(job,phase,now=Date.now()){
     if(job?.cancelled_at)return "cancelled";
     if(job?.stage==="completed"||phase?.completed_at)return "completed";
-    if(phase?.blocker_code)return "blocked";
     const due=phase?.due_at?new Date(phase.due_at).getTime():NaN;
     if(Number.isFinite(due)&&due<now)return "overdue";
+    if(phase?.blocker_code)return "blocked";
     const plannedStart=phase?.starts_at||(phase?.stage_key==="received"?job?.scheduled_at:null)||phase?.activated_at;
     const start=plannedStart?new Date(plannedStart).getTime():NaN;
     if(Number.isFinite(start)&&start>now)return "scheduled";
