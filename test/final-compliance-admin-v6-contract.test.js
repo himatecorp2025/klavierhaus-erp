@@ -166,3 +166,36 @@ test("Workflow status, responsibility, intake grid and Documents UX contracts ar
   assert.match(archive,/intakeAssessmentPdf/);
   assert.match(archive,/\/api\/intake\/:id\/export-pdf/);
 });
+
+
+test("Private appointments, VIP clients and unified notifications are wired end to end",()=>{
+  const html=read("public/index.html"),app=read("public/app.js"),round2=read("public/round2.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
+  const schema=read("server/schema.sql"),privateApi=read("server/private-appointments.js"),notifications=read("server/notification-center.js");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS private_appointments/);
+  assert.match(schema,/appointment_type TEXT NOT NULL CHECK\(appointment_type IN \('PRIVATE_VISIT','PIANO_VIEWING','SERVICE_CONSULTATION'\)\)/);
+  assert.match(schema,/is_vip INTEGER NOT NULL DEFAULT 0/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS notification_events/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS notification_recipients/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS push_subscriptions/);
+  assert.match(privateApi,/\/api\/public\/private-appointments/);
+  assert.doesNotMatch(privateApi,/findConflict/);
+  assert.match(round2,/private-appointment-event/);
+  assert.match(round2,/Private appointments/);
+  assert.match(round2,/r2OpenPrivateAppointment/);
+  assert.match(app,/vip-client-star/);
+  assert.match(app,/clientVipFilter/);
+  assert.match(html,/id="notificationBell"/);
+  assert.match(html,/id="notificationDrawer"/);
+  assert.match(app,/snooze-all/);
+  assert.match(app,/\/acknowledge/);
+  assert.match(app,/ensurePushSubscription/);
+  assert.match(notifications,/hours=3/);
+  assert.match(notifications,/notifications_enabled/);
+  assert.match(notifications,/sound_enabled/);
+  assert.match(css,/private-appointment-card/);
+  assert.match(css,/notification-drawer\.open/);
+  assert.match(css,/vip-client-star/);
+  assert.match(sw,/addEventListener\("push"/);
+  assert.match(sw,/addEventListener\("notificationclick"/);
+  assert.match(sw,/setAppBadge/);
+});
