@@ -17,6 +17,8 @@ function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||""))&&
 function validMonth(value){return /^\d{4}-\d{2}$/.test(String(value||""));}
 function normalizeEmail(value){return text(value,320).toLowerCase();}
 function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));}
+function json(value,fallback={}){try{return JSON.parse(String(value||"{}"));}catch(_error){return fallback;}}
+function phaseLabel(value){return text(value,160).replaceAll("_"," ").replace(/\b\w/g,ch=>ch.toUpperCase())||"Service work";}
 function nyDate(value=new Date()){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(value instanceof Date?value:new Date(value));
   const p=Object.fromEntries(parts.filter(part=>part.type!=="literal").map(part=>[part.type,part.value]));
@@ -35,19 +37,24 @@ function normalizeItems(items,{allowEmpty=false}={}){
   return (Array.isArray(items)?items:[]).map((item,index)=>{
     const type=["labor","material","adjustment","other"].includes(String(item?.item_type))?String(item.item_type):"other";
     const description=text(item?.item_description??item?.description,1000);
-    const quantity=Number(item?.quantity??1),unitPrice=money(item?.unit_price??item?.unitPrice??0);
+    const quantity=Number(item?.quantity??1),unitPrice=money(item?.unit_price??item?.unitPrice??0),totalPrice=money(quantity*unitPrice);
     if(!description)throw problem("INVOICE_ITEM_DESCRIPTION_REQUIRED");
     if(!Number.isFinite(quantity)||quantity<=0)throw problem("INVALID_INVOICE_ITEM_QUANTITY");
     if(!Number.isFinite(unitPrice))throw problem("INVALID_INVOICE_ITEM_PRICE");
     if(type!=="adjustment"&&unitPrice<0)throw problem("INVALID_INVOICE_ITEM_PRICE");
-    return {item_type:type,item_description:description,quantity,unit_price:unitPrice,total_price:money(quantity*unitPrice),sort_order:index};
+    const hasSplit=item?.labor_amount!==undefined||item?.material_amount!==undefined;
+    const labor=hasSplit?money(item?.labor_amount||0):(type==="labor"?totalPrice:0);
+    const material=hasSplit?money(item?.material_amount||0):(type==="material"?totalPrice:0);
+    if(!Number.isFinite(labor)||!Number.isFinite(material)||labor<0||material<0)throw problem("INVALID_INVOICE_ITEM_SPLIT");
+    if(hasSplit&&money(labor+material)!==totalPrice)throw problem("INVOICE_ITEM_SPLIT_MISMATCH");
+    return {item_type:type,item_description:description,quantity,unit_price:unitPrice,total_price:totalPrice,labor_amount:labor,material_amount:material,phase_key:text(item?.phase_key,100)||null,sort_order:index};
   });
 }
 function totals(items,taxRate){
-  const labor=money(items.filter(i=>i.item_type==="labor").reduce((sum,i)=>sum+i.total_price,0));
-  const material=money(items.filter(i=>i.item_type==="material").reduce((sum,i)=>sum+i.total_price,0));
-  const adjustment=money(items.filter(i=>!["labor","material"].includes(i.item_type)).reduce((sum,i)=>sum+i.total_price,0));
-  const taxable=money(labor+material+adjustment);
+  const labor=money(items.reduce((sum,i)=>sum+Number(i.labor_amount||0),0));
+  const material=money(items.reduce((sum,i)=>sum+Number(i.material_amount||0),0));
+  const gross=money(items.reduce((sum,i)=>sum+Number(i.total_price||0),0));
+  const adjustment=money(gross-labor-material),taxable=gross;
   if(taxable<0)throw problem("INVOICE_TOTAL_NEGATIVE");
   const tax=money(taxable*Number(taxRate||0)/100),total=money(taxable+tax);
   return {labor,material,adjustment,tax,total};
@@ -66,7 +73,7 @@ function resolveLogoPath(logoUrl,uploadDir){
   return fs.existsSync(fallback)?fallback:null;
 }
 
-function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir,transactionalEmail}){
+function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir,transactionalEmail,automationOutbox=null}){
   const financeReader=permit("ADMIN","MANAGER");
   const financeAdmin=permit("ADMIN");
   const invoiceDir=path.join(uploadDir,"invoices");
@@ -104,7 +111,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   function invoiceDetail(id){
     const row=db.prepare(`${selectInvoice} WHERE i.id=?`).get(id);
     if(!row)return null;
-    return {...row,
+    return {...row,snapshot:json(row.snapshot_json,{}),
       items:db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(id),
       payments:db.prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY paid_at,id").all(id),
       email_log:db.prepare("SELECT * FROM invoice_email_log WHERE invoice_id=? ORDER BY created_at DESC,id DESC").all(id)
@@ -137,16 +144,31 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare("UPDATE job_workflow_phases SET enabled=1,activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP),completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='completed'").run(jobId);
   }
   function defaultJobItems(job){
+    const handoffs=db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(job.id);
+    if(handoffs.length){
+      return handoffs.map(row=>{
+        const labor=money(row.phase_labor_cost||0),material=money(row.phase_material_cost||0),total=money(labor+material);
+        return {item_type:"other",item_description:text(row.billing_description,500)||phaseLabel(row.from_stage),quantity:1,unit_price:total,labor_amount:labor,material_amount:material,phase_key:row.from_stage||null};
+      });
+    }
     const rows=[];
-    if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:"Labor / technician service",quantity:1,unit_price:Number(job.total_labor_cost)});
-    if(Number(job.total_material_cost||0)>0)rows.push({item_type:"material",item_description:"Materials and parts",quantity:1,unit_price:Number(job.total_material_cost)});
-    if(!rows.length)rows.push({item_type:"labor",item_description:job.title||"Klavierhaus service",quantity:1,unit_price:0});
+    if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:"Labor / technician service",quantity:1,unit_price:Number(job.total_labor_cost),labor_amount:Number(job.total_labor_cost),material_amount:0});
+    if(Number(job.total_material_cost||0)>0)rows.push({item_type:"material",item_description:"Materials and parts",quantity:1,unit_price:Number(job.total_material_cost),labor_amount:0,material_amount:Number(job.total_material_cost)});
+    if(!rows.length)rows.push({item_type:"labor",item_description:job.title||"Klavierhaus service",quantity:1,unit_price:0,labor_amount:0,material_amount:0});
     return rows;
   }
   function persistPdf(invoiceId){
     const invoice=invoiceDetail(invoiceId);if(!invoice)throw problem("INVOICE_NOT_FOUND",404);
-    const info=company(),logoPath=resolveLogoPath(info.logo_url,uploadDir);
-    const pdf=generateBusinessInvoicePdf({company:info,invoice,items:invoice.items,counterpartyName:invoice.counterparty_name,logoPath});
+    const snapshot=invoice.snapshot||{},info=snapshot.issuer&&Object.keys(snapshot.issuer).length?snapshot.issuer:company(),logoPath=resolveLogoPath(info.logo_url,uploadDir);
+    const party=snapshot.counterparty||{},instrument=snapshot.instrument||{},job=snapshot.job||{};
+    const printable={...invoice,
+      counterparty_name:party.name||invoice.counterparty_name,counterparty_address:party.address||invoice.counterparty_address,
+      counterparty_email:party.email||invoice.counterparty_email,counterparty_phone:party.phone||invoice.counterparty_phone,
+      piano_brand:instrument.brand||invoice.piano_brand,piano_model:instrument.model||invoice.piano_model,piano_serial_number:instrument.serial_number||invoice.piano_serial_number,
+      piano_location_notes:instrument.location_notes||invoice.piano_location_notes,job_code:job.job_code||invoice.job_code,job_title:job.title||invoice.job_title,
+      location_type:job.location_type||invoice.location_type,site_address:job.site_address||invoice.site_address
+    };
+    const pdf=generateBusinessInvoicePdf({company:info,invoice:printable,items:invoice.items,counterpartyName:printable.counterparty_name,logoPath});
     const filename=`${invoice.invoice_number}.pdf`,filePath=path.join(invoiceDir,filename);
     fs.writeFileSync(filePath,pdf);
     const publicPath=`/uploads/invoices/${filename}`;
@@ -173,8 +195,8 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
   function replaceItems(invoiceId,items,taxRate){
     const normalized=normalizeItems(items),calc=totals(normalized,taxRate);
     db.prepare("DELETE FROM invoice_items WHERE invoice_id=?").run(invoiceId);
-    const insert=db.prepare("INSERT INTO invoice_items(invoice_id,item_type,item_description,quantity,unit_price,total_price,sort_order) VALUES(?,?,?,?,?,?,?)");
-    normalized.forEach(item=>insert.run(invoiceId,item.item_type,item.item_description,item.quantity,item.unit_price,item.total_price,item.sort_order));
+    const insert=db.prepare("INSERT INTO invoice_items(invoice_id,item_type,item_description,quantity,unit_price,total_price,labor_amount,material_amount,phase_key,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    normalized.forEach(item=>insert.run(invoiceId,item.item_type,item.item_description,item.quantity,item.unit_price,item.total_price,item.labor_amount,item.material_amount,item.phase_key,item.sort_order));
     db.prepare(`UPDATE invoices SET subtotal_labor=?,subtotal_material=?,subtotal_adjustment=?,tax_rate=?,tax_amount=?,total_amount=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(calc.labor,calc.material,calc.adjustment,Number(taxRate||0),calc.tax,calc.total,invoiceId);
     persistPdf(invoiceId);
@@ -191,27 +213,44 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     const dueDate=validDate(input?.due_date)?String(input.due_date):addDays(issueDate,30);
     if(dueDate<issueDate)throw problem("INVALID_INVOICE_DUE_DATE");
     const taxRate=Number(input?.tax_rate??0);if(!Number.isFinite(taxRate)||taxRate<0||taxRate>100)throw problem("INVALID_TAX_RATE");
-    const items=normalizeItems(input?.items),calc=totals(items,taxRate),jobId=integerId(input?.job_id);
+    const items=normalizeItems(input?.items),calc=totals(items,taxRate),jobId=integerId(input?.job_id),job=jobId?jobForInvoice(jobId):null;
     if(jobId){
       const existing=db.prepare("SELECT id FROM invoices WHERE job_id=? AND status<>'cancelled'").get(jobId);
       if(existing)return invoiceDetail(existing.id);
     }
-    const invoiceNumber=nextInvoiceNumber(direction,issueDate);
-    const status=direction==="payable"?"sent":"draft";
+    const invoiceNumber=nextInvoiceNumber(direction,issueDate),status=direction==="payable"?"sent":"draft";
+    const counterparty={
+      name:direction==="receivable"?party.name:party.company_name,
+      contact:direction==="receivable"?null:text(party.contact_name,240)||null,
+      email:text(party.email,320)||null,phone:text(party.phone,120)||null,address:text(party.address,1000)||null,
+      tax_id:direction==="payable"?text(party.tax_id,160)||null:null
+    };
+    const serviceDate=validDate(input?.service_date)?String(input.service_date):(job?.completed_at?nyDate(new Date(job.completed_at)):issueDate);
+    const snapshot={
+      version:1,issuer:company(),counterparty,
+      instrument:job?{brand:job.piano_brand||null,model:job.piano_model||null,serial_number:job.piano_serial_number||null,location_notes:job.piano_location_notes||null}:null,
+      job:job?{id:job.id,job_code:job.job_code,title:job.title,location_type:job.location_type,site_address:job.site_address,scheduled_at:job.scheduled_at}:null,
+      created_at:new Date().toISOString()
+    };
     const info=db.prepare(`INSERT INTO invoices(
       invoice_number,direction,status,source_type,source_id,job_id,client_id,partner_id,counterparty_name,counterparty_contact,counterparty_email,
-      counterparty_phone,counterparty_address,counterparty_tax_id,summary,notes,issue_date,due_date,currency,subtotal_labor,subtotal_material,
+      counterparty_phone,counterparty_address,counterparty_tax_id,summary,notes,issue_date,service_date,due_date,currency,snapshot_json,subtotal_labor,subtotal_material,
       subtotal_adjustment,tax_rate,tax_amount,total_amount,email_language,created_by_user_id,created_at,updated_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'USD',?,?,?,?,?,?,?, ?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
-      invoiceNumber,direction,status,text(input?.source_type||"manual",20),text(input?.source_id,160)||null,jobId,clientId,partnerId,
-      direction==="receivable"?party.name:party.company_name,direction==="receivable"?null:text(party.contact_name,240)||null,
-      text(party.email,320)||null,text(party.phone,120)||null,text(party.address,1000)||null,direction==="payable"?text(party.tax_id,160)||null:null,
-      text(input?.summary,1000)||"Klavierhaus service",text(input?.notes,5000)||null,issueDate,dueDate,
-      calc.labor,calc.material,calc.adjustment,taxRate,calc.tax,calc.total,["en","hu"].includes(input?.email_language)?input.email_language:"en",actor?.id||null
-    );
+    ) VALUES(
+      @invoice_number,@direction,@status,@source_type,@source_id,@job_id,@client_id,@partner_id,@counterparty_name,@counterparty_contact,@counterparty_email,
+      @counterparty_phone,@counterparty_address,@counterparty_tax_id,@summary,@notes,@issue_date,@service_date,@due_date,'USD',@snapshot_json,@subtotal_labor,@subtotal_material,
+      @subtotal_adjustment,@tax_rate,@tax_amount,@total_amount,@email_language,@created_by_user_id,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    )`).run({
+      invoice_number:invoiceNumber,direction,status,source_type:text(input?.source_type||"manual",20),source_id:text(input?.source_id,160)||null,job_id:jobId,
+      client_id:clientId,partner_id:partnerId,counterparty_name:counterparty.name,counterparty_contact:counterparty.contact,counterparty_email:counterparty.email,
+      counterparty_phone:counterparty.phone,counterparty_address:counterparty.address,counterparty_tax_id:counterparty.tax_id,
+      summary:text(input?.summary,1000)||"Klavierhaus service",notes:text(input?.notes,5000)||null,issue_date:issueDate,service_date:serviceDate,due_date:dueDate,
+      snapshot_json:JSON.stringify(snapshot),subtotal_labor:calc.labor,subtotal_material:calc.material,subtotal_adjustment:calc.adjustment,tax_rate:taxRate,tax_amount:calc.tax,total_amount:calc.total,
+      email_language:["en","hu"].includes(input?.email_language)?input.email_language:"en",created_by_user_id:actor?.id||null
+    });
     const invoiceId=Number(info.lastInsertRowid);
-    const insertItem=db.prepare("INSERT INTO invoice_items(invoice_id,item_type,item_description,quantity,unit_price,total_price,sort_order) VALUES(?,?,?,?,?,?,?)");
-    items.forEach(item=>insertItem.run(invoiceId,item.item_type,item.item_description,item.quantity,item.unit_price,item.total_price,item.sort_order));
+    const insertItem=db.prepare("INSERT INTO invoice_items(invoice_id,item_type,item_description,quantity,unit_price,total_price,labor_amount,material_amount,phase_key,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    items.forEach(item=>insertItem.run(invoiceId,item.item_type,item.item_description,item.quantity,item.unit_price,item.total_price,item.labor_amount,item.material_amount,item.phase_key,item.sort_order));
     persistPdf(invoiceId);
     return invoiceDetail(invoiceId);
   }
@@ -244,7 +283,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare("UPDATE pianos SET last_serviced_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nyDate(),before.piano_id);
     return jobForInvoice(jobId);
   }
-  async function sendInvoice(invoiceId,actor,languageOverride,recipientOverride){
+  async function sendInvoiceNow(invoiceId,actor,languageOverride,recipientOverride){
     let invoice=invoiceDetail(invoiceId);if(!invoice||invoice.deleted_at)throw problem("INVOICE_NOT_FOUND",404);
     if(invoice.direction!=="receivable")throw problem("PAYABLE_INVOICE_EMAIL_NOT_SUPPORTED",409);
     if(invoice.status==="paid")return invoice;
@@ -266,7 +305,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         to:recipient,clientName:invoice.counterparty_name,
         piano:{brand:invoice.piano_brand,model:invoice.piano_model,serial_number:invoice.piano_serial_number},
         workSummary:invoice.summary,invoiceNumber:invoice.invoice_number,totalAmount:invoice.total_amount,invoicePdf:persisted.pdf,language,
-        idempotencyKey:`workshop-invoice-${invoice.id}-${invoice.updated_at||invoice.created_at}`
+        idempotencyKey:`workshop-invoice-${invoice.id}`
       });
       db.transaction(()=>{
         db.prepare(`UPDATE invoices SET status='sent',email_language=?,sent_at=CURRENT_TIMESTAMP,sent_by_user_id=?,resend_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
@@ -281,6 +320,31 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         .run(invoice.id,recipient,language,text(error?.code||error?.message||"EMAIL_DELIVERY_FAILED",120),actor.id);
       throw problem(error?.code==="EMAIL_DELIVERY_NOT_CONFIGURED"?"EMAIL_DELIVERY_NOT_CONFIGURED":"EMAIL_DELIVERY_FAILED",error?.code==="EMAIL_DELIVERY_NOT_CONFIGURED"?503:502);
     }
+  }
+  if(automationOutbox){
+    automationOutbox.register("SEND_INVOICE",async payload=>{
+      const actor=db.prepare("SELECT id,name,role,is_superadmin FROM users WHERE id=?").get(payload.actor_user_id)
+        ||db.prepare("SELECT id,name,role,is_superadmin FROM users WHERE status='Active' AND (role='ADMIN' OR is_superadmin=1) ORDER BY is_superadmin DESC,id LIMIT 1").get();
+      if(!actor)throw problem("ADMIN_REQUIRED",403);
+      await sendInvoiceNow(Number(payload.invoice_id),actor,payload.language,payload.recipient);
+    });
+  }
+  async function sendInvoice(invoiceId,actor,languageOverride,recipientOverride){
+    const invoice=invoiceDetail(invoiceId);if(!invoice||invoice.deleted_at)throw problem("INVOICE_NOT_FOUND",404);
+    if(invoice.status==="sent"||invoice.status==="paid")return invoice;
+    const currentClient=invoice.client_id?clientById(invoice.client_id):null;
+    const recipient=normalizeEmail(recipientOverride||invoice.counterparty_email||currentClient?.email);
+    if(!recipient)throw problem("CLIENT_EMAIL_REQUIRED",409);
+    if(!validEmail(recipient))throw problem("INVALID_CLIENT_EMAIL");
+    const language=["en","hu"].includes(languageOverride)?languageOverride:invoice.email_language||"en";
+    if(!automationOutbox)return sendInvoiceNow(invoiceId,actor,language,recipient);
+    const event=automationOutbox.enqueue({
+      eventType:"SEND_INVOICE",entityType:"invoice",entityId:String(invoiceId),
+      payload:{invoice_id:invoiceId,actor_user_id:actor?.id||null,language,recipient},
+      dedupeKey:`invoice-send-${invoiceId}`
+    });
+    try{await automationOutbox.run(event.id);}catch(error){throw error;}
+    return invoiceDetail(invoiceId);
   }
   function overview(monthValue){
     const month=validMonth(monthValue)?String(monthValue):nyDate().slice(0,7),first=month+"-01",next=nextMonth(month)+"-01";

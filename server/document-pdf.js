@@ -570,90 +570,95 @@ function money(value, currency = "USD") {
 }
 
 function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpartyName = "", page = 1, pages = 1, showTotals = true, metrics, logoResources }) {
-  const directionLabel = invoice.direction === "payable" ? "VENDOR BILL" : "INVOICE";
-  const statusLabel = invoice.status === "paid" ? "Paid" : invoice.status === "void" ? "Void" : invoice.status === "carried_over" ? "Carried Over" : "Pending";
-  const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
-  const issuerAddress = [company.address_line1, company.address_line2, company.city, company.state, company.postal_code].filter(Boolean).join(", ");
-  const issuerContact = [company.email, company.phone].filter(Boolean).join(" | ");
-  const counterpartyAddress = safeText(invoice.counterparty_address || "");
-  const counterpartyTax = safeText(invoice.counterparty_tax_id || "");
-  const counterpartyContact = [invoice.counterparty_contact, invoice.counterparty_email, invoice.counterparty_phone].filter(Boolean).join(" | ");
-  const workflowPhaseInvoice = invoice.source_type === "workflow" && invoice.direction === "receivable";
-  const lines = [
-    `${DARK} rg 0 0 612 792 re f\n`,
-    textCommand(directionLabel, 390, 748, 20, GOLD),
-    textCommand(invoice.invoice_number || "", 390, 724, 14, CREAM),
-    textCommand(`Issue Date: ${formatPdfDate(invoice.issue_date)}`, 390, 704, 9, MUTED),
-    textCommand(`Due Date: ${formatPdfDate(invoice.due_date) || "—"}`, 390, 688, 9, MUTED),
-    textCommand(`Page ${page}/${pages}`, 500, 670, 8, MUTED),
-    logoCommand(Boolean(logoResources?.[logoResource]), 54, 704, 30, 30, logoResource),
-    textCommand(company.trade_name || company.legal_name || "Klavierhaus", 94, 708, 20, CREAM),
-    textCommand(truncate(issuerAddress, 310, 8, metrics), 54, 676, 8, MUTED),
-    textCommand(truncate(issuerContact, 310, 8, metrics), 54, 660, 8, MUTED),
-    textCommand(company.tax_id ? `Tax ID / EIN: ${company.tax_id}` : "", 54, 644, 8, MUTED),
-    `${GOLD} RG .8 w 54 626 504 0 re\n`,
-    textCommand(invoice.direction === "payable" ? "VENDOR" : "BILL TO", 54, 604, 8, GOLD),
-    textCommand(counterpartyName || invoice.counterparty_name || "—", 54, 586, 12, CREAM),
-    textCommand(truncate(counterpartyAddress, 500, 8, metrics), 54, 568, 8, MUTED),
-    textCommand(counterpartyTax ? `Tax ID: ${counterpartyTax}` : "", 54, 552, 8, MUTED),
-    textCommand(truncate(counterpartyContact, 500, 8, metrics), 54, 536, 8, MUTED),
-    textCommand(truncate(invoice.summary || "", 500, 9, metrics), 54, 514, 9, CREAM),
-    textCommand(workflowPhaseInvoice ? "PHASE" : "DESCRIPTION", 54, 486, 8, GOLD),
-    workflowPhaseInvoice ? "" : textCommand("QTY", 374, 486, 8, GOLD),
-    workflowPhaseInvoice ? "" : textCommand("UNIT PRICE", 416, 486, 8, GOLD),
-    textCommand(workflowPhaseInvoice ? "PHASE SUBTOTAL" : "LINE TOTAL", workflowPhaseInvoice ? 452 : 496, 486, 8, GOLD),
-    `${MUTED} RG .5 w 54 474 504 0 re\n`
+  const INK="0.07 0.07 0.07",GRAY="0.30 0.34 0.39",LIGHT="0.90 0.91 0.92",PALE="0.97 0.97 0.98";
+  const directionLabel=invoice.direction==="payable"?"VENDOR BILL":"COMMERCIAL INVOICE";
+  const statusLabel=invoice.status==="paid"?"PAID":invoice.status==="cancelled"?"CANCELLED":invoice.status==="draft"?"DRAFT":"DUE";
+  const issuerAddress=[company.address_line1,company.address_line2,[company.city,company.state,company.postal_code].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const issuerContact=[company.phone,company.email].filter(Boolean).join(" · ");
+  const counterpartyAddress=safeText(invoice.counterparty_address||"");
+  const counterpartyContact=[invoice.counterparty_email,invoice.counterparty_phone].filter(Boolean).join(" · ");
+  const serial=invoice.piano_serial_number?("S/N "+invoice.piano_serial_number):"";
+  const piano=[invoice.piano_brand,invoice.piano_model,serial].filter(Boolean).join(" · ");
+  const serviceLocation=invoice.location_type==="on_site"
+    ? ["On-site",invoice.site_address||invoice.piano_location_notes].filter(Boolean).join(" · ")
+    : "Klavierhaus Workshop";
+  const logoResource=logoResources?.LogoBlack?"LogoBlack":logoResources?.LogoOriginal?"LogoOriginal":null;
+  const lines=[
+    "1 1 1 rg 0 0 612 792 re f\n",
+    logoResource?logoCommand(true,54,724,32,32,logoResource):"",
+    textCommand(company.trade_name||company.legal_name||"Klavierhaus",96,744,18,INK,{bold:true}),
+    textCommand(truncate(issuerAddress,300,8,metrics),54,704,8,GRAY),
+    textCommand(truncate(issuerContact,300,8,metrics),54,690,8,GRAY),
+    textCommand(company.tax_id?("Tax ID / EIN: "+company.tax_id):"",54,676,8,GRAY),
+    textCommand(directionLabel,390,748,15,INK,{bold:true}),
+    textCommand(invoice.invoice_number||"",390,728,11,INK,{bold:true}),
+    textCommand("Issue Date: "+formatPdfDate(invoice.issue_date),390,706,8,GRAY),
+    textCommand("Service Date: "+(formatPdfDate(invoice.service_date)||"—"),390,692,8,GRAY),
+    textCommand("Due Date: "+(formatPdfDate(invoice.due_date)||"—"),390,678,8,GRAY),
+    textCommand("Status: "+statusLabel,390,664,8,INK,{bold:true}),
+    LIGHT+" RG .7 w 54 646 m 558 646 l S\n",
+    textCommand(invoice.direction==="payable"?"VENDOR":"BILL TO",54,624,8,GRAY,{bold:true}),
+    textCommand(counterpartyName||invoice.counterparty_name||"—",54,604,12,INK,{bold:true}),
+    textCommand(truncate(counterpartyAddress,230,8,metrics),54,588,8,GRAY),
+    textCommand(truncate(counterpartyContact,230,8,metrics),54,574,8,GRAY),
+    textCommand("INSTRUMENT / SERVICE",328,624,8,GRAY,{bold:true}),
+    textCommand(truncate(piano||"—",230,9,metrics),328,604,9,INK),
+    textCommand(truncate(serviceLocation,230,8,metrics),328,588,8,GRAY),
+    textCommand(truncate(invoice.summary||"",230,8,metrics),328,574,8,GRAY),
+    LIGHT+" RG .7 w 54 554 m 558 554 l S\n",
+    PALE+" rg 54 520 504 28 re f\n",
+    textCommand("DESCRIPTION",62,530,8,GRAY,{bold:true}),
+    textCommand("LABOR",340,530,8,GRAY,{bold:true}),
+    textCommand("MATERIALS",406,530,8,GRAY,{bold:true}),
+    textCommand("TOTAL",496,530,8,GRAY,{bold:true})
   ];
-  let y = 452;
-  for (const item of items.slice(0, 9)) {
-    lines.push(textCommand(truncate(item.item_description || "Item", workflowPhaseInvoice ? 380 : 315, 9, metrics), 54, y, 9, CREAM));
-    if (workflowPhaseInvoice) {
-      lines.push(textCommand(money(item.total_price || item.unit_price || 0, invoice.currency || "USD"), 452, y, 8, CREAM));
-      y -= 24;
-      continue;
+  let y=502;
+  for(const item of items.slice(0,9)){
+    const labor=Number(item.labor_amount||0),material=Number(item.material_amount||0),total=Number(item.total_price||0);
+    lines.push(textCommand(truncate(item.item_description||"Service",255,8.5,metrics),62,y,8.5,INK));
+    lines.push(textCommand(money(labor,invoice.currency||"USD"),340,y,7.5,INK));
+    lines.push(textCommand(money(material,invoice.currency||"USD"),406,y,7.5,INK));
+    lines.push(textCommand(money(total,invoice.currency||"USD"),496,y,7.5,INK,{bold:true}));
+    lines.push(LIGHT+" RG .35 w 54 "+number(y-9)+" m 558 "+number(y-9)+" l S\n");
+    y-=27;
+  }
+  if(showTotals){
+    const totalBeforeTax=Number(invoice.subtotal_labor||0)+Number(invoice.subtotal_material||0)+Number(invoice.subtotal_adjustment||0);
+    lines.push(LIGHT+" RG .7 w 330 190 m 558 190 l S\n");
+    lines.push(textCommand("Subtotal Labor",350,170,8,GRAY),textCommand(money(invoice.subtotal_labor,invoice.currency),470,170,8,INK));
+    lines.push(textCommand("Subtotal Materials",350,154,8,GRAY),textCommand(money(invoice.subtotal_material,invoice.currency),470,154,8,INK));
+    if(Number(invoice.subtotal_adjustment||0)!==0){
+      lines.push(textCommand("Adjustments",350,138,8,GRAY),textCommand(money(invoice.subtotal_adjustment,invoice.currency),470,138,8,INK));
     }
-    lines.push(textCommand(String(Number(item.quantity || 0)), 376, y, 9, CREAM));
-    lines.push(textCommand(money(item.unit_price || 0, invoice.currency || "USD"), 416, y, 8, CREAM));
-    lines.push(textCommand(money(item.total_price || 0, invoice.currency || "USD"), 496, y, 8, CREAM));
-    const settlement = [];
-    if (item.payment_method) settlement.push(`Payment: ${item.payment_method}`);
-    if (item.financial_status) settlement.push(`Status: ${String(item.financial_status).toLowerCase() === "paid" ? "Paid" : "Pending"}`);
-    if (settlement.length) lines.push(textCommand(truncate(settlement.join(" | "), 315, 7, metrics), 54, y - 11, 7, MUTED));
-    y -= settlement.length ? 32 : 24;
+    lines.push(textCommand("Tax ("+Number(invoice.tax_rate||0).toFixed(2)+"%)",350,122,8,GRAY),textCommand(money(invoice.tax_amount,invoice.currency),470,122,8,INK));
+    lines.push(INK+" RG 1 w 350 110 m 558 110 l S\n");
+    lines.push(textCommand(invoice.status==="paid"?"TOTAL PAID":"TOTAL DUE",350,88,10,INK,{bold:true}),textCommand(money(invoice.total_amount||totalBeforeTax,invoice.currency),470,88,12,INK,{bold:true}));
+    lines.push(textCommand("Payment methods: Bank Transfer / Check / Stripe",54,132,7.5,GRAY));
+    if(invoice.notes)lines.push(textCommand(truncate("Notes: "+invoice.notes,255,7.5,metrics),54,116,7.5,GRAY));
+  }else{
+    lines.push(textCommand("ITEMS CONTINUE ON THE NEXT PAGE",54,110,8,GRAY,{bold:true}));
   }
-  if (showTotals) {
-    lines.push(`${GOLD} RG .8 w 330 174 228 0 re\n`);
-    lines.push(textCommand("SUBTOTAL", 350, 150, 9, MUTED));
-    lines.push(textCommand(money(invoice.subtotal, invoice.currency), 450, 150, 10, CREAM));
-    lines.push(textCommand(`TAX (${Number(invoice.tax_rate || 0).toFixed(2)}%)`, 350, 128, 9, MUTED));
-    lines.push(textCommand(money(invoice.tax_amount, invoice.currency), 450, 128, 10, CREAM));
-    lines.push(textCommand("TOTAL USD", 350, 102, 10, GOLD));
-    lines.push(textCommand(money(invoice.total_amount, invoice.currency), 450, 102, 14, CREAM));
-    lines.push(textCommand(`Payment Method: ${invoice.payment_method || "—"}`, 54, 136, 8, MUTED));
-    lines.push(textCommand(`Payment Status: ${statusLabel}`, 54, 120, 8, MUTED));
-    if (invoice.payment_method === "Payment Link" && invoice.payment_link_url) lines.push(textCommand(truncate(`Payment Link: ${invoice.payment_link_url}`, 260, 8, metrics), 54, 104, 8, GOLD));
-    if (invoice.notes) lines.push(textCommand(truncate(`Notes: ${invoice.notes}`, 260, 8, metrics), 54, 86, 8, MUTED));
-  } else {
-    lines.push(textCommand("ITEMS CONTINUE ON THE NEXT PAGE", 54, 120, 8, GOLD));
-  }
-  lines.push(textCommand("Klavierhaus | New York", 54, 54, 7, MUTED));
+  lines.push(LIGHT+" RG .5 w 54 66 m 558 66 l S\n");
+  lines.push(textCommand("Thank you for choosing Klavierhaus.",54,46,7.5,GRAY));
+  lines.push(textCommand("Page "+page+"/"+pages,498,46,7.5,GRAY));
   return lines.join("");
 }
 
 function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], counterpartyName = "", fontPath, logoPath }) {
-  const sourceItems = Array.isArray(items) ? items : [];
-  const chunks = [];
-  for (let index = 0; index < sourceItems.length; index += 9) chunks.push(sourceItems.slice(index, index + 9));
-  if (!chunks.length) chunks.push([]);
-  const pageCount = chunks.length;
-  const labels = [company.trade_name, company.legal_name, company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.email, company.phone, company.tax_id, invoice.invoice_number, invoice.summary, invoice.notes, invoice.payment_link_url, counterpartyName, invoice.counterparty_address, invoice.counterparty_tax_id, invoice.counterparty_contact, invoice.counterparty_email, ...sourceItems.flatMap((item) => [item.item_description, item.payment_method, item.financial_status]), "INVOICE", "VENDOR BILL", "BILL TO", "DESCRIPTION", "PHASE", "PHASE SUBTOTAL", "QTY", "UNIT PRICE", "LINE TOTAL", "SUBTOTAL", "TAX", "TAX (0.00%)", "%", "TOTAL USD", "Issue Date", "Due Date", "Page", "Payment Method", "Payment Status", "Paid", "Pending", "ITEMS CONTINUE ON THE NEXT PAGE", "|"];
+  const sourceItems=Array.isArray(items)?items:[],chunks=[];
+  for(let index=0;index<sourceItems.length;index+=9)chunks.push(sourceItems.slice(index,index+9));
+  if(!chunks.length)chunks.push([]);
+  const pageCount=chunks.length;
+  const labels=[
+    company.trade_name,company.legal_name,company.address_line1,company.address_line2,company.city,company.state,company.postal_code,company.email,company.phone,company.tax_id,
+    invoice.invoice_number,invoice.summary,invoice.notes,counterpartyName,invoice.counterparty_address,invoice.counterparty_email,invoice.counterparty_phone,
+    invoice.piano_brand,invoice.piano_model,invoice.piano_serial_number,invoice.site_address,invoice.piano_location_notes,
+    ...sourceItems.map(item=>item.item_description),"COMMERCIAL INVOICE","VENDOR BILL","BILL TO","VENDOR","INSTRUMENT / SERVICE","DESCRIPTION","LABOR","MATERIALS","TOTAL",
+    "Subtotal Labor","Subtotal Materials","Adjustments","TOTAL DUE","TOTAL PAID","Payment methods","Thank you for choosing Klavierhaus.","Issue Date","Service Date","Due Date","Status","Page"
+  ];
   return createPdf({
-    pages: chunks.map((pageItems, index) => (metrics, logoResources) => businessInvoicePage({ company, invoice, items: pageItems, counterpartyName, page: index + 1, pages: pageCount, showTotals: index === pageCount - 1, metrics, logoResources })),
-    size: LETTER,
-    labels,
-    title: `Klavierhaus ${invoice.invoice_number || "Invoice"}`,
-    fontPath,
-    logoPath
+    pages:chunks.map((pageItems,index)=>(metrics,logoResources)=>businessInvoicePage({company,invoice,items:pageItems,counterpartyName,page:index+1,pages:pageCount,showTotals:index===pageCount-1,metrics,logoResources})),
+    size:LETTER,labels,title:"Klavierhaus "+(invoice.invoice_number||"Invoice"),fontPath,logoPath
   });
 }
 

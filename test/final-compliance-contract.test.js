@@ -91,8 +91,8 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(round2,/\/api\/jobs\/pipeline/);
   assert.match(round2,/\/api\/jobs\/activate\//);
   assert.match(round2,/\/handoff/);
-  assert.match(round3,/Save Draft \/ Send Later/);
-  assert.match(round3,/Send Invoice Now/);
+  assert.match(round3,/Complete & Save Draft/);
+  assert.match(round3,/Complete & Send Invoice/);
   assert.match(round3,/Approve & Send/);
   assert.match(round3,/\/mark-paid/);
   assert.match(round3,/\/api\/direct-expenses/);

@@ -213,6 +213,7 @@ ensureColumn("jobs","workflow_owner_user_id","TEXT");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
 ensureColumn("job_handoffs","phase_duration_min","INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0)");
+ensureColumn("job_handoffs","billing_description","TEXT");
 db.prepare("UPDATE jobs SET workflow_owner_user_id=COALESCE(workflow_owner_user_id,created_by_user_id) WHERE workflow_owner_user_id IS NULL").run();
 db.prepare(`UPDATE job_workflow_phases SET responsible_user_id=COALESCE(responsible_user_id,(SELECT created_by_user_id FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
   WHERE responsible_user_id IS NULL`).run();
@@ -231,6 +232,11 @@ if(tableExists("handoff_presets")&&Number(db.prepare("SELECT COUNT(*) count FROM
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
+ensureColumn("invoices","service_date","TEXT");
+ensureColumn("invoices","snapshot_json","TEXT NOT NULL DEFAULT '{}'");
+ensureColumn("invoice_items","labor_amount","REAL NOT NULL DEFAULT 0");
+ensureColumn("invoice_items","material_amount","REAL NOT NULL DEFAULT 0");
+ensureColumn("invoice_items","phase_key","TEXT");
 ensureColumn("invoices","archive_document_id","INTEGER");
 
 function seedWorkshopUxV5() {

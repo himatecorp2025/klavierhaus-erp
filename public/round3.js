@@ -30,7 +30,8 @@ function r3TypeOptions(selected="other"){
 }
 function r3LineMarkup(index,item={}){
   const type=item.item_type||"other",description=item.item_description||item.description||"",quantity=item.quantity??1,price=item.unit_price??"";
-  return "<div class='invoice-line' data-invoice-line='"+index+"'>"+
+  const labor=Number(item.labor_amount||0),material=Number(item.material_amount||0),phase=String(item.phase_key||"");
+  return "<div class='invoice-line' data-invoice-line='"+index+"' data-line-labor='"+labor+"' data-line-material='"+material+"' data-line-phase='"+esc(phase)+"'>"+
     "<label class='field'><span>"+tr("Type","Típus")+"</span><select data-line-type>"+r3TypeOptions(type)+"</select></label>"+
     "<label class='field invoice-line-description'><span>"+tr("Description","Megnevezés")+" *</span><input data-line-description value='"+esc(description)+"' required></label>"+
     "<label class='field'><span>"+tr("Qty","Mennyiség")+"</span><input data-line-quantity type='number' min='0.01' step='0.01' value='"+esc(quantity)+"' required></label>"+
@@ -60,12 +61,18 @@ function r3BindLineRemove(host){
   });
 }
 function r3CollectItems(root=document){
-  return $$("[data-invoice-line]",root).map(line=>({
-    item_type:$("[data-line-type]",line)?.value||"other",
-    item_description:$("[data-line-description]",line)?.value||"",
-    quantity:Number($("[data-line-quantity]",line)?.value||0),
-    unit_price:Number($("[data-line-price]",line)?.value||0)
-  }));
+  return $$("[data-invoice-line]",root).map(line=>{
+    const type=$("[data-line-type]",line)?.value||"other",quantity=Number($("[data-line-quantity]",line)?.value||0),unitPrice=Number($("[data-line-price]",line)?.value||0);
+    const item={item_type:type,item_description:$("[data-line-description]",line)?.value||"",quantity,unit_price:unitPrice};
+    const phaseKey=line.dataset.linePhase||"",originalLabor=Number(line.dataset.lineLabor||0),originalMaterial=Number(line.dataset.lineMaterial||0),originalTotal=originalLabor+originalMaterial;
+    if(phaseKey&&type==="other"&&originalTotal>0){
+      const nextTotal=Math.round((quantity*unitPrice+Number.EPSILON)*100)/100,ratio=originalLabor/originalTotal;
+      item.labor_amount=Math.round((nextTotal*ratio+Number.EPSILON)*100)/100;
+      item.material_amount=Math.round(((nextTotal-item.labor_amount)+Number.EPSILON)*100)/100;
+      item.phase_key=phaseKey;
+    }
+    return item;
+  });
 }
 async function r3DownloadPdf(url,filename){
   try{
@@ -80,6 +87,14 @@ async function r3DownloadPdf(url,filename){
     setTimeout(()=>URL.revokeObjectURL(objectUrl),5000);
   }catch(error){toast(humanError(error),"error");}
 }
+function r3PhaseInvoiceLines(handoffs=[]){
+  const rows=(Array.isArray(handoffs)?handoffs:[]).map(row=>{
+    const labor=Number(row.phase_labor_cost||0),material=Number(row.phase_material_cost||0),total=Math.round((labor+material+Number.EPSILON)*100)/100;
+    const description=row.billing_description||String(row.from_stage||"Service").replaceAll("_"," ").replace(/\b\w/g,ch=>ch.toUpperCase());
+    return {item_type:"other",item_description:description,quantity:1,unit_price:total,labor_amount:labor,material_amount:material,phase_key:row.from_stage||null};
+  });
+  return rows.length?rows:null;
+}
 function r3DefaultJobLines(job){
   const rows=[];
   if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:tr("Labor / technician service","Munkadíj / technikusi szolgáltatás"),quantity:1,unit_price:Number(job.total_labor_cost)});
@@ -87,8 +102,8 @@ function r3DefaultJobLines(job){
   if(!rows.length)rows.push({item_type:"labor",item_description:job.title||tr("Klavierhaus service","Klavierhaus szolgáltatás"),quantity:1,unit_price:0});
   return rows;
 }
-function r3InvoiceEditorBody({job=null,invoice=null}={}){
-  const rows=invoice?.items?.length?invoice.items:r3DefaultJobLines(job||{});
+function r3InvoiceEditorBody({job=null,invoice=null,items=null}={}){
+  const rows=invoice?.items?.length?invoice.items:(Array.isArray(items)&&items.length?items:r3DefaultJobLines(job||{}));
   const due=invoice?.due_date||r2DateAdd(r2Today(),30);
   const summary=invoice?.summary||((job?.job_code||tr("Job","Munka"))+" · "+(job?.title||""));
   return "<div class='invoice-editor-summary full'>"+
@@ -110,12 +125,13 @@ function r3EditorPayload(form){
 
 async function r3OpenCloseout(job,refresh=renderWorkshop){
   if(!job)return;
+  const handoffs=await api("/api/jobs/"+job.id+"/handoffs").catch(()=>[]),phaseItems=r3PhaseInvoiceLines(handoffs);
   openDialog({title:tr("Complete Job & Invoice","Munka lezárása és számlázás"),eyebrow:job.job_code||"ADMIN APPROVAL",body:
     "<form id='closeoutForm' class='form-grid'>"+
       "<div class='detail-note full'>"+tr("Review the automatically calculated invoice. You may change prices, add extra lines or add a discount before closing the job.","Ellenőrizd az automatikusan számolt számlát. A lezárás előtt módosíthatod az árakat, adhatsz hozzá plusz tételt vagy kedvezményt.")+"</div>"+
       "<label class='field full'><span>"+tr("Client email","Ügyfél e-mail")+" </span><input name='recipient_email' type='email' value='"+esc(job.client_email||"")+"' placeholder='name@example.com'><small>"+tr("If you enter or change it here, it is saved to the client master record.","Ha itt megadod vagy módosítod, a rendszer elmenti az ügyfél törzsadatába is.")+"</small></label>"+
-      r3InvoiceEditorBody({job})+
-      "<div class='closeout-choice full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button type='submit' class='secondary-button' name='closeout_mode' value='draft'>"+tr("Save Draft / Send Later","Mentés piszkozatként / későbbi küldés")+"</button><button type='submit' class='primary-button' name='closeout_mode' value='send'>"+tr("Send Invoice Now","Számla azonnali kiküldése")+"</button></div>"+
+      r3InvoiceEditorBody({job,items:phaseItems})+
+      "<div class='closeout-choice full'><button type='button' class='secondary-button' data-close-dialog>"+tr("Cancel","Mégse")+"</button><button type='submit' class='secondary-button' name='closeout_mode' value='draft'>"+tr("Complete & Save Draft","Lezárás és piszkozat mentése")+"</button><button type='submit' class='primary-button' name='closeout_mode' value='send'>"+tr("Complete & Send Invoice","Lezárás és számla küldése")+"</button></div>"+
     "</form>"
   });
   const form=$("#closeoutForm");r3BindLineEditor(form);$("[data-close-dialog]",form).addEventListener("click",closeDialog);
