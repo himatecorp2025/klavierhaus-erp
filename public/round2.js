@@ -462,7 +462,7 @@ function r2EventSegment(job,date){
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
   const color=job.assigned_technician_color||"#8d6a2c";
-  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
+  return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
     <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ${esc(job.title)}</strong>
     <span>${esc(job.client_name)} · ${esc(job.assigned_technician_name||"—")}</span>
     <small>${esc(r2StageLabel(job.stage))}</small>
@@ -498,7 +498,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2UpdateCalendarNowLine(){
@@ -595,6 +595,7 @@ function r2BindCalendarCreate(host){
   }));
 }
 async function r2RenderCalendar(){
+  clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   const host=$("#workshopContent");if(!host)return;
   state.r2CalendarMode=state.r2CalendarMode||localStorage.getItem("kh_calendar_mode")||"week";
   if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode="week";
@@ -633,6 +634,8 @@ async function r2RenderWorkflow(data){
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
   $("#workflowAddStageCard")?.addEventListener("click",r2OpenAddStage);
   const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);}
+  clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
+  if(bucket==="active")state.r2WorkflowStatusTimer=setInterval(()=>{if(state.view==="workshop"&&state.r2WorkshopMode==="workflow"&&state.r2WorkflowBucket==="active")void r2LoadWorkflowBucket("active");},30000);
 }
 function r2OverviewRows(key,overview){
   const rows=overview?.details?.[key]||[];
