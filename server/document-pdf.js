@@ -634,7 +634,10 @@ function businessInvoicePage({ company = {}, invoice = {}, items = [], counterpa
     lines.push(INK+" RG 1 w 350 110 m 558 110 l S\n");
     lines.push(textCommand(invoice.status==="paid"?"TOTAL PAID":"TOTAL DUE",350,88,10,INK,{bold:true}),textCommand(money(invoice.total_amount||totalBeforeTax,invoice.currency),470,88,12,INK,{bold:true}));
     lines.push(textCommand("Payment methods: Bank Transfer / Check / Stripe",54,132,7.5,GRAY));
-    if(invoice.notes)lines.push(textCommand(truncate("Notes: "+invoice.notes,255,7.5,metrics),54,116,7.5,GRAY));
+    if(invoice.payment_url&&invoice.status!=="paid"&&invoice.status!=="cancelled"){
+      lines.push(textCommand("Secure online payment:",54,116,7.5,GRAY,{bold:true}));
+      lines.push(textCommand(truncate(invoice.payment_url,260,6.5,metrics),54,102,6.5,GRAY));
+    }else if(invoice.notes)lines.push(textCommand(truncate("Notes: "+invoice.notes,255,7.5,metrics),54,116,7.5,GRAY));
   }else{
     lines.push(textCommand("ITEMS CONTINUE ON THE NEXT PAGE",54,110,8,GRAY,{bold:true}));
   }
@@ -652,7 +655,7 @@ function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], co
   const labels=[
     company.trade_name,company.legal_name,company.address_line1,company.address_line2,company.city,company.state,company.postal_code,company.email,company.phone,company.tax_id,
     invoice.invoice_number,invoice.summary,invoice.notes,counterpartyName,invoice.counterparty_address,invoice.counterparty_email,invoice.counterparty_phone,
-    invoice.piano_brand,invoice.piano_model,invoice.piano_serial_number,invoice.site_address,invoice.piano_location_notes,
+    invoice.piano_brand,invoice.piano_model,invoice.piano_serial_number,invoice.site_address,invoice.piano_location_notes,invoice.payment_url,
     ...sourceItems.map(item=>item.item_description),"COMMERCIAL INVOICE","VENDOR BILL","BILL TO","VENDOR","INSTRUMENT / SERVICE","DESCRIPTION","LABOR","MATERIALS","TOTAL",
     "Subtotal Labor","Subtotal Materials","Adjustments","TOTAL DUE","TOTAL PAID","Payment methods","Thank you for choosing Klavierhaus.","Issue Date","Service Date","Due Date","Status","Page"
   ];
