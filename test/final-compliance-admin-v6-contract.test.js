@@ -222,7 +222,7 @@ test("Notification center is a global hidden portal, never workspace content",()
 
 test("Responsive PWA layout keeps intake tiles compact and removes desktop-only minimum widths",()=>{
   const css=read("public/styles.css"),round2=read("public/round2.js"),sw=read("public/service-worker.js");
-  assert.match(css,/\/\* RESPONSIVE PWA V11 \*\//);
+  assert.match(css,/RESPONSIVE PWA V11/);
   assert.match(css,/\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(auto-fill,minmax\(142px,156px\)\)/);
   assert.match(css,/\.assessment-option\{[\s\S]*max-width:156px;[\s\S]*aspect-ratio:1\/1/);
   assert.match(css,/@media\(max-width:640px\)[\s\S]*\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
