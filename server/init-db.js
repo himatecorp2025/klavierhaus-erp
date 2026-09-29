@@ -191,6 +191,8 @@ if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
     SELECT id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at FROM _documents_legacy_archive`);
   db.exec('DROP TABLE "_documents_legacy_archive"');
+  db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_category_time ON document_archive(category,archived_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_entity ON document_archive(entity_type,entity_id)");
   console.log("[DOCUMENTS] Archive categories migrated");
 }
 
