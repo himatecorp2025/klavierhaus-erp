@@ -662,6 +662,54 @@ function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], co
   });
 }
 
+
+function paymentReceiptPage({company={},invoice={},payment={},metrics,logoResources}){
+  const INK="0.07 0.07 0.07",GRAY="0.30 0.34 0.39",LIGHT="0.90 0.91 0.92",PALE="0.97 0.97 0.98";
+  const logoResource=logoResources?.LogoBlack?"LogoBlack":logoResources?.LogoOriginal?"LogoOriginal":null;
+  const issuerAddress=[company.address_line1,company.address_line2,[company.city,company.state,company.postal_code].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const piano=[invoice.piano_brand,invoice.piano_model,invoice.piano_serial_number?("S/N "+invoice.piano_serial_number):""].filter(Boolean).join(" · ");
+  return [
+    "1 1 1 rg 0 0 612 792 re f\n",
+    logoResource?logoCommand(true,54,716,34,34,logoResource):"",
+    textCommand(company.trade_name||company.legal_name||"Klavierhaus",100,738,19,INK,{bold:true}),
+    textCommand(truncate(issuerAddress,320,8,metrics),54,694,8,GRAY),
+    textCommand([company.phone,company.email].filter(Boolean).join(" · "),54,680,8,GRAY),
+    textCommand("PAYMENT RECEIPT",390,738,15,INK,{bold:true}),
+    textCommand(invoice.invoice_number||"",390,716,10,INK,{bold:true}),
+    LIGHT+" RG .7 w 54 648 m 558 648 l S\n",
+    textCommand("RECEIVED FROM",54,622,8,GRAY,{bold:true}),
+    textCommand(invoice.counterparty_name||"—",54,598,13,INK,{bold:true}),
+    textCommand(invoice.counterparty_email||"",54,580,8,GRAY),
+    textCommand("PAYMENT DETAILS",328,622,8,GRAY,{bold:true}),
+    textCommand("Paid: "+formatPdfDate(payment.paid_at||invoice.paid_at),328,598,9,INK),
+    textCommand("Method: "+(payment.payment_method||invoice.payment_method||"Credit Card / Stripe"),328,580,9,INK),
+    textCommand(truncate("Reference: "+(payment.reference||"—"),220,8,metrics),328,562,8,GRAY),
+    LIGHT+" RG .7 w 54 532 m 558 532 l S\n",
+    PALE+" rg 54 450 504 60 re f\n",
+    textCommand("AMOUNT RECEIVED",70,486,9,GRAY,{bold:true}),
+    textCommand(money(payment.amount||invoice.total_amount,invoice.currency||"USD"),350,478,18,INK,{bold:true}),
+    textCommand("Invoice: "+(invoice.invoice_number||"—"),70,454,9,INK),
+    textCommand(truncate(piano||invoice.summary||"Klavierhaus service",250,8.5,metrics),250,454,8.5,GRAY),
+    textCommand("PAID IN FULL",54,398,12,INK,{bold:true}),
+    textCommand("This receipt confirms payment received for the invoice shown above.",54,374,9,GRAY),
+    LIGHT+" RG .5 w 54 90 m 558 90 l S\n",
+    textCommand("Thank you for choosing Klavierhaus.",54,68,8,GRAY),
+    textCommand("Payment receipt · Klavierhaus New York",390,68,8,GRAY)
+  ].join("");
+}
+
+function generatePaymentReceiptPdf({company={},invoice={},payment={},fontPath,logoPath}){
+  const labels=[
+    company.trade_name,company.legal_name,company.address_line1,company.address_line2,company.city,company.state,company.postal_code,company.phone,company.email,
+    invoice.invoice_number,invoice.counterparty_name,invoice.counterparty_email,invoice.piano_brand,invoice.piano_model,invoice.piano_serial_number,invoice.summary,
+    payment.payment_method,payment.reference,"PAYMENT RECEIPT","RECEIVED FROM","PAYMENT DETAILS","AMOUNT RECEIVED","PAID IN FULL","Thank you for choosing Klavierhaus."
+  ];
+  return createPdf({
+    pages:[(metrics,logoResources)=>paymentReceiptPage({company,invoice,payment,metrics,logoResources})],
+    size:LETTER,labels,title:"Klavierhaus Payment Receipt "+(invoice.invoice_number||""),fontPath,logoPath
+  });
+}
+
 function monthlyReportPage({ company = {}, month = "", summary = {}, paymentBreakdown = [], carried = [], rows = [], page = 1, pages = 1, metrics, logoResources }) {
   const logoResource = logoResources?.LogoOriginal ? "LogoOriginal" : "LogoWhite";
   const lines = [
@@ -877,4 +925,4 @@ function generateFinancialStatementPdf({ statement = "income-statement", company
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
+module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generatePaymentReceiptPdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
