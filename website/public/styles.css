@@ -2056,3 +2056,14 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 .event-order-form .public-payment-fields label{font-size:.72rem}
 .event-order-form .public-payment-fields input,.event-order-form .public-payment-fields select{min-height:3.25rem;border-radius:0;color:var(--ivory)}
 @media(max-width:800px){.public-payment-fields{grid-template-columns:1fr}}
+
+
+/* Minimal private appointment dialog */
+.private-appointment-dialog{width:min(calc(100% - 2rem),36rem)}
+.private-appointment-dialog .private-appointment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem}
+.private-appointment-dialog textarea{resize:vertical;min-height:5.5rem}
+.private-appointment-dialog [data-private-viewing-context],.private-appointment-dialog [data-service-title]{margin:.1rem 0 .25rem;color:var(--gold-bright);font-size:.92rem}
+@media(max-width:620px){
+  .private-appointment-dialog .private-appointment-grid{grid-template-columns:1fr}
+  .private-appointment-dialog .service-field-wide{grid-column:auto}
+}
