@@ -348,10 +348,10 @@ document.querySelector("[data-service-form]")?.addEventListener("submit",async(e
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
     if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
-    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontot rögzítettük.":"Thank you. Your appointment has been booked.";
+    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontkérést megkaptuk, a Klavierhaus jóváhagyása után válik véglegessé.":"Thank you. We received your appointment request. It becomes final only after Klavierhaus approval.";
     recordFirstPartyEvent("private_appointment_submit",{service_id:values.service_id||"",context:"service"});
     form.reset();window.setTimeout(()=>{if(serviceDialog?.open)serviceDialog.close("success");},850);
-  }catch(_error){if(result)result.textContent=language==="hu"?"A rögzítés nem sikerült. Kérjük, próbálja újra.":"We could not book the appointment. Please try again.";}
+  }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült. Kérjük, próbálja újra.":"We could not send the appointment request. Please try again.";}
 });
 
 const privateViewingDialog=document.querySelector("[data-private-viewing-dialog]");
@@ -375,10 +375,10 @@ privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventList
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
     if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
-    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontot rögzítettük.":"Thank you. Your appointment has been booked.";
+    if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontkérést megkaptuk, a Klavierhaus jóváhagyása után válik véglegessé.":"Thank you. We received your appointment request. It becomes final only after Klavierhaus approval.";
     recordFirstPartyEvent("private_appointment_submit",{piano_id:values.piano_id||"",service_id:values.service_id||""});
     form.reset();window.setTimeout(()=>{if(privateViewingDialog?.open)privateViewingDialog.close("success");},850);
-  }catch(_error){if(result)result.textContent=language==="hu"?"A rögzítés nem sikerült.":"We could not book the appointment.";}
+  }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült.":"We could not send the appointment request.";}
 });
 
 const interestDialog = document.querySelector("[data-interest-dialog]");
