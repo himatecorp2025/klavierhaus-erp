@@ -344,6 +344,26 @@ app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{se
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
+app.use("/api/public/website-contact-leads",(req,res,next)=>{
+  if(req.method!=="POST")return next();
+  const originalJson=res.json.bind(res);
+  res.json=body=>{
+    if(res.statusCode===201&&body?.id&&notificationCenter){
+      try{
+        const row=db.prepare("SELECT id,name,lead_type,message,assigned_user_id FROM website_contact_leads WHERE id=?").get(body.id);
+        if(row)notificationCenter.emit({
+          category:"WEBSITE_LEAD",entityType:"WEBSITE_LEAD",entityId:String(row.id),
+          titleEn:"New website enquiry",titleHu:"Új weboldali megkeresés",
+          bodyEn:`${row.name} · ${String(row.lead_type||"").replaceAll("_"," ")}${row.message?` · ${String(row.message).slice(0,220)}`:""}`,
+          bodyHu:`${row.name} · ${String(row.lead_type||"").replaceAll("_"," ")}${row.message?` · ${String(row.message).slice(0,220)}`:""}`,
+          actionUrl:"#cms",severity:"INFO",recipients:row.assigned_user_id?[row.assigned_user_id]:null
+        });
+      }catch(error){console.warn("[NOTIFICATION-WEBSITE-LEAD]",error.message);}
+    }
+    return originalJson(body);
+  };
+  next();
+});
 registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
