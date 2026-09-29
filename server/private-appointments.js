@@ -3,7 +3,26 @@
 const crypto=require("node:crypto");
 const clean=(value,max=2000)=>String(value??"").replace(/\u0000/g,"").trim().slice(0,max);
 const rid=()=>`PA-${crypto.randomUUID()}`;
-const validTime=value=>{const date=new Date(value);return Number.isNaN(date.getTime())?null:date.toISOString();};
+function formatNy(date){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,hourCycle:"h23"})
+    .formatToParts(date).reduce((out,part)=>(out[part.type]=part.value,out),{});
+  const hour=parts.hour==="24"?"00":parts.hour;return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}`;
+}
+function localNewYorkToIso(value){
+  const raw=clean(value,80),match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/);
+  if(!match)return null;
+  const [,year,month,day,hour,minute]=match,desired=Date.UTC(+year,+month-1,+day,+hour,+minute);let candidate=desired;
+  for(let i=0;i<3;i++){
+    const rendered=formatNy(new Date(candidate)),m=rendered.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+    const wall=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);candidate+=desired-wall;
+  }
+  const date=new Date(candidate);return formatNy(date)===`${year}-${month}-${day}T${hour}:${minute}`?date.toISOString():null;
+}
+const validTime=value=>{
+  const raw=clean(value,80);if(!raw)return null;
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw))return localNewYorkToIso(raw);
+  const date=new Date(raw);return Number.isNaN(date.getTime())?null:date.toISOString();
+};
 
 function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications}){
   const staff=permit("ADMIN","MANAGER","WORKER"),admin=permit("ADMIN");
