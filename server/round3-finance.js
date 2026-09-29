@@ -73,7 +73,7 @@ function resolveLogoPath(logoUrl,uploadDir){
   return fs.existsSync(fallback)?fallback:null;
 }
 
-function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir,transactionalEmail,automationOutbox=null,customerAutomation=null}){
+function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir,transactionalEmail,automationOutbox=null,customerAutomation=null,workshopPayments=null}){
   const financeReader=permit("ADMIN","MANAGER");
   const financeAdmin=permit("ADMIN");
   function customerMilestone(jobId,eventType){
@@ -118,6 +118,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     return {...row,snapshot:json(row.snapshot_json,{}),
       items:db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(id),
       payments:db.prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY paid_at,id").all(id),
+      stripe_checkouts:db.prepare("SELECT * FROM workshop_invoice_checkouts WHERE invoice_id=? ORDER BY created_at DESC").all(id),
       email_log:db.prepare("SELECT * FROM invoice_email_log WHERE invoice_id=? ORDER BY created_at DESC,id DESC").all(id),
       communication_log:db.prepare("SELECT * FROM customer_communication_log WHERE invoice_id=? ORDER BY created_at DESC,id DESC").all(id)
     };
@@ -304,12 +305,16 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       invoice=invoiceDetail(invoice.id);
     }
     const language=["en","hu"].includes(languageOverride)?languageOverride:invoice.email_language||"en";
+    if(workshopPayments?.configured){
+      workshopPayments.ensurePaymentLink(invoice.id);
+      invoice=invoiceDetail(invoice.id);
+    }
     const persisted=persistPdf(invoice.id);
     try{
       const delivery=await transactionalEmail.sendWorkshopInvoice({
         to:recipient,clientName:invoice.counterparty_name,
         piano:{brand:invoice.piano_brand,model:invoice.piano_model,serial_number:invoice.piano_serial_number},
-        workSummary:invoice.summary,invoiceNumber:invoice.invoice_number,totalAmount:invoice.total_amount,invoicePdf:persisted.pdf,language,
+        workSummary:invoice.summary,invoiceNumber:invoice.invoice_number,totalAmount:invoice.total_amount,paymentUrl:invoice.payment_url||"",invoicePdf:persisted.pdf,language,
         idempotencyKey:`workshop-invoice-${invoice.id}`
       });
       db.transaction(()=>{
@@ -515,6 +520,14 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     try{
       const after=await sendInvoice(id,req.user,req.body?.language,req.body?.recipient_email);audit(req,"SEND_EMAIL","invoices",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
+  });
+
+  app.post("/api/invoices/:id/payment-link",auth,financeAdmin,(req,res)=>{
+    const id=integerId(req.params.id),invoice=id&&invoiceDetail(id);if(!invoice||invoice.deleted_at)return res.status(404).json({error:"INVOICE_NOT_FOUND"});
+    if(invoice.direction!=="receivable")return res.status(409).json({error:"PAYABLE_INVOICE_PAYMENT_LINK_NOT_SUPPORTED"});
+    if(invoice.status==="paid")return res.status(409).json({error:"INVOICE_ALREADY_PAID"});
+    if(!workshopPayments?.configured)return res.status(503).json({error:"WORKSHOP_STRIPE_NOT_CONFIGURED"});
+    try{const link=workshopPayments.ensurePaymentLink(id);persistPdf(id);res.json({...link,invoice:invoiceDetail(id)});}catch(error){respondError(res,error);}
   });
 
   app.post("/api/invoices/:id/mark-paid",auth,financeReader,(req,res)=>{

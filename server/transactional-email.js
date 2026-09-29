@@ -126,7 +126,7 @@ function buildInvoiceEmail({ purchaserName, event, invoiceNumber, payment }) {
   };
 }
 
-function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumber, totalAmount, language = "en" }) {
+function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumber, totalAmount, paymentUrl = "", language = "en" }) {
   const hu=language==="hu";
   const name=clientName||(hu?"Ügyfelünk":"Valued Client");
   const pianoText=[piano?.brand,piano?.model,piano?.serial_number].filter(Boolean).join(" · ")||(hu?"az Ön zongorája":"your piano");
@@ -139,8 +139,10 @@ function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumb
   const closing=hu
     ? "Mellékelten küldjük a hivatalos számlát. Köszönjük a bizalmát! — Klavierhaus"
     : "Please find the official invoice attached. Thank you for your trust. — Klavierhaus";
-  const text=[lead,detail,`Invoice / Számla: ${invoiceNumber}`,`Total / Összesen: ${amount}`,closing].filter(Boolean).join("\n\n");
-  const html=`<!doctype html><html><body style="margin:0;background:#f6f3ec;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #d6c9aa;border-radius:18px;padding:30px"><p style="margin:0 0 12px;color:#8a6b2d;letter-spacing:.16em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:28px">${escapeHtml(subject)}</h1><p>${escapeHtml(lead)}</p>${detail?`<p><strong>${escapeHtml(detail)}</strong></p>`:""}<p style="padding:14px;border-radius:12px;background:#f7f4ed"><strong>${escapeHtml(invoiceNumber)}</strong><br>${escapeHtml(amount)}</p><p>${escapeHtml(closing)}</p></div></div></body></html>`;
+  const paymentLine=paymentUrl?(hu?`Biztonságos online fizetés: ${paymentUrl}`:`Secure online payment: ${paymentUrl}`):"";
+  const text=[lead,detail,`Invoice / Számla: ${invoiceNumber}`,`Total / Összesen: ${amount}`,paymentLine,closing].filter(Boolean).join("\n\n");
+  const paymentButton=paymentUrl?`<p style="margin:22px 0"><a href="${escapeHtml(paymentUrl)}" style="display:inline-block;background:#111827;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">${escapeHtml(hu?"Biztonságos online fizetés":"Pay securely online")}</a></p>`:"";
+  const html=`<!doctype html><html><body style="margin:0;background:#f6f3ec;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #d6c9aa;border-radius:18px;padding:30px"><p style="margin:0 0 12px;color:#8a6b2d;letter-spacing:.16em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:28px">${escapeHtml(subject)}</h1><p>${escapeHtml(lead)}</p>${detail?`<p><strong>${escapeHtml(detail)}</strong></p>`:""}<p style="padding:14px;border-radius:12px;background:#f7f4ed"><strong>${escapeHtml(invoiceNumber)}</strong><br>${escapeHtml(amount)}</p>${paymentButton}<p>${escapeHtml(closing)}</p></div></div></body></html>`;
   return {subject,text,html};
 }
 
@@ -203,6 +205,18 @@ function buildCustomerMilestoneEmail({ eventType, clientName, job = {}, invoice 
   const closing=hu?"Köszönjük bizalmát! — Klavierhaus":"Thank you for your trust. — Klavierhaus";
   const text=[lead,detail,closing].filter(Boolean).join("\n\n");
   const html='<!doctype html><html><body style="margin:0;background:#f6f7f9;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:30px"><p style="margin:0 0 12px;color:#4b5563;letter-spacing:.12em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-size:25px">'+escapeHtml(subject)+'</h1><p>'+escapeHtml(lead)+'</p>'+(detail?'<p style="padding:13px;border-radius:10px;background:#f3f4f6"><strong>'+escapeHtml(detail)+'</strong></p>':'')+'<p style="color:#4b5563">'+escapeHtml(closing)+'</p></div></div></body></html>';
+  return {subject,text,html};
+}
+
+function buildPaymentReceiptEmail({clientName,invoiceNumber,amount,paymentMethod,paidAt,language="en"}){
+  const hu=language==="hu",name=clientName||(hu?"Ügyfelünk":"Valued Client");
+  const formatted=Number(amount||0).toLocaleString("en-US",{style:"currency",currency:"USD"});
+  const subject=hu?`Klavierhaus · Fizetési bizonylat · ${invoiceNumber}`:`Klavierhaus · Payment receipt · ${invoiceNumber}`;
+  const lead=hu?`Tisztelt ${name}! A ${invoiceNumber} számú számla teljes összegű fizetését rögzítettük.`:`Dear ${name}, we have recorded full payment for invoice ${invoiceNumber}.`;
+  const detail=hu?`Összeg: ${formatted} · Fizetési mód: ${paymentMethod||"Stripe"} · Dátum: ${paidAt||""}`:`Amount: ${formatted} · Payment method: ${paymentMethod||"Stripe"} · Date: ${paidAt||""}`;
+  const closing=hu?"A hivatalos fizetési bizonylatot PDF mellékletként küldjük. Köszönjük! — Klavierhaus":"Your official payment receipt is attached as a PDF. Thank you. — Klavierhaus";
+  const text=[lead,detail,closing].join("\n\n");
+  const html=`<!doctype html><html><body style="margin:0;background:#f6f7f9;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:30px"><p style="margin:0 0 12px;color:#4b5563;letter-spacing:.12em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-size:25px">${escapeHtml(subject)}</h1><p>${escapeHtml(lead)}</p><p style="padding:13px;border-radius:10px;background:#f3f4f6"><strong>${escapeHtml(detail)}</strong></p><p>${escapeHtml(closing)}</p></div></div></body></html>`;
   return {subject,text,html};
 }
 
@@ -370,10 +384,10 @@ function createTransactionalEmail(env = process.env) {
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
-    async sendWorkshopInvoice({ to, clientName, piano, workSummary, invoiceNumber, totalAmount, invoicePdf, language = "en", idempotencyKey }) {
+    async sendWorkshopInvoice({ to, clientName, piano, workSummary, invoiceNumber, totalAmount, paymentUrl = "", invoicePdf, language = "en", idempotencyKey }) {
       assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      const content=buildWorkshopInvoiceEmail({clientName,piano,workSummary,invoiceNumber,totalAmount,language});
+      const content=buildWorkshopInvoiceEmail({clientName,piano,workSummary,invoiceNumber,totalAmount,paymentUrl,language});
       const {data,error}=await resend.emails.send({
         from,
         to:[normalizeRecipient(to)],
@@ -405,6 +419,19 @@ function createTransactionalEmail(env = process.env) {
       return {providerMessageId:String(data.id)};
     },
 
+    async sendPaymentReceipt({to,clientName,invoiceNumber,amount,paymentMethod,paidAt,receiptPdf,language="en",idempotencyKey}){
+      assertEnabled();
+      if(!apiKey||!from)throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"),{code:"EMAIL_DELIVERY_NOT_CONFIGURED"});
+      const content=buildPaymentReceiptEmail({clientName,invoiceNumber,amount,paymentMethod,paidAt,language});
+      const {data,error}=await resend.emails.send({
+        from,to:[normalizeRecipient(to)],subject:content.subject,html:content.html,text:content.text,
+        ...(replyTo?{replyTo}:{}),
+        ...(receiptPdf?{attachments:[{filename:`payment-receipt-${invoiceNumber}.pdf`,content:receiptPdf}]}:{}),
+        tags:[{name:"category",value:"payment_receipt"}]
+      },{idempotencyKey});
+      if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
+      return {providerMessageId:String(data.id)};
+    },
     async sendCustomerMilestone({ to, eventType, clientName, job, invoice, language = "en", idempotencyKey }) {
       assertEnabled();
       if(!apiKey||!from)throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"),{code:"EMAIL_DELIVERY_NOT_CONFIGURED"});
@@ -441,4 +468,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildPaymentReceiptEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };

@@ -36,6 +36,7 @@ const { registerArchiveCenterRoutes } = require("./archive-center");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 const { registerNotificationCenterRoutes } = require("./notification-center");
 const { createAutomationOutbox } = require("./automation-outbox");
+const { createWorkshopPayments } = require("./workshop-payments");
 const { createCustomerAutomation } = require("./customer-automation");
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 
@@ -59,7 +60,14 @@ db.pragma("busy_timeout = 5000");
 const transactionalEmail = createTransactionalEmail(process.env);
 const accountActivation = createAccountActivationService({ db, emailService: transactionalEmail });
 const ticketService = createTicketService({ db });
-const stripeSandbox = createStripeSandbox({ db, env: process.env, websiteBaseUrl: process.env.WEBSITE_BASE_URL, ticketService });
+let workshopPayments=null;
+const stripeSandbox = createStripeSandbox({
+  db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,
+  onCheckoutSessionEvent:async(eventType,session)=>{
+    if(!workshopPayments)throw new Error("WORKSHOP_PAYMENT_HANDLER_NOT_READY");
+    return workshopPayments.processCheckoutEvent(eventType,session);
+  }
+});
 
 const brandingUpload = createBrandingUpload(UPLOAD_DIR);
 const eventImageUpload = createEventImageUpload(EVENT_IMAGE_DIR);
@@ -347,6 +355,11 @@ app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
 const automationOutbox=createAutomationOutbox({db,notifications:notificationCenter});
+workshopPayments=createWorkshopPayments({
+  db,env:process.env,transactionalEmail,automationOutbox,uploadDir:UPLOAD_DIR,
+  appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
+});
+workshopPayments.registerPublicRoutes(app);
 const customerAutomation=createCustomerAutomation({db,transactionalEmail,automationOutbox});
 const customerAutomationTimer=setInterval(()=>{try{customerAutomation.sweep();}catch(error){console.warn("[CUSTOMER-AUTOMATION]",error.message);}},30*60*1000);
 customerAutomationTimer.unref?.();
@@ -377,7 +390,7 @@ app.use("/api/public/website-contact-leads",(req,res,next)=>{
 registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation});
-registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation});
+registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
 registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
 
