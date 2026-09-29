@@ -6,6 +6,7 @@ const Database = require("better-sqlite3");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
+const canonicalSchemaSql=fs.readFileSync(path.join(__dirname,"schema.sql"),"utf8");
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 fs.mkdirSync(backupDir, { recursive: true });
 
@@ -455,7 +456,6 @@ db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
 seedWorkshopUxV5();
 
-const canonicalSchemaSql=fs.readFileSync(path.join(__dirname,"schema.sql"),"utf8");
 const preserved=new Set(
   [...canonicalSchemaSql.matchAll(/CREATE TABLE IF NOT EXISTS\s+([A-Za-z0-9_]+)/gi)].map(match=>match[1])
 );
@@ -468,7 +468,7 @@ for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN 
   if (!preserved.has(row.name)) db.exec(`DROP TABLE IF EXISTS ${quoteName(row.name)}`);
 }
 
-db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+db.exec(canonicalSchemaSql);
 setSetting("round1_core_migration_complete", "1");
 setSetting("round1_schema_version", "1");
 setSetting("round2_workflow_migration_complete", "1");
