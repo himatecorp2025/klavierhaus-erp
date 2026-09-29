@@ -292,8 +292,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
         const order=stageDefinitions().filter(stage=>stage.key!==key).map(stage=>stage.key);
         order.splice(order.indexOf("admin_approval"),0,key);applyStageOrder(order,req.user.id);
         const stage=stageDefinitions().find(row=>row.key===key);
-        const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,created_at,updated_at)
-          SELECT id,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
+        const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,responsible_user_id,created_at,updated_at)
+          SELECT id,?,?,1,COALESCE(created_by_user_id,workflow_owner_user_id),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
         insert.run(key,stage.position);
       })();
       const after=stageDefinitions();audit(req,"CREATE","workflow_stage_definitions",key,null,after.find(row=>row.key===key));res.status(201).json(workflowSettingsPayload());
@@ -446,12 +446,13 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
     if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
     try{
-      const incoming=normalizePlan(req.body?.phases),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
+      const incoming=normalizePlan(req.body?.phases,{defaultResponsibleId:before.created_by_user_id||before.workflow_owner_user_id||req.user.id}),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
       const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
       const safe=incoming.map(row=>{
         const old=oldByKey.get(row.stage_key);
-        if(old?.completed_at||row.stage_key===before.stage||FIXED_STAGE_KEYS.has(row.stage_key))return {...row,enabled:true,due_at:row.due_at??old?.due_at??null};
-        return row;
+        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,responsible_user_id:row.responsible_user_id??old?.responsible_user_id??before.created_by_user_id??req.user.id};
+        if(old?.completed_at||row.stage_key===before.stage||FIXED_STAGE_KEYS.has(row.stage_key))return {...merged,enabled:true};
+        return merged;
       });
       if(currentPhase&&!safe.find(row=>row.stage_key===before.stage)?.enabled)throw problem("CURRENT_WORKFLOW_PHASE_REQUIRED",409);
       writePlan(id,safe,{preserveProgress:true});
@@ -464,12 +465,15 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const phase=before.workflow_phases.find(row=>row.stage_key===stage);if(!phase)return res.status(404).json({error:"WORKFLOW_PHASE_NOT_FOUND"});
     if(req.user.role==="WORKER"&&stage!==before.stage)return res.status(403).json({error:"PERMISSION_DENIED"});
     try{
+      const startsAt=req.body?.starts_at===undefined?phase.starts_at:optionalIso(req.body.starts_at);
       const dueAt=req.body?.due_at===undefined?phase.due_at:optionalIso(req.body.due_at);
+      const responsibleId=req.body?.responsible_user_id===undefined?phase.responsible_user_id:(text(req.body.responsible_user_id,160)||null);
+      if(responsibleId)responsibleUser(responsibleId,{optional:false});
       let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
       const blockerNote=req.body?.blocker_note===undefined?phase.blocker_note:text(req.body.blocker_note,2000)||null;
       if(blockerCode&&!BLOCKER_CODES.has(blockerCode))throw problem("INVALID_BLOCKER_CODE");
-      db.prepare("UPDATE job_workflow_phases SET due_at=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
-        .run(dueAt,blockerCode,blockerNote,id,stage);
+      db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,responsible_user_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
+        .run(startsAt,dueAt,responsibleId,blockerCode,blockerNote,id,stage);
       const after=jobById(id);audit(req,"UPDATE_PHASE_STATUS","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
@@ -515,9 +519,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const title=text(req.body?.title??before.title,240);if(!title)throw problem("JOB_TITLE_REQUIRED");
       const location=text(req.body?.location_type??before.location_type,30);if(!["workshop","on_site"].includes(location))throw problem("INVALID_SERVICE_LOCATION");
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:true});
-      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      const owner=responsibleUser(req.body?.workflow_owner_user_id??before.workflow_owner_user_id??before.created_by_user_id,{optional:false});
+      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,workflow_owner_user_id=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
         title,text(req.body?.description??before.description,10000)||null,location,text(req.body?.site_address??before.site_address,1200)||null,
-        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
+        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,owner.id,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
       );
       const after=jobById(id);audit(req,"UPDATE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
