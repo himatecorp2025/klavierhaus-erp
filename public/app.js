@@ -9,7 +9,8 @@ const state={
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,intake:[],users:[],
-  cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null
+  cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
+  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
 const activeViews=new Set(["workshop","planned","intake","master","finance","documents","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
@@ -127,6 +128,7 @@ function setSession(payload){
 }
 function clearSession(){
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
+  clearInterval(state.notificationTimer);state.notificationTimer=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
 }
 function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");}
 function updateNewYorkClock(){
@@ -143,8 +145,138 @@ function startNewYorkClock(){
 function showApp(){
   $("#loginScreen").classList.add("hidden");$("#appShell").classList.remove("hidden");
   $("#profileInitials").textContent=initials(state.user?.name);
-  startNewYorkClock();
+  startNewYorkClock();initNotificationCenter();
 }
+function notificationText(row,field){
+  return String(state.language==="hu"?(row?.[field+"_hu"]||row?.[field+"_en"]||""):(row?.[field+"_en"]||row?.[field+"_hu"]||""));
+}
+function notificationDate(value){
+  if(!value)return "";
+  try{return new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value));}
+  catch(_error){return String(value||"");}
+}
+function notificationSeverityIcon(value){
+  return ({URGENT:"!",WARNING:"!",SUCCESS:"✓",INFO:"•"})[String(value||"INFO").toUpperCase()]||"•";
+}
+function updateAppBadge(count){
+  const value=Math.max(0,Number(count)||0);
+  const badge=$("#notificationBadge");if(badge){badge.hidden=value<=0;badge.textContent=value>99?"99+":String(value);}
+  try{
+    if(value>0&&navigator.setAppBadge)void navigator.setAppBadge(value);
+    else if(value<=0&&navigator.clearAppBadge)void navigator.clearAppBadge();
+  }catch(_error){}
+}
+function playNotificationSound(){
+  if(!state.notificationPreferences?.sound_enabled)return;
+  try{
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
+    const ctx=new AudioCtx(),gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.12,ctx.currentTime+.02);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.42);gain.connect(ctx.destination);
+    const a=ctx.createOscillator(),b=ctx.createOscillator();a.type="sine";b.type="sine";a.frequency.setValueAtTime(660,ctx.currentTime);b.frequency.setValueAtTime(880,ctx.currentTime+.12);a.connect(gain);b.connect(gain);a.start();b.start(ctx.currentTime+.12);a.stop(ctx.currentTime+.22);b.stop(ctx.currentTime+.42);setTimeout(()=>ctx.close().catch(()=>{}),700);
+  }catch(_error){}
+}
+function notificationCard(row){
+  const title=notificationText(row,"title"),body=notificationText(row,"body"),severity=String(row.severity||"INFO").toLowerCase();
+  return `<article class="notification-card severity-${esc(severity)} ${row.read_at?"is-read":"is-unread"}" data-notification-card="${esc(row.id)}">
+    <button class="notification-card-close" type="button" data-notification-snooze="${esc(row.id)}" title="${tr("Dismiss for 3 hours","Bezárás 3 órára")}" aria-label="${tr("Dismiss for 3 hours","Bezárás 3 órára")}">×</button>
+    <div class="notification-card-icon" aria-hidden="true">${esc(notificationSeverityIcon(row.severity))}</div>
+    <div class="notification-card-body"><div class="notification-card-title"><strong>${esc(title)}</strong><small>${esc(notificationDate(row.created_at))}</small></div>
+      ${body?`<p>${esc(body)}</p>`:""}
+      <div class="notification-card-actions">
+        <button class="text-button" type="button" data-notification-remind="${esc(row.id)}">${tr("Remind later","Értesíts később")}</button>
+        <button class="primary-button compact-button" type="button" data-notification-done="${esc(row.id)}">✓ ${tr("Done","Tudomásul vettem")}</button>
+      </div>
+    </div>
+  </article>`;
+}
+function renderNotificationDrawer(){
+  const list=$("#notificationList");if(!list)return;
+  const rows=state.notifications||[];
+  list.innerHTML=rows.length?rows.map(notificationCard).join(""):`<div class="notification-empty"><span>✓</span><strong>${tr("You're up to date.","Minden naprakész.")}</strong><p>${tr("No active notifications need attention.","Nincs aktív értesítés, amellyel foglalkozni kell.")}</p></div>`;
+  const title=$("#notificationDrawerTitle");if(title)title.textContent=tr("Notifications","Értesítések");
+  const soundLabel=$("#notificationSoundLabel");if(soundLabel)soundLabel.textContent=tr("Sound","Hang");
+  const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
+  $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
+  $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
+  $$("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
+  $$("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
+    if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
+    try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
+    if(row?.action_url){if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));}
+    card.classList.remove("is-unread");card.classList.add("is-read");
+  }));
+}
+async function refreshNotifications({allowSound=true}={}){
+  if(!state.token||!state.user)return;
+  try{
+    const payload=await api("/api/notifications");
+    const rows=Array.isArray(payload.notifications)?payload.notifications:[],previous=state.notificationSeen;
+    state.notifications=rows;state.notificationPreferences=payload.preferences||state.notificationPreferences;
+    const ids=new Set(rows.map(row=>String(row.id))),newRows=state.notificationInitialized?rows.filter(row=>!previous.has(String(row.id))):[];
+    state.notificationSeen=ids;state.notificationInitialized=true;
+    updateAppBadge(payload.active_count??rows.length);renderNotificationDrawer();
+    if(allowSound&&newRows.length)playNotificationSound();
+  }catch(_error){}
+}
+function openNotificationDrawer(){
+  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
+  drawer.classList.add("open");drawer.setAttribute("aria-hidden","false");if(backdrop)backdrop.hidden=false;if(bell)bell.setAttribute("aria-expanded","true");
+  void refreshNotifications({allowSound:false});void ensurePushSubscription();
+}
+function closeNotificationDrawer(){
+  const drawer=$("#notificationDrawer"),backdrop=$("#notificationBackdrop"),bell=$("#notificationBell");if(!drawer)return;
+  drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");if(backdrop)backdrop.hidden=true;if(bell)bell.setAttribute("aria-expanded","false");
+}
+async function snoozeNotification(id,hours=3,until=null){
+  try{await api("/api/notifications/"+encodeURIComponent(id)+"/snooze",{method:"POST",body:JSON.stringify(until?{until}:{hours})});await refreshNotifications({allowSound:false});}
+  catch(error){toast(humanError(error),"error");}
+}
+async function acknowledgeNotification(id){
+  try{const card=$(`[data-notification-card="${CSS.escape(String(id))}"]`);card?.classList.add("is-leaving");await api("/api/notifications/"+encodeURIComponent(id)+"/acknowledge",{method:"POST",body:"{}"});setTimeout(()=>void refreshNotifications({allowSound:false}),180);}
+  catch(error){toast(humanError(error),"error");}
+}
+function openNotificationReminder(id){
+  const now=new Date(Date.now()+3*3600000),pad=value=>String(value).padStart(2,"0");
+  const initial=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  openDialog({title:tr("Remind me later","Értesíts később"),eyebrow:tr("NOTIFICATION","ÉRTESÍTÉS"),body:`<form id="notificationReminderForm" class="form-grid"><label class="field full"><span>${tr("Show this notification again at","Az értesítés újra megjelenjen ekkor")}</span><input name="until" type="datetime-local" value="${esc(initial)}" required></label><div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Schedule reminder","Emlékeztető beállítása")}</button></div></form>`});
+  $("#notificationReminderForm").addEventListener("submit",async event=>{event.preventDefault();const value=event.currentTarget.elements.until.value,date=new Date(value);if(Number.isNaN(date.getTime()))return;closeDialog();await snoozeNotification(id,3,date.toISOString());});
+}
+async function setNotificationSound(enabled){
+  try{const pref=await api("/api/notifications/preferences/sound",{method:"PUT",body:JSON.stringify({sound_enabled:Boolean(enabled)})});state.notificationPreferences=pref;renderNotificationDrawer();if(enabled)playNotificationSound();}
+  catch(error){toast(humanError(error),"error");}
+}
+function base64UrlToUint8(value){
+  const padding="=".repeat((4-value.length%4)%4),base64=(value+padding).replace(/-/g,"+").replace(/_/g,"/"),raw=atob(base64);return Uint8Array.from([...raw].map(ch=>ch.charCodeAt(0)));
+}
+async function ensurePushSubscription(){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)||!state.token)return;
+  try{
+    const config=await api("/api/push/config");if(!config.enabled||!config.public_key)return;
+    let permission=Notification.permission;
+    if(permission==="default")permission=await Notification.requestPermission();
+    if(permission!=="granted")return;
+    const registration=await navigator.serviceWorker.ready;let subscription=await registration.pushManager.getSubscription();
+    if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:base64UrlToUint8(config.public_key)});
+    await api("/api/push/subscriptions",{method:"POST",body:JSON.stringify({subscription:subscription.toJSON()})});
+  }catch(_error){}
+}
+function bindNotificationUi(){
+  if(state.notificationUiBound)return;state.notificationUiBound=true;
+  $("#notificationBell")?.addEventListener("click",()=>$("#notificationDrawer")?.classList.contains("open")?closeNotificationDrawer():openNotificationDrawer());
+  $("#notificationDrawerClose")?.addEventListener("click",closeNotificationDrawer);$("#notificationBackdrop")?.addEventListener("click",closeNotificationDrawer);
+  $("#notificationSoundToggle")?.addEventListener("change",event=>setNotificationSound(event.target.checked));
+  $("#notificationSnoozeAll")?.addEventListener("click",async()=>{
+    try{await api("/api/notifications/snooze-all",{method:"POST",body:JSON.stringify({hours:3})});closeNotificationDrawer();await refreshNotifications({allowSound:false});toast(tr("Notifications will return in 3 hours.","Az értesítések 3 óra múlva újra megjelennek."),"success");}
+    catch(error){toast(humanError(error),"error");}
+  });
+  navigator.serviceWorker?.addEventListener?.("message",event=>{if(event.data?.type==="NOTIFICATION_OPENED"&&event.data?.id)void api("/api/notifications/"+encodeURIComponent(event.data.id)+"/read",{method:"POST",body:"{}"}).catch(()=>{});});
+}
+function initNotificationCenter(){
+  if(!state.token||!state.user)return;
+  bindNotificationUi();clearInterval(state.notificationTimer);state.notificationTimer=setInterval(()=>void refreshNotifications(),60000);
+  void refreshNotifications({allowSound:false});
+  if("Notification" in window&&Notification.permission==="granted")void ensurePushSubscription();
+}
+
 async function loadBranding(){
   try{
     const branding=await fetch("/api/public/branding",{cache:"no-store"}).then(response=>response.json());
