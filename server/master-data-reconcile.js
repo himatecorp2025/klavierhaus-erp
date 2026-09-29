@@ -157,10 +157,13 @@ function sourceClientMatch(db,source){
 function upsertSourceClient(db,source,sourceName){
   if(source.source_id){const mapped=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,source.source_id);if(mapped)return db.prepare("SELECT * FROM clients WHERE id=?").get(mapped.client_id);}
   let row=sourceClientMatch(db,source);
-  if(!row&&clean(source.name)){
-    const info=db.prepare("INSERT INTO clients(name,email,phone,address,notes,client_type,created_at,updated_at) VALUES(?,?,?,?,?,'PRIVATE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-      .run(clean(source.name,240),normEmail(source.email)||null,clean(source.phone,120)||null,clean(source.address,1000)||null,clean(source.notes,5000)||null);
-    row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));
+  if(!row){
+    const fallbackName=clean(source.name,240)||(clean(source.source_id,80)?`Imported client ${clean(source.source_id,80)}`:(normEmail(source.email)||normPhone(source.phone)||clean(source.address,1000)?`Imported client ${normEmail(source.email)||normPhone(source.phone)||clean(source.address,1000).slice(0,48)}`:""));
+    if(fallbackName){
+      const info=db.prepare("INSERT INTO clients(name,email,phone,address,notes,client_type,created_at,updated_at) VALUES(?,?,?,?,?,'PRIVATE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        .run(fallbackName,normEmail(source.email)||null,clean(source.phone,120)||null,clean(source.address,1000)||null,clean(source.notes,5000)||null);
+      row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));
+    }
   }
   if(!row)return null;
   const next={name:clean(row.name)||clean(source.name,240),email:clean(row.email)||normEmail(source.email),phone:clean(row.phone)||clean(source.phone,120),address:clean(row.address)||clean(source.address,1000),notes:combineNotes(row.notes,source.notes)};
