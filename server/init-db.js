@@ -120,6 +120,14 @@ function prepareClientSegmentationCompatibility() {
   }
   db.exec('DROP INDEX IF EXISTS "idx_clients_customer_type"');
 }
+function prepareMasterDataCompatibility() {
+  if (!tableExists("pianos")) return;
+  ensureColumn("pianos","build_year","INTEGER");
+  ensureColumn("pianos","size_display","TEXT");
+  ensureColumn("pianos","color","TEXT");
+  ensureColumn("pianos","notes","TEXT");
+  ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
+}
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
 }
@@ -242,6 +250,7 @@ if(archiveCategoryNeedsMigration){
 // Add compatibility columns before schema.sql creates indexes that depend on them.
 prepareMessengerV12Compatibility();
 prepareClientSegmentationCompatibility();
+prepareMasterDataCompatibility();
 db.exec(canonicalSchemaSql);
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
