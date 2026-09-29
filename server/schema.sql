@@ -1258,7 +1258,7 @@ CREATE INDEX IF NOT EXISTS idx_website_tracking_round1 ON website_tracking_event
 -- as immutable snapshots while active modules only show live records.
 CREATE TABLE IF NOT EXISTS document_archive (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','internal_correspondence','company_message','company_document')),
+  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
   title TEXT NOT NULL,
   description TEXT,
   entity_type TEXT,
