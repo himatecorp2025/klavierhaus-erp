@@ -506,7 +506,7 @@ async function renderMaster(){
     const form=new FormData();form.append("file",file,file.name);
     try{
       const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import completed: ${summary.createdClients} new clients, ${summary.createdPianos} new pianos, ${summary.reviewItems} review items.`,`Import kész: ${summary.createdClients} új ügyfél, ${summary.createdPianos} új zongora, ${summary.reviewItems} ellenőrzendő tétel.`),"success");
+      toast(tr(`Import completed: ${summary.rows} source rows, ${summary.createdPianos} new pianos, ${summary.reviewItems} review items, ${summary.sourceDuplicateGroups} duplicate groups merged.`,`Import kész: ${summary.rows} forrássor, ${summary.createdPianos} új zongora, ${summary.reviewItems} ellenőrzendő tétel, ${summary.sourceDuplicateGroups} duplikátumcsoport összevonva.`),"success");
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
@@ -593,7 +593,7 @@ function runClientContactAction(clientId,kind){
 function renderPianoList(){
   const host=$("#masterList");if(!host)return;
   const rows=filteredMasterPianos(),reviews=filteredMasterPianoReviews(),totals=state.pianoOverview||{};
-  const summary=`<div class="master-piano-summary"><span><strong>${Number(totals.total_entities??((state.pianos||[]).length+(state.pianoReviews||[]).length))}</strong><small>${tr("visible instrument records","látható hangszeradat")}</small></span><span><strong>${Number(totals.classified??(state.pianos||[]).length)}</strong><small>${tr("classified","besorolt")}</small></span><span class="needs-review"><strong>${Number(totals.review??(state.pianoReviews||[]).length)}</strong><small>${tr("needs classification","besorolásra vár")}</small></span>${Number(totals.source_rows||0)>0?`<span><strong>${Number(totals.source_rows)}</strong><small>${tr("import source rows","import forrássor")}</small></span>`:""}</div>`;
+  const summary=`<div class="master-piano-summary"><span><strong>${Number(totals.total_entities??((state.pianos||[]).length+(state.pianoReviews||[]).length))}</strong><small>${tr("visible instrument records","látható hangszeradat")}</small></span><span><strong>${Number(totals.classified??(state.pianos||[]).length)}</strong><small>${tr("classified","besorolt")}</small></span><span class="needs-review"><strong>${Number(totals.review??(state.pianoReviews||[]).length)}</strong><small>${tr("needs classification","besorolásra vár")}</small></span>${Number(totals.source_rows||0)>0?`<span><strong>${Number(totals.source_rows)}</strong><small>${tr("import source rows","import forrássor")}</small></span>`:`<span class="import-missing"><strong>!</strong><small>${tr("master CSV not imported yet","a master CSV még nincs importálva")}</small></span>`}</div>`;
   if(!rows.length&&!reviews.length){host.innerHTML=summary+`<div class="empty-state">${tr("No pianos match this view.","Nincs a nézetnek megfelelő zongora.")}</div>`;return;}
   const classified=rows.map(piano=>`<button type="button" class="piano-list-row ${Number(piano.id)===Number(state.selectedPianoId)?"active":""}" data-master-piano-id="${piano.id}">
     <strong>${esc([piano.brand,piano.model].filter(Boolean).join(" ")||tr("Piano","Zongora"))}</strong>
