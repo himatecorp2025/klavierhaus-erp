@@ -76,6 +76,12 @@ function r2DefaultInput(dateKey=null){
 function r2TechnicianOptions(selected=""){
   return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
 }
+function r2ResponsibleOptions(selected=""){
+  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
+}
+function r2StatusLabel(status){
+  return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
+}
 function r2JobPiano(job){return [job.piano_brand,job.piano_model,job.piano_serial_number].filter(Boolean).join(" · ");}
 function r2Money(value){return new Intl.NumberFormat(state.language==="hu"?"hu-HU":"en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(Number(value||0));}
 function r2TimeMinutes(value){const p=r2NyParts(new Date(value));return Number(p.hour)*60+Number(p.minute);}
@@ -83,12 +89,17 @@ function r2Pad(value){return String(value).padStart(2,"0");}
 function r2MinutesInput(date,minutes){const safe=Math.max(0,Math.min(1439,minutes)),h=Math.floor(safe/60),m=safe%60;return `${date}T${r2Pad(h)}:${r2Pad(m)}`;}
 function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
 
-function r2WorkflowPlanRows(plan=null){
+function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null}={}){
   const map=new Map((plan||[]).map(row=>[row.stage_key,row]));
   return r2Definitions().map(stage=>{
-    const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):true),due=existing?.due_at?r2IsoToNyInput(existing.due_at):"";
-    return `<div class="workflow-plan-row" data-workflow-phase="${stage.key}">
+    const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):true);
+    const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
+    const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||defaultResponsible||state.user?.id||"";
+    const status=existing?.visual_status||"";
+    return `<div class="workflow-plan-row ${status?"phase-status-"+status:""}" data-workflow-phase="${stage.key}">
       <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${stage.key}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):tr("Include this phase","Fázis használata")}</small></span></label>
+      <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_${stage.key}" required>${r2ResponsibleOptions(responsible)}</select></label>
+      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span><input type="datetime-local" step="900" name="start_${stage.key}" value="${esc(start)}"></label>
       <label class="field"><span>${tr("Expected completion","Várható befejezés")}</span><input type="datetime-local" step="900" name="due_${stage.key}" value="${esc(due)}"></label>
     </div>`;
   }).join("");
@@ -96,8 +107,10 @@ function r2WorkflowPlanRows(plan=null){
 function r2ReadWorkflowPlan(form){
   return r2Definitions().map(stage=>{
     const enabled=r2FixedStage(stage.key)?true:Boolean(form.querySelector(`[name="phase_${stage.key}"]`)?.checked);
+    const startValue=form.querySelector(`[name="start_${stage.key}"]`)?.value||"";
     const dueValue=form.querySelector(`[name="due_${stage.key}"]`)?.value||"";
-    return {stage_key:stage.key,enabled,due_at:dueValue?r2NyInputToIso(dueValue):null};
+    const responsible=form.querySelector(`[name="responsible_${stage.key}"]`)?.value||state.user?.id||"";
+    return {stage_key:stage.key,enabled,starts_at:startValue?r2NyInputToIso(startValue):null,due_at:dueValue?r2NyInputToIso(dueValue):null,responsible_user_id:responsible||null};
   });
 }
 
