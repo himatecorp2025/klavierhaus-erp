@@ -69,8 +69,44 @@ function createNotificationCenter({db,env=process.env}={}){
     for(const userId of targets)void sendPush(userId,event);
     return event;
   }
+  function emitOnce({category,entityType,entityId,...rest}){
+    const existing=db.prepare("SELECT * FROM notification_events WHERE category=? AND entity_type=? AND entity_id=? AND resolved_at IS NULL ORDER BY created_at DESC LIMIT 1")
+      .get(clean(category,80),clean(entityType,80),clean(entityId,240));
+    return existing||emit({category,entityType,entityId,...rest});
+  }
+  function refreshTimedNotifications(){
+    const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title
+      FROM job_workflow_phases p JOIN jobs j ON j.id=p.job_id
+      WHERE p.enabled=1 AND p.completed_at IS NULL AND p.due_at IS NOT NULL AND datetime(p.due_at)<CURRENT_TIMESTAMP
+      AND j.cancelled_at IS NULL AND j.stage NOT IN ('planned','completed')`).all();
+    const overdueKeys=new Set(overdue.map(row=>`${row.job_id}:${row.stage_key}`));
+    for(const event of db.prepare("SELECT id,entity_id FROM notification_events WHERE category='DEADLINE' AND entity_type='WORKFLOW_PHASE' AND resolved_at IS NULL").all()){
+      if(!overdueKeys.has(String(event.entity_id)))db.prepare("UPDATE notification_events SET resolved_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
+    }
+    for(const row of overdue)emitOnce({
+      category:"DEADLINE",entityType:"WORKFLOW_PHASE",entityId:`${row.job_id}:${row.stage_key}`,
+      titleEn:"Workflow phase overdue",titleHu:"Lejárt munkafázis",
+      bodyEn:`${row.job_code||("#"+row.job_id)} · ${row.title}`,bodyHu:`${row.job_code||("#"+row.job_id)} · ${row.title}`,
+      actionUrl:"#workshop",severity:"URGENT"
+    });
+
+    const dueAppointments=db.prepare(`SELECT id,name,scheduled_at FROM private_appointments
+      WHERE status='SCHEDULED' AND datetime(scheduled_at)<=CURRENT_TIMESTAMP`).all();
+    const appointmentKeys=new Set(dueAppointments.map(row=>String(row.id)));
+    for(const event of db.prepare("SELECT id,entity_id FROM notification_events WHERE category='APPOINTMENT_DUE' AND entity_type='PRIVATE_APPOINTMENT' AND resolved_at IS NULL").all()){
+      if(!appointmentKeys.has(String(event.entity_id)))db.prepare("UPDATE notification_events SET resolved_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
+    }
+    for(const row of dueAppointments)emitOnce({
+      category:"APPOINTMENT_DUE",entityType:"PRIVATE_APPOINTMENT",entityId:String(row.id),
+      titleEn:"Private appointment needs attention",titleHu:"Privát időpont figyelmet igényel",
+      bodyEn:`${row.name} · ${new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(row.scheduled_at))}`,
+      bodyHu:`${row.name} · ${new Intl.DateTimeFormat("hu-HU",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(row.scheduled_at))}`,
+      actionUrl:"/?view=workshop&private=1",severity:"WARNING"
+    });
+  }
   function list(userId){
-    ensurePreference(userId);
+    ensurePreference(userId);refreshTimedNotifications();
+    const pref=preference(userId);if(!Number(pref?.notifications_enabled))return {notifications:[],unread_count:0,active_count:0,preferences:pref,push_configured:pushConfigured};
     const rows=db.prepare(`SELECT n.*,r.read_at,r.snoozed_until,r.acknowledged_at
       FROM notification_recipients r JOIN notification_events n ON n.id=r.notification_id
       WHERE r.user_id=? AND n.resolved_at IS NULL AND r.acknowledged_at IS NULL
@@ -152,7 +188,7 @@ function createNotificationCenter({db,env=process.env}={}){
   function unsubscribe(userId,endpoint){
     db.prepare("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?").run(userId,clean(endpoint,3000));return {ok:true};
   }
-  return {emit,list,snooze,snoozeAll,acknowledge,acknowledgeAll,markRead,resolveEntity,preference,ensurePreference,fromAudit,subscribe,unsubscribe,pushConfigured,vapidPublicKey:vapid.publicKey};
+  return {emit,emitOnce,list,snooze,snoozeAll,acknowledge,acknowledgeAll,markRead,resolveEntity,refreshTimedNotifications,preference,ensurePreference,fromAudit,subscribe,unsubscribe,pushConfigured,vapidPublicKey:vapid.publicKey};
 }
 
 function registerNotificationCenterRoutes({app,db,auth,permit,audit,env=process.env,service=null}){
