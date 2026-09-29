@@ -45,6 +45,7 @@ function v6ToggleSidebar(){
 }
 function v6OpenMore(){
   openDialog({title:tr("More","Továbbiak"),eyebrow:"KLAVIERHAUS ERP",body:`<div class="mobile-more-grid">
+    <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>
   </div>`});
@@ -310,7 +311,11 @@ function v6BrandAssetCard(kind,title,url,description){
   return `<section class="panel branding-card"><div class="branding-preview ${kind==="loginBackground"?"wide":""}">${url?`<img src="${esc(url)}" alt="">`:`<div class="cms-media-empty">＋</div>`}</div><div><span class="eyebrow">${esc(kind.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(description)}</p><label class="file-picker"><input type="file" accept="image/*" data-brand-file="${kind}"><span>↑ ${tr(url?"Replace":"Upload",url?"Csere":"Feltöltés")}</span></label></div></section>`;
 }
 const V6_ARCHIVE_CATEGORIES={
-  deleted_invoice:["Deleted invoices","Törölt számlák"],
+  deleted_invoice:["Invalidated / deleted invoices","Érvénytelenített / törölt számlák"],
+  financial_document:["Financial documents","Pénzügyi dokumentumok"],
+  contract:["Contracts","Szerződések"],
+  intake_assessment:["Intake assessment PDFs","Igényfelmérési PDF-ek"],
+  exported_report:["Exported reports / PDFs","Exportált riportok / PDF-ek"],
   internal_correspondence:["Internal correspondence","Belső levelezés"],
   company_message:["Company messages","Vállalati üzenetek"],
   company_document:["Company documents","Vállalati dokumentumok"]
@@ -327,7 +332,7 @@ async function v6DownloadArchive(row){
 }
 function v6OpenArchiveUpload(refresh){
   openDialog({title:tr("Add Archive Document","Archív dokumentum hozzáadása"),eyebrow:tr("DOCUMENT ARCHIVE","DOKUMENTUM ARCHÍVUM"),body:`<form id="archiveUploadForm" class="form-grid">
-    <label class="field"><span>${tr("Category","Kategória")} *</span><select name="category" required><option value="internal_correspondence">${v6ArchiveLabel("internal_correspondence")}</option><option value="company_message">${v6ArchiveLabel("company_message")}</option><option value="company_document">${v6ArchiveLabel("company_document")}</option></select></label>
+    <label class="field"><span>${tr("Category","Kategória")} *</span><select name="category" required><option value="financial_document">${v6ArchiveLabel("financial_document")}</option><option value="contract">${v6ArchiveLabel("contract")}</option><option value="exported_report">${v6ArchiveLabel("exported_report")}</option><option value="internal_correspondence">${v6ArchiveLabel("internal_correspondence")}</option><option value="company_message">${v6ArchiveLabel("company_message")}</option><option value="company_document">${v6ArchiveLabel("company_document")}</option></select></label>
     <label class="field"><span>${tr("File","Fájl")}</span><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.gif"></label>
     <label class="field full"><span>${tr("Title","Cím")} *</span><input name="title" required autofocus></label>
     <label class="field full"><span>${tr("Description / note","Leírás / megjegyzés")}</span><textarea name="description"></textarea></label>
@@ -338,26 +343,32 @@ function v6OpenArchiveUpload(refresh){
     try{await api("/api/archive/documents",{method:"POST",body:data});closeDialog();toast(tr("Document archived.","Dokumentum archiválva."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
-async function v6RenderArchive(){
-  const main=$("#cmsMain");if(!main)return;
+async function v6RenderArchive(target="#cmsMain"){
+  const main=$(target);if(!main)return;
   state.archiveCategory=state.archiveCategory||"deleted_invoice";state.archiveQuery=state.archiveQuery||"";
   const data=await api("/api/archive/documents?category="+encodeURIComponent(state.archiveCategory)+"&q="+encodeURIComponent(state.archiveQuery));
   const rows=data.rows||[];
   main.innerHTML=`<section class="panel archive-center"><div class="archive-toolbar">
-    <div><span class="eyebrow">${tr("DOCUMENT CUSTODY","DOKUMENTUMKEZELÉS")}</span><h2>${tr("Documents / Archive","Dokumentumok / Archívum")}</h2><p>${tr("Deleted invoices and internal company records remain searchable without staying in active operational lists.","A törölt számlák és belső vállalati iratok kereshetők maradnak, de nem maradnak az aktív operatív listákban.")}</p></div>
+    <div><span class="eyebrow">${tr("DOCUMENT CUSTODY","DOKUMENTUMKEZELÉS")}</span><h2>${tr("Documents / Archive","Dokumentumok / Archívum")}</h2><p>${tr("Financial records, contracts, exported PDFs, intake assessments and internal documents stay searchable without polluting active operational lists.","A pénzügyi iratok, szerződések, exportált PDF-ek, igényfelmérések és belső dokumentumok kereshetők maradnak anélkül, hogy az aktív operatív listákat terhelnék.")}</p></div>
     <button id="archiveAddDocument" class="primary-button" type="button">＋ ${tr("Add document","Dokumentum hozzáadása")}</button>
   </div>
   <div class="archive-filters"><select id="archiveCategory">${Object.keys(V6_ARCHIVE_CATEGORIES).map(key=>`<option value="${key}" ${key===state.archiveCategory?"selected":""}>${esc(v6ArchiveLabel(key))}</option>`).join("")}</select><div class="search-field"><input id="archiveSearch" type="search" value="${esc(state.archiveQuery)}" placeholder="${tr("Search title, reference or file…","Keresés cím, hivatkozás vagy fájl alapján…")}"></div></div>
   <div class="archive-list">${rows.length?rows.map(row=>`<article class="archive-row"><div class="archive-row-icon">${row.category==="deleted_invoice"?"🧾":"📄"}</div><div class="archive-row-main"><div class="archive-row-title"><strong>${esc(row.title)}</strong><span class="badge">${esc(v6ArchiveLabel(row.category))}</span></div><small>${esc(v6ArchiveDate(row.archived_at))}${row.archived_by_name?" · "+esc(row.archived_by_name):""}${row.entity_id?" · #"+esc(row.entity_id):""}</small>${row.description?`<p>${esc(row.description)}</p>`:""}${row.original_name?`<small>📎 ${esc(row.original_name)}</small>`:""}</div><div class="archive-row-actions">${row.file_path?`<button class="secondary-button" type="button" data-archive-download="${row.id}">${tr("Download","Letöltés")}</button>`:""}<button class="text-button" type="button" data-archive-details="${row.id}">${tr("Details","Részletek")}</button></div></article>`).join(""):`<div class="empty-state">${tr("No archived records in this category.","Ebben a kategóriában nincs archivált tétel.")}</div>`}</div></section>`;
-  $("#archiveCategory").addEventListener("change",async event=>{state.archiveCategory=event.target.value;state.archiveQuery="";await v6RenderArchive();});
-  $("#archiveSearch").addEventListener("input",debounce(async event=>{state.archiveQuery=event.target.value.trim();await v6RenderArchive();},220));
-  $("#archiveAddDocument").addEventListener("click",()=>v6OpenArchiveUpload(v6RenderArchive));
+  $("#archiveCategory").addEventListener("change",async event=>{state.archiveCategory=event.target.value;state.archiveQuery="";await v6RenderArchive(target);});
+  $("#archiveSearch").addEventListener("input",debounce(async event=>{state.archiveQuery=event.target.value.trim();await v6RenderArchive(target);},220));
+  $("#archiveAddDocument").addEventListener("click",()=>v6OpenArchiveUpload(()=>v6RenderArchive(target)));
   $$("[data-archive-download]",main).forEach(button=>button.addEventListener("click",()=>v6DownloadArchive(rows.find(row=>String(row.id)===button.dataset.archiveDownload))));
   $$("[data-archive-details]",main).forEach(button=>button.addEventListener("click",()=>{
     const row=rows.find(item=>String(item.id)===button.dataset.archiveDetails),invoice=row?.metadata?.invoice;
     openDialog({title:row?.title||tr("Archive record","Archív tétel"),eyebrow:v6ArchiveLabel(row?.category||""),body:`<div class="archive-detail">${row?.description?`<p>${esc(row.description)}</p>`:""}${invoice?`<div class="invoice-detail-kpis"><div><small>${tr("Invoice","Számla")}</small><strong>${esc(invoice.invoice_number||"")}</strong></div><div><small>${tr("Client","Ügyfél")}</small><strong>${esc(invoice.counterparty_name||"")}</strong></div><div><small>${tr("Total","Összesen")}</small><strong>${typeof r3Money==="function"?r3Money(invoice.total_amount):esc(invoice.total_amount)}</strong></div></div>`:""}<div class="detail-note">${tr("Archived","Archiválva")}: ${esc(v6ArchiveDate(row?.archived_at))}</div></div>`});
   }));
 }
+async function renderDocuments(){
+  const workspace=$("#workspace");if(!workspace)return;
+  workspace.innerHTML=pageHead(tr("Documents","Dokumentumok"),tr("Company document custody, financial records, contracts, intake PDFs and archived operational documents.","Vállalati dokumentumkezelés, pénzügyi iratok, szerződések, igényfelmérési PDF-ek és archivált operatív dokumentumok."))+"<div id='documentsMain'></div>";
+  await v6RenderArchive("#documentsMain");
+}
+
 renderCms=async function(){
   const workspace=$("#workspace");
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role)){workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Admin access required.","Admin jogosultság szükséges."));return;}
