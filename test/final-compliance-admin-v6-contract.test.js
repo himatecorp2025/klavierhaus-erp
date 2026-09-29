@@ -29,7 +29,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v14-live-messenger-client-segments/);
+  assert.match(sw,/klavierhaus-admin-v15-master-messenger-branding/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -46,6 +46,8 @@ test("CMS v6 is a visual builder with uploadable page images, galleries and bran
   assert.match(v6,/PWA \/ app icon/);
   assert.match(v6,/Login background/);
   assert.match(v6,/Public website logo/);
+  assert.match(v6,/ERP logo · dark mode/);
+  assert.match(v6,/ERP logo · light mode/);
   assert.match(v6,/\/api\/website-content\/image/);
   assert.match(css,/\.cms-media-card/);
   assert.match(css,/\.cms-gallery-grid/);
@@ -240,7 +242,8 @@ test("Private appointments, VIP clients and unified notifications are wired end 
   assert.match(round2,/Private appointments/);
   assert.match(round2,/r2OpenPrivateAppointment/);
   assert.match(app,/vip-client-star/);
-  assert.match(app,/clientVipFilter/);
+  assert.match(app,/masterToolButton\("VIP"/);
+  assert.match(app,/masterToolButton\("PIANOS"/);
   assert.match(html,/id="notificationBell"/);
   assert.match(html,/id="notificationDrawer"/);
   assert.match(app,/snooze-all/);
@@ -272,7 +275,7 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v14-live-messenger-client-segments/);
+  assert.match(sw,/klavierhaus-admin-v15-master-messenger-branding/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
 
@@ -289,5 +292,5 @@ test("Responsive PWA layout keeps intake tiles compact and removes desktop-only 
   assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
   assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
   assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
-  assert.match(sw,/klavierhaus-admin-v14-live-messenger-client-segments/);
+  assert.match(sw,/klavierhaus-admin-v15-master-messenger-branding/);
 });
