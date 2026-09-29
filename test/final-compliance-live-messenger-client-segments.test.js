@@ -72,11 +72,15 @@ test("07 customer editor persists explicit customer type and VIP independently",
   assert.match(backend,/client_type=\?/);
 });
 
-test("08 ERP Messenger refreshes active conversations automatically without page refresh",()=>{
-  const source=read("public/messenger.js");
+test("08 ERP Messenger refreshes active conversations automatically and renders current status inside the thread flow",()=>{
+  const source=read("public/messenger.js"),css=read("public/styles.css");
   assert.match(source,/messengerConversationSignature/);
   assert.match(source,/preloaded:conversation/);
   assert.match(source,/setInterval[\s\S]*2000/);
+  assert.match(source,/function messengerThreadStatus\(conversation\)/);
+  assert.match(source,/messenger-system-status/);
+  assert.doesNotMatch(source,/messenger-thread-head[\s\S]{0,500}<span class="status-pill">/);
+  assert.match(css,/\.messenger-system-status\{/);
 });
 
 test("09 ERP Messenger reply composer supports paperclip file attachments",()=>{
@@ -86,11 +90,15 @@ test("09 ERP Messenger reply composer supports paperclip file attachments",()=>{
   assert.match(source,/new FormData\(\)/);
 });
 
-test("10 public customer Messenger uses compact attachment icon",()=>{
+test("10 public customer Messenger uses compact attach wide message send order",()=>{
   const html=read("website/server/index.js"),css=read("website/public/styles.css");
-  assert.match(html,/customer-chat__attach-button/);
-  assert.match(html,/📎/);
-  assert.match(css,/\.customer-chat__attach-button/);
+  const start=html.indexOf('<div class="customer-chat__composer">'),end=html.indexOf("</div>",start),block=html.slice(start,end);
+  assert.ok(start>=0);
+  assert.ok(block.indexOf("customer-chat__attach-button")<block.indexOf("customer-chat-message"));
+  assert.ok(block.indexOf("customer-chat-message")<block.indexOf("customer-chat__send-button"));
+  assert.match(block,/📎/);
+  assert.match(css,/customer-chat__composer\{display:grid;grid-template-columns:2\.75rem minmax\(0,1fr\) 2\.75rem/);
+  assert.match(css,/customer-chat__composer textarea\{width:100%!important;min-width:0!important/);
 });
 
 test("11 appointment proposals remain visible as chat cards through accepted and declined states",()=>{
@@ -142,8 +150,12 @@ test("17 public appointment UI is explicit about HU US formats and New York time
   assert.match(backend,/America\/New_York/);
 });
 
-test("18 Intake required work cards stay compact with responsive four three two grid and stable amount field",()=>{
-  const css=read("public/styles.css");
+test("18 Intake required work cards use one continuous responsive four three two grid",()=>{
+  const css=read("public/styles.css"),v6=read("public/v6.js");
+  assert.match(v6,/assessment-grid assessment-grid--continuous/);
+  assert.doesNotMatch(v6,/Object\.groupBy\?Object\.groupBy\(catalog/);
+  assert.doesNotMatch(v6,/<section class="assessment-category">/);
+  assert.match(v6,/assessment-option-category/);
   assert.match(css,/assessment-grid\{grid-template-columns:repeat\(4/);
   assert.match(css,/@media\(max-width:1100px\)[\s\S]*assessment-grid\{grid-template-columns:repeat\(3/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*assessment-grid\{grid-template-columns:repeat\(2/);
