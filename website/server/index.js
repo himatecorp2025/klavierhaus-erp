@@ -226,14 +226,20 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
       <div class="customer-chat__heading"><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p><p class="customer-chat__status" data-chat-support-status aria-live="polite"></p></div>
       <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
-      <form data-chat-form>
-        <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name"></label>
-        <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email"></label>
-        <label>${escapeHtml(chatCopy.topic)}<select name="category"><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="PIANO">${language === "hu" ? "Zongora és bemutatóterem" : "Piano & showroom"}</option><option value="REPAIR">${language === "hu" ? "Javítás és szerviz" : "Repair & service"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private visit / appointment"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
-        <label>${escapeHtml(chatCopy.message)}<textarea name="message" maxlength="5000" rows="3" required></textarea></label>
-        <div class="customer-chat__attachments"><span>${escapeHtml(chatCopy.attachments)}</span><div class="customer-chat__attachment-row"><label class="customer-chat__attach-button" title="${language === "hu" ? "Fájlok csatolása" : "Attach files"}"><input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"><span aria-hidden="true">📎</span><strong>${language === "hu" ? "Csatolás" : "Attach"}</strong></label><small>${language === "hu" ? "Kép, PDF vagy dokumentum · max. 10" : "Image, PDF or document · max 10"}</small></div><div class="customer-chat__file-list" data-chat-file-list></div></div>
-        <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
-        <button class="button button--primary" type="submit">${escapeHtml(chatCopy.send)}</button>
+      <form class="customer-chat__form" data-chat-form>
+        <div class="customer-chat__intake" data-chat-intake-fields>
+          <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name"></label>
+          <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email"></label>
+          <label>${escapeHtml(chatCopy.topic)}<select name="category"><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="PIANO">${language === "hu" ? "Zongora és bemutatóterem" : "Piano & showroom"}</option><option value="REPAIR">${language === "hu" ? "Javítás és szerviz" : "Repair & service"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private visit / appointment"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
+          <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
+        </div>
+        <div class="customer-chat__composer">
+          <label class="sr-only" for="customer-chat-message">${escapeHtml(chatCopy.message)}</label>
+          <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" required placeholder="${escapeHtml(chatCopy.message)}"></textarea>
+          <label class="customer-chat__attach-button" title="${language === "hu" ? "Fájl csatolása" : "Attach file"}" aria-label="${language === "hu" ? "Fájl csatolása" : "Attach file"}"><input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"><span aria-hidden="true">📎</span></label>
+          <button class="customer-chat__send-button" type="submit" aria-label="${escapeHtml(chatCopy.send)}"><span aria-hidden="true">➤</span></button>
+        </div>
+        <div class="customer-chat__file-list" data-chat-file-list></div>
         <p class="form-result" data-chat-result aria-live="polite"></p>
       </form>
       <form class="customer-chat__lookup" data-chat-lookup-form>
