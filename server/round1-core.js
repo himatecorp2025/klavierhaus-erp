@@ -80,7 +80,7 @@ function convertIntakeLead(db,lead,body={}){
   })();
 }
 
-function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload}){
+function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,notifications=null}){
   const staff=permit("ADMIN","MANAGER","WORKER");
 
   app.get("/api/clients",auth,staff,(req,res)=>{
@@ -206,6 +206,16 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload}){
         clientId,pianoId,text(req.body?.raw_client_name,240)||null,rawContact||null,location,issue,JSON.stringify(media),urgency,initialStatus,technician||null
       );
       const row=leadRow(db.prepare("SELECT * FROM intake_leads WHERE id=?").get(Number(info.lastInsertRowid)));
+      if(identityStatus==="ambiguous"&&notifications){
+        const recipients=db.prepare("SELECT id FROM users WHERE status='Active' AND (role='ADMIN' OR role='SUPERADMIN' OR is_superadmin=1)").all().map(item=>item.id);
+        if(recipients.length)notifications.emitOnce({
+          category:"DATA_EXCEPTION",entityType:"INTAKE",entityId:String(row.id),
+          titleEn:"Possible duplicate customer",titleHu:"Lehetséges duplikált ügyfél",
+          bodyEn:`${row.raw_client_name||"New intake"} · multiple exact client matches need review`,
+          bodyHu:`${row.raw_client_name||"Új igény"} · több pontos ügyféltalálat, ellenőrzés szükséges`,
+          actionUrl:"#intake",severity:"WARNING",recipients
+        });
+      }
       audit(req,"CREATE","intake",String(row.id),null,{...row,identity_status:identityStatus});res.status(201).json({...row,identity_status:identityStatus});
     }catch(error){res.status(Number(error.status||400)).json({error:error.message||"INTAKE_CREATE_FAILED"});}
   });
