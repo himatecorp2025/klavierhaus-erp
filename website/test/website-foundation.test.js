@@ -284,7 +284,8 @@ test("private appointment forms are minimal and preserve selected context",()=>{
   const privateForm=source.slice(privateStart,privateEnd);
   assert.match(privateForm,/name="name"/);
   assert.match(privateForm,/name="phone"/);
-  assert.match(privateForm,/name="scheduled_at" type="datetime-local"/);
+  assert.match(privateForm,/name="scheduled_at_display" type="text"/);
+  assert.match(privateForm,/2026\. 10\. 15\. 14:30|10\/15\/2026 2:30 PM/);
   assert.match(privateForm,/name="note"/);
   assert.match(privateForm,/name="piano_id"/);
   assert.match(privateForm,/name="service_id"/);
