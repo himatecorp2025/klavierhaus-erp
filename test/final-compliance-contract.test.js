@@ -98,7 +98,7 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.segmented-control/);
   assert.match(css,/\.typeahead-menu/);
-  assert.match(sw,/klavierhaus-admin-v17-unsaved-three-way-dialog/);
+  assert.match(sw,/klavierhaus-admin-v18-intake-messenger-master-fixes/);
   assert.match(sw,/url\.pathname\.startsWith\("\/api\/"\)/);
 });
 
