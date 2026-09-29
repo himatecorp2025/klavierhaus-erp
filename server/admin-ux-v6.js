@@ -134,6 +134,41 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
     }catch(error){respond(res,error);}
   });
 
+  app.get("/api/handoff-presets",auth,staff,(req,res)=>{
+    const includeInactive=(req.user.role==="ADMIN"||req.user.role==="SUPERADMIN")&&req.query.include_inactive==="1";
+    res.json((includeInactive
+      ?db.prepare("SELECT * FROM handoff_presets ORDER BY sort_order,id").all()
+      :db.prepare("SELECT * FROM handoff_presets WHERE active=1 ORDER BY sort_order,id").all()));
+  });
+  app.post("/api/handoff-presets",auth,admin,(req,res)=>{
+    try{
+      const titleEn=text(req.body?.title_en,240),titleHu=text(req.body?.title_hu,240);
+      const labor=money(req.body?.default_labor_cost),material=money(req.body?.default_material_cost),duration=Math.max(0,Math.round(Number(req.body?.default_duration_min||0)));
+      if(!titleEn||!titleHu)throw problem("HANDOFF_PRESET_TITLE_REQUIRED");
+      if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("HANDOFF_PRESET_VALUES_INVALID");
+      const info=db.prepare(`INSERT INTO handoff_presets(title_en,title_hu,default_labor_cost,default_material_cost,default_duration_min,active,sort_order,created_by_user_id,updated_by_user_id)
+        VALUES(?,?,?,?,?,?,?,?,?)`).run(titleEn,titleHu,labor,material,duration,req.body?.active===false?0:1,Number(req.body?.sort_order||0),req.user.id,req.user.id);
+      const row=db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(Number(info.lastInsertRowid));audit(req,"CREATE","handoff_presets",String(row.id),null,row);res.status(201).json(row);
+    }catch(error){respond(res,error);}
+  });
+  app.put("/api/handoff-presets/:id",auth,admin,(req,res)=>{
+    const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);if(!before)return res.status(404).json({error:"HANDOFF_PRESET_NOT_FOUND"});
+    try{
+      const titleEn=text(req.body?.title_en??before.title_en,240),titleHu=text(req.body?.title_hu??before.title_hu,240);
+      const labor=money(req.body?.default_labor_cost??before.default_labor_cost),material=money(req.body?.default_material_cost??before.default_material_cost),duration=Math.max(0,Math.round(Number(req.body?.default_duration_min??before.default_duration_min)));
+      if(!titleEn||!titleHu)throw problem("HANDOFF_PRESET_TITLE_REQUIRED");
+      if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("HANDOFF_PRESET_VALUES_INVALID");
+      db.prepare(`UPDATE handoff_presets SET title_en=?,title_hu=?,default_labor_cost=?,default_material_cost=?,default_duration_min=?,active=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(titleEn,titleHu,labor,material,duration,req.body?.active===undefined?Number(before.active):req.body.active?1:0,Number(req.body?.sort_order??before.sort_order??0),req.user.id,id);
+      const after=db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);audit(req,"UPDATE","handoff_presets",String(id),before,after);res.json(after);
+    }catch(error){respond(res,error);}
+  });
+  app.delete("/api/handoff-presets/:id",auth,admin,(req,res)=>{
+    const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);if(!before)return res.status(404).json({error:"HANDOFF_PRESET_NOT_FOUND"});
+    db.prepare("UPDATE handoff_presets SET active=0,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id,id);
+    const after=db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);audit(req,"ARCHIVE","handoff_presets",String(id),before,after);res.json({ok:true,preset:after});
+  });
+
   app.put("/api/v6/website-services/:id/gallery",auth,admin,(req,res)=>{
     const before=db.prepare("SELECT * FROM website_services WHERE id=?").get(req.params.id);
     if(!before)return res.status(404).json({error:"WEBSITE_SERVICE_NOT_FOUND"});

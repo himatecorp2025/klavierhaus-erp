@@ -557,14 +557,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
         const remaining=before.workflow_phases.filter(row=>row.enabled&&!row.completed_at&&!["admin_approval","completed",before.stage].includes(row.stage_key));
         if(remaining.length)throw problem("WORKFLOW_PHASES_REMAINING",409,{remaining:remaining.map(row=>row.stage_key)});
       }
-      const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0);
-      if(!(labor>=0)||!(material>=0))throw problem("INVALID_HANDOFF_COST");
+      const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0),duration=Math.max(0,Math.round(Number(req.body?.phase_duration_min||0)));
+      if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("INVALID_HANDOFF_COST");
       const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
       const resourceTechnician=before.assigned_technician_id;
       const note=text(req.body?.phase_note,5000)||null;
       const result=db.transaction(()=>{
-        const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,phase_labor_cost,phase_material_cost,created_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,responsible.id,responsible.name,note,labor,material);
+        const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,phase_labor_cost,phase_material_cost,phase_duration_min,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,responsible.id,responsible.name,note,labor,material,duration);
         completePhase(id,before.stage);
         db.prepare("UPDATE job_workflow_phases SET responsible_user_id=?,starts_at=COALESCE(starts_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(responsible.id,id,toStage);
         activatePhase(id,toStage);

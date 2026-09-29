@@ -1044,6 +1044,23 @@ CREATE TABLE IF NOT EXISTS intake_catalog_items (
   FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS handoff_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title_en TEXT NOT NULL,
+  title_hu TEXT NOT NULL,
+  default_labor_cost REAL NOT NULL DEFAULT 0 CHECK(default_labor_cost >= 0),
+  default_material_cost REAL NOT NULL DEFAULT 0 CHECK(default_material_cost >= 0),
+  default_duration_min INTEGER NOT NULL DEFAULT 0 CHECK(default_duration_min >= 0),
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS intake_assessment_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   intake_id INTEGER NOT NULL,
@@ -1148,6 +1165,7 @@ CREATE TABLE IF NOT EXISTS job_handoffs (
   phase_note TEXT,
   phase_labor_cost REAL NOT NULL DEFAULT 0 CHECK(phase_labor_cost >= 0),
   phase_material_cost REAL NOT NULL DEFAULT 0 CHECK(phase_material_cost >= 0),
+  phase_duration_min INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
   FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -1325,6 +1343,7 @@ CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at D
 CREATE INDEX IF NOT EXISTS idx_intake_client ON intake_leads(client_id);
 CREATE INDEX IF NOT EXISTS idx_intake_technician ON intake_leads(assigned_technician_id,status);
 CREATE INDEX IF NOT EXISTS idx_intake_catalog_active ON intake_catalog_items(active,sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_handoff_presets_active ON handoff_presets(active,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_intake_assessment_intake ON intake_assessment_items(intake_id,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_jobs_stage ON jobs(stage,cancelled_at,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled_at ON jobs(scheduled_at,cancelled_at,stage);

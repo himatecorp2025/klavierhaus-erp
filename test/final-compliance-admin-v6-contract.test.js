@@ -88,6 +88,21 @@ test("Intake keeps the manual job approval gate while assessment delivery is ema
   assert.match(index,/registerArchiveCenterRoutes\(\{[^}]*transactionalEmail/);
 });
 
+test("Handoff presets are Admin-managed data and populate the mobile workflow handoff",()=>{
+  const schema=read("server/schema.sql"),init=read("server/init-db.js"),api=read("server/admin-ux-v6.js"),round2=read("server/round2-workflow.js"),ui=read("public/round2.js"),v6=read("public/v6.js"),css=read("public/styles.css");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS handoff_presets/);
+  assert.match(schema,/phase_duration_min INTEGER/);
+  assert.match(init,/Tuning/);
+  assert.match(init,/Regulation/);
+  assert.match(api,/\/api\/handoff-presets/);
+  assert.match(ui,/Quick presets/);
+  assert.match(ui,/data-handoff-preset/);
+  assert.match(ui,/phase_duration_min/);
+  assert.match(round2,/phase_duration_min/);
+  assert.match(v6,/v6OpenHandoffPresetCenter/);
+  assert.match(css,/\.handoff-preset-strip/);
+});
+
 test("calendar v6 shares horizontal scroll for header/body and creates jobs from an empty 15-minute slot",()=>{
   const round2=read("public/round2.js"),css=read("public/styles.css");
   assert.match(round2,/time-calendar-scroll[\s\S]*time-calendar-head[\s\S]*time-calendar-body/);
