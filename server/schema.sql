@@ -983,6 +983,7 @@ CREATE TABLE IF NOT EXISTS clients (
   phone TEXT,
   address TEXT,
   notes TEXT,
+  preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
   vip_updated_by_user_id TEXT,
   vip_updated_at TEXT,
@@ -1288,6 +1289,23 @@ CREATE TABLE IF NOT EXISTS invoice_email_log (
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS intake_assessment_email_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  intake_id INTEGER NOT NULL,
+  archive_document_id INTEGER,
+  recipient TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  custom_message TEXT,
+  status TEXT NOT NULL CHECK(status IN ('sent','failed')),
+  provider_message_id TEXT,
+  error_code TEXT,
+  sent_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (intake_id) REFERENCES intake_leads(id) ON DELETE CASCADE,
+  FOREIGN KEY (archive_document_id) REFERENCES document_archive(id) ON DELETE SET NULL,
+  FOREIGN KEY (sent_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS kpi_summary_cache (
   month_key TEXT PRIMARY KEY,
   labor_revenue REAL NOT NULL DEFAULT 0,
@@ -1329,6 +1347,7 @@ CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id,paid_at,id);
 CREATE INDEX IF NOT EXISTS idx_direct_expenses_date ON direct_expenses(expense_date,category);
 CREATE INDEX IF NOT EXISTS idx_invoice_email_log_invoice ON invoice_email_log(invoice_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_intake_assessment_email_log_intake ON intake_assessment_email_log(intake_id,created_at DESC);
 
 -- Preserved website/event indexes plus explicit public read-path indexes.
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
