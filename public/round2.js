@@ -654,6 +654,51 @@ async function r2RenderCalendar(){
   r2BindCalendarPointer(host,jobRows);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);
   clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);},30000);
 }
+function r2PrivateAppointmentCard(row){
+  const status=String(row.status||"SCHEDULED").toUpperCase();
+  return `<article class="job-card private-appointment-card private-status-${status.toLowerCase()}" data-private-card="${esc(row.id)}">
+    <div class="job-card-top"><span class="job-code">◈ ${esc(r2PrivateContext(row))}</span><span class="priority-chip private-status-chip">${esc(r2PrivateStatusLabel(status))}</span></div>
+    <h3>${esc(row.name)}</h3>
+    <p class="job-party">☎ ${esc(row.phone||"—")}</p>
+    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(row.scheduled_at))}</span><span>👤 ${esc(row.assigned_user_name||tr("Unassigned","Nincs felelős"))}</span></div>
+    ${row.note?`<div class="detail-note private-note">${esc(row.note)}</div>`:""}
+    <div class="job-actions"><button class="secondary-button" type="button" data-private-edit="${esc(row.id)}">ⓘ ${tr("Details","Részletek")}</button></div>
+  </article>`;
+}
+function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(state.r2PrivateStatus||"")){
+  openDialog({title:row.name,eyebrow:`◈ ${tr("PRIVATE APPOINTMENT","PRIVÁT IDŐPONT")}`,body:`<form id="privateAppointmentEditor" class="form-grid">
+    <div class="detail-note full private-context-note"><strong>${esc(r2PrivateContext(row))}</strong></div>
+    <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
+    <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
+    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(r2IsoToNyInput(row.scheduled_at))}" required></label>
+    <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
+    <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
+    <label class="field full"><span>${tr("Status","Státusz")}</span><select name="status"><option value="SCHEDULED" ${row.status==="SCHEDULED"?"selected":""}>${tr("Scheduled","Ütemezve")}</option><option value="COMPLETED" ${row.status==="COMPLETED"?"selected":""}>${tr("Completed","Lezárva")}</option><option value="CANCELLED" ${row.status==="CANCELLED"?"selected":""}>${tr("Cancelled","Törölt")}</option></select></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div>
+  </form>`});
+  $("#privateAppointmentEditor").addEventListener("submit",async event=>{
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);if(!body.assigned_user_id)body.assigned_user_id=null;
+    try{await api("/api/private-appointments/"+encodeURIComponent(row.id),{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Private appointment updated.","Privát időpont frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+  });
+}
+async function r2LoadPrivateAppointments(status=""){
+  state.r2WorkflowBucket="private";state.r2PrivateStatus=status;
+  const rows=await api("/api/private-appointments"+(status?"?status="+encodeURIComponent(status):""));
+  state.r2PrivateAppointments=rows;await r2RenderPrivateAppointments(rows,status);
+}
+async function r2RenderPrivateAppointments(rows,status=""){
+  const host=$("#workshopContent");if(!host)return;
+  host.innerHTML=`<div class="workflow-view-toolbar private-workflow-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
+    <button type="button" data-workflow-bucket="active">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="closed">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="private" class="active private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
+  </div><div class="segmented-control compact private-status-switch"><button type="button" data-private-status="" class="${!status?"active":""}">${tr("All","Mind")}</button><button type="button" data-private-status="SCHEDULED" class="${status==="SCHEDULED"?"active":""}">${tr("Scheduled","Ütemezve")}</button><button type="button" data-private-status="COMPLETED" class="${status==="COMPLETED"?"active":""}">${tr("Completed","Lezárt")}</button><button type="button" data-private-status="CANCELLED" class="${status==="CANCELLED"?"active":""}">${tr("Cancelled","Törölt")}</button></div></div>
+    <small>${tr("Private piano viewings and service consultations. These do not consume workshop scheduling capacity.","Privát zongoramegtekintések és szolgáltatási konzultációk. Ezek nem foglalják a műhely kapacitását.")}</small></div>
+    <div class="private-appointments-grid">${rows.length?rows.map(r2PrivateAppointmentCard).join(""):`<div class="empty-state">${tr("No private appointments in this filter.","Nincs privát időpont ebben a szűrésben.")}</div>`}</div>`;
+  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const bucket=button.dataset.workflowBucket;if(bucket==="private")return;if(bucket==="closed")void r2LoadWorkflowBucket("closed","completed");else void r2LoadWorkflowBucket("active");}));
+  $$("[data-private-status]",host).forEach(button=>button.addEventListener("click",()=>r2LoadPrivateAppointments(button.dataset.privateStatus||"")));
+  $$("[data-private-edit]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.privateEdit));if(row)r2OpenPrivateAppointment(row);}));
+}
 async function r2LoadWorkflowBucket(bucket,closedType=null){
   const next=["active","closed"].includes(bucket)?bucket:"active",type=closedType||state.r2ClosedType||"completed";
   const data=await api("/api/jobs/workflow?bucket="+encodeURIComponent(next)+(next==="closed"?"&closed_type="+encodeURIComponent(type):""));
@@ -666,9 +711,10 @@ async function r2RenderWorkflow(data){
   host.innerHTML=`<div class="workflow-view-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
     <button type="button" data-workflow-bucket="active" class="${bucket==="active"?"active":""}">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
+    <button type="button" data-workflow-bucket="private" class="private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
   </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
   <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column,{closed:bucket==="closed"})).join("")}${canAdd?r2AddStageColumn():""}</div></div>`;
-  $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>button.dataset.workflowBucket==="closed"?r2LoadWorkflowBucket("closed","completed"):r2LoadWorkflowBucket("active")));
+  $("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const value=button.dataset.workflowBucket;if(value==="private")return r2LoadPrivateAppointments();if(value==="closed")return r2LoadWorkflowBucket("closed","completed");return r2LoadWorkflowBucket("active");}));
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
   $("#workflowAddStageCard")?.addEventListener("click",r2OpenAddStage);
   const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);}
