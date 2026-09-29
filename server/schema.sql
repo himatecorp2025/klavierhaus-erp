@@ -1330,6 +1330,27 @@ CREATE TABLE IF NOT EXISTS intake_assessment_email_log (
   FOREIGN KEY (sent_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS customer_communication_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type TEXT NOT NULL,
+  job_id INTEGER,
+  invoice_id INTEGER,
+  client_id INTEGER,
+  recipient TEXT,
+  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
+  status TEXT NOT NULL CHECK(status IN ('sent','failed')),
+  provider_message_id TEXT,
+  error_code TEXT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_customer_communication_job ON customer_communication_log(job_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_communication_invoice ON customer_communication_log(invoice_id,created_at DESC);
+
 CREATE TABLE IF NOT EXISTS automation_outbox (
   id TEXT PRIMARY KEY,
   event_type TEXT NOT NULL,
