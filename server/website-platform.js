@@ -287,6 +287,13 @@ function registerWebsitePlatformRoutes(options) {
     };
     db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,rental_duration,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
       VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@piano_brand,@piano_model,@service_address,@preferred_time,@event_date,@event_venue,@instrument_requirements,@rental_duration,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
+    notifications?.emit({
+      category:"WEBSITE_LEAD",entityType:"WEBSITE_LEAD",entityId:row.id,
+      titleEn:"New website enquiry",titleHu:"Új weboldali megkeresés",
+      bodyEn:`${row.name} · ${String(row.lead_type||"").replaceAll("_"," ")}${row.message?` · ${String(row.message).slice(0,220)}`:""}`,
+      bodyHu:`${row.name} · ${String(row.lead_type||"").replaceAll("_"," ")}${row.message?` · ${String(row.message).slice(0,220)}`:""}`,
+      actionUrl:"#cms",severity:"INFO"
+    });
     res.status(201).json({ ok: true, id: row.id });
   });
   app.get("/api/website-contact-leads", auth, admin, (req, res) => {
