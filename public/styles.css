@@ -2136,6 +2136,8 @@ input,select,textarea,button{max-width:100%}
 .master-piano-summary strong{font-size:15px}.master-piano-summary small{color:var(--muted);font-size:8px;line-height:1.25}
 .master-piano-summary .needs-review{border-color:color-mix(in srgb,#c83c3c 45%,var(--line));background:color-mix(in srgb,#c83c3c 7%,var(--surface-2))}
 .master-piano-summary .needs-review strong{color:#d85b5b}
+.master-piano-summary .import-missing{border-color:color-mix(in srgb,#c99a45 50%,var(--line));background:color-mix(in srgb,#c99a45 8%,var(--surface-2))}
+.master-piano-summary .import-missing strong{color:#b57b1d}
 .piano-review-row{border:1px solid color-mix(in srgb,#c83c3c 42%,var(--line))!important;background:color-mix(in srgb,#c83c3c 5%,var(--surface))!important;margin-top:6px}
 .piano-review-row:hover{border-color:#c83c3c!important;background:color-mix(in srgb,#c83c3c 10%,var(--surface))!important}
 .piano-review-title{display:flex;align-items:center;gap:7px;min-width:0}.piano-review-title .master-review-alert{width:21px;height:21px;flex-basis:21px;font-size:11px}.piano-review-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
