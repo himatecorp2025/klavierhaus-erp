@@ -224,6 +224,11 @@ test("Admin closeout creates editable draft invoice from aggregated costs and re
   assert.equal(closeout.payload.job.stage,"completed");
   assert.equal(closeout.payload.job.completed_by_name,"Final Admin");
   assert.equal(closeout.payload.invoice.counterparty_email,"captured.final@example.com");
+  assert.equal(closeout.payload.invoice.snapshot.counterparty.email,"captured.final@example.com");
+  assert.equal(closeout.payload.invoice.snapshot.instrument.brand,shared.piano.brand);
+  assert.equal(closeout.payload.invoice.items.length,3);
+  const phaseLine=closeout.payload.invoice.items.find(item=>Number(item.labor_amount)===150&&Number(item.material_amount)===30);
+  assert.ok(phaseLine,"phase-level labor/material invoice line must be preserved");
   assert.equal(appDb.prepare("SELECT email FROM clients WHERE id=?").get(shared.client.id).email,"captured.final@example.com");
   const activeWorkflow=await request("/api/jobs/workflow",{token});
   assert.equal(activeWorkflow.status,200);
@@ -258,6 +263,9 @@ test("Admin closeout creates editable draft invoice from aggregated costs and re
   const invoicePdf=await pdf("/api/invoices/"+shared.invoice.id+"/pdf",token);
   assert.equal(invoicePdf.status,200);
   assert.equal(invoicePdf.buffer.subarray(0,5).toString(),"%PDF-");
+  const invoicePdfSource=invoicePdf.buffer.toString("latin1");
+  assert.match(invoicePdfSource,/1 1 1 rg 0 0 612 792 re f/);
+  assert.doesNotMatch(invoicePdfSource,/0\.055 0\.055 0\.055 rg 0 0 612 792 re f/);
 
   const overview=await request("/api/finance/overview?month="+nyDate().slice(0,7),{token});
   assert.equal(overview.status,200,JSON.stringify(overview.payload));
@@ -280,6 +288,10 @@ test("Invoice email uses English by default, Hungarian is available, and failed 
   assert.equal(detail.status,200);
   assert.equal(detail.payload.status,"draft");
   assert.equal(detail.payload.email_log[0].status,"failed");
+  const queued=appDb.prepare("SELECT * FROM automation_outbox WHERE event_type='SEND_INVOICE' AND entity_id=? ORDER BY created_at DESC LIMIT 1").get(String(shared.invoice.id));
+  assert.ok(queued,"failed approved invoice delivery must remain durable");
+  assert.equal(queued.status,"pending");
+  assert.ok(Number(queued.attempts)>=1);
 });
 
 test("There is no partial-payment path; sent invoice is settled in one full Mark Paid action",async()=>{
