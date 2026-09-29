@@ -35,8 +35,10 @@ test("Workshop v5 visual contracts cover calendar, CMS, bilingual chrome and mod
   assert.match(round2,/calendar-drag-tip/);
   assert.match(round2,/calendar-now-line/);
   assert.match(round2,/workflow_stage|workflow phases|Workflow phases/i);
-  assert.match(round2,/Completed is always mandatory/);
-  assert.match(round2,/Lezárva mindig kötelező/);
+  assert.match(round2,/Required system phase/);
+  assert.match(round2,/Kötelező rendszerfázis/);
+  assert.match(round2,/Planned start/);
+  assert.match(round2,/Felelős/);
   assert.match(round2,/api\/workshop\/overview/);
   assert.match(round2,/api\/workflow\/settings/);
   assert.match(round2,/api\/jobs\/\$\{job\.id\}\/schedule/);
