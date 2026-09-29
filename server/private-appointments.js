@@ -103,6 +103,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     if(!phone)return {error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED",status:400};
     if(!scheduledAt)return {error:"PRIVATE_APPOINTMENT_TIME_REQUIRED",status:400};
     let context;try{context=validateContext(body);}catch(error){return {error:error.message,status:error.status||400};}
+    const explicitType=clean(body?.appointment_type,40).toUpperCase();if(!context.pianoId&&!context.serviceId&&["PRIVATE_VISIT","PIANO_VIEWING","SERVICE_CONSULTATION"].includes(explicitType))context.type=explicitType;
     const assigned=clean(body?.assigned_user_id,160)||null;if(assigned&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assigned))return {error:"INVALID_APPOINTMENT_ASSIGNEE",status:400};
     let slot;try{slot=assertAvailable(db,{startsAt:scheduledAt,endsAt:body?.scheduled_end_at,duration:body?.duration_min||DEFAULT_DURATION_MIN,excludeAppointmentId,excludeProposalId});}catch(error){return {error:error.message,status:error.status||409,details:error.details};}
     const appointmentId=excludeAppointmentId||rid();
@@ -214,6 +215,35 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
       catch(error){delivery={status:"FAILED",error:error.code||error.message};}
     }
     audit(req,"PROPOSE","private_appointment_requests",before.id,before,after);res.status(201).json({...after,proposal:db.prepare("SELECT * FROM customer_appointment_proposals WHERE id=?").get(proposalId),email_delivery:delivery});
+  });
+
+  app.post("/api/customer-conversations/:conversationId/appointment-proposals/:proposalId/finalize",auth,staff,async(req,res)=>{
+    const conversation=db.prepare("SELECT * FROM customer_conversations WHERE id=?").get(req.params.conversationId);
+    if(!conversation)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
+    const proposal=db.prepare("SELECT * FROM customer_appointment_proposals WHERE id=? AND conversation_id=?").get(req.params.proposalId,conversation.id);
+    if(!proposal)return res.status(404).json({error:"APPOINTMENT_PROPOSAL_NOT_FOUND"});
+    if(proposal.private_appointment_id)return res.json({ok:true,idempotent:true,appointment:byId(proposal.private_appointment_id)});
+    if(proposal.status!=="ACCEPTED")return res.status(409).json({error:"APPOINTMENT_PROPOSAL_NOT_ACCEPTED"});
+    if(proposal.expires_at&&new Date(proposal.expires_at)<=new Date())return res.status(409).json({error:"APPOINTMENT_PROPOSAL_EXPIRED"});
+    const request=db.prepare("SELECT * FROM private_appointment_requests WHERE proposal_id=?").get(proposal.id);
+    const duration=Math.round((new Date(proposal.ends_at)-new Date(proposal.starts_at))/60000);
+    const body={
+      appointment_type:proposal.appointment_type,name:conversation.name||request?.name||"Guest",email:conversation.email||request?.email||null,phone:proposal.phone||request?.phone||"",
+      scheduled_at:proposal.starts_at,scheduled_end_at:proposal.ends_at,duration_min:duration,note:proposal.note||request?.note||null,
+      assigned_user_id:proposal.assigned_user_id||conversation.assigned_user_id||req.user.id,language:conversation.language||request?.language||"en",
+      source_path:conversation.source_path||request?.source_path||null,piano_id:request?.piano_id||null,service_id:request?.service_id||null
+    };
+    const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",conversationId:conversation.id,email:body.email,excludeProposalId:proposal.id}))();
+    if(result.error)return res.status(result.status).json({error:result.error,details:result.details});
+    db.transaction(()=>{
+      db.prepare("UPDATE customer_appointment_proposals SET private_appointment_id=?,finalized_at=CURRENT_TIMESTAMP,finalized_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(result.row.id,req.user.id,proposal.id);
+      db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(conversation.id);
+      if(request)db.prepare("UPDATE private_appointment_requests SET status='APPROVED',private_appointment_id=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(result.row.id,req.user.id,request.id);
+    })();
+    notify(result.row,{kind:"created",actor:req.user});if(request)notifyRequest(requestById(request.id),{kind:"approved",actor:req.user});
+    const emailDelivery=await sendDecisionEmail({...result.row,email:body.email,language:body.language},"APPROVED");
+    audit(req,"FINALIZE","customer_appointment_proposals",proposal.id,proposal,db.prepare("SELECT * FROM customer_appointment_proposals WHERE id=?").get(proposal.id));
+    res.status(201).json({ok:true,appointment:result.row,email_delivery:emailDelivery});
   });
 
   app.post("/api/private-appointments",auth,staff,(req,res)=>{
