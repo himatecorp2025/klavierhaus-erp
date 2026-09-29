@@ -45,7 +45,7 @@ function intakeAssessmentPdf({lead,items=[]}){
   return createPdf({pages,size:LETTER,labels,title:`Klavierhaus Intake Assessment ${lead.id}`});
 }
 
-function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
+function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transactionalEmail}){
   const admin=permit("ADMIN");
   const staff=permit("ADMIN","MANAGER","WORKER");
   const target=path.join(uploadDir,"archive");
@@ -66,6 +66,28 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
   }).single("file");
 
   const select=`SELECT a.*,u.name archived_by_name FROM document_archive a LEFT JOIN users u ON u.id=a.archived_by_user_id`;
+  function assessmentSource(id){
+    const lead=db.prepare(`SELECT l.*,c.name client_name,c.email client_email,c.phone client_phone,c.preferred_language client_preferred_language,
+      p.brand piano_brand,p.model piano_model,p.serial_number piano_serial_number,u.name technician_name
+      FROM intake_leads l LEFT JOIN clients c ON c.id=l.client_id LEFT JOIN pianos p ON p.id=l.piano_id
+      LEFT JOIN users u ON u.id=l.assigned_technician_id WHERE l.id=?`).get(id);
+    if(!lead)throw problem("INTAKE_NOT_FOUND",404);
+    lead.media_urls=json(lead.media_urls||"[]");
+    const items=db.prepare("SELECT * FROM intake_assessment_items WHERE intake_id=? ORDER BY sort_order,id").all(id);
+    return {lead,items};
+  }
+  function createAssessmentArtifact(id,actor){
+    const {lead,items}=assessmentSource(id);
+    const pdf=intakeAssessmentPdf({lead,items}),filename=`intake-assessment-${id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`,filePath=path.join(target,filename);
+    fs.writeFileSync(filePath,pdf,{flag:"wx"});
+    const publicPath=`/uploads/archive/${filename}`,snapshot={source:"intake_assessment_export",intake:lead,items};
+    const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+      VALUES('intake_assessment',?,?,?,?,?,?,?,?,?,?,?)`).run(
+      `Intake Assessment #${id} · ${lead.client_name||lead.raw_client_name||"Prospect"}`,lead.reported_issue||null,"intake",String(id),
+      `intake-assessment-${id}.pdf`,filename,"application/pdf",pdf.length,publicPath,JSON.stringify(snapshot),actor?.id||null
+    );
+    return {lead,items,pdf,publicPath,archiveId:Number(info.lastInsertRowid)};
+  }
 
   app.get("/api/archive/documents",auth,admin,(req,res)=>{
     try{
@@ -107,26 +129,49 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
   app.post("/api/intake/:id/export-pdf",auth,staff,(req,res)=>{
     try{
       const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
-      const lead=db.prepare(`SELECT l.*,c.name client_name,c.email client_email,c.phone client_phone,
-        p.brand piano_brand,p.model piano_model,p.serial_number piano_serial_number,u.name technician_name
-        FROM intake_leads l LEFT JOIN clients c ON c.id=l.client_id LEFT JOIN pianos p ON p.id=l.piano_id
-        LEFT JOIN users u ON u.id=l.assigned_technician_id WHERE l.id=?`).get(id);
-      if(!lead)throw problem("INTAKE_NOT_FOUND",404);
-      lead.media_urls=json(lead.media_urls||"[]");
-      const items=db.prepare("SELECT * FROM intake_assessment_items WHERE intake_id=? ORDER BY sort_order,id").all(id);
-      const pdf=intakeAssessmentPdf({lead,items}),filename=`intake-assessment-${id}-${Date.now()}.pdf`,filePath=path.join(target,filename);
-      fs.writeFileSync(filePath,pdf,{flag:"wx"});
-      const publicPath=`/uploads/archive/${filename}`,snapshot={source:"intake_assessment_export",intake:lead,items};
-      const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
-        VALUES('intake_assessment',?,?,?,?,?,?,?,?,?,?,?)`).run(
-        `Intake Assessment #${id} · ${lead.client_name||lead.raw_client_name||"Prospect"}`,lead.reported_issue||null,"intake",String(id),
-        `intake-assessment-${id}.pdf`,filename,"application/pdf",pdf.length,publicPath,JSON.stringify(snapshot),req.user.id
-      );
-      const archiveId=Number(info.lastInsertRowid),row=db.prepare(`${select} WHERE a.id=?`).get(archiveId);
-      audit(req,"EXPORT_PDF","intake",String(id),null,{archive_document_id:archiveId,file_path:publicPath});
-      res.setHeader("X-Archive-Document-Id",String(archiveId));
-      res.type("application/pdf").set("Content-Disposition",`attachment; filename="intake-assessment-${id}.pdf"`).send(pdf);
+      const artifact=createAssessmentArtifact(id,req.user);
+      audit(req,"EXPORT_PDF","intake",String(id),null,{archive_document_id:artifact.archiveId,file_path:artifact.publicPath});
+      res.setHeader("X-Archive-Document-Id",String(artifact.archiveId));
+      res.type("application/pdf").set("Content-Disposition",`attachment; filename="intake-assessment-${id}.pdf"`).send(artifact.pdf);
     }catch(error){respond(res,error);}
+  });
+
+  app.get("/api/intake/:id/assessment-email-log",auth,staff,(req,res)=>{
+    const id=integerId(req.params.id);if(!id||!db.prepare("SELECT 1 FROM intake_leads WHERE id=?").get(id))return res.status(404).json({error:"INTAKE_NOT_FOUND"});
+    res.json(db.prepare("SELECT * FROM intake_assessment_email_log WHERE intake_id=? ORDER BY created_at DESC,id DESC").all(id));
+  });
+
+  app.post("/api/intake/:id/send-assessment",auth,staff,async(req,res)=>{
+    const id=integerId(req.params.id);if(!id)return res.status(404).json({error:"INTAKE_NOT_FOUND"});
+    let artifact=null,recipient="",language="en",customMessage=text(req.body?.message,3000),attachPdf=req.body?.attach_pdf!==false;
+    try{
+      const source=assessmentSource(id),lead=source.lead;
+      recipient=text(req.body?.recipient_email||lead.client_email||(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(lead.raw_contact||"").trim())?lead.raw_contact:""),320).toLowerCase();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))throw problem("CLIENT_EMAIL_REQUIRED",409);
+      language=["en","hu"].includes(req.body?.language)?req.body.language:(lead.client_preferred_language||"en");
+      artifact=createAssessmentArtifact(id,req.user);
+      const delivery=await transactionalEmail.sendIntakeAssessment({
+        to:recipient,clientName:artifact.lead.client_name||artifact.lead.raw_client_name,
+        piano:{brand:artifact.lead.piano_brand,model:artifact.lead.piano_model,serial_number:artifact.lead.piano_serial_number},
+        issue:artifact.lead.reported_issue,items:artifact.items,estimatedTotal:artifact.lead.estimated_total,
+        assessmentPdf:attachPdf?artifact.pdf:null,customMessage,language,
+        idempotencyKey:`intake-assessment-${id}-archive-${artifact.archiveId}`
+      });
+      db.transaction(()=>{
+        db.prepare(`INSERT INTO intake_assessment_email_log(intake_id,archive_document_id,recipient,language,custom_message,status,provider_message_id,sent_by_user_id)
+          VALUES(?,?,?,?,?,'sent',?,?)`).run(id,artifact.archiveId,recipient,language,customMessage||null,delivery.providerMessageId,req.user.id);
+        if(artifact.lead.client_id)db.prepare("UPDATE clients SET preferred_language=?,email=COALESCE(NULLIF(email,''),?),updated_at=CURRENT_TIMESTAMP WHERE id=?").run(language,recipient,artifact.lead.client_id);
+        db.prepare("UPDATE intake_leads SET status=CASE WHEN status='new' THEN 'under_review' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
+      })();
+      audit(req,"SEND_ASSESSMENT","intake",String(id),null,{archive_document_id:artifact.archiveId,recipient,language,provider_message_id:delivery.providerMessageId});
+      res.status(201).json({ok:true,archive_document_id:artifact.archiveId,recipient,language,provider_message_id:delivery.providerMessageId});
+    }catch(error){
+      if(id&&recipient){
+        try{db.prepare(`INSERT INTO intake_assessment_email_log(intake_id,archive_document_id,recipient,language,custom_message,status,error_code,sent_by_user_id)
+          VALUES(?,?,?,?,?,'failed',?,?)`).run(id,artifact?.archiveId||null,recipient,language,customMessage||null,text(error?.code||error?.message,120),req.user?.id||null);}catch(_logError){}
+      }
+      respond(res,error);
+    }
   });
 
   app.get("/api/archive/documents/:id/download",auth,admin,(req,res)=>{
