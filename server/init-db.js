@@ -77,6 +77,27 @@ function adminUxV6Backup() {
   console.log(`[ADMIN-V6] Safety backup created: ${target}`);
   return target;
 }
+function messengerV12NeedsCompatibilityMigration() {
+  return (tableExists("private_appointments") &&
+      (!columns("private_appointments").has("scheduled_end_at") || !columns("private_appointments").has("conversation_id"))) ||
+    (tableExists("intake_leads") && !columns("intake_leads").has("source_conversation_id"));
+}
+function messengerV12Backup() {
+  if (!fs.existsSync(dbPath) || !messengerV12NeedsCompatibilityMigration()) return null;
+  try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(backupDir, `messenger-v12-pre-migration-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath, target);
+  console.log(`[MESSENGER-V12] Safety backup created: ${target}`);
+  return target;
+}
+function prepareMessengerV12Compatibility() {
+  if (tableExists("intake_leads")) ensureColumn("intake_leads","source_conversation_id","TEXT");
+  if (tableExists("private_appointments")) {
+    ensureColumn("private_appointments","scheduled_end_at","TEXT");
+    ensureColumn("private_appointments","conversation_id","TEXT");
+  }
+}
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
 }
@@ -143,6 +164,7 @@ round3MigrationBackup();
 finalComplianceBackup();
 workshopUxV5Backup();
 adminUxV6Backup();
+messengerV12Backup();
 dropLegacyDerivedSchemaObjects();
 
 const legacyPianoColumns = columns("pianos");
@@ -193,6 +215,9 @@ if(archiveCategoryNeedsMigration){
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
   console.log("[DOCUMENTS] Legacy archive category table isolated");
 }
+// Existing production databases already have private_appointments/intake_leads.
+// Add Messenger v12 columns before schema.sql creates indexes that depend on them.
+prepareMessengerV12Compatibility();
 db.exec(canonicalSchemaSql);
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
