@@ -333,6 +333,7 @@ const V6_ARCHIVE_CATEGORIES={
   financial_document:["Financial documents","Pénzügyi dokumentumok"],
   contract:["Contracts","Szerződések"],
   intake_assessment:["Intake assessment PDFs","Igényfelmérési PDF-ek"],
+  deleted_intake:["Deleted intake requests","Törölt igények"],
   exported_report:["Exported reports / PDFs","Exportált riportok / PDF-ek"],
   internal_correspondence:["Internal correspondence","Belső levelezés"],
   company_message:["Company messages","Vállalati üzenetek"],
@@ -556,7 +557,7 @@ openIntakeDialog=async function(options={}){
     <label class="field full"><span>${tr("Requested service / issue","Jelzett probléma / igény")} *</span><textarea name="reported_issue" required>${esc(base.reported_issue||"")}</textarea></label>
     <section class="full assessment-panel"><div class="assessment-head"><div><span class="eyebrow">${tr("PIANO ASSESSMENT","ZONGORAFELMÉRÉS")}</span><h3>${tr("Select required work","Válaszd ki a szükséges munkákat")}</h3></div><div class="assessment-total"><small>${tr("Estimated total","Becsült összeg")}</small><strong id="assessmentTotal">${r3Money(assessment.estimated_total||0)}</strong></div></div>${v6AssessmentRows(catalog,assessment.items||[])}</section>
     <label class="field full"><span>${tr("Photos / videos","Fotók / videók")}</span><label class="file-picker large"><input id="intakeMediaFiles" type="file" multiple accept="image/*,video/mp4,video/quicktime,video/webm"><span>↑ ${tr("Choose photos or videos","Fotók vagy videók kiválasztása")}</span></label><small id="intakeMediaCount">${existingMedia.length?`${existingMedia.length} ${tr("existing files preserved","meglévő fájl megtartva")}`:""}</small></label>
-    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Save intake","Igény rögzítése")}</button></div></form>`});
+    <div class="form-actions full">${editing?`<button id="intakeDeleteButton" type="button" class="danger-button">${tr("Delete intake","Igény törlése")}</button>`:""}<button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Save intake","Igény rögzítése")}</button></div>${editing?`<div id="intakeDeletePanel" class="detail-note full hidden"><strong>${tr("Delete and archive this intake?","Törlöd és archiválod ezt az igényt?")}</strong><small>${tr("The client and linked operational records remain. A full snapshot and PDF will be stored under Documents → Deleted intake requests.","Az ügyfél és a kapcsolódó operatív adatok megmaradnak. Teljes snapshot és PDF kerül a Dokumentumok → Törölt igények kategóriába.")}</small><label class="field"><span>${tr("Reason (optional)","Indoklás (opcionális)")}</span><input id="intakeDeleteReason" maxlength="3000"></label><div class="form-actions"><button id="intakeDeleteCancel" type="button" class="secondary-button">${tr("Keep intake","Igény megtartása")}</button><button id="intakeDeleteConfirm" type="button" class="danger-button">${tr("Delete and archive","Törlés és archiválás")}</button></div></div>`:""}</form>`});
   const search=$("#intakeClientSearch"),suggestions=$("#intakeClientSuggestions"),clientId=$("#intakeClientId"),pianoField=$("#intakePianoField"),pianoSelect=$("#intakePianoSelect");
   async function populatePianos(client,selectedPianoId=null){const pianos=await api(`/api/clients/${client.id}/pianos`);pianoField.classList.remove("hidden");pianoSelect.innerHTML=`<option value="">${tr("Select later / new piano","Később választom / új zongora")}</option>`+pianos.map(p=>`<option value="${p.id}" ${String(selectedPianoId||"")===String(p.id)?"selected":""}>${esc([p.brand,p.model,p.serial_number].filter(Boolean).join(" · "))}</option>`).join("");}
   async function selectClient(client,selectedPianoId=null){clientId.value=client.id;search.value=client.name;suggestions.classList.add("hidden");$("#rawClientName").value=client.name;$("#rawContact").value=client.email||client.phone||"";await populatePianos(client,selectedPianoId);}
@@ -565,6 +566,17 @@ openIntakeDialog=async function(options={}){
   $$("[data-assessment-check]").forEach(box=>box.addEventListener("change",()=>{const price=$(`[data-assessment-price="${box.dataset.assessmentCheck}"]`);if(price)price.disabled=!box.checked;box.closest(".assessment-option")?.classList.toggle("selected",box.checked);v6AssessmentRefreshTotal();}));
   $$("[data-assessment-price]").forEach(input=>input.addEventListener("input",v6AssessmentRefreshTotal));v6AssessmentRefreshTotal();
   $("#intakeMediaFiles").addEventListener("change",event=>{$("#intakeMediaCount").textContent=`${existingMedia.length+event.currentTarget.files.length} ${tr("files total","fájl összesen")}`;});
+  if(editing){
+    $("#intakeDeleteButton")?.addEventListener("click",()=>$("#intakeDeletePanel")?.classList.remove("hidden"));
+    $("#intakeDeleteCancel")?.addEventListener("click",()=>$("#intakeDeletePanel")?.classList.add("hidden"));
+    $("#intakeDeleteConfirm")?.addEventListener("click",async()=>{
+      const button=$("#intakeDeleteConfirm"),reason=String($("#intakeDeleteReason")?.value||"").trim();button.disabled=true;
+      try{
+        await api(`/api/intake/${lead.id}`,{method:"DELETE",body:JSON.stringify({reason})});
+        closeDialog();toast(tr("Intake deleted and archived.","Az igény törölve és archiválva."),"success");await renderIntake();
+      }catch(error){button.disabled=false;toast(humanError(error),"error");}
+    });
+  }
   $("#intakeEditor").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));if(!body.client_id)delete body.client_id;if(!body.piano_id)delete body.piano_id;if(!body.assigned_technician_id)delete body.assigned_technician_id;if(!body.source_conversation_id)delete body.source_conversation_id;
     const button=event.currentTarget.querySelector('button[type="submit"]');button.disabled=true;
