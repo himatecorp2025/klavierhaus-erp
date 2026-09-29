@@ -1298,3 +1298,64 @@ select option{background:var(--surface);color:var(--ink)}
   .workflow-view-controls{align-items:stretch}
   .workflow-view-controls .segmented-control{width:100%;overflow-x:auto}
 }
+
+
+/* WORKFLOW STATUS + DRAG UX V8 */
+.job-drag-handle{cursor:grab;user-select:none;touch-action:none}
+.job-drag-handle:active{cursor:grabbing}
+.stage-card.dragging,.workflow-column.dragging{opacity:.32}
+.workflow-drag-ghost,.workflow-touch-drag-ghost{
+  opacity:.94;transform:rotate(1.2deg) scale(.985);box-shadow:0 24px 60px rgba(0,0,0,.34);
+  border-color:var(--accent)!important;background:var(--surface)!important;
+}
+.workflow-touch-drag-ghost{left:0;top:0}
+.workflow-column-drag-ghost{opacity:.92;box-shadow:0 28px 70px rgba(0,0,0,.34);background:var(--surface)}
+.workflow-column.drag-over{outline:2px solid var(--accent);outline-offset:3px;background:var(--accent-soft)}
+.status-chip{border:1px solid currentColor}
+.stage-card.status-scheduled{border-left:4px solid #2f7cff;background:color-mix(in srgb,#2f7cff 9%,var(--surface))}
+.stage-card.status-in_progress{border-left:4px solid #e6ad2f;background:color-mix(in srgb,#e6ad2f 9%,var(--surface))}
+.stage-card.status-blocked{border-left:4px solid #9666ff;background:color-mix(in srgb,#9666ff 10%,var(--surface))}
+.stage-card.status-overdue{border-left:4px solid #e55c62;background:color-mix(in srgb,#e55c62 10%,var(--surface))}
+.stage-card.status-completed{border-left:4px solid #2f9b68;background:color-mix(in srgb,#2f9b68 9%,var(--surface))}
+.status-chip.status-scheduled{color:#69a2ff;background:color-mix(in srgb,#2f7cff 15%,var(--surface))}
+.status-chip.status-in_progress{color:#e6ad2f;background:color-mix(in srgb,#e6ad2f 14%,var(--surface))}
+.status-chip.status-blocked{color:#b695ff;background:color-mix(in srgb,#9666ff 14%,var(--surface))}
+.status-chip.status-overdue,.status-chip.status-cancelled{color:#ff858a;background:color-mix(in srgb,#e55c62 14%,var(--surface))}
+.status-chip.status-completed{color:#61c995;background:color-mix(in srgb,#2f9b68 14%,var(--surface))}
+.phase-chip.phase-status-scheduled{border-color:color-mix(in srgb,#2f7cff 48%,var(--line));color:#69a2ff}
+.phase-chip.phase-status-in_progress{border-color:color-mix(in srgb,#e6ad2f 48%,var(--line));color:#e6ad2f}
+.phase-chip.phase-status-blocked{border-color:color-mix(in srgb,#9666ff 48%,var(--line));color:#b695ff}
+.phase-chip.phase-status-overdue,.phase-chip.phase-status-cancelled{border-color:color-mix(in srgb,#e55c62 48%,var(--line));color:#ff858a}
+.phase-chip.phase-status-completed{border-color:color-mix(in srgb,#2f9b68 48%,var(--line));color:#61c995}
+.workflow-start,.workflow-due{font-size:10px;color:var(--muted)}
+.workflow-plan-row{grid-template-columns:minmax(170px,1.25fr) minmax(160px,1fr) minmax(170px,1fr) minmax(170px,1fr);align-items:end}
+.workflow-plan-row.phase-status-completed{border-color:color-mix(in srgb,#2f9b68 36%,var(--line))}
+.workflow-plan-row.phase-status-overdue{border-color:color-mix(in srgb,#e55c62 40%,var(--line))}
+.workflow-plan-row.phase-status-blocked{border-color:color-mix(in srgb,#9666ff 38%,var(--line))}
+@media(max-width:980px){
+  .workflow-plan-row{grid-template-columns:1fr 1fr}
+}
+@media(max-width:620px){
+  .workflow-plan-row{grid-template-columns:1fr}
+}
+
+/* Intake assessment: square, touch-friendly choice grid */
+.assessment-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.assessment-option{
+  position:relative;display:grid;grid-template-columns:1fr;grid-template-rows:auto 1fr auto;align-content:start;
+  aspect-ratio:1/1;min-height:0;padding:12px;border-radius:16px;overflow:hidden;
+}
+.assessment-option>input{
+  position:absolute;top:10px;right:10px;width:21px;height:21px;z-index:2
+}
+.assessment-option>span{padding-right:28px;align-content:start}
+.assessment-option>span strong{font-size:12px;line-height:1.25}
+.assessment-option>span small{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.assessment-price{grid-template-columns:auto 1fr;align-self:end;margin-top:8px}
+.assessment-price>span{font-size:16px;font-weight:800;color:var(--accent)}
+.assessment-price input{width:100%;min-width:0}
+.assessment-option:has(>input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;background:var(--accent-soft)}
+@media(max-width:700px){
+  .assessment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .assessment-option{padding:10px}
+}
