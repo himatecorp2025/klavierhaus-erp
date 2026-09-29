@@ -208,6 +208,11 @@ ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("jobs","workflow_owner_user_id","TEXT");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
+db.prepare("UPDATE jobs SET workflow_owner_user_id=COALESCE(workflow_owner_user_id,created_by_user_id) WHERE workflow_owner_user_id IS NULL").run();
+db.prepare(`UPDATE job_workflow_phases SET responsible_user_id=COALESCE(responsible_user_id,(SELECT created_by_user_id FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
+  WHERE responsible_user_id IS NULL`).run();
+db.prepare(`UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,(SELECT scheduled_at FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
+  WHERE stage_key='received' AND starts_at IS NULL`).run();
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
