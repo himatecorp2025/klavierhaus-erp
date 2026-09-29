@@ -577,8 +577,6 @@ CREATE TABLE IF NOT EXISTS support_holidays (
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_status_activity ON customer_conversations(status,last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_assignee ON customer_conversations(assigned_user_id,status,last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation_time ON customer_messages(conversation_id,created_at,id);
-CREATE INDEX IF NOT EXISTS idx_private_appointments_conversation ON private_appointments(conversation_id,scheduled_at);
-
 CREATE TABLE IF NOT EXISTS app_settings (
   setting_key TEXT PRIMARY KEY,
   setting_value TEXT,
@@ -796,6 +794,7 @@ CREATE TABLE IF NOT EXISTS private_appointments (
 );
 CREATE INDEX IF NOT EXISTS idx_private_appointments_time ON private_appointments(scheduled_at,status);
 CREATE INDEX IF NOT EXISTS idx_private_appointments_context ON private_appointments(appointment_type,piano_id,service_id);
+CREATE INDEX IF NOT EXISTS idx_private_appointments_conversation ON private_appointments(conversation_id,scheduled_at);
 
 CREATE TABLE IF NOT EXISTS notification_events (
   id TEXT PRIMARY KEY,
