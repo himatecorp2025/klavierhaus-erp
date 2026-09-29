@@ -59,12 +59,12 @@ function parsePageRoutes(raw) {
 }
 
 function defaultWebsiteDesignSettings() {
-  return { black: "#080807", ivory: "#f2efe8", cream: "#e8e1d5", gold: "#b79a60", gold_bright: "#d9bd7a", muted: "#aaa49a", line: "rgba(183,154,96,.28)", display: "Cormorant Garamond", sans: "Inter", logo_url: "" };
+  return { black: "#080807", ivory: "#f2efe8", cream: "#e8e1d5", gold: "#b79a60", gold_bright: "#d9bd7a", muted: "#aaa49a", line: "rgba(183,154,96,.28)", display: "Cormorant Garamond", sans: "Inter", logo_url: "", favicon_url: "" };
 }
 
 function parseDesignSettings(raw) {
   const value = defaultWebsiteDesignSettings();
-  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed.logo_url || ""))) value.logo_url = String(parsed.logo_url); } catch (_error) { /* defaults */ }
+  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for(const key of ["logo_url","favicon_url"]) if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); } catch (_error) { /* defaults */ }
   return value;
 }
 
