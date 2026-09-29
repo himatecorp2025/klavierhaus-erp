@@ -39,11 +39,13 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
     p.brand AS piano_brand,p.model AS piano_model,p.serial_number AS piano_serial_number,p.location_notes AS piano_location_notes,
     u.name AS assigned_technician_name,u.calendar_color AS assigned_technician_color,
+    owner.name AS workflow_owner_name,
     (SELECT COUNT(*) FROM job_handoffs h WHERE h.job_id=j.id) AS handoff_count
     FROM jobs j
     JOIN clients c ON c.id=j.client_id
     JOIN pianos p ON p.id=j.piano_id
-    LEFT JOIN users u ON u.id=j.assigned_technician_id`;
+    LEFT JOIN users u ON u.id=j.assigned_technician_id
+    LEFT JOIN users owner ON owner.id=j.workflow_owner_user_id`;
 
   function stageDefinitions({includeInactive=false}={}){
     const rows=db.prepare(`SELECT stage_key key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_at
@@ -59,10 +61,23 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     return "in_progress";
   }
   function phasesForJob(jobId){
-    const rows=db.prepare(`SELECT id,job_id,stage_key,position,enabled,due_at,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at
-      FROM job_workflow_phases WHERE job_id=? ORDER BY position,id`).all(jobId);
+    const rows=db.prepare(`SELECT p.id,p.job_id,p.stage_key,p.position,p.enabled,p.starts_at,p.due_at,p.responsible_user_id,
+      ru.name AS responsible_name,p.blocker_code,p.blocker_note,p.activated_at,p.completed_at,p.created_at,p.updated_at
+      FROM job_workflow_phases p LEFT JOIN users ru ON ru.id=p.responsible_user_id
+      WHERE p.job_id=? ORDER BY p.position,p.id`).all(jobId);
     if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled)}));
-    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,due_at:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,responsible_user_id:null,responsible_name:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+  }
+  function phaseVisualStatus(job,phase,now=Date.now()){
+    if(job?.cancelled_at)return "cancelled";
+    if(job?.stage==="completed"||phase?.completed_at)return "completed";
+    if(phase?.blocker_code)return "blocked";
+    const due=phase?.due_at?new Date(phase.due_at).getTime():NaN;
+    if(Number.isFinite(due)&&due<now)return "overdue";
+    const plannedStart=phase?.starts_at||(phase?.stage_key==="received"?job?.scheduled_at:null)||phase?.activated_at;
+    const start=plannedStart?new Date(plannedStart).getTime():NaN;
+    if(Number.isFinite(start)&&start>now)return "scheduled";
+    return "in_progress";
   }
   function pendingWorkingPhases(jobId,currentStage){
     return phasesForJob(jobId).filter(row=>row.enabled&&!row.completed_at&&row.stage_key!==currentStage&&row.stage_key!=="completed"&&row.stage_key!=="admin_approval");
@@ -85,7 +100,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     const stage=logicalStage(row),workflow_phases=phasesForJob(row.id);
     const current_phase=workflow_phases.find(phase=>phase.stage_key===stage)||null;
     const next_phase=stage==="planned"||stage==="completed"?null:nextEnabledPhase(row.id,stage);
-    return {...row,storage_stage:row.stage,stage,workflow_phases,current_phase,next_stage:next_phase?.stage_key||null,ready_for_closeout:readyForCloseout(row.id,stage)};
+    const phasesWithStatus=workflow_phases.map(phase=>({...phase,visual_status:phaseVisualStatus({...row,stage},phase)}));
+    const activePhase=phasesWithStatus.find(phase=>phase.stage_key===stage)||null;
+    return {...row,storage_stage:row.stage,stage,workflow_phases:phasesWithStatus,current_phase:activePhase,next_stage:next_phase?.stage_key||null,
+      workflow_status:stage==="planned"?"planned":phaseVisualStatus({...row,stage},activePhase),ready_for_closeout:readyForCloseout(row.id,stage)};
   }
   const jobById=id=>decorateJob(db.prepare(`${selectJob} WHERE j.id=?`).get(id));
 
