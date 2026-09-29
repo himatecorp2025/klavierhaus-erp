@@ -5,6 +5,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const {supportState}=require("./support-calendar");
 const {assertAvailable,interval,holdExpiry}=require("./private-appointment-scheduling");
+const {ensureClientIdentity,findClientIdentity}=require("./client-identity");
 
 const PUBLIC_CATEGORIES=new Set(["SERVICE","TECHNICAL","PIANO","REPAIR","PRIVATE_CONSULTATION","BILLING","OTHER"]);
 const IDENTITY_REQUIRED=new Set(["SERVICE","PIANO","REPAIR","PRIVATE_CONSULTATION","BILLING"]);
@@ -64,7 +65,8 @@ function registerWebsiteConversationRoutes({
       .map(message=>({...message,attachments:attachmentRows(message.id,{token,conversationId:row.id})}));
     const linkedAppointments=db.prepare("SELECT * FROM private_appointments WHERE conversation_id=? ORDER BY scheduled_at DESC").all(row.id);
     const linkedIntake=db.prepare("SELECT id,status,reported_issue,estimated_total,created_at FROM intake_leads WHERE source_conversation_id=? ORDER BY id DESC LIMIT 1").get(row.id)||null;
-    return {...row,messages,appointment_proposals:proposals(row.id),private_appointments:linkedAppointments,linked_intake:linkedIntake,support:supportState({db,env}),staff_view:staffView};
+    const linkedClient=row.client_id?db.prepare("SELECT id,name,email,phone,address,preferred_language,client_type,is_vip FROM clients WHERE id=?").get(row.client_id)||null:null;
+    return {...row,messages,appointment_proposals:proposals(row.id),private_appointments:linkedAppointments,linked_intake:linkedIntake,linked_client:linkedClient,support:supportState({db,env}),staff_view:staffView};
   }
   function saveFiles(files,conversationId,messageId){
     const insert=db.prepare("INSERT INTO customer_message_attachments(id,conversation_id,message_id,stored_name,original_name,mime_type,file_size,sha256) VALUES(?,?,?,?,?,?,?,?)");
@@ -105,8 +107,9 @@ function registerWebsiteConversationRoutes({
     const token=crypto.randomBytes(32).toString("base64url"),conversationId=id("CONV"),messageId=id("MSG"),support=supportState({db,env});
     try{
       db.transaction(()=>{
-        db.prepare(`INSERT INTO customer_conversations(id,public_token_hash,public_token_encrypted,name,email,language,category,status,consent_contact,source_path,metadata_json,last_message_at,last_activity_at)
-          VALUES(?,?,?,?,?,?,?,'PENDING_STAFF',1,?,'{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(conversationId,hash(token),encryptToken(token,tokenKey),name||null,mail||null,req.body?.language==="hu"?"hu":"en",category,clean(req.body?.source_path,1000)||null);
+        const linked=ensureClientIdentity(db,{name,email:mail,language:req.body?.language},{create:Boolean(name&&validEmail(mail))}).client;
+        db.prepare(`INSERT INTO customer_conversations(id,public_token_hash,public_token_encrypted,name,email,client_id,language,category,status,consent_contact,source_path,metadata_json,last_message_at,last_activity_at)
+          VALUES(?,?,?,?,?,?,?,?,'PENDING_STAFF',1,?,'{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(conversationId,hash(token),encryptToken(token,tokenKey),linked?.name||name||null,linked?.email||mail||null,linked?.id||null,req.body?.language==="hu"?"hu":"en",category,clean(req.body?.source_path,1000)||null);
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(messageId,conversationId,"CUSTOMER",name||"Guest",mail||null,message);
         saveFiles(req.files,conversationId,messageId);event(conversationId,"CREATED",{toStatus:"PENDING_STAFF",details:{message_id:messageId,support_open:support.open}});
       })();
@@ -149,21 +152,35 @@ function registerWebsiteConversationRoutes({
     if(proposal.status!=="PROPOSED")return res.status(409).json({error:"APPOINTMENT_PROPOSAL_ALREADY_RESOLVED"});
     if(proposal.expires_at&&new Date(proposal.expires_at)<=new Date())return res.status(409).json({error:"APPOINTMENT_PROPOSAL_EXPIRED"});
     const decision=clean(req.body?.decision,20).toUpperCase();if(!["ACCEPTED","DECLINED"].includes(decision))return res.status(400).json({error:"INVALID_APPOINTMENT_DECISION"});
-    db.transaction(()=>{
-      db.prepare("UPDATE customer_appointment_proposals SET status=?,responded_at=CURRENT_TIMESTAMP,expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(decision,decision==="ACCEPTED"?holdExpiry():proposal.expires_at,proposal.id);
-      db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);
-      if(decision==="DECLINED")db.prepare("UPDATE private_appointment_requests SET status='REQUESTED',proposal_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE proposal_id=? AND status='PROPOSED'").run(proposal.id);
-      event(row.id,decision==="ACCEPTED"?"APPOINTMENT_ACCEPTED":"APPOINTMENT_DECLINED",{toStatus:"PENDING_STAFF",details:{proposal_id:proposal.id}});
-    })();
+    const request=db.prepare("SELECT * FROM private_appointment_requests WHERE proposal_id=?").get(proposal.id)||null;
+    let appointmentId=null,slot=null,linkedClient=null;
+    if(decision==="ACCEPTED"){
+      const phone=clean(proposal.phone||request?.phone,80);if(!phone)return res.status(409).json({error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED"});
+      try{slot=assertAvailable(db,{startsAt:proposal.starts_at,endsAt:proposal.ends_at,excludeProposalId:proposal.id});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
+      linkedClient=row.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(row.client_id):null;
+      if(!linkedClient)linkedClient=ensureClientIdentity(db,{name:row.name||request?.name,email:row.email||request?.email,phone,language:row.language||request?.language},{create:true}).client;
+      appointmentId=id("PA");
+      db.transaction(()=>{
+        db.prepare(`INSERT INTO private_appointments(id,appointment_type,name,email,phone,scheduled_at,scheduled_end_at,duration_min,note,conversation_id,client_id,piano_id,service_id,status,assigned_user_id,language,source_path,created_source,created_by_user_id)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'SCHEDULED',?,?,?,?,?)`).run(
+          appointmentId,proposal.appointment_type,row.name||request?.name||"Guest",row.email||request?.email||null,phone,slot.starts_at,slot.ends_at,slot.duration_min,proposal.note||request?.note||null,row.id,linkedClient?.id||request?.client_id||null,
+          request?.piano_id||null,request?.service_id||null,proposal.assigned_user_id||row.assigned_user_id||null,row.language||request?.language||"en",row.source_path||request?.source_path||null,"ERP",proposal.created_by_user_id||null
+        );
+        db.prepare("UPDATE customer_appointment_proposals SET status='ACCEPTED',private_appointment_id=?,responded_at=CURRENT_TIMESTAMP,expires_at=NULL,finalized_at=CURRENT_TIMESTAMP,finalized_by_user_id=created_by_user_id,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(appointmentId,proposal.id);
+        db.prepare("UPDATE customer_conversations SET client_id=COALESCE(client_id,?),status='OPEN',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(linkedClient?.id||request?.client_id||null,row.id);
+        if(request)db.prepare("UPDATE private_appointment_requests SET status='APPROVED',client_id=COALESCE(client_id,?),private_appointment_id=?,assigned_user_id=COALESCE(assigned_user_id,?),reviewed_by_user_id=COALESCE(reviewed_by_user_id,?),reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(linkedClient?.id||null,appointmentId,proposal.assigned_user_id||null,proposal.created_by_user_id||null,request.id);
+        event(row.id,"APPOINTMENT_ACCEPTED",{toStatus:"OPEN",details:{proposal_id:proposal.id,private_appointment_id:appointmentId,auto_finalized:true}});
+      })();
+    }else{
+      db.transaction(()=>{
+        db.prepare("UPDATE customer_appointment_proposals SET status='DECLINED',responded_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(proposal.id);
+        db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);
+        db.prepare("UPDATE private_appointment_requests SET status='REQUESTED',proposal_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE proposal_id=? AND status='PROPOSED'").run(proposal.id);
+        event(row.id,"APPOINTMENT_DECLINED",{toStatus:"PENDING_STAFF",details:{proposal_id:proposal.id}});
+      })();
+    }
     const after=byId(row.id);
-    if(notifications)notifications.emit({
-      category:"PRIVATE_APPOINTMENT",entityType:"CUSTOMER_CONVERSATION",entityId:row.id,
-      titleEn:decision==="ACCEPTED"?"Customer accepted proposed appointment":"Customer requested another appointment time",
-      titleHu:decision==="ACCEPTED"?"Az ügyfél elfogadta az időpontjavaslatot":"Az ügyfél másik időpontot kér",
-      bodyEn:`${row.name||"Customer"} · ${formatNy(new Date(proposal.starts_at))}`,bodyHu:`${row.name||"Ügyfél"} · ${formatNy(new Date(proposal.starts_at))}`,
-      actionUrl:"#messenger",severity:decision==="ACCEPTED"?"SUCCESS":"INFO",recipients:supportRecipients(proposal.assigned_user_id||row.assigned_user_id)
-    });
+    if(notifications)notifications.emit({category:"PRIVATE_APPOINTMENT",entityType:decision==="ACCEPTED"?"PRIVATE_APPOINTMENT":"CUSTOMER_CONVERSATION",entityId:appointmentId||row.id,titleEn:decision==="ACCEPTED"?"Customer accepted · appointment scheduled":"Customer requested another appointment time",titleHu:decision==="ACCEPTED"?"Ügyfél elfogadta · időpont naptárba helyezve":"Az ügyfél másik időpontot kér",bodyEn:`${row.name||"Customer"} · ${formatNy(new Date(proposal.starts_at))}`,bodyHu:`${row.name||"Ügyfél"} · ${formatNy(new Date(proposal.starts_at))}`,actionUrl:decision==="ACCEPTED"?"/?view=workshop&private=1":"#messenger",severity:decision==="ACCEPTED"?"SUCCESS":"INFO",recipients:supportRecipients(proposal.assigned_user_id||row.assigned_user_id)});
     res.json(payload(after,{token:req.params.token}));
   });
 
@@ -238,10 +255,11 @@ function registerWebsiteConversationRoutes({
     let slot;try{slot=assertAvailable(db,{startsAt,endsAt:req.body?.ends_at,duration:req.body?.duration_min||60});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
     const type=clean(req.body?.appointment_type||"PRIVATE_VISIT",40).toUpperCase();if(!["PRIVATE_VISIT","PIANO_VIEWING","SERVICE_CONSULTATION"].includes(type))return res.status(400).json({error:"INVALID_APPOINTMENT_TYPE"});
     const assigned=clean(req.body?.assigned_user_id,160)||row.assigned_user_id||req.user.id;if(assigned&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assigned))return res.status(400).json({error:"INVALID_APPOINTMENT_ASSIGNEE"});
+    const linked=row.client_id?db.prepare("SELECT phone FROM clients WHERE id=?").get(row.client_id):null,proposalPhone=clean(req.body?.phone,80)||clean(linked?.phone,80);if(!proposalPhone)return res.status(400).json({error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED"});
     const proposalId=id("APR"),expiry=holdExpiry();
     db.transaction(()=>{
       db.prepare(`INSERT INTO customer_appointment_proposals(id,conversation_id,appointment_type,starts_at,ends_at,assigned_user_id,phone,note,status,created_by_user_id,expires_at)
-        VALUES(?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,row.id,type,slot.starts_at,slot.ends_at,assigned,clean(req.body?.phone,80)||null,clean(req.body?.note,1000)||null,req.user.id,expiry);
+        VALUES(?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,row.id,type,slot.starts_at,slot.ends_at,assigned,proposalPhone,clean(req.body?.note,1000)||null,req.user.id,expiry);
       db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',assigned_user_id=COALESCE(assigned_user_id,?),last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assigned,row.id);
       event(row.id,"APPOINTMENT_PROPOSED",{actor:req.user,fromStatus:row.status,toStatus:"PENDING_CUSTOMER",details:{proposal_id:proposalId,starts_at:slot.starts_at,ends_at:slot.ends_at,duration_min:slot.duration_min,expires_at:expiry}});
     })();
@@ -251,9 +269,9 @@ function registerWebsiteConversationRoutes({
   app.get("/api/customer-conversations/:id/intake-draft",auth,staff,(req,res)=>{
     const row=byId(req.params.id);if(!row)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
     const customerMessages=db.prepare("SELECT body FROM customer_messages WHERE conversation_id=? AND direction='CUSTOMER' ORDER BY created_at,id LIMIT 8").all(row.id).map(item=>item.body).filter(Boolean);
-    const client=validEmail(row.email)?db.prepare("SELECT id FROM clients WHERE lower(COALESCE(email,''))=? ORDER BY id LIMIT 1").get(row.email):null;
+    const client=row.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(row.client_id):findClientIdentity(db,{name:row.name,email:row.email}).client;
     res.json({
-      source_conversation_id:row.id,client_id:client?.id||null,raw_client_name:row.name||"",raw_contact:row.email||"",
+      source_conversation_id:row.id,client_id:client?.id||null,client_name:client?.name||row.name||"",client_email:client?.email||row.email||"",client_phone:client?.phone||"",client_type:client?.client_type||"PRIVATE",raw_client_name:client?.name||row.name||"",raw_contact:client?.email||client?.phone||row.email||"",
       reported_issue:customerMessages.join("\n\n")||`${row.category} enquiry`,service_location:"workshop",estimated_urgency:"normal",
       assigned_technician_id:row.assigned_user_id||null
     });
