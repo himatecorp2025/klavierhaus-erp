@@ -354,7 +354,7 @@ function createTransactionalEmail(env = process.env) {
         html:content.html,
         text:content.text,
         ...(replyTo?{replyTo}:{}),
-        attachments:[{filename:"klavierhaus-intake-assessment.pdf",content:assessmentPdf}],
+        ...(assessmentPdf?{attachments:[{filename:"klavierhaus-intake-assessment.pdf",content:assessmentPdf}]}:{}),
         tags:[{name:"category",value:"intake_assessment"}]
       },{idempotencyKey});
       if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
