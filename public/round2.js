@@ -82,6 +82,15 @@ function r2ResponsibleOptions(selected=""){
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
 }
+function r2PrivateContext(row){
+  return row?.piano_id?(state.language==="hu"?(row.piano_title_hu||[row.piano_brand,row.piano_model].filter(Boolean).join(" ")):(row.piano_title_en||[row.piano_brand,row.piano_model].filter(Boolean).join(" "))):
+    row?.service_id?(state.language==="hu"?(row.service_title_hu||"Szolgáltatás"):(row.service_title_en||"Service")):tr("Private visit","Privát látogatás");
+}
+function r2PrivateCalendarRow(row){
+  return {...row,id:"private:"+row.id,private_appointment:true,private_id:row.id,title:r2PrivateContext(row),client_name:row.name,scheduled_end:new Date(new Date(row.scheduled_at).getTime()+60*60000).toISOString(),estimated_duration_min:60,assigned_technician_name:row.assigned_user_name||"",assigned_technician_color:"#c99a45",location_type:"private",stage:"private",workflow_status:"private"};
+}
+function r2PrivateStatusLabel(status){return ({SCHEDULED:tr("Scheduled","Ütemezve"),COMPLETED:tr("Completed","Lezárva"),CANCELLED:tr("Cancelled","Törölt")})[status]||status||"";}
+
 function r2ComputedStatus(job,now=Date.now()){
   const phase=job?.current_phase||{};
   if(job?.cancelled_at)return "cancelled";
@@ -472,6 +481,12 @@ function r2EventSegment(job,date){
 }
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
+  if(job.private_appointment){
+    return `<button type="button" class="calendar-event-block private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:#c99a45">
+      <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ◈ ${esc(job.title)}</strong>
+      <span>${esc(job.client_name)} · ${esc(job.phone||"")}</span><small>${esc(r2PrivateStatusLabel(job.status))}</small>
+    </button>`;
+  }
   const color=job.assigned_technician_color||"#8d6a2c";
   return `<button type="button" class="calendar-event-block location-${esc(job.location_type)} status-${esc(r2ComputedStatus(job))} ${job.stage==="completed"?"is-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(color)}">
     <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ${esc(job.title)}</strong>
@@ -509,7 +524,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2RefreshCalendarStatuses(host,jobs){
