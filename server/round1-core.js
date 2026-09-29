@@ -135,6 +135,25 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all());
   });
 
+  app.get("/api/master-data/piano-overview",auth,staff,(_req,res)=>{
+    const classified=db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
+      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
+      FROM pianos p JOIN clients c ON c.id=p.client_id
+      WHERE COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
+      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all();
+    const review=db.prepare(`SELECT r.*,c.name AS client_name,c.address AS client_address,
+      COALESCE(NULLIF(TRIM(r.source_brand),''),'Unknown') AS display_brand,
+      NULLIF(TRIM(r.source_model),'') AS display_model,
+      NULLIF(TRIM(r.source_serial_number),'') AS display_serial_number
+      FROM client_piano_review_queue r
+      LEFT JOIN clients c ON c.id=r.client_id
+      WHERE r.status='PENDING'
+      ORDER BY lower(COALESCE(r.source_brand,'')),lower(COALESCE(r.source_model,'')),r.id`).all();
+    const sourceRows=db.prepare("SELECT COUNT(*) AS count FROM master_data_piano_source_map").get()?.count||0;
+    const sourceGroups=db.prepare("SELECT COUNT(DISTINCT COALESCE(CAST(piano_id AS TEXT),'R:'||CAST(review_id AS TEXT))) AS count FROM master_data_piano_source_map WHERE piano_id IS NOT NULL OR review_id IS NOT NULL").get()?.count||0;
+    res.json({classified,review,totals:{classified:classified.length,review:review.length,total_entities:classified.length+review.length,source_rows:Number(sourceRows),source_groups:Number(sourceGroups)}});
+  });
+
   app.get("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const id=integerId(req.params.id);
     if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});

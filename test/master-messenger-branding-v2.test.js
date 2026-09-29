@@ -27,6 +27,8 @@ test("public Messenger composer is icon-only for attachment and does not render 
   assert.ok(start>=0);
   assert.match(composer,/customer-chat__attach-button/);
   assert.match(composer,/📎/);
+  assert.ok(composer.indexOf("customer-chat__attach-button")<composer.indexOf("customer-chat-message"));
+  assert.ok(composer.indexOf("customer-chat-message")<composer.indexOf("customer-chat__send-button"));
   assert.doesNotMatch(composer,/<strong>|<small>|Image, PDF|Kép, PDF|document · max/);
 });
 
@@ -75,7 +77,8 @@ test("VIP remains independent from People Business Institution client type",()=>
   assert.match(schema,/client_type TEXT NOT NULL DEFAULT 'PRIVATE'/);
   assert.match(schema,/is_vip INTEGER NOT NULL DEFAULT 0/);
   assert.match(app,/PRIVATE:tr\("People","Emberek"\)/);
-  assert.match(app,/VIP is independent from the customer type/);
+  assert.match(app,/<strong>★ VIP<\/strong>/);
+  assert.doesNotMatch(app,/VIP is independent from (?:the )?customer type/);
 });
 
 test("piano list API exposes owner and effective location inherited from customer address",()=>{

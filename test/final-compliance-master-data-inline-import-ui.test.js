@@ -19,10 +19,18 @@ test("Master Data exposes admin CSV import and review-aware client counts",()=>{
   assert.match(app,/data-classify-review/);
 });
 
-test("unclassified pianos are excluded from normal piano cards and exposed through review queue",()=>{
-  const api=read("server/round1-core.js"),schema=read("server/schema.sql");
-  assert.match(api,/COALESCE\(p\.classification_status,'CLASSIFIED'\)='CLASSIFIED'/);
-  assert.match(api,/\/api\/clients\/:id\/piano-review/);
+test("Master Data piano overview keeps classified records separate but makes pending review instruments visible",()=>{
+  const api=read("server/round1-core.js"),app=read("public/app.js"),schema=read("server/schema.sql");
+  assert.match(api,/app\.get\("\/api\/master-data\/piano-overview"/);
+  assert.match(api,/WHERE r\.status='PENDING'/);
+  assert.match(api,/source_rows/);
+  assert.match(app,/api\("\/api\/master-data\/piano-overview"\)/);
+  assert.match(app,/state\.pianoReviews/);
+  assert.match(app,/piano-review-row/);
+  assert.match(app,/data-master-review-id/);
+  assert.match(app,/master-piano-summary/);
+  assert.match(app,/master CSV not imported yet/);
+  assert.match(app,/sourceDuplicateGroups/);
   assert.match(schema,/client_piano_review_queue/);
   assert.match(schema,/classification_status TEXT NOT NULL DEFAULT 'CLASSIFIED'/);
 });
@@ -95,6 +103,6 @@ test("piano-specific location remains optional and client address stays the effe
   assert.match(app,/piano\.location_notes\|\|client\?\.address\|\|piano\.client_address/);
 });
 
-test("PWA cache is bumped for Master Data reconciliation UI",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v17-unsaved-three-way-dialog/);
+test("PWA cache is bumped for Intake Messenger and Master Data corrections",()=>{
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v18-intake-messenger-master-fixes/);
 });

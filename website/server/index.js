@@ -234,9 +234,9 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
           <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
         </div>
         <div class="customer-chat__composer">
+          <label class="customer-chat__attach-button" title="${language === "hu" ? "Fájl csatolása" : "Attach file"}" aria-label="${language === "hu" ? "Fájl csatolása" : "Attach file"}"><input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"><span aria-hidden="true">📎</span></label>
           <label class="sr-only" for="customer-chat-message">${escapeHtml(chatCopy.message)}</label>
           <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" required placeholder="${escapeHtml(chatCopy.message)}"></textarea>
-          <label class="customer-chat__attach-button" title="${language === "hu" ? "Fájl csatolása" : "Attach file"}" aria-label="${language === "hu" ? "Fájl csatolása" : "Attach file"}"><input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"><span aria-hidden="true">📎</span></label>
           <button class="customer-chat__send-button" type="submit" aria-label="${escapeHtml(chatCopy.send)}"><span aria-hidden="true">➤</span></button>
         </div>
         <div class="customer-chat__file-list" data-chat-file-list></div>

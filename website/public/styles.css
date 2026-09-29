@@ -2099,8 +2099,8 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
 
 /* Customer Messenger V2: intake once, continuous chat afterwards. */
 .customer-chat__intake{display:grid;gap:.65rem}
-.customer-chat__composer{display:grid;grid-template-columns:minmax(0,1fr) 2.75rem 2.75rem;gap:.45rem;align-items:end}
-.customer-chat__composer textarea{min-height:2.75rem!important;max-height:8rem;resize:none;padding:.72rem .8rem!important}
+.customer-chat__composer{display:grid;grid-template-columns:2.75rem minmax(0,1fr) 2.75rem;gap:.45rem;align-items:end;width:100%;min-width:0}
+.customer-chat__composer textarea{width:100%!important;min-width:0!important;min-height:2.75rem!important;max-height:8rem;resize:none;padding:.72rem .8rem!important}
 .customer-chat__attach-button,.customer-chat__send-button{display:grid!important;place-items:center;width:2.75rem;height:2.75rem;min-height:2.75rem!important;padding:0!important;border:1px solid rgba(201,169,94,.5)!important;border-radius:50%!important;background:rgba(183,154,96,.08)!important;color:var(--gold-bright)!important;cursor:pointer}
 .customer-chat__send-button{border-color:var(--gold-bright)!important;background:var(--gold-bright)!important;color:#080807!important;font-size:1rem}
 .customer-chat__attach-button input{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
