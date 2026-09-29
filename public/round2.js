@@ -514,12 +514,12 @@ function r2RenderMonthGrid(range,jobs){
 }
 function r2RefreshCalendarStatuses(host,jobs){
   const byId=new Map((jobs||[]).map(job=>[String(job.id),job])),statuses=["scheduled","in_progress","blocked","overdue","completed","cancelled"];
-  $("[data-calendar-job]",host).forEach(node=>{
+  $$("[data-calendar-job]",host).forEach(node=>{
     const job=byId.get(String(node.dataset.calendarJob));if(!job)return;statuses.forEach(status=>node.classList.remove("status-"+status));node.classList.add("status-"+r2ComputedStatus(job));
   });
 }
 function r2UpdateCalendarNowLine(){
-  $("[data-now-line]").forEach(line=>{
+  $$("[data-now-line]").forEach(line=>{
     const column=line.closest("[data-calendar-date]");if(!column||column.dataset.calendarDate!==r2Today()){line.hidden=true;return;}
     const p=r2NyParts(new Date()),minutes=Number(p.hour)*60+Number(p.minute);
     line.hidden=minutes<R2_DAY_START||minutes>R2_DAY_END;line.style.setProperty("--now-top",`${(minutes-R2_DAY_START)*R2_PX_PER_MIN}px`);
