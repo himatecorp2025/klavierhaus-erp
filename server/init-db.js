@@ -201,6 +201,7 @@ if(tableExists("_documents_legacy_archive")){
 // DROP TABLE on an obsolete parent can fire SQLite's FK constraint triggers.
 db.pragma("foreign_keys = OFF");
 
+ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
 ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
 ensureColumn("clients","vip_updated_by_user_id","TEXT");
 ensureColumn("clients","vip_updated_at","TEXT");
