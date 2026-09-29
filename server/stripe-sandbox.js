@@ -51,6 +51,7 @@ function createStripeSandbox(options = {}) {
   const onPaymentRecorded = typeof options.onPaymentRecorded === "function" ? options.onPaymentRecorded : null;
   const onPaymentFulfilled = typeof options.onPaymentFulfilled === "function" ? options.onPaymentFulfilled : null;
   const onPaymentRefunded = typeof options.onPaymentRefunded === "function" ? options.onPaymentRefunded : null;
+  const onCheckoutSessionEvent = typeof options.onCheckoutSessionEvent === "function" ? options.onCheckoutSessionEvent : null;
   function callTransactionalCallback(callback, payload, code) {
     if (!callback) return null;
     const result = callback(payload);
@@ -347,11 +348,20 @@ function createStripeSandbox(options = {}) {
     try {
       let result = { ignored: true };
       if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type)) {
-        result = await fulfillCheckoutSession(event.data.object);
+        const session=event.data.object;
+        if(session?.metadata?.payment_domain==="workshop_invoice"){
+          if(!onCheckoutSessionEvent)throw new Error("WORKSHOP_PAYMENT_HANDLER_NOT_CONFIGURED");
+          result=await onCheckoutSessionEvent(event.type,session);
+        }else result = await fulfillCheckoutSession(session);
       } else if (["checkout.session.expired", "checkout.session.async_payment_failed"].includes(event.type)) {
         const session = event.data.object;
-        db.prepare("UPDATE event_checkout_holds SET status='EXPIRED',updated_at=CURRENT_TIMESTAMP WHERE stripe_checkout_session_id=? AND status='PENDING'").run(session.id);
-        result = { released: true };
+        if(session?.metadata?.payment_domain==="workshop_invoice"){
+          if(!onCheckoutSessionEvent)throw new Error("WORKSHOP_PAYMENT_HANDLER_NOT_CONFIGURED");
+          result=await onCheckoutSessionEvent(event.type,session);
+        }else{
+          db.prepare("UPDATE event_checkout_holds SET status='EXPIRED',updated_at=CURRENT_TIMESTAMP WHERE stripe_checkout_session_id=? AND status='PENDING'").run(session.id);
+          result = { released: true };
+        }
       } else if (["refund.created", "refund.updated", "refund.failed"].includes(event.type)) {
         const refund = event.data.object;
         const status = refund.status === "succeeded" ? "REFUNDED" : refund.status === "failed" ? "REFUND_FAILED" : "REFUND_PENDING";
