@@ -182,7 +182,9 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     try{
       const issue=text(req.body?.reported_issue,5000),location=text(req.body?.service_location||"workshop",30),urgency=text(req.body?.estimated_urgency||"normal",30);
       let clientId=integerId(req.body?.client_id),pianoId=integerId(req.body?.piano_id),identityStatus="unmatched";
-      const rawContact=text(req.body?.raw_contact,500),parsedContact=parseContact(rawContact);
+      const rawContact=text(req.body?.raw_contact,500),parsedContact=parseContact(rawContact),sourceConversationId=text(req.body?.source_conversation_id,160)||null;
+      if(sourceConversationId&&!db.prepare("SELECT 1 FROM customer_conversations WHERE id=?").get(sourceConversationId))return res.status(400).json({error:"INVALID_SOURCE_CONVERSATION"});
+      if(sourceConversationId){const existing=db.prepare("SELECT id FROM intake_leads WHERE source_conversation_id=? ORDER BY id DESC LIMIT 1").get(sourceConversationId);if(existing)return res.status(409).json({error:"INTAKE_ALREADY_EXISTS",intake_id:existing.id});}
       if(!clientId){
         const matches=exactClientCandidates(db,parsedContact);
         if(matches.length===1){clientId=Number(matches[0].id);identityStatus="matched";}
@@ -201,9 +203,9 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
       if(technician&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN')").get(technician))return res.status(400).json({error:"INVALID_TECHNICIAN_ID"});
       const media=normalizeMedia(req.body?.media_urls);
       const initialStatus=identityStatus==="ambiguous"?"under_review":"new";
-      const info=db.prepare(`INSERT INTO intake_leads(client_id,piano_id,raw_client_name,raw_contact,service_location,reported_issue,media_urls,estimated_urgency,status,assigned_technician_id,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
-        clientId,pianoId,text(req.body?.raw_client_name,240)||null,rawContact||null,location,issue,JSON.stringify(media),urgency,initialStatus,technician||null
+      const info=db.prepare(`INSERT INTO intake_leads(client_id,piano_id,raw_client_name,raw_contact,service_location,reported_issue,media_urls,estimated_urgency,status,assigned_technician_id,source_conversation_id,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+        clientId,pianoId,text(req.body?.raw_client_name,240)||null,rawContact||null,location,issue,JSON.stringify(media),urgency,initialStatus,technician||null,sourceConversationId
       );
       const row=leadRow(db.prepare("SELECT * FROM intake_leads WHERE id=?").get(Number(info.lastInsertRowid)));
       if(identityStatus==="ambiguous"&&notifications){
@@ -223,17 +225,28 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
   app.put("/api/intake/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM intake_leads WHERE id=?").get(id);
     if(!before)return res.status(404).json({error:"INTAKE_NOT_FOUND"});
+    if(before.status==="converted")return res.status(409).json({error:"INTAKE_ALREADY_CONVERTED"});
     try{
-      const status=text(req.body?.status??before.status,30);
-      if(!["new","under_review","converted","archived"].includes(status))throw Object.assign(new Error("INVALID_INTAKE_STATUS"),{status:400});
-      const media=req.body?.media_urls===undefined?mediaList(before.media_urls):normalizeMedia(req.body.media_urls);
-      db.prepare(`UPDATE intake_leads SET raw_client_name=?,raw_contact=?,reported_issue=?,media_urls=?,estimated_urgency=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
-        text(req.body?.raw_client_name??before.raw_client_name,240)||null,text(req.body?.raw_contact??before.raw_contact,500)||null,
-        text(req.body?.reported_issue??before.reported_issue,5000),JSON.stringify(media),
-        ["low","normal","urgent"].includes(String(req.body?.estimated_urgency??before.estimated_urgency))?String(req.body?.estimated_urgency??before.estimated_urgency):before.estimated_urgency,status,id
+      const status=text(req.body?.status??before.status,30);if(!["new","under_review","archived"].includes(status))throw Object.assign(new Error("INVALID_INTAKE_STATUS"),{status:400});
+      const location=text(req.body?.service_location??before.service_location,30);if(!["workshop","on_site"].includes(location))throw Object.assign(new Error("INVALID_SERVICE_LOCATION"),{status:400});
+      const urgency=text(req.body?.estimated_urgency??before.estimated_urgency,30);if(!["low","normal","urgent"].includes(urgency))throw Object.assign(new Error("INVALID_URGENCY"),{status:400});
+      let clientId=req.body?.client_id===undefined?before.client_id:integerId(req.body.client_id),pianoId=req.body?.piano_id===undefined?before.piano_id:integerId(req.body.piano_id);
+      if(clientId&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))throw Object.assign(new Error("INVALID_CLIENT_ID"),{status:400});
+      if(pianoId){
+        const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);if(!piano||(clientId&&Number(piano.client_id)!==Number(clientId)))throw Object.assign(new Error("INVALID_PIANO_ID"),{status:400});
+        if(!clientId)clientId=Number(piano.client_id);
+      }
+      const technician=req.body?.assigned_technician_id===undefined?before.assigned_technician_id:(text(req.body.assigned_technician_id,160)||null);
+      if(technician&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN')").get(technician))throw Object.assign(new Error("INVALID_TECHNICIAN_ID"),{status:400});
+      const sourceConversationId=req.body?.source_conversation_id===undefined?before.source_conversation_id:(text(req.body.source_conversation_id,160)||null);
+      if(sourceConversationId&&!db.prepare("SELECT 1 FROM customer_conversations WHERE id=?").get(sourceConversationId))throw Object.assign(new Error("INVALID_SOURCE_CONVERSATION"),{status:400});
+      const media=req.body?.media_urls===undefined?mediaList(before.media_urls):normalizeMedia(req.body.media_urls),issue=text(req.body?.reported_issue??before.reported_issue,5000);
+      if(!issue)throw Object.assign(new Error("REPORTED_ISSUE_REQUIRED"),{status:400});
+      db.prepare(`UPDATE intake_leads SET client_id=?,piano_id=?,raw_client_name=?,raw_contact=?,service_location=?,reported_issue=?,media_urls=?,estimated_urgency=?,status=?,assigned_technician_id=?,source_conversation_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+        clientId||null,pianoId||null,text(req.body?.raw_client_name??before.raw_client_name,240)||null,text(req.body?.raw_contact??before.raw_contact,500)||null,
+        location,issue,JSON.stringify(media),urgency,status,technician,sourceConversationId,id
       );
-      const row=leadRow(db.prepare("SELECT * FROM intake_leads WHERE id=?").get(id));
-      audit(req,"UPDATE","intake",String(id),leadRow(before),row);res.json(row);
+      const row=leadRow(db.prepare("SELECT * FROM intake_leads WHERE id=?").get(id));audit(req,"UPDATE","intake",String(id),leadRow(before),row);res.json(row);
     }catch(error){res.status(Number(error.status||400)).json({error:error.message||"INTAKE_UPDATE_FAILED"});}
   });
 
