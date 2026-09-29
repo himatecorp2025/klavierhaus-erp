@@ -766,13 +766,13 @@ test("Unified notifications support 3-hour dismiss, permanent Done, sound prefer
   const hidden=await request("/api/notifications",{token:manager});
   assert.equal(hidden.payload.notifications.some(item=>item.id===row.id),false);
 
-  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
+  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-MANAGER'").run(row.id);
   const returned=await request("/api/notifications",{token:manager});
   assert.equal(returned.payload.notifications.some(item=>item.id===row.id),true);
 
-  const done=await request("/api/notifications/"+encodeURIComponent(row.id)+"/acknowledge",{token:admin,method:"POST",body:{}});
+  const done=await request("/api/notifications/"+encodeURIComponent(row.id)+"/acknowledge",{token:manager,method:"POST",body:{}});
   assert.equal(done.status,200);
-  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
+  appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-MANAGER'").run(row.id);
   const gone=await request("/api/notifications",{token:manager});
   assert.equal(gone.payload.notifications.some(item=>item.id===row.id),false);
 
