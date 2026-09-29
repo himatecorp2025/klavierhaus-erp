@@ -1922,3 +1922,77 @@ input,select,textarea,button{max-width:100%}
   .assessment-option{min-height:108px!important;padding:9px!important}.assessment-option small{font-size:8px!important}.assessment-price input{width:60px!important}
   .mobile-more-popover .mobile-more-card{min-height:88px}
 }
+
+
+/* Messenger approval queue: compact status cards, not pill filters. */
+.messenger-status-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:0 0 12px}
+.messenger-status-card{display:grid;grid-template-columns:28px minmax(0,1fr);grid-template-areas:"icon count" "label label";align-items:center;gap:4px 8px;min-height:68px;padding:10px 11px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);color:var(--ink);text-align:left}
+.messenger-status-card>span{grid-area:icon;display:grid;place-items:center;width:28px;height:28px;border:1px solid var(--line);border-radius:9px;font-size:15px}
+.messenger-status-card>strong{grid-area:count;justify-self:end;font-size:18px;line-height:1}
+.messenger-status-card>small{grid-area:label;color:var(--muted);font-size:9px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.messenger-status-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
+.messenger-status-card.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface-2));box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent)}
+.messenger-status-card.active>span{border-color:var(--accent);color:var(--accent)}
+.messenger-inbox{grid-template-rows:auto 1fr}
+.messenger-request-detail{padding:18px}
+.messenger-request-detail dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:7px 12px}
+.messenger-request-detail dt{color:var(--muted)}.messenger-request-detail dd{margin:0;overflow-wrap:anywhere}
+.compact-button{margin-top:8px;min-height:36px!important;padding:7px 10px!important}
+.messenger-proposal-card.accepted{border-color:#4cb879;background:color-mix(in srgb,#4cb879 8%,var(--surface-2))}
+.messenger-proposal-card.cancelled,.messenger-proposal-card.declined{opacity:.62}
+
+/* Intake work selectors deliberately mirror the More-menu card language. */
+.assessment-category{margin-top:14px}
+.assessment-category h3{margin:0 0 7px;font-size:10px!important;letter-spacing:.09em!important}
+.assessment-grid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important}
+.assessment-option{
+  position:relative!important;
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  grid-template-rows:24px auto minmax(0,1fr) 34px!important;
+  place-items:center!important;
+  align-content:center!important;
+  gap:4px!important;
+  min-width:0!important;
+  min-height:108px!important;
+  aspect-ratio:auto!important;
+  padding:9px 10px!important;
+  border:1px solid var(--line)!important;
+  border-radius:15px!important;
+  background:var(--surface-2)!important;
+  color:var(--ink)!important;
+  text-align:center!important;
+  cursor:pointer!important;
+  overflow:hidden!important;
+}
+.assessment-option-icon{display:grid!important;place-items:center!important;width:24px!important;height:24px!important;padding:0!important;color:var(--ink)!important;font-size:20px!important;line-height:1!important}
+.assessment-option>strong{width:100%;padding:0 24px 0 0!important;font-size:10px!important;line-height:1.2!important;letter-spacing:.03em!important;text-transform:none!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+.assessment-option>small{width:100%;margin:0!important;padding:0 4px!important;color:var(--muted)!important;font-size:8px!important;line-height:1.2!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:1!important;overflow:hidden!important}
+.assessment-option>input[type="checkbox"]{position:absolute!important;top:9px!important;right:9px!important;width:19px!important;height:19px!important;min-height:0!important;margin:0!important;accent-color:var(--accent)!important;z-index:2}
+.assessment-price{align-self:end!important;justify-self:center!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:3px!important;width:auto!important;max-width:100%!important;color:var(--accent)!important;font-weight:800!important}
+.assessment-price>span{font-size:11px!important;color:var(--accent)!important}
+.assessment-price input{width:68px!important;min-width:0!important;min-height:30px!important;height:30px!important;padding:4px 6px!important;border-radius:10px!important;text-align:right!important;font-size:10px!important;font-weight:750!important}
+.assessment-option:hover{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))!important}
+.assessment-option.selected,.assessment-option:has(input[type="checkbox"]:checked){border-color:var(--accent)!important;background:color-mix(in srgb,var(--accent) 7%,var(--surface-2))!important;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent)!important}
+.assessment-option.selected .assessment-option-icon,.assessment-option:has(input[type="checkbox"]:checked) .assessment-option-icon{color:var(--accent)!important}
+
+@media(max-width:1100px){
+  .messenger-status-cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .assessment-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+}
+@media(max-width:700px){
+  .messenger-status-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .messenger-status-card{min-height:62px;padding:8px 9px;border-radius:13px}
+  .messenger-status-card>strong{font-size:16px}.messenger-status-card>small{font-size:8px}
+  .assessment-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+  .assessment-option{min-height:102px!important;padding:8px!important;border-radius:14px!important;grid-template-rows:22px auto 1fr 32px!important}
+  .assessment-option-icon{width:22px!important;height:22px!important;font-size:19px!important}
+  .assessment-option>strong{font-size:9px!important;padding-right:22px!important}
+  .assessment-option>small{font-size:7px!important;-webkit-line-clamp:1!important}
+  .assessment-price input{width:62px!important;height:29px!important;min-height:29px!important}
+}
+@media(max-width:360px){
+  .assessment-option{min-height:98px!important;padding:7px!important}
+  .assessment-option>small{display:none!important}
+  .assessment-option{grid-template-rows:22px 1fr 31px!important}
+}
