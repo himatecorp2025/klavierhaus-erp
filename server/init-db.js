@@ -190,6 +190,9 @@ ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(them
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
 ensureColumn("jobs","workflow_stage_key","TEXT");
+ensureColumn("jobs","workflow_owner_user_id","TEXT");
+ensureColumn("job_workflow_phases","starts_at","TEXT");
+ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
