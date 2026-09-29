@@ -38,6 +38,7 @@ const { registerNotificationCenterRoutes } = require("./notification-center");
 const { createAutomationOutbox } = require("./automation-outbox");
 const { createWorkshopPayments } = require("./workshop-payments");
 const { createCustomerAutomation } = require("./customer-automation");
+const { createInventoryService,registerInventoryRoutes } = require("./inventory");
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 
 const app = express();
@@ -354,9 +355,10 @@ app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{se
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
+const inventoryService=createInventoryService({db,notifications:notificationCenter});
 const automationOutbox=createAutomationOutbox({db,notifications:notificationCenter});
 workshopPayments=createWorkshopPayments({
-  db,env:process.env,transactionalEmail,automationOutbox,uploadDir:UPLOAD_DIR,
+  db,env:process.env,transactionalEmail,automationOutbox,notifications:notificationCenter,uploadDir:UPLOAD_DIR,
   appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
 });
 workshopPayments.registerPublicRoutes(app);
@@ -388,11 +390,12 @@ app.use("/api/public/website-contact-leads",(req,res,next)=>{
   next();
 });
 registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
-registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
-registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation});
+registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,notifications:notificationCenter});
+registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});
-registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
-registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
+registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",inventoryService});
+registerInventoryRoutes({app,db,auth,permit,audit,inventoryService});
+registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail,notifications:notificationCenter});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
