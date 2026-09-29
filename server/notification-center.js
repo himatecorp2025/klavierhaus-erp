@@ -75,6 +75,20 @@ function createNotificationCenter({db,env=process.env}={}){
     return existing||emit({category,entityType,entityId,...rest});
   }
   function refreshTimedNotifications(){
+    const recentLeads=db.prepare(`SELECT id,name,lead_type,message FROM website_contact_leads
+      WHERE status NOT IN ('CLOSED','REJECTED') AND datetime(created_at)>=datetime('now','-7 days') ORDER BY created_at DESC LIMIT 100`).all();
+    for(const lead of recentLeads)emitOnce({
+      category:"WEBSITE_LEAD",entityType:"WEBSITE_LEAD",entityId:String(lead.id),
+      titleEn:"New website enquiry",titleHu:"Új weboldali megkeresés",
+      bodyEn:`${lead.name} · ${String(lead.lead_type||"").replaceAll("_"," ")}${lead.message?` · ${String(lead.message).slice(0,220)}`:""}`,
+      bodyHu:`${lead.name} · ${String(lead.lead_type||"").replaceAll("_"," ")}${lead.message?` · ${String(lead.message).slice(0,220)}`:""}`,
+      actionUrl:"#cms",severity:"INFO"
+    });
+    const openLeadIds=new Set(recentLeads.map(row=>String(row.id)));
+    for(const event of db.prepare("SELECT id,entity_id FROM notification_events WHERE category='WEBSITE_LEAD' AND entity_type='WEBSITE_LEAD' AND resolved_at IS NULL").all()){
+      if(!openLeadIds.has(String(event.entity_id)))db.prepare("UPDATE notification_events SET resolved_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
+    }
+
     const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title
       FROM job_workflow_phases p JOIN jobs j ON j.id=p.job_id
       WHERE p.enabled=1 AND p.completed_at IS NULL AND p.due_at IS NOT NULL AND datetime(p.due_at)<CURRENT_TIMESTAMP
