@@ -35,6 +35,8 @@ try{
     CREATE TABLE contacts(id TEXT PRIMARY KEY,name TEXT,email TEXT,phone TEXT,address TEXT,notes TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE pianos(id TEXT PRIMARY KEY,brand TEXT,model TEXT,serial_no TEXT,finish TEXT,location TEXT,notes TEXT,owner_contact_id TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE client_pianos(id TEXT PRIMARY KEY,client_id TEXT,piano_id TEXT);
+    CREATE TABLE inventory_items(id TEXT PRIMARY KEY,name TEXT,qty REAL);
+    INSERT INTO inventory_items(id,name,qty) VALUES('LEGACY-INV-1','Legacy felt',12);
     CREATE TABLE invoices(id INTEGER PRIMARY KEY,total_amount REAL,status TEXT);
     CREATE TABLE invoice_credit_memos(id INTEGER PRIMARY KEY,invoice_id INTEGER);
     CREATE TRIGGER trg_invoice_credit_memos_immutable_update
@@ -56,6 +58,16 @@ try{
   legacy.close();
 
   run("FINAL_LEGACY_MIGRATION");
+  {
+    const migrated=new Database(dbPath);
+    const columns=migrated.prepare("PRAGMA table_info(inventory_items)").all().map(row=>row.name);
+    assert.ok(columns.includes("sku"),"canonical inventory_items.sku missing after legacy retirement");
+    assert.ok(columns.includes("quantity_on_hand"),"canonical inventory_items.quantity_on_hand missing after legacy retirement");
+    assert.equal(migrated.prepare("SELECT COUNT(*) c FROM inventory_items").get().c,0,"legacy inventory rows must not leak into the canonical stock catalog");
+    migrated.prepare(`INSERT INTO inventory_items(sku,name_en,name_hu,unit,quantity_on_hand,reorder_point,reorder_quantity,unit_cost,active)
+      VALUES('INV-SENTINEL','Migration sentinel','Migrációs sentinel','pcs',7,2,4,1.5,1)`).run();
+    migrated.close();
+  }
   run("FINAL_IDEMPOTENT");
 
   const db=new Database(dbPath,{readonly:true});
@@ -66,10 +78,10 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
-  for(const retired of ["contacts","client_pianos","planned_jobs","inventory_items","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child"]){
+  for(const retired of ["contacts","client_pianos","planned_jobs","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child","_inventory_legacy_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
@@ -77,6 +89,11 @@ try{
   assert.equal(db.prepare("SELECT COUNT(*) c FROM partners").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM job_handoffs").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM direct_expenses").get().c,0);
+  const inventorySentinel=db.prepare("SELECT * FROM inventory_items WHERE sku='INV-SENTINEL'").get();
+  assert.equal(inventorySentinel.quantity_on_hand,7,"canonical inventory data must survive idempotent init-db runs");
+  assert.equal(inventorySentinel.reorder_point,2);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM purchase_requests").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM inventory_movements").get().c,0);
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'final_compliance_schema_version\'").get().setting_value,"4");
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'workshop_ux_schema_version\'").get().setting_value,"5");
   assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=\'admin_ux_schema_version\'").get().setting_value,"6");
