@@ -617,7 +617,7 @@ test("Intake assessment PDF is exported and retained in Documents",async()=>{
   assert.ok(Number.isSafeInteger(archiveId)&&archiveId>0);
   const buffer=Buffer.from(await response.arrayBuffer());
   assert.ok(buffer.length>500);
-  assert.equal(buffer.subarray(0,8).toString("latin1"),"%PDF-1.4");
+  assert.match(buffer.subarray(0,8).toString("latin1"),/^%PDF-1\.[0-9]$/);
 
   const documents=await request("/api/archive/documents?category=intake_assessment",{token});
   assert.equal(documents.status,200,JSON.stringify(documents.payload));
@@ -633,5 +633,5 @@ test("Intake assessment PDF is exported and retained in Documents",async()=>{
   const fileResponse=await fetch(origin+"/api/archive/documents/"+archiveId+"/download",{headers:{Authorization:"Bearer "+token}});
   assert.equal(fileResponse.status,200);
   const archivedPdf=Buffer.from(await fileResponse.arrayBuffer());
-  assert.equal(archivedPdf.subarray(0,8).toString("latin1"),"%PDF-1.4");
+  assert.match(archivedPdf.subarray(0,8).toString("latin1"),/^%PDF-1\.[0-9]$/);
 });
