@@ -305,7 +305,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
         to:recipient,clientName:invoice.counterparty_name,
         piano:{brand:invoice.piano_brand,model:invoice.piano_model,serial_number:invoice.piano_serial_number},
         workSummary:invoice.summary,invoiceNumber:invoice.invoice_number,totalAmount:invoice.total_amount,invoicePdf:persisted.pdf,language,
-        idempotencyKey:`workshop-invoice-${invoice.id}-${invoice.updated_at||invoice.created_at}`
+        idempotencyKey:`workshop-invoice-${invoice.id}`
       });
       db.transaction(()=>{
         db.prepare(`UPDATE invoices SET status='sent',email_language=?,sent_at=CURRENT_TIMESTAMP,sent_by_user_id=?,resend_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
