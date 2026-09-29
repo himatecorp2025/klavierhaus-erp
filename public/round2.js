@@ -312,7 +312,7 @@ async function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
   $("#handoffForm").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     body.phase_labor_cost=Number(body.phase_labor_cost||0);body.phase_material_cost=Number(body.phase_material_cost||0);body.phase_duration_min=Number(body.phase_duration_min||0);
-    body.materials=$("[data-material-quantity]",event.currentTarget).map(input=>({inventory_item_id:Number(input.dataset.inventoryItemId),quantity:Number(input.value||0)})).filter(item=>item.inventory_item_id&&item.quantity>0);
+    body.materials=$$("[data-material-quantity]",event.currentTarget).map(input=>({inventory_item_id:Number(input.dataset.inventoryItemId),quantity:Number(input.value||0)})).filter(item=>item.inventory_item_id&&item.quantity>0);
     if(!body.assigned_to_user_id)delete body.assigned_to_user_id;
     const submit=event.currentTarget.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent=tr("Saving…","Mentés…");
     try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed and job moved.","Fázis lezárva, munka áthelyezve."),"success");await refresh();}catch(error){submit.disabled=false;submit.textContent=tr("Save & handoff","Mentés és továbbítás");toast(humanError(error),"error");}
