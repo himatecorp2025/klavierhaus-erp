@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v7-dynamic-workflow-cms-images/);
+  assert.match(sw,/klavierhaus-admin-v8-workflow-documents-intake/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
