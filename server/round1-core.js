@@ -12,6 +12,21 @@ function parseContact(raw){
   if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))return {email:value.toLowerCase(),phone:null};
   return {email:null,phone:value};
 }
+function normalizePhone(value){return String(value||"").replace(/\D/g,"").replace(/^1(?=\d{10}$)/,"");}
+function exactClientCandidates(db,{email,phone}={}){
+  const ids=new Set();
+  const normalizedEmail=text(email,320).toLowerCase();
+  if(normalizedEmail){
+    for(const row of db.prepare("SELECT id FROM clients WHERE lower(COALESCE(email,''))=?").all(normalizedEmail))ids.add(Number(row.id));
+  }
+  const normalizedPhone=normalizePhone(phone);
+  if(normalizedPhone){
+    for(const row of db.prepare("SELECT id,phone FROM clients WHERE phone IS NOT NULL AND trim(phone)<>''").all()){
+      if(normalizePhone(row.phone)===normalizedPhone)ids.add(Number(row.id));
+    }
+  }
+  return [...ids].map(id=>db.prepare("SELECT * FROM clients WHERE id=?").get(id)).filter(Boolean);
+}
 function mediaList(value){
   if(Array.isArray(value))return value;
   try{const parsed=JSON.parse(String(value||"[]"));return Array.isArray(parsed)?parsed:[];}catch(_error){return [];}
@@ -151,7 +166,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload}){
   app.get("/api/intake",auth,staff,(req,res)=>{
     const status=text(req.query.status,30).toLowerCase();
     if(status&&!["new","under_review","converted","archived"].includes(status))return res.status(400).json({error:"INVALID_INTAKE_STATUS"});
-    const rows=db.prepare(`SELECT i.*,c.name AS client_name,p.brand AS piano_brand,p.model AS piano_model,u.name AS assigned_technician_name,
+    const rows=db.prepare(`SELECT i.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.preferred_language AS client_preferred_language,p.brand AS piano_brand,p.model AS piano_model,u.name AS assigned_technician_name,
       j.id AS job_id,j.job_code AS job_code,j.stage AS job_stage
       FROM intake_leads i
       LEFT JOIN clients c ON c.id=i.client_id
@@ -166,7 +181,13 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload}){
   app.post("/api/intake",auth,staff,(req,res)=>{
     try{
       const issue=text(req.body?.reported_issue,5000),location=text(req.body?.service_location||"workshop",30),urgency=text(req.body?.estimated_urgency||"normal",30);
-      const clientId=integerId(req.body?.client_id),pianoId=integerId(req.body?.piano_id);
+      let clientId=integerId(req.body?.client_id),pianoId=integerId(req.body?.piano_id),identityStatus="unmatched";
+      const rawContact=text(req.body?.raw_contact,500),parsedContact=parseContact(rawContact);
+      if(!clientId){
+        const matches=exactClientCandidates(db,parsedContact);
+        if(matches.length===1){clientId=Number(matches[0].id);identityStatus="matched";}
+        else if(matches.length>1)identityStatus="ambiguous";
+      }else identityStatus="explicit";
       if(!issue)return res.status(400).json({error:"REPORTED_ISSUE_REQUIRED"});
       if(!["workshop","on_site"].includes(location))return res.status(400).json({error:"INVALID_SERVICE_LOCATION"});
       if(!["low","normal","urgent"].includes(urgency))return res.status(400).json({error:"INVALID_URGENCY"});
@@ -174,16 +195,18 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload}){
       if(pianoId){
         const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);
         if(!piano||(clientId&&Number(piano.client_id)!==clientId))return res.status(400).json({error:"INVALID_PIANO_ID"});
+        if(!clientId){clientId=Number(piano.client_id);identityStatus="piano_owner";}
       }
       const technician=text(req.body?.assigned_technician_id,160);
       if(technician&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN')").get(technician))return res.status(400).json({error:"INVALID_TECHNICIAN_ID"});
       const media=normalizeMedia(req.body?.media_urls);
+      const initialStatus=identityStatus==="ambiguous"?"under_review":"new";
       const info=db.prepare(`INSERT INTO intake_leads(client_id,piano_id,raw_client_name,raw_contact,service_location,reported_issue,media_urls,estimated_urgency,status,assigned_technician_id,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,'new',?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
-        clientId,pianoId,text(req.body?.raw_client_name,240)||null,text(req.body?.raw_contact,500)||null,location,issue,JSON.stringify(media),urgency,technician||null
+        VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+        clientId,pianoId,text(req.body?.raw_client_name,240)||null,rawContact||null,location,issue,JSON.stringify(media),urgency,initialStatus,technician||null
       );
       const row=leadRow(db.prepare("SELECT * FROM intake_leads WHERE id=?").get(Number(info.lastInsertRowid)));
-      audit(req,"CREATE","intake",String(row.id),null,row);res.status(201).json(row);
+      audit(req,"CREATE","intake",String(row.id),null,{...row,identity_status:identityStatus});res.status(201).json({...row,identity_status:identityStatus});
     }catch(error){res.status(Number(error.status||400)).json({error:error.message||"INTAKE_CREATE_FAILED"});}
   });
 
