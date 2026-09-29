@@ -279,21 +279,34 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     try{await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
-function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
+async function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
   const next=targetStage||job.next_stage;
   if(!next||next==="completed"){toast(tr("This job is ready for Admin closeout.","A munka adminisztrátori lezárásra kész."),"error");return;}
   const targetPhase=(job.workflow_phases||[]).find(phase=>phase.stage_key===next)||{};
+  const presets=await api("/api/handoff-presets").catch(()=>[]);
   openDialog({title:tr("Complete Phase / Handoff","Fázis lezárása / Átadás"),eyebrow:`${r2StageLabel(job.stage)} → ${r2StageLabel(next)}`,body:`<form id="handoffForm" class="form-grid">
     <div class="detail-note full">${tr("Complete the current phase and move the job to the selected unfinished phase. Intermediate phases may be completed in a different order; Admin Approval remains the final active phase.","Zárd le az aktuális fázist, és helyezd át a munkát a kiválasztott, még nyitott fázisba. A köztes fázisok eltérő sorrendben is teljesíthetők; az Admin jóváhagyás mindig az utolsó aktív fázis.")}</div>
+    ${presets.length?`<section class="full handoff-preset-panel"><div class="handoff-preset-head"><strong>${tr("Quick presets","Gyors presetek")}</strong><small>${tr("Tap once, then adjust if needed.","Egy érintés, utána szükség esetén módosítható.")}</small></div><div class="handoff-preset-strip">${presets.slice(0,6).map(p=>`<button type="button" class="handoff-preset-button" data-handoff-preset="${p.id}" data-labor="${Number(p.default_labor_cost||0)}" data-material="${Number(p.default_material_cost||0)}" data-duration="${Number(p.default_duration_min||0)}"><strong>${esc(state.language==="hu"?p.title_hu:p.title_en)}</strong><small>${r2Money(p.default_labor_cost)} / ${r2Money(p.default_material_cost)} ${tr("mat","anyag")} · ${Number(p.default_duration_min||0)} min</small></button>`).join("")}</div></section>`:""}
     <label class="field"><span>${tr("Labor / daily fee","Munkadíj / napi díj")} (USD)</span><input name="phase_labor_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field"><span>${tr("Material cost","Anyagköltség")} (USD)</span><input name="phase_material_cost" type="number" min="0" step="0.01" value="0"></label>
+    <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="phase_duration_min" type="number" min="0" step="15" value="0"></label>
     <label class="field full"><span>${tr("Internal handoff note","Belső átadási jegyzet")}</span><textarea name="phase_note"></textarea></label>
     <label class="field full"><span>${tr("Next phase responsible","Következő fázis felelőse")}</span><select name="assigned_to_user_id" required>${r2ResponsibleOptions(targetPhase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
     <input type="hidden" name="to_stage" value="${esc(next)}">
-    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Complete & move","Lezárás és áthelyezés")}</button></div></form>`});
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save & handoff","Mentés és továbbítás")}</button></div></form>`});
+  $$("[data-handoff-preset]").forEach(button=>button.addEventListener("click",()=>{
+    const form=$("#handoffForm");if(!form)return;
+    form.elements.phase_labor_cost.value=button.dataset.labor||"0";
+    form.elements.phase_material_cost.value=button.dataset.material||"0";
+    form.elements.phase_duration_min.value=button.dataset.duration||"0";
+    $$("[data-handoff-preset]").forEach(item=>item.classList.toggle("active",item===button));
+  }));
   $("#handoffForm").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.phase_labor_cost=Number(body.phase_labor_cost||0);body.phase_material_cost=Number(body.phase_material_cost||0);if(!body.assigned_to_user_id)delete body.assigned_to_user_id;
-    try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed and job moved.","Fázis lezárva, munka áthelyezve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
+    body.phase_labor_cost=Number(body.phase_labor_cost||0);body.phase_material_cost=Number(body.phase_material_cost||0);body.phase_duration_min=Number(body.phase_duration_min||0);
+    if(!body.assigned_to_user_id)delete body.assigned_to_user_id;
+    const submit=event.currentTarget.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent=tr("Saving…","Mentés…");
+    try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed and job moved.","Fázis lezárva, munka áthelyezve."),"success");await refresh();}catch(error){submit.disabled=false;submit.textContent=tr("Save & handoff","Mentés és továbbítás");toast(humanError(error),"error");}
   });
 }
 function r2OpenCancel(job,refresh=renderWorkshop){
