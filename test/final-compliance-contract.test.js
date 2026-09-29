@@ -122,3 +122,17 @@ test("Round J uses the canonical stock catalog instead of the retired legacy inv
   assert.match(inventory,/ensurePurchaseRequest/);
 });
 
+test("Round J connects preset material recipes to the mobile handoff and Admin controls",()=>{
+  const round2=read("public/round2.js"),v6=read("public/v6.js"),admin=read("server/admin-ux-v6.js");
+  assert.match(round2,/handoffMaterialUsage/);
+  assert.match(round2,/data-material-quantity/);
+  assert.match(round2,/body\.materials=/);
+  assert.match(round2,/preset\.materials/);
+  assert.match(v6,/Inventory & procurement/);
+  assert.match(v6,/data-preset-material-check/);
+  assert.match(v6,/body\.materials=/);
+  assert.match(v6,/\/api\/purchase-requests/);
+  assert.match(admin,/setPresetMaterials/);
+});
+
+
