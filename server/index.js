@@ -36,6 +36,7 @@ const { registerArchiveCenterRoutes } = require("./archive-center");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 const { registerNotificationCenterRoutes } = require("./notification-center");
 const { createAutomationOutbox } = require("./automation-outbox");
+const { createCustomerAutomation } = require("./customer-automation");
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 
 const app = express();
@@ -346,6 +347,10 @@ app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
 const automationOutbox=createAutomationOutbox({db,notifications:notificationCenter});
+const customerAutomation=createCustomerAutomation({db,transactionalEmail,automationOutbox});
+const customerAutomationTimer=setInterval(()=>{try{customerAutomation.sweep();}catch(error){console.warn("[CUSTOMER-AUTOMATION]",error.message);}},30*60*1000);
+customerAutomationTimer.unref?.();
+setTimeout(()=>{try{customerAutomation.sweep();}catch(error){console.warn("[CUSTOMER-AUTOMATION]",error.message);}},2000).unref?.();
 const automationTimer=setInterval(()=>{void automationOutbox.processDue(20).catch(error=>console.warn("[AUTOMATION-OUTBOX]",error.message));},60000);
 automationTimer.unref?.();
 setTimeout(()=>{void automationOutbox.processDue(20).catch(error=>console.warn("[AUTOMATION-OUTBOX]",error.message));},1000).unref?.();
@@ -371,8 +376,8 @@ app.use("/api/public/website-contact-leads",(req,res,next)=>{
 });
 registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
-registerRound2WorkflowRoutes({app,db,auth,permit,audit});
-registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox});
+registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation});
+registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
 registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
 
