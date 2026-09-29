@@ -103,6 +103,24 @@ test("Handoff presets are Admin-managed data and populate the mobile workflow ha
   assert.match(css,/\.handoff-preset-strip/);
 });
 
+test("Invoice closeout keeps the manual decision gate and durable automation stays behind it",()=>{
+  const schema=read("server/schema.sql"),finance=read("server/round3-finance.js"),pdf=read("server/document-pdf.js"),ui=read("public/round3.js"),index=read("server/index.js"),outbox=read("server/automation-outbox.js");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS automation_outbox/);
+  assert.match(schema,/snapshot_json TEXT NOT NULL DEFAULT '\{\}'/);
+  assert.match(schema,/labor_amount REAL NOT NULL DEFAULT 0/);
+  assert.match(finance,/automationOutbox\.register\("SEND_INVOICE"/);
+  assert.match(finance,/dedupeKey:`invoice-send-\$\{invoiceId\}`/);
+  assert.match(finance,/SELECT \* FROM job_handoffs WHERE job_id=\?/);
+  assert.match(pdf,/COMMERCIAL INVOICE/);
+  assert.match(pdf,/1 1 1 rg 0 0 612 792 re f/);
+  assert.doesNotMatch(pdf,/function businessInvoicePage[\s\S]*?\$\{DARK\} rg 0 0 612 792 re f/);
+  assert.match(ui,/Complete & Save Draft/);
+  assert.match(ui,/Complete & Send Invoice/);
+  assert.match(index,/createAutomationOutbox/);
+  assert.match(outbox,/processDue/);
+  assert.match(outbox,/dedupe_key TEXT|dedupeKey/);
+});
+
 test("calendar v6 shares horizontal scroll for header/body and creates jobs from an empty 15-minute slot",()=>{
   const round2=read("public/round2.js"),css=read("public/styles.css");
   assert.match(round2,/time-calendar-scroll[\s\S]*time-calendar-head[\s\S]*time-calendar-body/);
