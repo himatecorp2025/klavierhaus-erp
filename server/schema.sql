@@ -733,7 +733,7 @@ CREATE TABLE IF NOT EXISTS website_contact_leads (
 
 CREATE TABLE IF NOT EXISTS private_appointments (
   id TEXT PRIMARY KEY,
-  appointment_type TEXT NOT NULL CHECK(appointment_type IN ('PIANO_VIEWING','SERVICE_CONSULTATION')),
+  appointment_type TEXT NOT NULL CHECK(appointment_type IN ('PRIVATE_VISIT','PIANO_VIEWING','SERVICE_CONSULTATION')),
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
   scheduled_at TEXT NOT NULL,
