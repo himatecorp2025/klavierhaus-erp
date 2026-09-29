@@ -6,6 +6,7 @@ function validEmail(value){
   return !email||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 function integerId(value){const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:null;}
+const CLIENT_TYPES=new Set(["PRIVATE","BUSINESS","INSTITUTION"]);
 function parseContact(raw){
   const value=text(raw,500);
   if(!value)return {email:null,phone:null};
@@ -96,9 +97,10 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     const name=text(req.body?.name,240),email=text(req.body?.email,320).toLowerCase();
     if(!name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
     if(!validEmail(email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
-    const isVip=req.body?.is_vip===true||req.body?.is_vip===1||String(req.body?.is_vip||"").toLowerCase()==="true"?1:0;
-    const info=db.prepare("INSERT INTO clients(name,email,phone,address,notes,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-      .run(name,email||null,text(req.body?.phone,120)||null,text(req.body?.address,1000)||null,text(req.body?.notes,5000)||null,isVip,isVip?req.user.id:null,isVip?new Date().toISOString():null);
+    const isVip=req.body?.is_vip===true||req.body?.is_vip===1||String(req.body?.is_vip||"").toLowerCase()==="true"?1:0,requestedType=text(req.body?.client_type||"PRIVATE",40).toUpperCase();
+    if(!CLIENT_TYPES.has(requestedType))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
+    const info=db.prepare("INSERT INTO clients(name,email,phone,address,notes,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+      .run(name,email||null,text(req.body?.phone,120)||null,text(req.body?.address,1000)||null,text(req.body?.notes,5000)||null,requestedType,isVip,isVip?req.user.id:null,isVip?new Date().toISOString():null);
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));
     audit(req,"CREATE","clients",String(row.id),null,row);res.status(201).json(row);
   });
@@ -106,16 +108,17 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
   app.put("/api/clients/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM clients WHERE id=?").get(id);
     if(!before)return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    const requestedVip=req.body?.is_vip===undefined?Number(before.is_vip||0):(req.body.is_vip===true||req.body.is_vip===1||String(req.body.is_vip||"").toLowerCase()==="true"?1:0);
+    const requestedVip=req.body?.is_vip===undefined?Number(before.is_vip||0):(req.body.is_vip===true||req.body.is_vip===1||String(req.body.is_vip||"").toLowerCase()==="true"?1:0),requestedType=text(req.body?.client_type??before.client_type??"PRIVATE",40).toUpperCase();
+    if(!CLIENT_TYPES.has(requestedType))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
     const next={
       name:text(req.body?.name??before.name,240),email:text(req.body?.email??before.email,320).toLowerCase(),
-      phone:text(req.body?.phone??before.phone,120),address:text(req.body?.address??before.address,1000),notes:text(req.body?.notes??before.notes,5000),is_vip:requestedVip
+      phone:text(req.body?.phone??before.phone,120),address:text(req.body?.address??before.address,1000),notes:text(req.body?.notes??before.notes,5000),client_type:requestedType,is_vip:requestedVip
     };
     if(!next.name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
     if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
     const vipChanged=Number(before.is_vip||0)!==next.is_vip;
-    db.prepare("UPDATE clients SET name=?,email=?,phone=?,address=?,notes=?,is_vip=?,vip_updated_by_user_id=CASE WHEN ?=1 THEN ? ELSE vip_updated_by_user_id END,vip_updated_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE vip_updated_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(next.name,next.email||null,next.phone||null,next.address||null,next.notes||null,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
+    db.prepare("UPDATE clients SET name=?,email=?,phone=?,address=?,notes=?,client_type=?,is_vip=?,vip_updated_by_user_id=CASE WHEN ?=1 THEN ? ELSE vip_updated_by_user_id END,vip_updated_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE vip_updated_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(next.name,next.email||null,next.phone||null,next.address||null,next.notes||null,next.client_type,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(id);
     audit(req,"UPDATE","clients",String(id),before,row);res.json(row);
   });
