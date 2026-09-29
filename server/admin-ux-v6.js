@@ -202,26 +202,36 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
     res.status(201).json({url,file_name:text(req.file.originalname,500),mime_type:req.file.mimetype,size:Number(req.file.size||0)});
   });
 
-  app.get("/api/settings/branding/assets",auth,admin,(_req,res)=>res.json({
-    favicon_url:setting(db,"favicon_url","/icons/icon-192.png"),
-    app_icon_url:setting(db,"app_icon_url",setting(db,"logo_url","/icons/icon-512.png")),
-    login_background_url:setting(db,"login_background_url",""),
-    logo_url:setting(db,"logo_url","/icons/icon-512.png"),
-    branding_version:setting(db,"branding_version","1")
-  }));
+  app.get("/api/settings/branding/assets",auth,admin,(_req,res)=>{
+    const legacy=setting(db,"logo_url","/icons/icon-512.png");
+    res.json({
+      favicon_url:setting(db,"favicon_url","/icons/icon-192.png"),
+      app_icon_url:setting(db,"app_icon_url","/icons/icon-512.png"),
+      login_background_url:setting(db,"login_background_url",""),
+      logo_url:legacy,
+      erp_logo_dark_url:setting(db,"erp_logo_dark_url",legacy),
+      erp_logo_light_url:setting(db,"erp_logo_light_url",legacy),
+      branding_version:setting(db,"branding_version","1")
+    });
+  });
   for(const spec of [
-    {route:"favicon",key:"favicon_url"},
-    {route:"app-icon",key:"app_icon_url"}
+    {route:"favicon",key:"favicon_url",min:32},
+    {route:"public-logo",key:null,min:192},
+    {route:"public-favicon",key:null,min:32},
+    {route:"erp-logo-dark",key:"erp_logo_dark_url",min:192,legacy:true},
+    {route:"erp-logo-light",key:"erp_logo_light_url",min:192},
+    {route:"app-icon",key:"app_icon_url",min:192}
   ]){
     app.post(`/api/settings/branding/${spec.route}`,auth,admin,brandUpload,(req,res)=>{
       if(!req.file)return res.status(400).json({error:"INVALID_BRANDING_IMAGE_TYPE"});
-      const details=inspectImageFile(req.file.path);
-      const min=spec.route==="app-icon"?192:32;
+      const details=inspectImageFile(req.file.path),min=Number(spec.min||32);
       if(!details||details.width<min||details.height<min){try{fs.unlinkSync(req.file.path);}catch(_error){}return res.status(400).json({error:"INVALID_BRANDING_IMAGE"});}
-      const before=setting(db,spec.key,""),url=`/uploads/branding-v6/${path.basename(req.file.path)}`;
+      const before=spec.key?setting(db,spec.key,""):null,url=`/uploads/branding-v6/${path.basename(req.file.path)}`;
       const absolute_url=`${String(appBaseUrl||"").replace(/\/$/,"")}${url}`;
-      setSetting(db,spec.key,url,req.user);setSetting(db,"branding_version",String(Date.now()),req.user);
-      audit(req,"UPDATE","branding",spec.key,{url:before},{url,...details});res.json({url,absolute_url,...details,branding_version:setting(db,"branding_version","1")});
+      if(spec.key)setSetting(db,spec.key,url,req.user);
+      if(spec.legacy)setSetting(db,"logo_url",url,req.user);
+      setSetting(db,"branding_version",String(Date.now()),req.user);
+      audit(req,"UPDATE","branding",spec.key||spec.route,before==null?null:{url:before},{url,...details});res.json({url,absolute_url,...details,branding_version:setting(db,"branding_version","1")});
     });
   }
 }
