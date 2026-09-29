@@ -29,6 +29,8 @@ test("Master Data piano overview keeps classified records separate but makes pen
   assert.match(app,/piano-review-row/);
   assert.match(app,/data-master-review-id/);
   assert.match(app,/master-piano-summary/);
+  assert.match(app,/master CSV not imported yet/);
+  assert.match(app,/sourceDuplicateGroups/);
   assert.match(schema,/client_piano_review_queue/);
   assert.match(schema,/classification_status TEXT NOT NULL DEFAULT 'CLASSIFIED'/);
 });
