@@ -24,6 +24,7 @@ const {
   createEventImageUpload,
   createWebsiteImageUpload,
   createCustomerConversationUpload,
+  createMasterDataImportUpload,
   inspectImageFile,
   uploadErrorHandler
 } = require("./upload-middleware");
@@ -74,6 +75,7 @@ const brandingUpload = createBrandingUpload(UPLOAD_DIR);
 const eventImageUpload = createEventImageUpload(EVENT_IMAGE_DIR);
 const websiteImageUpload = createWebsiteImageUpload(WEBSITE_IMAGE_DIR);
 const customerConversationUpload = createCustomerConversationUpload(UPLOAD_DIR);
+const masterDataImportUpload = createMasterDataImportUpload();
 const intakeMediaUpload = createIntakeMediaUpload(UPLOAD_DIR);
 
 function newId(prefix) {
@@ -396,7 +398,7 @@ registerPrivateAppointmentRoutes({
   app,db,auth,permit,audit,notifications:notificationCenter,transactionalEmail,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",env:process.env
 });
-registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,notifications:notificationCenter});
+registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,masterDataImportUpload,notifications:notificationCenter});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",inventoryService});
