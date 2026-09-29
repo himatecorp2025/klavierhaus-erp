@@ -543,6 +543,40 @@ CREATE TABLE IF NOT EXISTS customer_conversation_events (
   FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS customer_appointment_proposals (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  appointment_type TEXT NOT NULL CHECK(appointment_type IN ('PRIVATE_VISIT','PIANO_VIEWING','SERVICE_CONSULTATION')),
+  starts_at TEXT NOT NULL,
+  ends_at TEXT NOT NULL,
+  assigned_user_id TEXT,
+  phone TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'PROPOSED' CHECK(status IN ('PROPOSED','ACCEPTED','DECLINED','CANCELLED')),
+  private_appointment_id TEXT,
+  created_by_user_id TEXT,
+  responded_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(private_appointment_id) REFERENCES private_appointments(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_customer_appointment_proposals_conversation ON customer_appointment_proposals(conversation_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS support_holidays (
+  holiday_date TEXT PRIMARY KEY,
+  label TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  updated_by_user_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_conversations_status_activity ON customer_conversations(status,last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_conversations_assignee ON customer_conversations(assigned_user_id,status,last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation_time ON customer_messages(conversation_id,created_at,id);
 CREATE TABLE IF NOT EXISTS app_settings (
   setting_key TEXT PRIMARY KEY,
   setting_value TEXT,
@@ -737,7 +771,9 @@ CREATE TABLE IF NOT EXISTS private_appointments (
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
   scheduled_at TEXT NOT NULL,
+  scheduled_end_at TEXT,
   note TEXT,
+  conversation_id TEXT,
   piano_id TEXT,
   service_id TEXT,
   status TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK(status IN ('SCHEDULED','COMPLETED','CANCELLED')),
@@ -752,11 +788,13 @@ CREATE TABLE IF NOT EXISTS private_appointments (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
+  FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE SET NULL,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_private_appointments_time ON private_appointments(scheduled_at,status);
 CREATE INDEX IF NOT EXISTS idx_private_appointments_context ON private_appointments(appointment_type,piano_id,service_id);
+CREATE INDEX IF NOT EXISTS idx_private_appointments_conversation ON private_appointments(conversation_id,scheduled_at);
 
 CREATE TABLE IF NOT EXISTS notification_events (
   id TEXT PRIMARY KEY,
@@ -1018,6 +1056,7 @@ CREATE TABLE IF NOT EXISTS intake_leads (
   status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','under_review','converted','archived')),
   assigned_technician_id TEXT,
   estimated_total REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0),
+  source_conversation_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   converted_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -12,7 +12,7 @@ const state={
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
-const activeViews=new Set(["workshop","planned","intake","master","finance","documents","cms","profile"]);
+const activeViews=new Set(["workshop","messenger","planned","intake","master","finance","documents","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
@@ -22,9 +22,9 @@ const chromeText={
   email:["Email","E-mail"],password:["Password","Jelszó"],sign_in:["Sign in","Bejelentkezés"],
   account_activation:["ACCOUNT ACTIVATION","FIÓK AKTIVÁLÁS"],confirm_login:["Confirm your login","Erősítsd meg a belépést"],
   six_digit_code:["6-digit code","6 jegyű kód"],activate:["Activate","Aktiválás"],resend_code:["Send a new code","Új kód küldése"],back_to_login:["Back to login","Vissza a belépéshez"],
-  nav_workshop:["Workshop & Calendar","Műhely & Naptár"],nav_intake:["Intake","Igényfelmérés"],nav_planned:["Planned Jobs","Tervezett munkák"],
+  nav_workshop:["Workshop & Calendar","Műhely & Naptár"],nav_intake:["Intake","Igényfelmérés"],nav_messenger:["Messenger","Messenger"],nav_planned:["Planned Jobs","Tervezett munkák"],
   nav_master:["Master Data","Törzsadatok"],nav_finance:["Finance","Pénzügy"],nav_documents:["Documents","Dokumentumok"],nav_cms:["Website CMS","Weboldal CMS"],
-  mobile_workshop:["Workshop","Műhely"],mobile_planned:["Planned","Tervezett"],mobile_intake:["Intake","Igény"],mobile_master:["Master","Törzs"],
+  mobile_workshop:["Workshop","Műhely"],mobile_messenger:["Messenger","Messenger"],mobile_planned:["Planned","Tervezett"],mobile_intake:["Intake","Igény"],mobile_master:["Master","Törzs"],
   mobile_finance:["Finance","Pénzügy"],mobile_more:["More","Továbbiak"],mobile_profile:["Profile","Profil"],new_york_time:["New York time","New York-i idő"]
 };
 function applyChromeLanguage(){
@@ -318,11 +318,12 @@ async function loadBranding(){
 }
 function syncNavigationState(view=state.view){
   $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
-  $("#mobileMoreButton")?.classList.toggle("active",["finance","documents","cms","profile"].includes(view));
+  $("#mobileMoreButton")?.classList.toggle("active",["planned","finance","documents","cms","profile"].includes(view));
 }
 function navTo(view){
   if(!activeViews.has(view))return;
   state.view=view;history.replaceState({},"",`#${view}`);
+  if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
   void renderView();
 }
@@ -352,6 +353,7 @@ async function renderView(){
   const workspace=$("#workspace");workspace.innerHTML=loading();
   try{
     if(state.view==="workshop")await renderWorkshop();
+    else if(state.view==="messenger")await renderMessenger();
     else if(state.view==="planned")await renderPlanned();
     else if(state.view==="master")await renderMaster();
     else if(state.view==="finance")await renderFinance();

@@ -72,6 +72,7 @@
       <nav class="sidebar-nav">
         <button type="button" class="nav-item" data-nav="workshop"><span class="nav-icon">▦</span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
         <button type="button" class="nav-item" data-nav="intake"><span class="nav-icon">✓</span><span data-i18n="nav_intake">Intake</span></button>
+        <button type="button" class="nav-item" data-nav="messenger"><span class="nav-icon">✦</span><span data-i18n="nav_messenger">Messenger</span></button>
         <button type="button" class="nav-item" data-nav="planned"><span class="nav-icon">◷</span><span data-i18n="nav_planned">Planned Jobs</span></button>
         <button type="button" class="nav-item" data-nav="master"><span class="nav-icon">◫</span><span data-i18n="nav_master">Master Data</span></button>
         <button type="button" class="nav-item" data-nav="finance"><span class="nav-icon">$</span><span data-i18n="nav_finance">Finance</span></button>
@@ -111,11 +112,15 @@
 
     <nav class="mobile-nav" aria-label="Mobile navigation">
       <button type="button" data-nav="workshop"><span>▦</span><small data-i18n="mobile_workshop">Workshop</small></button>
-      <button type="button" data-nav="planned"><span>◷</span><small data-i18n="mobile_planned">Planned</small></button>
+      <button type="button" data-nav="messenger"><span>✦</span><small data-i18n="mobile_messenger">Messenger</small></button>
       <button type="button" class="mobile-intake-primary" data-nav="intake"><span>＋</span><small data-i18n="mobile_intake">Intake</small></button>
       <button type="button" data-nav="master"><span>◫</span><small data-i18n="mobile_master">Master</small></button>
-      <button type="button" id="mobileMoreButton" aria-haspopup="dialog"><span>•••</span><small data-i18n="mobile_more">More</small></button>
+      <button type="button" id="mobileMoreButton" aria-haspopup="menu" aria-expanded="false"><span>•••</span><small data-i18n="mobile_more">More</small></button>
     </nav>
+    <div id="mobileMorePopover" class="mobile-more-popover" hidden>
+      <div class="mobile-more-popover-head"><strong data-i18n="mobile_more">More</strong><button id="mobileMoreClose" class="icon-button" type="button" aria-label="Close">×</button></div>
+      <div id="mobileMoreGrid" class="mobile-more-grid"></div>
+    </div>
   </div>
 
   <div id="notificationLayer" class="notification-layer" hidden aria-hidden="true">
@@ -149,6 +154,7 @@
   <script src="/app.js"></script>
   <script src="/round2.js"></script>
   <script src="/round3.js"></script>
+  <script src="/messenger.js"></script>
   <script src="/v6.js"></script>
 </body>
 </html>

@@ -435,6 +435,8 @@ const customerChatLookupForm = customerChat?.querySelector("[data-chat-lookup-fo
 const customerChatLookupResult = customerChat?.querySelector("[data-chat-lookup-result]");
 const customerChatMessages = customerChat?.querySelector("[data-chat-messages]");
 const customerChatWelcome = customerChat?.querySelector("[data-chat-welcome]");
+const customerChatSupportStatus = customerChat?.querySelector("[data-chat-support-status]");
+const customerChatFileList = customerChat?.querySelector("[data-chat-file-list]");
 const customerConversationKey = "klavierhaus_customer_conversation_v1";
 let customerConversationToken = "";
 let customerChatPollTimer = null;
@@ -446,7 +448,7 @@ function renderCustomerMessages(messages = [], conversation = null) {
   if (conversation?.status === "CLOSED") {
     const status = document.createElement("p");
     status.className = "customer-chat__status customer-chat__status--closed";
-    status.textContent = language === "hu" ? "Ez a beszélgetés automatikusan lezárult. Új üzenettel ugyanitt újranyitható." : "This conversation was automatically closed. Send a new message here to reopen it.";
+    status.textContent = language === "hu" ? "Ez a beszélgetés lezárult. Új üzenettel ugyanitt folytatható." : "This conversation is closed. You can continue here by sending a new message.";
     customerChatMessages.append(status);
   }
   messages.forEach((message) => {
@@ -467,7 +469,39 @@ function renderCustomerMessages(messages = [], conversation = null) {
     });
     customerChatMessages.append(item);
   });
+  (conversation?.appointment_proposals || []).filter(item=>item.status==="PROPOSED").forEach(proposal=>{
+    const card=document.createElement("article");
+    card.className="customer-chat__proposal";
+    const start=new Date(proposal.starts_at),end=new Date(proposal.ends_at);
+    const formatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"});
+    const endFormatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",timeStyle:"short"});
+    const title=document.createElement("strong");title.textContent=language==="hu"?"Javasolt időpont":"Proposed appointment";
+    const when=document.createElement("p");when.textContent=`${formatter.format(start)} – ${endFormatter.format(end)} ET`;
+    const actions=document.createElement("div");actions.className="customer-chat__proposal-actions";
+    const accept=document.createElement("button");accept.type="button";accept.className="button button--primary";accept.dataset.proposalDecision="ACCEPTED";accept.dataset.proposalId=proposal.id;accept.textContent=language==="hu"?"Elfogadom":"Accept";
+    const decline=document.createElement("button");decline.type="button";decline.className="button button--ghost";decline.dataset.proposalDecision="DECLINED";decline.dataset.proposalId=proposal.id;decline.textContent=language==="hu"?"Más időpontot kérek":"Request another time";
+    actions.append(accept,decline);card.append(title,when,actions);customerChatMessages.append(card);
+  });
   customerChatMessages.scrollTop = customerChatMessages.scrollHeight;
+}
+
+function renderCustomerChatFiles(){
+  if(!customerChatFileList)return;
+  customerChatFileList.replaceChildren();
+  [...(customerChatForm?.elements.attachments?.files||[])].forEach(file=>{
+    const chip=document.createElement("span");chip.className="customer-chat__file-chip";chip.textContent=`${file.name} · ${Math.max(1,Math.round(file.size/1024))} KB`;customerChatFileList.append(chip);
+  });
+}
+function renderSupportStatus(status){
+  if(!customerChatSupportStatus)return;
+  const open=Boolean(status?.open);customerChatSupportStatus.classList.toggle("is-live",open);
+  customerChatSupportStatus.textContent=open
+    ? (language==="hu"?"● Élő ügyfélszolgálat elérhető · 9:00–17:00 ET":"● Live support available · 9:00 AM–5:00 PM ET")
+    : (language==="hu"?"○ Ügyfélszolgálat offline · hagyjon üzenetet, a következő ügyfélszolgálati időben válaszolunk.":"○ Support is offline · leave a message and we will reply during the next support window.");
+}
+async function loadSupportStatus(){
+  try{const response=await fetch("/api/site/support-status",{credentials:"same-origin",cache:"no-store"});renderSupportStatus(await response.json());}
+  catch(_error){renderSupportStatus({open:false});}
 }
 
 async function loadCustomerConversation(token) {
@@ -477,7 +511,8 @@ async function loadCustomerConversation(token) {
     if (!response.ok) throw new Error("CONVERSATION_NOT_FOUND");
     const conversation = await response.json();
     customerConversationToken = token;
-    const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0]);
+    const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status).join(",")]);
+    renderSupportStatus(conversation.support||{});
     renderCustomerMessages(conversation.messages || [], conversation);
     if (nextSnapshot !== customerConversationSnapshot && customerChatResult) customerChatResult.textContent = conversation.status === "CLOSED" ? (language === "hu" ? "A beszélgetés lezárult." : "The conversation is closed.") : (language === "hu" ? "A beszélgetés betöltve." : "Conversation loaded.");
     customerConversationSnapshot = nextSnapshot;
@@ -517,7 +552,23 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
   customerChat?.querySelector("[data-chat-welcome-close]")?.addEventListener("click", () => customerChatWelcome?.classList.add("is-dismissed"));
   window.setTimeout(() => customerChatWelcome?.classList.add("is-dismissed"), 9000);
   try { customerConversationToken = localStorage.getItem(customerConversationKey) || new URLSearchParams(location.search).get("conversation") || ""; } catch (_error) { customerConversationToken = ""; }
+  loadSupportStatus();
   loadCustomerConversation(customerConversationToken);
+  customerChatForm.elements.attachments?.addEventListener("change",renderCustomerChatFiles);
+  customerChatMessages?.addEventListener("click",async event=>{
+    const button=event.target.closest("[data-proposal-decision]");if(!button||!customerConversationToken)return;
+    button.disabled=true;
+    try{
+      const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/appointment-proposals/${encodeURIComponent(button.dataset.proposalId)}/respond`,{
+        method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:button.dataset.proposalDecision})
+      });
+      const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"APPOINTMENT_RESPONSE_FAILED");
+      customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);
+      if(customerChatResult)customerChatResult.textContent=button.dataset.proposalDecision==="ACCEPTED"
+        ?(language==="hu"?"Az időpontot elfogadta.":"Appointment accepted.")
+        :(language==="hu"?"Jeleztük, hogy másik időpontot kér.":"We have let the team know you need another time.");
+    }catch(_error){button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az időpontválasz nem sikerült.":"We could not save your appointment response.";}
+  });
   customerChatPollTimer = window.setInterval(() => {
     if (customerConversationToken) loadCustomerConversation(customerConversationToken);
   }, 3500);
@@ -540,7 +591,7 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
       if (!customerConversationToken) {
         payload.set("name", String(data.get("name") || ""));
         payload.set("email", String(data.get("email") || ""));
-        payload.set("category", String(data.get("category") || "GENERAL"));
+        payload.set("category", String(data.get("category") || "SERVICE"));
         payload.set("consent_contact", data.get("consent_contact") === "on" ? "true" : "false");
         payload.set("language", language);
         payload.set("source_path", location.pathname);
@@ -555,7 +606,8 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
       const conversation = result.conversation || result;
       customerConversationSnapshot = "";
       renderCustomerMessages(conversation.messages || [], conversation);
-      customerChatForm.reset();
+      customerChatForm.reset();renderCustomerChatFiles();
+      renderSupportStatus(conversation.support||{});
       if (customerConversationToken) localStorage.setItem(customerConversationKey, customerConversationToken);
       if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Köszönjük, üzenetét rögzítettük." : "Thank you, your message has been received.";
     } catch (error) {
