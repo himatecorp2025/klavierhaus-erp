@@ -19,7 +19,7 @@ function fixture(){
     CREATE TABLE invoices(
       id INTEGER PRIMARY KEY,invoice_number TEXT,direction TEXT,status TEXT,client_id INTEGER,job_id INTEGER,
       counterparty_name TEXT,counterparty_email TEXT,summary TEXT,currency TEXT,total_amount REAL,payment_method TEXT,paid_at TEXT,
-      deleted_at TEXT,payment_url TEXT
+      deleted_at TEXT,payment_url TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE invoice_payments(
       id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER,amount REAL,payment_method TEXT,reference TEXT,paid_at TEXT,
