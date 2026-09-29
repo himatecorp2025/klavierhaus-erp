@@ -118,6 +118,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     return {...row,snapshot:json(row.snapshot_json,{}),
       items:db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(id),
       payments:db.prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY paid_at,id").all(id),
+      stripe_checkouts:db.prepare("SELECT * FROM workshop_invoice_checkouts WHERE invoice_id=? ORDER BY created_at DESC").all(id),
       email_log:db.prepare("SELECT * FROM invoice_email_log WHERE invoice_id=? ORDER BY created_at DESC,id DESC").all(id),
       communication_log:db.prepare("SELECT * FROM customer_communication_log WHERE invoice_id=? ORDER BY created_at DESC,id DESC").all(id)
     };
