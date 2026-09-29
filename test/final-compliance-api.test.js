@@ -544,3 +544,94 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
   assert.equal(removePolish.status,200,JSON.stringify(removePolish.payload));
   assert.deepEqual(removePolish.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
 });
+
+
+test("Workflow timing can move backward and forward and recomputes colors",async()=>{
+  const token=shared.adminToken;
+  const created=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,
+    piano_id:shared.piano.id,
+    title:"Bidirectional workflow timing test",
+    scheduled_at:futureIso(30,9),
+    estimated_duration_min:120,
+    assigned_technician_id:"U-F-WORKER"
+  }});
+  assert.equal(created.status,201,JSON.stringify(created.payload));
+  assert.equal(created.payload.stage,"received");
+  assert.equal(created.payload.workflow_owner_user_id,"U-F-ADMIN");
+  assert.equal(created.payload.workflow_status,"scheduled");
+  assert.ok(created.payload.workflow_phases.filter(phase=>phase.enabled).every(phase=>phase.responsible_user_id==="U-F-ADMIN"));
+
+  const movedOwner=await request("/api/jobs/"+created.payload.id,{token,method:"PUT",body:{workflow_owner_user_id:"U-F-MANAGER"}});
+  assert.equal(movedOwner.status,200,JSON.stringify(movedOwner.payload));
+  assert.equal(movedOwner.payload.workflow_owner_user_id,"U-F-MANAGER");
+  assert.equal(movedOwner.payload.assigned_technician_id,"U-F-WORKER");
+
+  const pastStart=new Date(Date.now()-2*60*60*1000).toISOString();
+  const farFuture=futureIso(31,18);
+  const started=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
+    starts_at:pastStart,due_at:farFuture,responsible_user_id:"U-F-MANAGER",blocker_code:null,blocker_note:null
+  }});
+  assert.equal(started.status,200,JSON.stringify(started.payload));
+  assert.equal(started.payload.workflow_status,"in_progress");
+  assert.equal(started.payload.current_phase.responsible_user_id,"U-F-MANAGER");
+
+  const overdue=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
+    due_at:new Date(Date.now()-60*60*1000).toISOString()
+  }});
+  assert.equal(overdue.status,200,JSON.stringify(overdue.payload));
+  assert.equal(overdue.payload.workflow_status,"overdue");
+
+  const blocked=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
+    due_at:farFuture,starts_at:pastStart,blocker_code:"waiting_client",blocker_note:"Awaiting confirmation"
+  }});
+  assert.equal(blocked.status,200,JSON.stringify(blocked.payload));
+  assert.equal(blocked.payload.workflow_status,"blocked");
+
+  const scheduledAgain=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
+    starts_at:futureIso(32,10),due_at:futureIso(32,18),blocker_code:null,blocker_note:null
+  }});
+  assert.equal(scheduledAgain.status,200,JSON.stringify(scheduledAgain.payload));
+  assert.equal(scheduledAgain.payload.workflow_status,"scheduled");
+
+  const retroactiveAgain=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
+    starts_at:pastStart,due_at:farFuture
+  }});
+  assert.equal(retroactiveAgain.status,200,JSON.stringify(retroactiveAgain.payload));
+  assert.equal(retroactiveAgain.payload.workflow_status,"in_progress");
+
+  const cancelled=await request("/api/jobs/"+created.payload.id+"/cancel",{token,method:"POST",body:{party:"klavierhaus",reason:"Timing status acceptance cleanup"}});
+  assert.equal(cancelled.status,200,JSON.stringify(cancelled.payload));
+  assert.equal(cancelled.payload.job.workflow_status,"cancelled");
+});
+
+test("Intake assessment PDF is exported and retained in Documents",async()=>{
+  const token=shared.adminToken;
+  const response=await fetch(origin+"/api/intake/"+shared.intakeId+"/export-pdf",{
+    method:"POST",
+    headers:{Authorization:"Bearer "+token,Accept:"application/pdf"}
+  });
+  assert.equal(response.status,200);
+  assert.match(response.headers.get("content-type")||"",/application\/pdf/);
+  const archiveId=Number(response.headers.get("x-archive-document-id"));
+  assert.ok(Number.isSafeInteger(archiveId)&&archiveId>0);
+  const buffer=Buffer.from(await response.arrayBuffer());
+  assert.ok(buffer.length>500);
+  assert.equal(buffer.subarray(0,8).toString("latin1"),"%PDF-1.4");
+
+  const documents=await request("/api/archive/documents?category=intake_assessment",{token});
+  assert.equal(documents.status,200,JSON.stringify(documents.payload));
+  const row=documents.payload.rows.find(item=>Number(item.id)===archiveId);
+  assert.ok(row);
+  assert.equal(row.category,"intake_assessment");
+  assert.equal(row.entity_type,"intake");
+  assert.equal(String(row.entity_id),String(shared.intakeId));
+  assert.match(row.original_name,/intake-assessment-/);
+  assert.equal(row.mime_type,"application/pdf");
+  assert.equal(row.metadata.source,"intake_assessment_export");
+
+  const fileResponse=await fetch(origin+"/api/archive/documents/"+archiveId+"/download",{headers:{Authorization:"Bearer "+token}});
+  assert.equal(fileResponse.status,200);
+  const archivedPdf=Buffer.from(await fileResponse.arrayBuffer());
+  assert.equal(archivedPdf.subarray(0,8).toString("latin1"),"%PDF-1.4");
+});
