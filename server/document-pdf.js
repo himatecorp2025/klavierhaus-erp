@@ -666,6 +666,69 @@ function generateBusinessInvoicePdf({ company = {}, invoice = {}, items = [], co
 }
 
 
+
+function jobCompletionReportPage({company={},job={},handoffs=[],phases=[],metrics,logoResources}){
+  const INK="0.07 0.07 0.07",GRAY="0.30 0.34 0.39",LIGHT="0.90 0.91 0.92",PALE="0.97 0.97 0.98";
+  const logoResource=logoResources?.LogoBlack?"LogoBlack":logoResources?.LogoOriginal?"LogoOriginal":null;
+  const piano=[job.piano_brand,job.piano_model,job.piano_serial_number?("S/N "+job.piano_serial_number):""].filter(Boolean).join(" · ");
+  const lines=[
+    "1 1 1 rg 0 0 612 792 re f\n",
+    logoResource?logoCommand(true,54,718,32,32,logoResource):"",
+    textCommand(company.trade_name||company.legal_name||"Klavierhaus",98,740,18,INK,{bold:true}),
+    textCommand("JOB COMPLETION REPORT",360,740,14,INK,{bold:true}),
+    textCommand(job.job_code||("#"+job.id),360,718,10,INK,{bold:true}),
+    LIGHT+" RG .7 w 54 676 m 558 676 l S\n",
+    textCommand("CLIENT",54,650,8,GRAY,{bold:true}),
+    textCommand(job.client_name||"—",54,628,12,INK,{bold:true}),
+    textCommand("INSTRUMENT",320,650,8,GRAY,{bold:true}),
+    textCommand(truncate(piano||"—",230,9,metrics),320,628,9,INK),
+    textCommand("SERVICE",54,590,8,GRAY,{bold:true}),
+    textCommand(truncate(job.title||"Klavierhaus service",240,10,metrics),54,568,10,INK,{bold:true}),
+    textCommand(truncate(job.description||"",240,8,metrics),54,550,8,GRAY),
+    textCommand("COMPLETED",320,590,8,GRAY,{bold:true}),
+    textCommand(formatPdfDate(job.completed_at)||"—",320,568,10,INK),
+    textCommand(job.completed_by_name?("Approved by: "+job.completed_by_name):"",320,550,8,GRAY),
+    LIGHT+" RG .7 w 54 522 m 558 522 l S\n",
+    PALE+" rg 54 486 504 28 re f\n",
+    textCommand("WORK / HANDOFF",62,496,8,GRAY,{bold:true}),
+    textCommand("LABOR",370,496,8,GRAY,{bold:true}),
+    textCommand("MATERIAL",438,496,8,GRAY,{bold:true}),
+    textCommand("DURATION",506,496,8,GRAY,{bold:true})
+  ];
+  let y=466;
+  const rows=handoffs.length?handoffs:[{billing_description:job.title||"Service completed",phase_labor_cost:job.total_labor_cost||0,phase_material_cost:job.total_material_cost||0,phase_duration_min:job.estimated_duration_min||0}];
+  for(const row of rows.slice(0,10)){
+    const description=row.billing_description||String(row.from_stage||"Service").replaceAll("_"," ");
+    lines.push(textCommand(truncate(description,285,8.5,metrics),62,y,8.5,INK));
+    lines.push(textCommand(money(row.phase_labor_cost||0,"USD"),370,y,7.5,INK));
+    lines.push(textCommand(money(row.phase_material_cost||0,"USD"),438,y,7.5,INK));
+    lines.push(textCommand(String(Number(row.phase_duration_min||0))+" min",510,y,7.5,INK));
+    lines.push(LIGHT+" RG .35 w 54 "+number(y-9)+" m 558 "+number(y-9)+" l S\n");y-=27;
+  }
+  const totalLabor=rows.reduce((sum,row)=>sum+Number(row.phase_labor_cost||0),0),totalMaterial=rows.reduce((sum,row)=>sum+Number(row.phase_material_cost||0),0);
+  lines.push(textCommand("TOTAL LABOR",326,166,8,GRAY),textCommand(money(totalLabor,"USD"),456,166,9,INK,{bold:true}));
+  lines.push(textCommand("TOTAL MATERIALS",326,148,8,GRAY),textCommand(money(totalMaterial,"USD"),456,148,9,INK,{bold:true}));
+  if(phases.length){
+    const completed=phases.filter(row=>row.completed_at).map(row=>String(row.stage_key||"").replaceAll("_"," ")).join(" · ");
+    lines.push(textCommand("Workflow: "+truncate(completed,430,7.5,metrics),54,126,7.5,GRAY));
+  }
+  lines.push(LIGHT+" RG .5 w 54 88 m 558 88 l S\n");
+  lines.push(textCommand("Klavierhaus internal service completion record.",54,66,8,GRAY));
+  return lines.join("");
+}
+
+function generateJobCompletionReportPdf({company={},job={},handoffs=[],phases=[],fontPath,logoPath}){
+  const labels=[
+    company.trade_name,company.legal_name,job.job_code,job.client_name,job.title,job.description,job.piano_brand,job.piano_model,job.piano_serial_number,job.completed_by_name,
+    ...handoffs.flatMap(row=>[row.billing_description,row.from_stage,row.assigned_to]),...phases.map(row=>row.stage_key),
+    "JOB COMPLETION REPORT","CLIENT","INSTRUMENT","SERVICE","COMPLETED","WORK / HANDOFF","TOTAL LABOR","TOTAL MATERIALS"
+  ];
+  return createPdf({
+    pages:[(metrics,logoResources)=>jobCompletionReportPage({company,job,handoffs,phases,metrics,logoResources})],
+    size:LETTER,labels,title:"Klavierhaus Job Completion "+(job.job_code||job.id||""),fontPath,logoPath
+  });
+}
+
 function paymentReceiptPage({company={},invoice={},payment={},metrics,logoResources}){
   const INK="0.07 0.07 0.07",GRAY="0.30 0.34 0.39",LIGHT="0.90 0.91 0.92",PALE="0.97 0.97 0.98";
   const logoResource=logoResources?.LogoBlack?"LogoBlack":logoResources?.LogoOriginal?"LogoOriginal":null;
@@ -928,4 +991,4 @@ function generateFinancialStatementPdf({ statement = "income-statement", company
   });
 }
 
-module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generatePaymentReceiptPdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
+module.exports = { BOARDING_PASS, LETTER, createPdf, generateInvoicePdf, generateBusinessInvoicePdf, generatePaymentReceiptPdf, generateJobCompletionReportPdf, generateMonthlyInvoiceReportPdf, generateFinancialStatementPdf, generateTicketBackPdf, generateTicketDocumentPdf, generateTicketFrontPdf, generateTicketFullPdf, generateTicketPdf, safeText, textCommand, ticketDesignType, ticketPalette };
