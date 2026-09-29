@@ -98,6 +98,18 @@ function prepareMessengerV12Compatibility() {
     ensureColumn("private_appointments","conversation_id","TEXT");
   }
 }
+function prepareClientSegmentationCompatibility() {
+  if (!tableExists("clients")) return;
+  ensureColumn("clients","client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))");
+  ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
+  if (columns("clients").has("customer_type")) {
+    db.exec(`UPDATE clients
+      SET client_type=UPPER(customer_type)
+      WHERE UPPER(customer_type) IN ('BUSINESS','INSTITUTION')
+        AND COALESCE(NULLIF(TRIM(client_type),''),'PRIVATE')='PRIVATE'`);
+  }
+  db.exec('DROP INDEX IF EXISTS "idx_clients_customer_type"');
+}
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
 }
@@ -215,9 +227,10 @@ if(archiveCategoryNeedsMigration){
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
   console.log("[DOCUMENTS] Legacy archive category table isolated");
 }
-// Existing production databases already have private_appointments/intake_leads.
-// Add Messenger v12 columns before schema.sql creates indexes that depend on them.
+// Existing production databases already have private_appointments/intake_leads/clients.
+// Add compatibility columns before schema.sql creates indexes that depend on them.
 prepareMessengerV12Compatibility();
+prepareClientSegmentationCompatibility();
 db.exec(canonicalSchemaSql);
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
