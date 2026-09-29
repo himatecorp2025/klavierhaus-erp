@@ -467,6 +467,7 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   visitor_token_hash TEXT,
   name TEXT,
   email TEXT,
+  client_id INTEGER,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
   category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','TICKET','BILLING','REPAIR','GENERAL','OTHER')),
   service_id TEXT,
@@ -496,6 +497,7 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
   FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
   FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -780,6 +782,7 @@ CREATE TABLE IF NOT EXISTS private_appointments (
   duration_min INTEGER NOT NULL DEFAULT 60 CHECK(duration_min >= 15 AND duration_min <= 480),
   note TEXT,
   conversation_id TEXT,
+  client_id INTEGER,
   piano_id TEXT,
   service_id TEXT,
   status TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK(status IN ('SCHEDULED','COMPLETED','CANCELLED')),
@@ -795,6 +798,7 @@ CREATE TABLE IF NOT EXISTS private_appointments (
   FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
   FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE SET NULL,
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -816,6 +820,7 @@ CREATE TABLE IF NOT EXISTS private_appointment_requests (
   status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK(status IN ('REQUESTED','PROPOSED','APPROVED','DECLINED','CANCELLED')),
   assigned_user_id TEXT,
   conversation_id TEXT,
+  client_id INTEGER,
   proposal_id TEXT,
   private_appointment_id TEXT,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
@@ -828,6 +833,7 @@ CREATE TABLE IF NOT EXISTS private_appointment_requests (
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE SET NULL,
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
   FOREIGN KEY(proposal_id) REFERENCES customer_appointment_proposals(id) ON DELETE SET NULL,
   FOREIGN KEY(private_appointment_id) REFERENCES private_appointments(id) ON DELETE SET NULL,
   FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -1060,7 +1066,9 @@ CREATE TABLE IF NOT EXISTS clients (
   address TEXT,
   notes TEXT,
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
+  client_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
+  customer_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(customer_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
   vip_updated_by_user_id TEXT,
   vip_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1563,6 +1571,7 @@ CREATE TABLE IF NOT EXISTS kpi_summary_cache (
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(lower(name));
 CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(lower(email));
 CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
+CREATE INDEX IF NOT EXISTS idx_clients_customer_type ON clients(customer_type,is_vip,lower(name));
 CREATE INDEX IF NOT EXISTS idx_pianos_client ON pianos(client_id);
 CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
 CREATE INDEX IF NOT EXISTS idx_intake_status ON intake_leads(status,created_at DESC);

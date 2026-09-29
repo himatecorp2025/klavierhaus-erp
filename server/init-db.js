@@ -234,14 +234,18 @@ if(tableExists("_documents_legacy_archive")){
 db.pragma("foreign_keys = OFF");
 
 ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
+ensureColumn("clients","client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))");
 ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
 ensureColumn("clients","vip_updated_by_user_id","TEXT");
 ensureColumn("clients","vip_updated_at","TEXT");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
+ensureColumn("customer_conversations","client_id","INTEGER");
 ensureColumn("private_appointments","scheduled_end_at","TEXT");
 ensureColumn("private_appointments","conversation_id","TEXT");
+ensureColumn("private_appointments","client_id","INTEGER");
+ensureColumn("private_appointment_requests","client_id","INTEGER");
 ensureColumn("private_appointments","email","TEXT");
 ensureColumn("private_appointments","duration_min","INTEGER NOT NULL DEFAULT 60 CHECK(duration_min >= 15 AND duration_min <= 480)");
 ensureColumn("customer_appointment_proposals","expires_at","TEXT");
