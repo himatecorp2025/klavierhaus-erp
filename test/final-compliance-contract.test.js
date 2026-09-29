@@ -136,3 +136,16 @@ test("Round J connects preset material recipes to the mobile handoff and Admin c
 });
 
 
+
+
+test("frontend collection selectors never use the single-element $ helper",()=>{
+  const files=["public/app.js","public/finance-tools.js","public/master-data.js","public/round2.js","public/round3.js","public/v6.js","public/workshop-shell.js","public/workshop-v2.js"];
+  const collectionMethod=/(^|[^$])\$\([^)]*\)\s*\.(forEach|map|filter|some|every|reduce)\s*\(/;
+  const violations=[];
+  for(const file of files){
+    read(file).split("\n").forEach((line,index)=>{
+      if(collectionMethod.test(line))violations.push(file+":"+(index+1)+" "+line.trim());
+    });
+  }
+  assert.deepEqual(violations,[],"Use $$() for selector collections; $() returns only one Element.\n"+violations.join("\n"));
+});

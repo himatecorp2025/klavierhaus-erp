@@ -317,7 +317,7 @@ async function loadBranding(){
   }catch(_error){}
 }
 function syncNavigationState(view=state.view){
-  $(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
+  $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
   $("#mobileMoreButton")?.classList.toggle("active",["finance","documents","cms","profile"].includes(view));
 }
 function navTo(view){
@@ -663,7 +663,7 @@ async function renderProfile(){
     <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span>${canManage?`<button class="secondary-button team-edit-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>`:""}</div>`).join("")}</div></section></div>`;
   $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}clearSession();showLogin();});
   $("#newUserBtn")?.addEventListener("click",()=>void openUserDialog());
-  $("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>void openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
+  $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>void openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
 }
 async function openUserDialog(user=null){
   const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role);
