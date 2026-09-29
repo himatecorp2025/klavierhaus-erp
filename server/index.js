@@ -368,9 +368,9 @@ registerWebsitePlatformRoutes({
   app,db,auth,permit,requireSuperadmin,audit,websiteImageUpload,websiteImageDir:WEBSITE_IMAGE_DIR,
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
-  transactionalEmail,env:process.env
+  transactionalEmail,env:process.env,notifications:notificationCenter
 });
-registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir:UPLOAD_DIR});
+registerWebsiteConversationRoutes({app,db,customerConversationUpload,uploadDir:UPLOAD_DIR,notifications:notificationCenter});
 
 app.use(uploadErrorHandler);
 app.use((err,req,res,next)=>{
