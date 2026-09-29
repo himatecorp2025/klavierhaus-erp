@@ -71,6 +71,23 @@ test("Intake v6 removes manual URL entry in the active UI and adds catalog prici
   assert.match(round2,/estimated_revenue/);
 });
 
+test("Intake keeps the manual job approval gate while assessment delivery is email/PDF automated",()=>{
+  const core=read("server/round1-core.js"),archive=read("server/archive-center.js"),email=read("server/transactional-email.js"),schema=read("server/schema.sql"),v6=read("public/v6.js"),index=read("server/index.js");
+  assert.match(core,/function exactClientCandidates/);
+  assert.match(core,/identityStatus==="ambiguous"\?"under_review":"new"/);
+  assert.doesNotMatch(core,/app\.post\("\/api\/intake"[\s\S]{0,6000}INSERT INTO jobs/);
+  assert.match(v6,/Approve \/ create job/);
+  assert.match(v6,/data-intake-send/);
+  assert.match(v6,/Send assessment/);
+  assert.match(archive,/\/api\/intake\/:id\/send-assessment/);
+  assert.match(archive,/createAssessmentArtifact/);
+  assert.match(email,/sendIntakeAssessment/);
+  assert.match(email,/intake_assessment/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS intake_assessment_email_log/);
+  assert.match(schema,/preferred_language TEXT NOT NULL DEFAULT 'en'/);
+  assert.match(index,/registerArchiveCenterRoutes\(\{[^}]*transactionalEmail/);
+});
+
 test("calendar v6 shares horizontal scroll for header/body and creates jobs from an empty 15-minute slot",()=>{
   const round2=read("public/round2.js"),css=read("public/styles.css");
   assert.match(round2,/time-calendar-scroll[\s\S]*time-calendar-head[\s\S]*time-calendar-body/);
