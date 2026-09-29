@@ -231,6 +231,11 @@ if(tableExists("handoff_presets")&&Number(db.prepare("SELECT COUNT(*) count FROM
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
+ensureColumn("invoices","service_date","TEXT");
+ensureColumn("invoices","snapshot_json","TEXT NOT NULL DEFAULT '{}'");
+ensureColumn("invoice_items","labor_amount","REAL NOT NULL DEFAULT 0");
+ensureColumn("invoice_items","material_amount","REAL NOT NULL DEFAULT 0");
+ensureColumn("invoice_items","phase_key","TEXT");
 ensureColumn("invoices","archive_document_id","INTEGER");
 
 function seedWorkshopUxV5() {
