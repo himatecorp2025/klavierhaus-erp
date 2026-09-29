@@ -34,6 +34,7 @@ const { registerRound2WorkflowRoutes } = require("./round2-workflow");
 const { registerRound3FinanceRoutes } = require("./round3-finance");
 const { registerAdminUxV6Routes } = require("./admin-ux-v6");
 const { registerArchiveCenterRoutes } = require("./archive-center");
+const { registerWebsiteBackupResetRoutes } = require("./website-backup-reset");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 const { registerNotificationCenterRoutes } = require("./notification-center");
 const { createAutomationOutbox } = require("./automation-outbox");
@@ -404,6 +405,11 @@ registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDi
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",inventoryService});
 registerInventoryRoutes({app,db,auth,permit,audit,inventoryService});
 registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail,notifications:notificationCenter});
+registerWebsiteBackupResetRoutes({
+  app,db,auth,permit,requireSuperadmin,audit,
+  backupDir:process.env.BACKUP_DIR||path.join(__dirname,"backups"),
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com"
+});
 
 registerEventRoutes({
   app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
