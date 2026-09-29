@@ -15,6 +15,39 @@ function createNotificationCenter({db,env=process.env}={}){
   };
   const pushConfigured=Boolean(vapid.publicKey&&vapid.privateKey&&vapid.subject);
   if(pushConfigured)webpush.setVapidDetails(vapid.subject,vapid.publicKey,vapid.privateKey);
+  const realtimeListeners=new Map(),realtimeTickets=new Map();
+
+  function issueRealtimeTicket(userId){
+    const ticket=crypto.randomBytes(32).toString("base64url");
+    realtimeTickets.set(ticket,{userId:String(userId),expiresAt:Date.now()+60000});
+    return {ticket,expires_in_seconds:60};
+  }
+  function publishRealtime(userId,event){
+    const listeners=realtimeListeners.get(String(userId));if(!listeners?.size)return;
+    const payload={id:event.id,category:event.category,severity:event.severity,active_count:countActive(userId),created_at:event.created_at};
+    for(const listener of [...listeners]){try{listener(payload);}catch(_error){listeners.delete(listener);}}
+    if(!listeners.size)realtimeListeners.delete(String(userId));
+  }
+  function attachRealtime(ticket,res){
+    const key=clean(ticket,200),entry=realtimeTickets.get(key);
+    realtimeTickets.delete(key);
+    if(!entry||entry.expiresAt<Date.now())return false;
+    const userId=String(entry.userId);
+    res.status(200);
+    res.setHeader("Content-Type","text/event-stream");
+    res.setHeader("Cache-Control","no-cache, no-transform");
+    res.setHeader("Connection","keep-alive");
+    res.setHeader("X-Accel-Buffering","no");
+    res.flushHeaders?.();
+    const send=payload=>res.write("event: notification\ndata: "+JSON.stringify(payload)+"\n\n");
+    if(!realtimeListeners.has(userId))realtimeListeners.set(userId,new Set());
+    realtimeListeners.get(userId).add(send);
+    res.write("event: ready\ndata: "+JSON.stringify({active_count:countActive(userId)})+"\n\n");
+    const heartbeat=setInterval(()=>{try{res.write(": keep-alive\n\n");}catch(_error){}},20000);
+    const cleanup=()=>{clearInterval(heartbeat);const set=realtimeListeners.get(userId);set?.delete(send);if(set&&!set.size)realtimeListeners.delete(userId);};
+    res.on("close",cleanup);res.on("error",cleanup);
+    return true;
+  }
 
   function ensurePreference(userId){
     if(!userId)return;
@@ -66,7 +99,8 @@ function createNotificationCenter({db,env=process.env}={}){
       for(const userId of targets)insert.run(eventId,userId);
     })();
     const event=db.prepare("SELECT * FROM notification_events WHERE id=?").get(eventId);
-    for(const userId of targets)void sendPush(userId,event);
+    const delivered=db.prepare("SELECT user_id FROM notification_recipients WHERE notification_id=?").all(eventId).map(row=>row.user_id);
+    for(const userId of delivered){void sendPush(userId,event);publishRealtime(userId,event);}
     return event;
   }
   function emitOnce({category,entityType,entityId,...rest}){
@@ -75,21 +109,21 @@ function createNotificationCenter({db,env=process.env}={}){
     return existing||emit({category,entityType,entityId,...rest});
   }
   function refreshTimedNotifications(){
-    const recentLeads=db.prepare(`SELECT id,name,lead_type,message FROM website_contact_leads
+    const recentLeads=db.prepare(`SELECT id,name,lead_type,message,assigned_user_id FROM website_contact_leads
       WHERE status NOT IN ('CLOSED','REJECTED') AND datetime(created_at)>=datetime('now','-7 days') ORDER BY created_at DESC LIMIT 100`).all();
     for(const lead of recentLeads)emitOnce({
       category:"WEBSITE_LEAD",entityType:"WEBSITE_LEAD",entityId:String(lead.id),
       titleEn:"New website enquiry",titleHu:"Új weboldali megkeresés",
       bodyEn:`${lead.name} · ${String(lead.lead_type||"").replaceAll("_"," ")}${lead.message?` · ${String(lead.message).slice(0,220)}`:""}`,
       bodyHu:`${lead.name} · ${String(lead.lead_type||"").replaceAll("_"," ")}${lead.message?` · ${String(lead.message).slice(0,220)}`:""}`,
-      actionUrl:"#cms",severity:"INFO"
+      actionUrl:"#cms",severity:"INFO",recipients:lead.assigned_user_id?[lead.assigned_user_id]:null
     });
     const openLeadIds=new Set(recentLeads.map(row=>String(row.id)));
     for(const event of db.prepare("SELECT id,entity_id FROM notification_events WHERE category='WEBSITE_LEAD' AND entity_type='WEBSITE_LEAD' AND resolved_at IS NULL").all()){
       if(!openLeadIds.has(String(event.entity_id)))db.prepare("UPDATE notification_events SET resolved_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
     }
 
-    const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title
+    const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title,j.assigned_user_id
       FROM job_workflow_phases p JOIN jobs j ON j.id=p.job_id
       WHERE p.enabled=1 AND p.completed_at IS NULL AND p.due_at IS NOT NULL AND datetime(p.due_at)<CURRENT_TIMESTAMP
       AND j.cancelled_at IS NULL AND j.stage NOT IN ('planned','completed')`).all();
@@ -101,10 +135,10 @@ function createNotificationCenter({db,env=process.env}={}){
       category:"DEADLINE",entityType:"WORKFLOW_PHASE",entityId:`${row.job_id}:${row.stage_key}`,
       titleEn:"Workflow phase overdue",titleHu:"Lejárt munkafázis",
       bodyEn:`${row.job_code||("#"+row.job_id)} · ${row.title}`,bodyHu:`${row.job_code||("#"+row.job_id)} · ${row.title}`,
-      actionUrl:"#workshop",severity:"URGENT"
+      actionUrl:"#workshop",severity:"URGENT",recipients:row.assigned_user_id?[row.assigned_user_id]:null
     });
 
-    const dueAppointments=db.prepare(`SELECT id,name,scheduled_at FROM private_appointments
+    const dueAppointments=db.prepare(`SELECT id,name,scheduled_at,assigned_user_id FROM private_appointments
       WHERE status='SCHEDULED' AND datetime(scheduled_at)<=CURRENT_TIMESTAMP`).all();
     const appointmentKeys=new Set(dueAppointments.map(row=>String(row.id)));
     for(const event of db.prepare("SELECT id,entity_id FROM notification_events WHERE category='APPOINTMENT_DUE' AND entity_type='PRIVATE_APPOINTMENT' AND resolved_at IS NULL").all()){
@@ -115,7 +149,7 @@ function createNotificationCenter({db,env=process.env}={}){
       titleEn:"Private appointment needs attention",titleHu:"Privát időpont figyelmet igényel",
       bodyEn:`${row.name} · ${new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(row.scheduled_at))}`,
       bodyHu:`${row.name} · ${new Intl.DateTimeFormat("hu-HU",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(row.scheduled_at))}`,
-      actionUrl:"/?view=workshop&private=1",severity:"WARNING"
+      actionUrl:"/?view=workshop&private=1",severity:"WARNING",recipients:row.assigned_user_id?[row.assigned_user_id]:null
     });
   }
   function list(userId){
@@ -189,7 +223,10 @@ function createNotificationCenter({db,env=process.env}={}){
     const severity=/CANCEL|DELETE|FAIL|OVERDUE/.test(act)?"WARNING":/COMPLETE|PAID|CLOSE/.test(act)?"SUCCESS":"INFO";
     const bodyEn=`${user?.name||"System"} · ${act.replaceAll("_"," ")}`;
     const bodyHu=`${user?.name||"Rendszer"} · ${act.replaceAll("_"," ")}`;
-    return emit({category:"OPERATIONAL",entityType:mod.toUpperCase(),entityId:String(recordId||""),titleEn:label,titleHu:label,bodyEn,bodyHu,severity,actorUserId:user?.id||null});
+    const source=newValue&&typeof newValue==="object"?newValue:{};
+    const recipientKeys=["assigned_user_id","responsible_user_id","technician_id","main_responsible_user_id","owner_user_id"];
+    const recipients=[...new Set(recipientKeys.map(key=>source?.[key]).filter(Boolean))];
+    return emit({category:"OPERATIONAL",entityType:mod.toUpperCase(),entityId:String(recordId||""),titleEn:label,titleHu:label,bodyEn,bodyHu,severity,actorUserId:user?.id||null,recipients:recipients.length?recipients:null});
   }
   function subscribe(userId,subscription,userAgent=""){
     if(!subscription?.endpoint||!subscription?.keys?.p256dh||!subscription?.keys?.auth)throw Object.assign(new Error("INVALID_PUSH_SUBSCRIPTION"),{status:400});
@@ -204,7 +241,7 @@ function createNotificationCenter({db,env=process.env}={}){
   function unsubscribe(userId,endpoint){
     db.prepare("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?").run(userId,clean(endpoint,3000));return {ok:true};
   }
-  return {emit,emitOnce,list,snooze,snoozeAll,acknowledge,acknowledgeAll,markRead,resolveEntity,refreshTimedNotifications,preference,ensurePreference,fromAudit,subscribe,unsubscribe,pushConfigured,vapidPublicKey:vapid.publicKey};
+  return {emit,emitOnce,list,snooze,snoozeAll,acknowledge,acknowledgeAll,markRead,resolveEntity,refreshTimedNotifications,preference,ensurePreference,fromAudit,subscribe,unsubscribe,issueRealtimeTicket,attachRealtime,pushConfigured,vapidPublicKey:vapid.publicKey};
 }
 
 function registerNotificationCenterRoutes({app,db,auth,permit,audit,env=process.env,service=null}){
@@ -212,6 +249,10 @@ function registerNotificationCenterRoutes({app,db,auth,permit,audit,env=process.
   const send=(res,fn)=>{try{res.json(fn());}catch(error){res.status(Number(error?.status||400)).json({error:error?.message||"NOTIFICATION_REQUEST_FAILED"});}};
   app.get("/api/notifications",auth,(req,res)=>send(res,()=>notifications.list(req.user.id)));
   app.get("/api/notifications/active",auth,(req,res)=>send(res,()=>notifications.list(req.user.id)));
+  app.post("/api/notifications/realtime-ticket",auth,(req,res)=>send(res,()=>notifications.issueRealtimeTicket(req.user.id)));
+  app.get("/api/notifications/stream",(req,res)=>{
+    if(!notifications.attachRealtime(req.query?.ticket,res))return res.status(401).json({error:"INVALID_NOTIFICATION_STREAM_TICKET"});
+  });
   app.post("/api/notifications/:id/read",auth,(req,res)=>send(res,()=>notifications.markRead(req.user.id,req.params.id)));
   app.post("/api/notifications/:id/snooze",auth,(req,res)=>send(res,()=>notifications.snooze(req.user.id,req.params.id,{hours:req.body?.hours??3,until:req.body?.until||null})));
   app.post("/api/notifications/:id/acknowledge",auth,(req,res)=>send(res,()=>notifications.acknowledge(req.user.id,req.params.id)));
