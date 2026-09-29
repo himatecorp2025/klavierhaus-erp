@@ -1163,6 +1163,7 @@ CREATE TABLE IF NOT EXISTS job_handoffs (
   assigned_to_user_id TEXT,
   assigned_to TEXT,
   phase_note TEXT,
+  billing_description TEXT,
   phase_labor_cost REAL NOT NULL DEFAULT 0 CHECK(phase_labor_cost >= 0),
   phase_material_cost REAL NOT NULL DEFAULT 0 CHECK(phase_material_cost >= 0),
   phase_duration_min INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0),
