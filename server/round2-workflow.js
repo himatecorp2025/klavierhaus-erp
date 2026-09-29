@@ -121,6 +121,13 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(!row)throw problem("INVALID_TECHNICIAN_ID");
     return row;
   }
+  function responsibleUser(id,{optional=true}={}){
+    const value=text(id,160);
+    if(!value&&optional)return null;
+    const row=value&&db.prepare("SELECT id,name,role,status,calendar_color FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN','SUPERADMIN')").get(value);
+    if(!row)throw problem("INVALID_RESPONSIBLE_USER_ID");
+    return row;
+  }
   function findConflict(jobId,technicianId,start,duration){
     if(!technicianId||!start)return null;
     const wantedStart=new Date(start).getTime(),wantedEnd=new Date(endAt(start,duration)).getTime();
@@ -131,29 +138,32 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       return rowStart<wantedEnd&&rowEnd>wantedStart;
     })||null;
   }
-  function normalizePlan(input){
+  function normalizePlan(input,{defaultResponsibleId=null,defaultStartAt=null}={}){
     const supplied=Array.isArray(input)?input:null;
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
     const plan=stageDefinitions().map(stage=>{
-      const item=byKey.get(stage.key);
-      const mandatory=FIXED_STAGE_KEYS.has(stage.key);
-      const enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
-      return {stage_key:stage.key,position:stage.position,enabled,due_at:item?optionalIso(item.due_at):null};
+      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
+      const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
+      if(responsibleId)responsibleUser(responsibleId,{optional:false});
+      return {stage_key:stage.key,position:stage.position,enabled,
+        starts_at:item?.starts_at?optionalIso(item.starts_at):(stage.key==="received"&&defaultStartAt?optionalIso(defaultStartAt):null),
+        due_at:item?.due_at?optionalIso(item.due_at):null,responsible_user_id:responsibleId};
     });
     for(const key of ["received","admin_approval","completed"])if(!plan.find(row=>row.stage_key===key)?.enabled)throw problem("WORKFLOW_FIXED_STAGE_REQUIRED");
     return plan;
   }
   function writePlan(jobId,plan,{preserveProgress=false}={}){
     const existing=new Map(phasesForJob(jobId).map(row=>[row.stage_key,row]));
-    const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,due_at,activated_at,completed_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(job_id,stage_key) DO UPDATE SET position=excluded.position,enabled=excluded.enabled,due_at=excluded.due_at,
+    const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,responsible_user_id,activated_at,completed_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(job_id,stage_key) DO UPDATE SET position=excluded.position,enabled=excluded.enabled,starts_at=excluded.starts_at,due_at=excluded.due_at,responsible_user_id=excluded.responsible_user_id,
       activated_at=CASE WHEN ?=1 THEN job_workflow_phases.activated_at ELSE excluded.activated_at END,
       completed_at=CASE WHEN ?=1 THEN job_workflow_phases.completed_at ELSE excluded.completed_at END,
       updated_at=CURRENT_TIMESTAMP`);
     for(const row of plan){
       const old=existing.get(row.stage_key);
-      upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.due_at,preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
+      upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.starts_at,row.due_at,row.responsible_user_id,
+        preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
     }
   }
   function firstEnabledStage(jobId){
