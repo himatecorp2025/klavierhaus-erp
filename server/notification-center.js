@@ -106,6 +106,19 @@ function createNotificationCenter({db,env=process.env}={}){
       WHERE user_id=? AND acknowledged_at IS NULL`).run(userId);
     return {ok:true};
   }
+  function snoozeAll(userId,{hours=3,until=null}={}){
+    let snoozedUntil=null;
+    if(until){
+      const date=new Date(until);if(Number.isNaN(date.getTime()))throw Object.assign(new Error("INVALID_NOTIFICATION_SNOOZE_TIME"),{status:400});
+      snoozedUntil=date.toISOString();
+    }else{
+      const safeHours=Math.min(168,Math.max(1,Number(hours)||3));
+      snoozedUntil=new Date(Date.now()+safeHours*3600000).toISOString();
+    }
+    db.prepare(`UPDATE notification_recipients SET read_at=COALESCE(read_at,CURRENT_TIMESTAMP),snoozed_until=?,acknowledged_at=NULL
+      WHERE user_id=? AND acknowledged_at IS NULL`).run(snoozedUntil,userId);
+    return {ok:true,snoozed_until:snoozedUntil};
+  }
   function markRead(userId,notificationId){
     if(!visible(userId,notificationId))throw Object.assign(new Error("NOTIFICATION_NOT_FOUND"),{status:404});
     db.prepare("UPDATE notification_recipients SET read_at=COALESCE(read_at,CURRENT_TIMESTAMP) WHERE user_id=? AND notification_id=?").run(userId,notificationId);
@@ -139,7 +152,7 @@ function createNotificationCenter({db,env=process.env}={}){
   function unsubscribe(userId,endpoint){
     db.prepare("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?").run(userId,clean(endpoint,3000));return {ok:true};
   }
-  return {emit,list,snooze,acknowledge,acknowledgeAll,markRead,resolveEntity,preference,ensurePreference,fromAudit,subscribe,unsubscribe,pushConfigured,vapidPublicKey:vapid.publicKey};
+  return {emit,list,snooze,snoozeAll,acknowledge,acknowledgeAll,markRead,resolveEntity,preference,ensurePreference,fromAudit,subscribe,unsubscribe,pushConfigured,vapidPublicKey:vapid.publicKey};
 }
 
 function registerNotificationCenterRoutes({app,db,auth,permit,audit,env=process.env,service=null}){
@@ -151,11 +164,16 @@ function registerNotificationCenterRoutes({app,db,auth,permit,audit,env=process.
   app.post("/api/notifications/:id/snooze",auth,(req,res)=>send(res,()=>notifications.snooze(req.user.id,req.params.id,{hours:req.body?.hours??3,until:req.body?.until||null})));
   app.post("/api/notifications/:id/acknowledge",auth,(req,res)=>send(res,()=>notifications.acknowledge(req.user.id,req.params.id)));
   app.post("/api/notifications/acknowledge-all",auth,(req,res)=>send(res,()=>notifications.acknowledgeAll(req.user.id)));
+  app.post("/api/notifications/snooze-all",auth,(req,res)=>send(res,()=>notifications.snoozeAll(req.user.id,{hours:req.body?.hours??3,until:req.body?.until||null})));
   app.get("/api/notifications/preferences",auth,(req,res)=>send(res,()=>({preferences:notifications.preference(req.user.id),push_configured:notifications.pushConfigured,vapid_public_key:notifications.vapidPublicKey})));
   app.put("/api/notifications/preferences/sound",auth,(req,res)=>send(res,()=>{
     notifications.ensurePreference(req.user.id);const enabled=req.body?.sound_enabled?1:0;
     db.prepare("UPDATE notification_preferences SET sound_enabled=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(enabled,req.user.id);
     audit?.(req,"UPDATE_SOUND","notifications",req.user.id,null,{sound_enabled:enabled});return notifications.preference(req.user.id);
+  }));
+  app.get("/api/admin/users/:id/notification-delivery",auth,admin,(req,res)=>send(res,()=>{
+    const userId=clean(req.params.id,160);if(!db.prepare("SELECT 1 FROM users WHERE id=?").get(userId))throw Object.assign(new Error("USER_NOT_FOUND"),{status:404});
+    return notifications.preference(userId);
   }));
   app.put("/api/admin/users/:id/notification-delivery",auth,admin,(req,res)=>send(res,()=>{
     const userId=clean(req.params.id,160);if(!db.prepare("SELECT 1 FROM users WHERE id=?").get(userId))throw Object.assign(new Error("USER_NOT_FOUND"),{status:404});
