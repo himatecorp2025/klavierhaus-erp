@@ -286,20 +286,21 @@ function r2OpenCancel(job,refresh=renderWorkshop){
 }
 
 function r2WorkflowCard(job){
-  const overdue=job.current_phase?.due_at&&new Date(job.current_phase.due_at)<new Date()&&job.stage!=="completed";
-  return `<article class="job-card stage-card ${overdue?"is-overdue":""} ${job.stage==="completed"?"is-locked":""}" draggable="${job.stage==="completed"?"false":"true"}" data-job-id="${job.id}">
-    <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${esc(r2StageLabel(job.stage))}</span></div>
+  const status=job.workflow_status||"in_progress",phase=job.current_phase||{};
+  return `<article class="job-card stage-card status-${esc(status)}" draggable="false" data-job-id="${job.id}">
+    <div class="job-card-top job-drag-handle" draggable="true" data-job-drag-handle="${job.id}" title="${tr("Drag this card to another phase","Húzd a kártyát egy másik fázisba")}"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip status-chip status-${esc(status)}">${esc(r2StatusLabel(status))}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
-    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>👤 ${esc(job.assigned_technician_name||tr("Unassigned","Nincs technikus"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
-    ${job.current_phase?.due_at?`<div class="workflow-due ${overdue?"overdue":""}">${tr("Due","Határidő")}: ${esc(r2FormatDateTime(job.current_phase.due_at))}</div>`:""}
-    ${job.current_phase?.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(job.current_phase.blocker_code))}${job.current_phase.blocker_note?` · ${esc(job.current_phase.blocker_note)}`:""}</div>`:""}
-    ${job.stage==="completed"?`<div class="completed-note">✓ ${tr("Closed by","Lezárta")}: ${esc(job.completed_by_name||"Admin")}</div>`:""}
+    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>👤 ${esc(phase.responsible_name||job.assigned_technician_name||tr("Unassigned","Nincs felelős"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
+    ${phase.starts_at?`<div class="workflow-start">${tr("Start","Kezdés")}: ${esc(r2FormatDateTime(phase.starts_at))}</div>`:""}
+    ${phase.due_at?`<div class="workflow-due ${status==="overdue"?"overdue":""}">${tr("Due","Határidő")}: ${esc(r2FormatDateTime(phase.due_at))}</div>`:""}
+    ${phase.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(phase.blocker_code))}${phase.blocker_note?` · ${esc(phase.blocker_note)}`:""}</div>`:""}
+    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled).map(p=>`<span class="phase-chip phase-status-${esc(p.visual_status||"scheduled")}">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
     <div class="job-actions">
       <button class="text-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Details","Részletek")}</button>
-      ${job.stage!=="completed"&&job.ready_for_closeout&&r2IsAdmin()?`<button class="primary-button closeout-button" type="button" data-closeout-job="${job.id}">${tr("Complete & Invoice","Lezárás és számlázás")}</button>`:""}
-      ${job.stage!=="completed"&&!job.ready_for_closeout?`<button class="primary-button" type="button" data-handoff-job="${job.id}">${tr("Complete phase","Fázis lezárása")}</button>`:""}
-      ${job.stage!=="completed"?`<button class="text-button" type="button" data-schedule-job="${job.id}">${tr("Schedule","Ütemezés")}</button><button class="text-button" type="button" data-blocker-job="${job.id}">${tr("Deadline / blocker","Határidő / elakadás")}</button>`:""}
-      ${r2IsAdmin()&&job.stage!=="completed"?`<button class="text-button" type="button" data-plan-job="${job.id}">${tr("Workflow","Munkafolyamat")}</button><button class="danger-button" type="button" data-cancel-job="${job.id}">${tr("Cancel","Megszakítás")}</button>`:""}
+      ${job.ready_for_closeout&&r2IsAdmin()?`<button class="primary-button closeout-button" type="button" data-closeout-job="${job.id}">${tr("Complete & Invoice","Lezárás és számlázás")}</button>`:""}
+      ${!job.ready_for_closeout?`<button class="primary-button" type="button" data-handoff-job="${job.id}">${tr("Complete phase","Fázis lezárása")}</button>`:""}
+      <button class="text-button" type="button" data-schedule-job="${job.id}">${tr("Schedule","Ütemezés")}</button><button class="text-button" type="button" data-blocker-job="${job.id}">${tr("Timing / responsibility","Időzítés / felelős")}</button>
+      ${r2IsAdmin()?`<button class="text-button" type="button" data-plan-job="${job.id}">${tr("Workflow","Munkafolyamat")}</button><button class="danger-button" type="button" data-cancel-job="${job.id}">${tr("Cancel","Megszakítás")}</button>`:""}
     </div>
   </article>`;
 }
@@ -334,16 +335,49 @@ function r2WorkflowColumn(column,{closed=false}={}){
 function r2AddStageColumn(){
   return `<button type="button" class="workflow-add-column" id="workflowAddStageCard"><span>＋</span><strong>${tr("Add workflow phase","Új munkafázis")}</strong><small>${tr("Up to two additional intermediate phases","Legfeljebb két további köztes fázis")}</small></button>`;
 }
+function r2CreateDragGhost(source,className="workflow-drag-ghost"){
+  const rect=source.getBoundingClientRect(),ghost=source.cloneNode(true);
+  ghost.classList.add(className);ghost.style.width=rect.width+"px";ghost.style.position="fixed";ghost.style.left="-10000px";ghost.style.top="-10000px";ghost.style.pointerEvents="none";ghost.style.zIndex="99999";
+  document.body.appendChild(ghost);return ghost;
+}
+function r2ClearDropHighlights(root){$$(".drag-over",root).forEach(node=>node.classList.remove("drag-over"));}
+function r2BindTouchCardDrag(handle,card,jobs,root){
+  let ghost=null,target=null,active=false;
+  const move=event=>{
+    if(!active||!ghost)return;event.preventDefault();
+    ghost.style.left=(event.clientX+12)+"px";ghost.style.top=(event.clientY+12)+"px";
+    r2ClearDropHighlights(root);const hit=document.elementFromPoint(event.clientX,event.clientY),column=hit?.closest?.("[data-drop-stage]");
+    target=column||null;if(target)target.classList.add("drag-over");
+  };
+  const end=event=>{
+    if(!active)return;active=false;try{handle.releasePointerCapture(event.pointerId);}catch(_error){}
+    ghost?.remove();ghost=null;r2ClearDropHighlights(root);card.classList.remove("dragging");
+    const job=jobs.find(item=>String(item.id)===String(card.dataset.jobId)),stage=target?.dataset.dropStage;target=null;
+    if(job&&stage&&job.stage!==stage)r2OpenHandoff(job,renderWorkshop,stage);
+  };
+  handle.addEventListener("pointerdown",event=>{
+    if(event.pointerType==="mouse")return;active=true;handle.setPointerCapture?.(event.pointerId);ghost=r2CreateDragGhost(card,"workflow-touch-drag-ghost");card.classList.add("dragging");move(event);
+  });
+  handle.addEventListener("pointermove",move,{passive:false});handle.addEventListener("pointerup",end);handle.addEventListener("pointercancel",end);
+}
 function r2BindDrag(root,jobs){
-  $$('[data-job-id][draggable="true"]',root).forEach(card=>card.addEventListener("dragstart",event=>{event.dataTransfer.setData("text/job-id",card.dataset.jobId);card.classList.add("dragging");}));
-  $$('[data-job-id][draggable="true"]',root).forEach(card=>card.addEventListener("dragend",()=>card.classList.remove("dragging")));
+  $$("[data-job-drag-handle]",root).forEach(handle=>{
+    const card=handle.closest("[data-job-id]");if(!card)return;
+    handle.addEventListener("dragstart",event=>{
+      const ghost=r2CreateDragGhost(card);handle._r2Ghost=ghost;event.dataTransfer.setData("text/job-id",card.dataset.jobId);event.dataTransfer.effectAllowed="move";
+      try{event.dataTransfer.setDragImage(ghost,Math.min(70,ghost.offsetWidth/3),28);}catch(_error){}
+      card.classList.add("dragging");
+    });
+    handle.addEventListener("dragend",()=>{handle._r2Ghost?.remove();handle._r2Ghost=null;card.classList.remove("dragging");r2ClearDropHighlights(root);});
+    r2BindTouchCardDrag(handle,card,jobs,root);
+  });
   $$("[data-drop-stage]",root).forEach(column=>{
-    column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/job-id"))event.preventDefault();});
+    column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/job-id")){event.preventDefault();r2ClearDropHighlights(root);column.classList.add("drag-over");}});
+    column.addEventListener("dragleave",event=>{if(!column.contains(event.relatedTarget))column.classList.remove("drag-over");});
     column.addEventListener("drop",event=>{
       const jobId=event.dataTransfer.getData("text/job-id");if(!jobId)return;
-      event.preventDefault();const job=jobs.find(item=>String(item.id)===jobId),target=column.dataset.dropStage;
-      if(!job||job.stage===target)return;
-      r2OpenHandoff(job,renderWorkshop,target);
+      event.preventDefault();r2ClearDropHighlights(root);const job=jobs.find(item=>String(item.id)===jobId),target=column.dataset.dropStage;
+      if(!job||job.stage===target)return;r2OpenHandoff(job,renderWorkshop,target);
     });
   });
 }
@@ -356,7 +390,8 @@ async function r2SaveStageOrder(stageKeys,refresh=renderWorkshop){
 }
 function r2BindStageColumnReorder(root){
   if(!r2IsAdmin())return;
-  $$("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragstart",event=>{event.stopPropagation();event.dataTransfer.setData("text/stage-key",handle.dataset.stageDrag);event.dataTransfer.effectAllowed="move";}));
+  $("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragstart",event=>{event.stopPropagation();const column=handle.closest("[data-stage-column]"),ghost=column?r2CreateDragGhost(column,"workflow-column-drag-ghost"):null;handle._r2Ghost=ghost;event.dataTransfer.setData("text/stage-key",handle.dataset.stageDrag);event.dataTransfer.effectAllowed="move";if(ghost)try{event.dataTransfer.setDragImage(ghost,80,28);}catch(_error){};column?.classList.add("dragging");}));
+  $("[data-stage-drag]",root).forEach(handle=>handle.addEventListener("dragend",()=>{handle._r2Ghost?.remove();handle._r2Ghost=null;handle.closest("[data-stage-column]")?.classList.remove("dragging");r2ClearDropHighlights(root);}));
   $$("[data-stage-column]",root).forEach(column=>{
     column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/stage-key")&&!r2FixedStage(column.dataset.stageColumn))event.preventDefault();});
     column.addEventListener("drop",event=>{
