@@ -517,7 +517,7 @@ function updateMasterToolbar(){
   const reveal=$("#masterSearchReveal");
   reveal?.classList.toggle("open",Boolean(state.masterSearchOpen));
   const active=state.masterMode==="PIANOS"?"PIANOS":state.clientMasterFilter||"ALL";
-  $$$("[data-master-tool]").forEach(button=>{
+  $$("[data-master-tool]").forEach(button=>{
     const kind=button.dataset.masterTool;
     button.classList.toggle("active",kind==="SEARCH"?Boolean(state.masterSearchOpen):(kind==="CLIENTS"?active==="ALL":kind===active));
   });
