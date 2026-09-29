@@ -15,10 +15,20 @@ function v6ResolveTheme(){
   const local=localStorage.getItem(v6UserThemeKey());
   return local==="light"?"light":"dark";
 }
+function v6BrandAssetUrl(url){
+  if(!url)return "";const version=state.v6Branding?.branding_version||"1";return `${url}${url.includes("?")?"&":"?"}v=${encodeURIComponent(version)}`;
+}
+function v6ApplyBrandLogo(){
+  const branding=state.v6Branding||{},theme=document.documentElement.dataset.theme==="light"?"light":"dark";
+  const url=theme==="light"?(branding.erp_logo_light_url||branding.logo_url):(branding.erp_logo_dark_url||branding.logo_url);
+  if(!url)return;
+  for(const img of [$("#loginBrandLogo"),$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img)img.src=v6BrandAssetUrl(url);
+}
 function v6ApplyTheme(theme,{save=false}={}){
   const next=theme==="light"?"light":"dark";
   document.documentElement.dataset.theme=next;
   document.documentElement.style.colorScheme=next;
+  v6ApplyBrandLogo();
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content",next==="dark"?"#0f1115":"#f6f7f9");
   localStorage.setItem(v6UserThemeKey(),next);
   if(!state.user)localStorage.setItem("kh_login_theme",next);
@@ -92,17 +102,17 @@ showApp=function(){
 loadBranding=async function(){
   try{
     const branding=await fetch("/api/public/branding",{cache:"no-store"}).then(response=>response.json());
-    for(const img of [$("#loginBrandLogo"),$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img&&branding.logo_url)img.src=`${branding.logo_url}${branding.logo_url.includes("?")?"&":"?"}v=${encodeURIComponent(branding.branding_version||"1")}`;
+    state.v6Branding=branding;v6ApplyBrandLogo();
     if(branding.login_background_url){
       $("#loginScreen")?.style.setProperty("--login-background",`url("${String(branding.login_background_url).replaceAll('"','%22')}")`);
       $("#loginScreen")?.classList.add("has-custom-background");
     }else{
       $("#loginScreen")?.style.removeProperty("--login-background");$("#loginScreen")?.classList.remove("has-custom-background");
     }
-    const favicon=branding.favicon_url||branding.logo_url;
-    if(favicon)$("#appFavicon")?.setAttribute("href",`${favicon}${favicon.includes("?")?"&":"?"}v=${encodeURIComponent(branding.branding_version||"1")}`);
-    const touch=branding.app_icon_url||branding.logo_url;
-    if(touch)$("#appTouchIcon")?.setAttribute("href",`${touch}${touch.includes("?")?"&":"?"}v=${encodeURIComponent(branding.branding_version||"1")}`);
+    const favicon=branding.favicon_url;
+    if(favicon)$("#appFavicon")?.setAttribute("href",v6BrandAssetUrl(favicon));
+    const touch=branding.app_icon_url;
+    if(touch)$("#appTouchIcon")?.setAttribute("href",v6BrandAssetUrl(touch));
     document.title=`${branding.company_name||"Klavierhaus"} ERP`;
   }catch(_error){}
 };
@@ -265,18 +275,9 @@ async function v6RenderCollections(){
   $$("[data-new-collection]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCollectionEditor(button.dataset.newCollection,null,v6RenderCollections)));
   $$("[data-edit-collection]",host).forEach(button=>button.addEventListener("click",()=>{const group=groups.find(g=>g[0]===button.dataset.editCollection);const row=group?.[2].find(item=>String(item.id)===button.dataset.id);if(row)v6OpenCollectionEditor(button.dataset.editCollection,row,v6RenderCollections);}));
 }
-async function v6SetGlobalFavicon(url){
-  for(const language of ["en","hu"]){
-    const page=await api(`/api/website-content/global?lang=${language}`),content=structuredClone(page.content||{});
-    if(!content.brand||typeof content.brand!=="object")content.brand={};
-    content.brand.logoImage=url;
-    await api("/api/website-content/global",{method:"PUT",body:JSON.stringify({language,content})});
-  }
-}
 async function v6RenderBranding(){
   const host=$("#cmsMain");
-  const [branding,assets,design,globalEn]=await Promise.all([api("/api/settings/branding"),api("/api/settings/branding/assets"),api("/api/website-design-settings"),api("/api/website-content/global?lang=en")]);
-  const publicFavicon=globalEn.content?.brand?.logoImage||"";
+  const [branding,assets,design]=await Promise.all([api("/api/settings/branding"),api("/api/settings/branding/assets"),api("/api/website-design-settings")]);
   const palette=[
     ["black",tr("Primary dark","Elsődleges sötét"),design.black||"#080807"],
     ["ivory",tr("Ivory","Elefántcsont"),design.ivory||"#f2efe8"],
@@ -286,11 +287,12 @@ async function v6RenderBranding(){
     ["muted",tr("Muted text","Másodlagos szöveg"),design.muted||"#aaa49a"]
   ];
   host.innerHTML=`<div class="branding-grid">
-    ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Header logo on the public website.","A publikus weboldal fejlécében használt logó."))}
-    ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),publicFavicon,tr("Browser tab icon. Stored through the existing global website content.","Böngészőfül ikon. A meglévő globális weboldaltartalmon keresztül tárolva."))}
-    ${v6BrandAssetCard("erpLogo",tr("ERP logo","ERP logó"),branding.logo_url,tr("Logo used by login and the admin shell.","A login és az adminfelület logója."))}
-    ${v6BrandAssetCard("appIcon",tr("PWA / app icon","PWA / alkalmazásikon"),assets.app_icon_url,tr("Installed app icon and touch icon.","Telepített alkalmazás és touch ikon."))}
-    ${v6BrandAssetCard("loginBackground",tr("Login background","Login háttérkép"),branding.login_background_url,tr("Responsive background image behind the login card.","Reszponzív háttérkép a login kártya mögött."))}
+    ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Independent header logo on the public website.","A publikus weboldal önálló fejléc-logója."))}
+    ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),design.favicon_url,tr("Independent browser-tab icon for the public website.","A publikus weboldal önálló böngészőfül-ikonja."))}
+    ${v6BrandAssetCard("erpLogoDark",tr("ERP logo · dark mode","ERP logó · sötét mód"),assets.erp_logo_dark_url,tr("ERP and login logo while dark mode is active.","ERP és login logó sötét módban."))}
+    ${v6BrandAssetCard("erpLogoLight",tr("ERP logo · light mode","ERP logó · világos mód"),assets.erp_logo_light_url,tr("ERP and login logo while light mode is active.","ERP és login logó világos módban."))}
+    ${v6BrandAssetCard("appIcon",tr("PWA / app icon","PWA / alkalmazásikon"),assets.app_icon_url,tr("Independent installed-app and touch icon.","Önálló telepített alkalmazás- és touch ikon."))}
+    ${v6BrandAssetCard("loginBackground",tr("Login background","Login háttérkép"),assets.login_background_url,tr("Independent responsive background behind the login card.","Önálló reszponzív háttérkép a login kártya mögött."))}
   </div>
   <section class="panel website-design-panel"><div class="panel-head"><div><span class="eyebrow">${tr("PUBLIC WEBSITE DESIGN","PUBLIKUS WEBOLDAL DIZÁJN")}</span><h2>${tr("Colors & typography","Színek és tipográfia")}</h2></div></div>
     <form id="websiteDesignForm" class="website-design-form">
@@ -299,20 +301,26 @@ async function v6RenderBranding(){
       <div class="form-actions"><button class="primary-button" type="submit">${tr("Save website design","Weboldal-dizájn mentése")}</button></div>
     </form>
   </section>`;
-  async function uploadWebsite(file){const out=await v6UploadWebsiteImage(file);return out.absolute_url||out.image_url;}
-  async function uploadBranding(endpoint,field,file){const form=new FormData();form.append(field,file);const out=await api(endpoint,{method:"POST",body:form});return out.url||out.logo_url||out.login_background_url;}
+  async function uploadBranding(endpoint,file){const form=new FormData();form.append("file",file);return api(endpoint,{method:"POST",body:form});}
   $("#websiteDesignForm")?.addEventListener("submit",async event=>{
     event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));
-    try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
+    try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||"",favicon_url:design.favicon_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
   });
   $$("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0],kind=event.currentTarget.dataset.brandFile;if(!file)return;
     try{
-      if(kind==="websiteLogo"){const url=await uploadWebsite(file);await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,logo_url:url})});}
-      else if(kind==="websiteFavicon"){const form=new FormData();form.append("file",file);const out=await api("/api/settings/branding/favicon",{method:"POST",body:form});await v6SetGlobalFavicon(out.absolute_url||out.url);}
-      else if(kind==="erpLogo"){await uploadBranding("/api/settings/branding/logo","logo",file);}
-      else if(kind==="appIcon"){await uploadBranding("/api/settings/branding/app-icon","file",file);}
-      else if(kind==="loginBackground"){await uploadBranding("/api/settings/branding/background","background",file);}
+      if(kind==="websiteLogo"){
+        const out=await uploadBranding("/api/settings/branding/public-logo",file),url=out.absolute_url||out.url;
+        await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,logo_url:url})});
+      }else if(kind==="websiteFavicon"){
+        const out=await uploadBranding("/api/settings/branding/public-favicon",file),url=out.absolute_url||out.url;
+        await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,favicon_url:url})});
+      }else if(kind==="erpLogoDark")await uploadBranding("/api/settings/branding/erp-logo-dark",file);
+      else if(kind==="erpLogoLight")await uploadBranding("/api/settings/branding/erp-logo-light",file);
+      else if(kind==="appIcon")await uploadBranding("/api/settings/branding/app-icon",file);
+      else if(kind==="loginBackground"){
+        const form=new FormData();form.append("background",file);await api("/api/settings/branding/background",{method:"POST",body:form});
+      }
       toast(tr("Brand asset updated.","Arculati elem frissítve."),"success");await loadBranding();await v6RenderBranding();
     }catch(error){toast(humanError(error),"error");}
   }));
@@ -320,7 +328,7 @@ async function v6RenderBranding(){
 function v6BrandAssetCard(kind,title,url,description){
   return `<section class="panel branding-card"><div class="branding-preview ${kind==="loginBackground"?"wide":""}">${url?`<img src="${esc(url)}" alt="">`:`<div class="cms-media-empty">＋</div>`}</div><div><span class="eyebrow">${esc(kind.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(description)}</p><label class="file-picker"><input type="file" accept="image/*" data-brand-file="${kind}"><span>↑ ${tr(url?"Replace":"Upload",url?"Csere":"Feltöltés")}</span></label></div></section>`;
 }
-const V6_ARCHIVE_CATEGORIES={
+const V6_ARCHIVE_CATEGORIES=const V6_ARCHIVE_CATEGORIES={
   deleted_invoice:["Invalidated / deleted invoices","Érvénytelenített / törölt számlák"],
   financial_document:["Financial documents","Pénzügyi dokumentumok"],
   contract:["Contracts","Szerződések"],
