@@ -240,7 +240,7 @@ if(inventoryCatalogNeedsMigration){
   db.exec('ALTER TABLE "inventory_items" RENAME TO "_inventory_legacy_items"');
   console.log("[INVENTORY] Legacy inventory_items table isolated before canonical inventory schema creation");
 }
-const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("financial_document");
+const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("deleted_intake");
 if(archiveCategoryNeedsMigration){
   if(tableExists("_documents_legacy_archive"))db.exec('DROP TABLE "_documents_legacy_archive"');
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');

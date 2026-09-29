@@ -6,8 +6,8 @@ const crypto=require("node:crypto");
 const multer=require("multer");
 const {LETTER,createPdf,textCommand,safeText}=require("./document-pdf");
 
-const CATEGORIES=new Set(["deleted_invoice","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
-const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","intake_assessment"]);
+const CATEGORIES=new Set(["deleted_invoice","deleted_intake","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
+const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","deleted_intake","intake_assessment"]);
 const EXTENSIONS=new Set([".pdf",".doc",".docx",".xls",".xlsx",".csv",".txt",".jpg",".jpeg",".png",".webp",".gif"]);
 const MIMES=new Set([
   "application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -89,6 +89,39 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
     return {lead,items,pdf,publicPath,archiveId:Number(info.lastInsertRowid)};
   }
 
+  function deleteIntakeToArchive(id,actor,reason=""){
+    const {lead,items}=assessmentSource(id);
+    const emailLog=db.prepare("SELECT * FROM intake_assessment_email_log WHERE intake_id=? ORDER BY created_at,id").all(id);
+    const linkedJobs=db.prepare("SELECT id,job_code,title,stage,cancelled_at,completed_at FROM jobs WHERE intake_id=? ORDER BY id").all(id);
+    const pdf=intakeAssessmentPdf({lead,items});
+    const filename=`deleted-intake-${id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`;
+    const filePath=path.join(target,filename);
+    fs.writeFileSync(filePath,pdf,{flag:"wx"});
+    const publicPath=`/uploads/archive/${filename}`;
+    const snapshot={source:"deleted_intake",deleted_at:new Date().toISOString(),deleted_by_user_id:actor?.id||null,reason:text(reason,3000),intake:lead,items,email_log:emailLog,linked_jobs:linkedJobs};
+    try{
+      const archived=db.transaction(()=>{
+        const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+          VALUES('deleted_intake',?,?,?,?,?,?,?,?,?,?,?)`).run(
+          `Deleted Intake #${id} · ${lead.client_name||lead.raw_client_name||"Prospect"}`,
+          text(reason,3000)||lead.reported_issue||null,"intake",String(id),`deleted-intake-${id}.pdf`,filename,"application/pdf",pdf.length,publicPath,JSON.stringify(snapshot),actor?.id||null
+        );
+        db.prepare("DELETE FROM intake_leads WHERE id=?").run(id);
+        return db.prepare(`${select} WHERE a.id=?`).get(Number(info.lastInsertRowid));
+      })();
+      return {...archived,metadata:snapshot};
+    }catch(error){try{fs.unlinkSync(filePath);}catch(_error){}throw error;}
+  }
+
+  app.delete("/api/intake/:id",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
+      const before=assessmentSource(id);
+      const archived=deleteIntakeToArchive(id,req.user,req.body?.reason||"");
+      audit(req,"DELETE","intake",String(id),before,{archive_document_id:archived.id,category:"deleted_intake"},1,"Intake deleted and archived");
+      res.json({ok:true,archive_document:archived});
+    }catch(error){respond(res,error);}
+  });
   app.get("/api/archive/documents",auth,admin,(req,res)=>{
     try{
       const category=text(req.query.category,80),q=text(req.query.q,240).toLowerCase(),like=`%${q}%`;

@@ -960,6 +960,22 @@ CREATE TABLE IF NOT EXISTS system_integration_health (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+
+CREATE TABLE IF NOT EXISTS website_backups (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL DEFAULT 'all' CHECK(scope IN ('all','pages','collections','branding')),
+  trigger_type TEXT NOT NULL DEFAULT 'MANUAL' CHECK(trigger_type IN ('MANUAL','PRE_RESET','PRE_RESTORE')),
+  label TEXT,
+  file_path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  snapshot_version INTEGER NOT NULL DEFAULT 1,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_website_backups_created ON website_backups(created_at DESC,id DESC);
+
 CREATE TABLE IF NOT EXISTS system_integration_backups (
   id TEXT PRIMARY KEY,
   provider TEXT NOT NULL CHECK(provider IN ('GOOGLE_CALENDAR','GA4','CLARITY','SEARCH_CONSOLE','RESEND','STRIPE')),
@@ -1677,7 +1693,7 @@ CREATE INDEX IF NOT EXISTS idx_website_tracking_round1 ON website_tracking_event
 -- as immutable snapshots while active modules only show live records.
 CREATE TABLE IF NOT EXISTS document_archive (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
+  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','deleted_intake','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
   title TEXT NOT NULL,
   description TEXT,
   entity_type TEXT,

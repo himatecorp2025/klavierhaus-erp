@@ -476,6 +476,89 @@ test("Admin and Super Admin invoice controls move deleted drafts to the document
 });
 
 
+
+test("Deleting an Intake archives a complete snapshot and PDF while client and linked Job remain",async()=>{
+  const token=shared.adminToken;
+  const created=await request("/api/intake",{token,method:"POST",body:{
+    client_id:shared.client.id,
+    piano_id:shared.piano.id,
+    raw_client_name:"Archive Intake Client",
+    raw_contact:"archive.intake@example.com",
+    service_location:"on_site",
+    reported_issue:"Archive-only regulation assessment",
+    estimated_urgency:"normal",
+    media_urls:["https://example.com/archive-before.jpg"],
+    assigned_technician_id:"U-F-WORKER"
+  }});
+  assert.equal(created.status,201,JSON.stringify(created.payload));
+
+  const catalog=await request("/api/intake-catalog",{token,method:"POST",body:{
+    category:"ARCHIVE TEST",title_en:"Archive regulation",title_hu:"Archív szabályozás",description_en:"Retention test",description_hu:"Megőrzési teszt",default_price:175,active:true
+  }});
+  assert.equal(catalog.status,201,JSON.stringify(catalog.payload));
+  const assessment=await request("/api/intake/"+created.payload.id+"/assessment",{token,method:"PUT",body:{items:[{catalog_item_id:catalog.payload.id,price:190}]}});
+  assert.equal(assessment.status,200,JSON.stringify(assessment.payload));
+  assert.equal(assessment.payload.items.length,1);
+
+  const linkedJob=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Job retained after Intake deletion"
+  }});
+  assert.equal(linkedJob.status,201,JSON.stringify(linkedJob.payload));
+  appDb.prepare("UPDATE jobs SET intake_id=? WHERE id=?").run(created.payload.id,linkedJob.payload.id);
+
+  const clientBefore=appDb.prepare("SELECT * FROM clients WHERE id=?").get(shared.client.id);
+  const deleted=await request("/api/intake/"+created.payload.id,{token,method:"DELETE",body:{reason:"Customer cancelled before work approval"}});
+  assert.equal(deleted.status,200,JSON.stringify(deleted.payload));
+  assert.equal(deleted.payload.ok,true);
+  assert.equal(deleted.payload.archive_document.category,"deleted_intake");
+
+  const active=await request("/api/intake",{token});
+  assert.equal(active.status,200);
+  assert.equal(active.payload.some(row=>Number(row.id)===Number(created.payload.id)),false);
+  assert.equal(Boolean(appDb.prepare("SELECT 1 FROM clients WHERE id=?").get(shared.client.id)),true);
+  assert.equal(appDb.prepare("SELECT name FROM clients WHERE id=?").get(shared.client.id).name,clientBefore.name);
+  const retainedJob=appDb.prepare("SELECT id,intake_id FROM jobs WHERE id=?").get(linkedJob.payload.id);
+  assert.ok(retainedJob);
+  assert.equal(retainedJob.intake_id,null);
+
+  const archive=await request("/api/archive/documents?category=deleted_intake",{token});
+  assert.equal(archive.status,200,JSON.stringify(archive.payload));
+  const row=archive.payload.rows.find(item=>String(item.entity_id)===String(created.payload.id));
+  assert.ok(row);
+  assert.equal(row.metadata.source,"deleted_intake");
+  assert.equal(row.metadata.intake.reported_issue,"Archive-only regulation assessment");
+  assert.equal(row.metadata.items.length,1);
+  assert.equal(row.metadata.items[0].price,190);
+  assert.ok(row.metadata.linked_jobs.some(job=>Number(job.id)===Number(linkedJob.payload.id)));
+  assert.equal(row.metadata.reason,"Customer cancelled before work approval");
+
+  const archivedPdf=await pdf("/api/archive/documents/"+row.id+"/download",token);
+  assert.equal(archivedPdf.status,200);
+  assert.ok(archivedPdf.buffer.subarray(0,4).toString("utf8")==="%PDF");
+});
+
+
+
+test("Website recovery API enforces backup creation and destructive-action permissions",async()=>{
+  const adminToken=shared.adminToken;
+  const manual=await request("/api/website-recovery/backups",{token:adminToken,method:"POST",body:{label:"Pre-launch golden state"}});
+  assert.equal(manual.status,201,JSON.stringify(manual.payload));
+  assert.equal(manual.payload.trigger_type,"MANUAL");
+  const status=await request("/api/website-recovery",{token:adminToken});
+  assert.equal(status.status,200,JSON.stringify(status.payload));
+  assert.ok(status.payload.backups.some(row=>row.id===manual.payload.id));
+
+  const deniedFull=await request("/api/website-recovery/factory-reset",{token:adminToken,method:"POST",body:{scope:"all",confirmation:"RESET WEBSITE"}});
+  assert.equal(deniedFull.status,403,JSON.stringify(deniedFull.payload));
+  assert.equal(deniedFull.payload.error,"SUPERADMIN_REQUIRED");
+
+  const superToken=await login("owner.final@example.com");
+  const badRestore=await request("/api/website-recovery/backups/"+encodeURIComponent(manual.payload.id)+"/restore",{token:superToken,method:"POST",body:{confirmation:"WRONG"}});
+  assert.equal(badRestore.status,409,JSON.stringify(badRestore.payload));
+  assert.equal(badRestore.payload.error,"WEBSITE_RESTORE_CONFIRMATION_REQUIRED");
+});
+
+
 test("Dynamic workflow supports two extra reorderable intermediate phases and cancelled history",async()=>{
   const token=shared.adminToken;
   const initial=await request("/api/workflow/settings",{token});

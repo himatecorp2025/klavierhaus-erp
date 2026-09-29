@@ -2142,3 +2142,21 @@ input,select,textarea,button{max-width:100%}
 .piano-review-row:hover{border-color:#c83c3c!important;background:color-mix(in srgb,#c83c3c 10%,var(--surface))!important}
 .piano-review-title{display:flex;align-items:center;gap:7px;min-width:0}.piano-review-title .master-review-alert{width:21px;height:21px;flex-basis:21px;font-size:11px}.piano-review-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:700px){.master-piano-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.assessment-option-category{font-size:6.5px}}
+
+/* Website recovery center. */
+.website-recovery{display:grid;gap:14px}
+.recovery-overview{display:grid;gap:14px}
+.recovery-last-backup{display:grid;gap:3px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.recovery-last-backup small,.recovery-target span,.backup-row small{color:var(--muted)}
+.website-recovery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.recovery-scope-card{display:grid;align-content:start;gap:10px;min-height:190px}
+.recovery-scope-card p{margin:0;color:var(--muted);line-height:1.45}
+.recovery-scope-card button{justify-self:start;margin-top:auto}
+.recovery-danger-card{border-color:color-mix(in srgb,#c83c3c 50%,var(--line));background:color-mix(in srgb,#c83c3c 5%,var(--surface))}
+.recovery-backup-list{display:grid;gap:12px}
+.backup-list{display:grid;gap:8px}
+.backup-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2)}
+.backup-row>div{display:grid;gap:3px;min-width:0}.backup-row strong,.backup-row small{overflow-wrap:anywhere}
+.recovery-target{display:grid;gap:3px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+#intakeDeletePanel{margin-top:2px;border-color:color-mix(in srgb,#c83c3c 45%,var(--line));background:color-mix(in srgb,#c83c3c 6%,var(--surface-2))}
+@media(max-width:760px){.website-recovery-grid{grid-template-columns:1fr}.backup-row{grid-template-columns:1fr}.backup-row button{justify-self:start}}
