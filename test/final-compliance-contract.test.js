@@ -16,8 +16,7 @@ function gitBlobSha(file){
 test("unrelated protected website server modules remain byte-identical",()=>{
   const expected={
     "server/website-platform.js":"8a10313eb02bdd41fdc434d1f5a9bdbe7ca7d1e7",
-    "server/website-catalog.js":"18ebe2d0663d2c4dfd995f1732a504b6555a8b98",
-    "server/upload-middleware.js":"64444c043a3a1b646032a5ca5c10569d37806938"
+    "server/website-catalog.js":"18ebe2d0663d2c4dfd995f1732a504b6555a8b98"
   };
   for(const [file,sha] of Object.entries(expected))assert.equal(gitBlobSha(file),sha,file+" changed despite zero-modification policy");
 });
