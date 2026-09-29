@@ -86,17 +86,18 @@ test("Canonical Messenger backend routes assignment, notifications, appointments
 });
 
 
-test("Messenger private appointments require staff approval/finalization and expose compact status cards",()=>{
+test("Messenger private requests require staff approval while accepted Klavierhaus proposals auto-finalize to calendar",()=>{
   const messenger=read("public/messenger.js"),privateApi=read("server/private-appointments.js"),conversation=read("server/website-conversations.js"),schema=read("server/schema.sql"),css=read("public/styles.css");
   assert.match(css,/\.messenger-status-cards/);
   assert.match(css,/\.messenger-status-card/);
   assert.match(messenger,/Private requests/);
-  assert.match(messenger,/Finalize & add to calendar/);
+  assert.doesNotMatch(messenger,/Finalize & add to calendar/);
   assert.match(messenger,/Approve & add to calendar/);
   assert.match(privateApi,/CREATE|private_appointment_requests/);
   assert.match(privateApi,/\/api\/private-appointment-requests\/\:id\/approve/);
   assert.match(privateApi,/\/appointment-proposals\/\:proposalId\/finalize/);
-  assert.match(conversation,/Customer accepted proposed appointment/);
+  assert.match(conversation,/auto_finalized:true/);
+  assert.match(conversation,/INSERT INTO private_appointments/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS private_appointment_requests/);
   assert.match(schema,/duration_min INTEGER NOT NULL DEFAULT 60/);
   assert.match(schema,/expires_at TEXT/);
