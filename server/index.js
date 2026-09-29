@@ -35,6 +35,7 @@ const { registerAdminUxV6Routes } = require("./admin-ux-v6");
 const { registerArchiveCenterRoutes } = require("./archive-center");
 const { registerWebsiteConversationRoutes } = require("./website-conversations");
 const { registerNotificationCenterRoutes } = require("./notification-center");
+const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -343,6 +344,7 @@ app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{se
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
+registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail});
