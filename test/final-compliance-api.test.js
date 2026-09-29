@@ -415,6 +415,16 @@ test("Admin and Super Admin invoice controls move deleted drafts to the document
   const cancelled=await request("/api/invoices/"+manual.payload.id+"/cancel",{token,method:"POST",body:{reason:"Duplicate draft"}});
   assert.equal(cancelled.status,200,JSON.stringify(cancelled.payload));
   assert.equal(cancelled.payload.status,"cancelled");
+  assert.ok(Number(cancelled.payload.archive_document_id)>0);
+  const activeAfterCancel=await request("/api/invoices",{token});
+  assert.equal(activeAfterCancel.status,200);
+  assert.equal(activeAfterCancel.payload.some(row=>row.id===manual.payload.id),false);
+  const invalidatedDocs=await request("/api/archive/documents?category=deleted_invoice",{token});
+  assert.equal(invalidatedDocs.status,200,JSON.stringify(invalidatedDocs.payload));
+  const invalidatedDoc=invalidatedDocs.payload.rows.find(row=>row.entity_type==="invoice"&&String(row.entity_id)===String(manual.payload.id));
+  assert.ok(invalidatedDoc);
+  assert.equal(invalidatedDoc.metadata.source,"invoice_cancellation");
+  assert.equal(invalidatedDoc.metadata.invoice.status,"cancelled");
 
   const denied=await request("/api/invoices/"+manual.payload.id,{token,method:"DELETE"});
   assert.equal(denied.status,403);
@@ -433,6 +443,7 @@ test("Admin and Super Admin invoice controls move deleted drafts to the document
   assert.equal(archive.status,200,JSON.stringify(archive.payload));
   const archived=archive.payload.rows.find(row=>row.entity_type==="invoice"&&String(row.entity_id)===String(manual.payload.id));
   assert.ok(archived);
+  assert.equal(Number(archived.id),Number(invalidatedDoc.id));
   assert.equal(archived.metadata.invoice.invoice_number,manual.payload.invoice_number);
   const retained=appDb.prepare("SELECT deleted_at,archive_document_id FROM invoices WHERE id=?").get(manual.payload.id);
   assert.ok(retained?.deleted_at);
