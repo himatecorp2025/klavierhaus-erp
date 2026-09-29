@@ -250,6 +250,22 @@ function buildConversationAutoReplyEmail({ name, conversationUrl, language = "en
   };
 }
 
+function buildPrivateAppointmentDecisionEmail({name,decision,startsAt,endsAt,durationMin=60,language="en",conversationUrl=""}) {
+  const approved=String(decision||"").toUpperCase()==="APPROVED";
+  const format=value=>value?new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"";
+  const when=format(startsAt),end=endsAt?format(endsAt):"";
+  const subject=approved?(language==="hu"?"Klavierhaus · Privát időpont jóváhagyva":"Klavierhaus · Private appointment approved"):(language==="hu"?"Klavierhaus · Privát időpont kérés frissítése":"Klavierhaus · Private appointment request update");
+  const message=approved
+    ?(language==="hu"?`Kedves ${name||"Ügyfelünk"}! Jóváhagytuk privát időpontját: ${when}${end?` – ${end}`:""} (időtartam: ${durationMin} perc).`:`Hello ${name||"Guest"}, your private appointment has been approved for ${when}${end?` – ${end}`:""} (duration: ${durationMin} minutes).`)
+    :(language==="hu"?`Kedves ${name||"Ügyfelünk"}! A kért privát időpontot jelenleg nem tudjuk jóváhagyni. Kérjük, egyeztessen velünk új időpontról.`:`Hello ${name||"Guest"}, we cannot approve the requested private appointment at this time. Please contact us to arrange another time.`);
+  const link=conversationUrl?`\n\n${conversationUrl}`:"";
+  return {
+    subject,
+    text:`${message}${link}`,
+    html:`<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><p>${escapeHtml(message)}</p>${conversationUrl?`<p><a href="${escapeHtml(conversationUrl)}" style="color:#d7b66b">${escapeHtml(language==="hu"?"Beszélgetés megnyitása":"Open conversation")}</a></p>`:""}</div>`
+  };
+}
+
 function safeProviderCode(error) {
   const candidate = String(error?.name || error?.code || "EMAIL_DELIVERY_FAILED").toUpperCase();
   return /^[A-Z0-9_-]{2,80}$/.test(candidate) ? candidate : "EMAIL_DELIVERY_FAILED";
@@ -451,6 +467,18 @@ function createTransactionalEmail(env = process.env) {
       if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
+    async sendPrivateAppointmentDecision({to,name,decision,startsAt,endsAt,durationMin,language="en",conversationUrl="",idempotencyKey}){
+      assertEnabled();
+      if(!apiKey||!from)throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"),{code:"EMAIL_DELIVERY_NOT_CONFIGURED"});
+      const content=buildPrivateAppointmentDecisionEmail({name,decision,startsAt,endsAt,durationMin,language,conversationUrl});
+      const {data,error}=await resend.emails.send({
+        from,to:[normalizeRecipient(to)],subject:content.subject,html:content.html,text:content.text,
+        ...(replyTo?{replyTo}:{}),tags:[{name:"category",value:"private_appointment"}]
+      },{idempotencyKey});
+      if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
+      return {providerMessageId:String(data.id)};
+    },
+
     verifyWebhook({ payload, id, timestamp, signature }) {
       if (!webhookSecret) {
         const error = new Error("EMAIL_WEBHOOK_NOT_CONFIGURED");
@@ -468,4 +496,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildPaymentReceiptEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildPaymentReceiptEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, buildPrivateAppointmentDecisionEmail, createTransactionalEmail };

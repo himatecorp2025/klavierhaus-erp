@@ -89,6 +89,9 @@ try{
     const appointmentColumns=migrated.prepare("PRAGMA table_info(private_appointments)").all().map(row=>row.name);
     assert.ok(appointmentColumns.includes("scheduled_end_at"),"legacy private_appointments.scheduled_end_at must be added before schema indexes");
     assert.ok(appointmentColumns.includes("conversation_id"),"legacy private_appointments.conversation_id must be added before schema indexes");
+    assert.ok(appointmentColumns.includes("email"),"legacy private_appointments.email must be added");
+    assert.ok(appointmentColumns.includes("duration_min"),"legacy private_appointments.duration_min must be added");
+    assert.equal(migrated.prepare("SELECT duration_min FROM private_appointments WHERE id='PA-LEGACY-1'").get().duration_min,60,"legacy appointments must receive the 60-minute default");
     assert.equal(migrated.prepare("SELECT name FROM private_appointments WHERE id='PA-LEGACY-1'").get().name,"Legacy Appointment","legacy appointment data must survive Messenger migration");
     assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_private_appointments_conversation'").get(),"Messenger private appointment index must exist");
     migrated.prepare(`INSERT INTO inventory_items(sku,name_en,name_hu,unit,quantity_on_hand,reorder_point,reorder_quantity,unit_cost,active)
@@ -108,7 +111,7 @@ try{
   for(const retired of ["contacts","client_pianos","planned_jobs","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child","_inventory_legacy_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
+  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","private_appointments","private_appointment_requests","customer_appointment_proposals","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);

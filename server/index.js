@@ -389,7 +389,10 @@ app.use("/api/public/website-contact-leads",(req,res,next)=>{
   };
   next();
 });
-registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications:notificationCenter});
+registerPrivateAppointmentRoutes({
+  app,db,auth,permit,audit,notifications:notificationCenter,transactionalEmail,
+  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",env:process.env
+});
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,notifications:notificationCenter});
 registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});

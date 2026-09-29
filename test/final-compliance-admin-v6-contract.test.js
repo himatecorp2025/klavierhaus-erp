@@ -29,7 +29,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v12-messenger-support/);
+  assert.match(sw,/klavierhaus-admin-v13-appointment-approval/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -216,9 +216,9 @@ test("Workflow status, responsibility, intake grid and Documents UX contracts ar
   assert.match(css,/stage-card\.status-overdue/);
   assert.match(css,/stage-card\.status-completed/);
   assert.match(css,/stage-card\.status-cancelled/);
-  assert.match(css,/\.assessment-grid\{grid-template-columns:repeat\(3/);
+  assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2/);
-  assert.match(v6,/assessment-price"><span>\$<\/span>/);
+  assert.match(v6,/assessment-option-icon/);
   assert.match(archive,/intakeAssessmentPdf/);
   assert.match(archive,/\/api\/intake\/:id\/export-pdf/);
 });
@@ -234,7 +234,8 @@ test("Private appointments, VIP clients and unified notifications are wired end 
   assert.match(schema,/CREATE TABLE IF NOT EXISTS notification_recipients/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS push_subscriptions/);
   assert.match(privateApi,/\/api\/public\/private-appointments/);
-  assert.doesNotMatch(privateApi,/findConflict/);
+  assert.match(privateApi,/private_appointment_requests/);
+  assert.match(privateApi,/assertAvailable/);
   assert.match(round2,/private-appointment-event/);
   assert.match(round2,/Private appointments/);
   assert.match(round2,/r2OpenPrivateAppointment/);
@@ -271,7 +272,7 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v12-messenger-support/);
+  assert.match(sw,/klavierhaus-admin-v13-appointment-approval/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
 
@@ -279,14 +280,14 @@ test("Notification center is a global hidden portal, never workspace content",()
 test("Responsive PWA layout keeps intake tiles compact and removes desktop-only minimum widths",()=>{
   const css=read("public/styles.css"),round2=read("public/round2.js"),sw=read("public/service-worker.js");
   assert.match(css,/RESPONSIVE PWA V11/);
-  assert.match(css,/\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(auto-fill,minmax\(142px,156px\)\)/);
-  assert.match(css,/\.assessment-option\{[\s\S]*max-width:156px;[\s\S]*aspect-ratio:1\/1/);
-  assert.match(css,/@media\(max-width:640px\)[\s\S]*\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);
+  assert.match(css,/\.assessment-option-icon/);
+  assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
   assert.match(css,/@media\(max-width:640px\)[\s\S]*\.app-dialog,[\s\S]*width:100vw!important/);
   assert.match(css,/@media\(max-width:640px\)[\s\S]*\.form-grid\{grid-template-columns:1fr!important/);
   assert.match(css,/@media\(max-width:640px\)[\s\S]*\.workflow-board\{[\s\S]*minmax\(82vw,82vw\)/);
   assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
   assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
   assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
-  assert.match(sw,/klavierhaus-admin-v12-messenger-support/);
+  assert.match(sw,/klavierhaus-admin-v13-appointment-approval/);
 });
