@@ -129,7 +129,7 @@ function createCipher(secret) {
 function registerWebsitePlatformRoutes(options) {
   const {
     app, db, auth, permit, requireSuperadmin, audit, websiteImageUpload, websiteImageDir,
-    erpBaseUrl = "", websiteBaseUrl = "", transactionalEmail, env = process.env, notifications = null
+    erpBaseUrl = "", websiteBaseUrl = "", transactionalEmail, env = process.env
   } = options;
   const admin = permit("ADMIN");
   const baseUrl = String(erpBaseUrl || "").replace(/\/$/, "");
@@ -287,12 +287,6 @@ function registerWebsitePlatformRoutes(options) {
     };
     db.prepare(`INSERT INTO website_contact_leads(id,lead_type,name,email,phone,service_id,piano_brand,piano_model,service_address,preferred_time,event_date,event_venue,instrument_requirements,rental_duration,message,preferred_contact,language,consent_contact,consent_marketing,source_path,utm_source,utm_medium,utm_campaign)
       VALUES(@id,@lead_type,@name,@email,@phone,@service_id,@piano_brand,@piano_model,@service_address,@preferred_time,@event_date,@event_venue,@instrument_requirements,@rental_duration,@message,@preferred_contact,@language,@consent_contact,@consent_marketing,@source_path,@utm_source,@utm_medium,@utm_campaign)`).run(row);
-    notifications?.emit({
-      category:"WEBSITE_LEAD",entityType:"WEBSITE_LEAD",entityId:row.id,titleEn:"New website enquiry",titleHu:"Új weboldali megkeresés",
-      bodyEn:`${row.name} · ${row.lead_type.replaceAll("_"," ")}${row.message?` · ${row.message.slice(0,220)}`:""}`,
-      bodyHu:`${row.name} · ${row.lead_type.replaceAll("_"," ")}${row.message?` · ${row.message.slice(0,220)}`:""}`,
-      actionUrl:"#cms",severity:"INFO"
-    });
     res.status(201).json({ ok: true, id: row.id });
   });
   app.get("/api/website-contact-leads", auth, admin, (req, res) => {
@@ -315,7 +309,6 @@ function registerWebsitePlatformRoutes(options) {
       .run(status, assignee, clean(req.body?.internal_notes, 10000), contactDate, appointment, before.id);
     const after = db.prepare("SELECT * FROM website_contact_leads WHERE id=?").get(before.id);
     audit(req, "UPDATE", "website_leads", before.id, before, after, 1, "Website lead updated");
-    if(["CLOSED","REJECTED"].includes(after.status))notifications?.resolveEntity("WEBSITE_LEAD",after.id);
     res.json(after);
   });
 
