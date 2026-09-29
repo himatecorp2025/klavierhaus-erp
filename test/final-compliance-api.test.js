@@ -754,26 +754,26 @@ test("VIP client status is durable, filterable data and can be switched both dir
 });
 
 test("Unified notifications support 3-hour dismiss, permanent Done, sound preference and admin-only delivery",async()=>{
-  const admin=shared.adminToken,worker=await login("tech.final@example.com");
-  const payload=await request("/api/notifications",{token:admin});
+  const admin=shared.adminToken,manager=await login("manager.final@example.com"),worker=await login("tech.final@example.com");
+  const payload=await request("/api/notifications",{token:manager});
   assert.equal(payload.status,200,JSON.stringify(payload.payload));
   const row=payload.payload.notifications.find(item=>item.entity_type==="PRIVATE_APPOINTMENT"&&item.entity_id===shared.privateAppointmentId);
   assert.ok(row,JSON.stringify(payload.payload.notifications));
 
-  const snooze=await request("/api/notifications/"+encodeURIComponent(row.id)+"/snooze",{token:admin,method:"POST",body:{hours:3}});
+  const snooze=await request("/api/notifications/"+encodeURIComponent(row.id)+"/snooze",{token:manager,method:"POST",body:{hours:3}});
   assert.equal(snooze.status,200,JSON.stringify(snooze.payload));
   assert.ok(new Date(snooze.payload.snoozed_until).getTime()>Date.now()+2.5*3600000);
-  const hidden=await request("/api/notifications",{token:admin});
+  const hidden=await request("/api/notifications",{token:manager});
   assert.equal(hidden.payload.notifications.some(item=>item.id===row.id),false);
 
   appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
-  const returned=await request("/api/notifications",{token:admin});
+  const returned=await request("/api/notifications",{token:manager});
   assert.equal(returned.payload.notifications.some(item=>item.id===row.id),true);
 
   const done=await request("/api/notifications/"+encodeURIComponent(row.id)+"/acknowledge",{token:admin,method:"POST",body:{}});
   assert.equal(done.status,200);
   appDb.prepare("UPDATE notification_recipients SET snoozed_until=datetime('now','-1 minute') WHERE notification_id=? AND user_id='U-F-ADMIN'").run(row.id);
-  const gone=await request("/api/notifications",{token:admin});
+  const gone=await request("/api/notifications",{token:manager});
   assert.equal(gone.payload.notifications.some(item=>item.id===row.id),false);
 
   const soundOff=await request("/api/notifications/preferences/sound",{token:worker,method:"PUT",body:{sound_enabled:false}});
@@ -795,7 +795,7 @@ test("Unified notifications support 3-hour dismiss, permanent Done, sound prefer
 });
 
 test("Timed notification sweep deduplicates overdue private appointment alerts",async()=>{
-  const admin=shared.adminToken,id=shared.privateAppointmentId;
+  const admin=await login("manager.final@example.com"),id=shared.privateAppointmentId;
   appDb.prepare("UPDATE private_appointments SET scheduled_at=datetime('now','-10 minutes'),status='SCHEDULED',completed_at=NULL,cancelled_at=NULL WHERE id=?").run(id);
   const first=await request("/api/notifications",{token:admin});
   assert.equal(first.status,200);
