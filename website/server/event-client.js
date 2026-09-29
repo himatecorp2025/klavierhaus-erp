@@ -127,6 +127,9 @@ function createEventClient(options = {}) {
       files.forEach((file) => form.append("attachments", new Blob([file.buffer], { type: file.mimetype || "application/octet-stream" }), file.originalname || "attachment"));
       return request("/api/public/customer-conversations", { method: "POST", body: form });
     },
+    supportStatus() {
+      return request("/api/public/support-status");
+    },
     customerConversation(token) {
       return request(`/api/public/customer-conversations/${encodeURIComponent(token)}`);
     },
@@ -142,6 +145,11 @@ function createEventClient(options = {}) {
     },
     customerConversationAttachment(token, attachmentId) {
       return requestBinary(`/api/public/customer-conversations/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`);
+    },
+    respondToCustomerAppointment(token, proposalId, decision) {
+      return request(`/api/public/customer-conversations/${encodeURIComponent(token)}/appointment-proposals/${encodeURIComponent(proposalId)}/respond`, {
+        method:"POST",body:JSON.stringify({decision})
+      });
     },
     createLead(lead) {
       return request("/api/public/contact-leads", { method: "POST", body: JSON.stringify(lead) });
