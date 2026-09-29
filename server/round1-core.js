@@ -177,6 +177,11 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       text(req.body?.color,160)||null,text(req.body?.notes,5000)||null
     );
     const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));
+    const reviewId=integerId(req.body?.review_id);
+    if(reviewId){
+      const review=db.prepare("SELECT * FROM client_piano_review_queue WHERE id=? AND client_id=? AND status='PENDING'").get(reviewId,clientId);
+      if(review)db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id,reviewId);
+    }
     audit(req,"CREATE","pianos",String(row.id),null,row);res.status(201).json(row);
   });
 
