@@ -1226,6 +1226,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   due_date TEXT NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD' CHECK(currency='USD'),
   snapshot_json TEXT NOT NULL DEFAULT '{}',
+  payment_url TEXT,
   subtotal_labor REAL NOT NULL DEFAULT 0,
   subtotal_material REAL NOT NULL DEFAULT 0,
   subtotal_adjustment REAL NOT NULL DEFAULT 0,
@@ -1285,6 +1286,27 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS workshop_invoice_checkouts (
+  id TEXT PRIMARY KEY,
+  invoice_id INTEGER NOT NULL,
+  stripe_checkout_session_id TEXT UNIQUE,
+  stripe_payment_intent_id TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','PAID','EXPIRED','FAILED')),
+  amount_cents INTEGER NOT NULL CHECK(amount_cents >= 0),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  checkout_url TEXT,
+  expires_at TEXT NOT NULL,
+  failure_code TEXT,
+  paid_at TEXT,
+  receipt_archive_document_id INTEGER,
+  receipt_provider_message_id TEXT,
+  receipt_sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+  FOREIGN KEY (receipt_archive_document_id) REFERENCES document_archive(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS direct_expenses (
@@ -1409,6 +1431,8 @@ CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id,issue_date 
 CREATE INDEX IF NOT EXISTS idx_invoices_partner ON invoices(partner_id,issue_date DESC);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id,paid_at,id);
+CREATE INDEX IF NOT EXISTS idx_workshop_invoice_checkouts_invoice ON workshop_invoice_checkouts(invoice_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workshop_invoice_checkouts_session ON workshop_invoice_checkouts(stripe_checkout_session_id);
 CREATE INDEX IF NOT EXISTS idx_direct_expenses_date ON direct_expenses(expense_date,category);
 CREATE INDEX IF NOT EXISTS idx_invoice_email_log_invoice ON invoice_email_log(invoice_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_intake_assessment_email_log_intake ON intake_assessment_email_log(intake_id,created_at DESC);
