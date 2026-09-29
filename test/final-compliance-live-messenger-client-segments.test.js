@@ -57,9 +57,11 @@ test("05 unknown identified customer is created once as Private",()=>{
   db.close();
 });
 
-test("06 Master Data toolbar exposes search and four requested customer filters",()=>{
+test("06 Master Data toolbar is the approved seven icon-only controls",()=>{
   const app=read("public/app.js");
-  for(const token of ["clientSearchButton","clientVipFilter",'data-client-filter="PRIVATE"','data-client-filter="BUSINESS"','data-client-filter="INSTITUTION"'])assert.ok(app.includes(token),token);
+  for(const token of ['masterToolButton("SEARCH"','masterToolButton("CLIENTS"','masterToolButton("VIP"','masterToolButton("PRIVATE"','masterToolButton("BUSINESS"','masterToolButton("INSTITUTION"','masterToolButton("PIANOS"'])assert.ok(app.includes(token),token);
+  assert.doesNotMatch(app,/clientVipFilter|data-client-filter=/);
+  assert.match(app,/master-tool-svg/);
 });
 
 test("07 customer editor persists explicit customer type and VIP independently",()=>{
