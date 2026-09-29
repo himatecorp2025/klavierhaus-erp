@@ -165,7 +165,8 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       counterparty_name:party.name||invoice.counterparty_name,counterparty_address:party.address||invoice.counterparty_address,
       counterparty_email:party.email||invoice.counterparty_email,counterparty_phone:party.phone||invoice.counterparty_phone,
       piano_brand:instrument.brand||invoice.piano_brand,piano_model:instrument.model||invoice.piano_model,piano_serial_number:instrument.serial_number||invoice.piano_serial_number,
-      piano_location_notes:instrument.location_notes||invoice.piano_location_notes,job_code:job.job_code||invoice.job_code,job_title:job.title||invoice.job_title
+      piano_location_notes:instrument.location_notes||invoice.piano_location_notes,job_code:job.job_code||invoice.job_code,job_title:job.title||invoice.job_title,
+      location_type:job.location_type||invoice.location_type,site_address:job.site_address||invoice.site_address
     };
     const pdf=generateBusinessInvoicePdf({company:info,invoice:printable,items:invoice.items,counterpartyName:printable.counterparty_name,logoPath});
     const filename=`${invoice.invoice_number}.pdf`,filePath=path.join(invoiceDir,filename);
