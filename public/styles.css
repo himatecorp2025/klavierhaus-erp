@@ -1400,14 +1400,23 @@ select option{background:var(--surface);color:var(--ink)}
 .private-appointment-event.is-private-completed{border-left-color:#2f9b68!important;background:color-mix(in srgb,#2f9b68 14%,var(--surface))!important}
 .private-appointment-event.is-cancelled{border-left-color:#e55c62!important;background:color-mix(in srgb,#e55c62 14%,var(--surface))!important}
 
-.header-tools{grid-template-columns:auto auto auto}
+[hidden]{display:none!important}
+.header-tools{display:flex;align-items:center;gap:10px;justify-self:end;flex-wrap:nowrap}
+.header-tools>.ny-clock{order:0}
+.header-tools>.notification-bell{order:1;flex:0 0 auto}
+.header-tools>.theme-switch{order:2;flex:0 0 auto}
+.header-tools>.header-actions{order:3;flex:0 0 auto}
 .notification-bell{position:relative;display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:13px;background:var(--surface);color:var(--ink);font-size:18px}
 .notification-bell:hover,.notification-bell[aria-expanded="true"]{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));background:var(--surface-2)}
 .notification-bell-icon{display:grid;place-items:center;width:20px;height:20px}.notification-bell-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .notification-badge{position:absolute;top:-6px;right:-7px;min-width:21px;height:21px;padding:0 5px;border:2px solid var(--surface);border-radius:999px;background:#cf2f38;color:#fff;font-size:10px;font-weight:900;line-height:17px;text-align:center}
-.notification-backdrop{position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.2);backdrop-filter:blur(2px);animation:notificationFadeIn .18s ease both}
-.notification-drawer{position:fixed;z-index:10030;top:0;right:0;width:min(430px,calc(100vw - 18px));height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 70px rgba(0,0,0,.22);transform:translateX(105%);opacity:.75;pointer-events:none;transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
-.notification-drawer.open{transform:translateX(0);opacity:1;pointer-events:auto}
+.notification-layer{position:fixed;inset:0;z-index:10020;pointer-events:none;isolation:isolate;contain:layout paint}
+.notification-layer.open{pointer-events:auto}
+.notification-backdrop{position:absolute;inset:0;z-index:0;background:rgba(0,0,0,.22);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:opacity .2s ease,visibility 0s linear .26s}
+.notification-drawer{position:absolute;z-index:1;top:0;right:0;width:min(430px,calc(100vw - 18px));height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 70px rgba(0,0,0,.22);transform:translate3d(105%,0,0);opacity:.72;visibility:hidden;pointer-events:none;will-change:transform,opacity;transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s ease,visibility 0s linear .28s}
+.notification-layer.open .notification-backdrop{opacity:1;visibility:visible;transition-delay:0s}
+.notification-layer.open .notification-drawer,.notification-drawer.open{transform:translate3d(0,0,0);opacity:1;visibility:visible;pointer-events:auto;transition-delay:0s}
+html.notification-layer-open{overflow:hidden}
 .notification-drawer-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px;border-bottom:1px solid var(--line)}
 .notification-drawer-header h2{margin:3px 0 0;font-size:22px}
 .notification-drawer-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--surface-2)}
@@ -1450,5 +1459,5 @@ select option{background:var(--surface);color:var(--ink)}
   .ny-clock span{display:none}
 }
 @media(prefers-reduced-motion:reduce){
-  .notification-drawer,.notification-card,.notification-backdrop{transition:none!important;animation:none!important}
+  .notification-layer,.notification-drawer,.notification-card,.notification-backdrop{transition:none!important;animation:none!important}
 }

@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v9-private-vip-notifications/);
+  assert.match(sw,/klavierhaus-admin-v10-global-notification-drawer/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -198,4 +198,23 @@ test("Private appointments, VIP clients and unified notifications are wired end 
   assert.match(sw,/addEventListener\("push"/);
   assert.match(sw,/addEventListener\("notificationclick"/);
   assert.match(sw,/setAppBadge/);
+});
+
+
+test("Notification center is a global hidden portal, never workspace content",()=>{
+  const html=read("public/index.html"),app=read("public/app.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
+  const mainStart=html.indexOf('<div class="app-main-column">');
+  const mainEnd=html.indexOf('<nav class="mobile-nav"',mainStart);
+  const layer=html.indexOf('id="notificationLayer"');
+  assert.ok(mainStart>=0&&mainEnd>mainStart&&layer>mainEnd,"notification layer must live outside app-main-column/workspace flow");
+  assert.match(html,/id="notificationLayer" class="notification-layer" hidden aria-hidden="true"/);
+  assert.match(css,/\[hidden\]\{display:none!important\}/);
+  assert.match(css,/\.notification-layer\{position:fixed;inset:0/);
+  assert.match(css,/\.notification-layer\.open\{pointer-events:auto\}/);
+  assert.match(app,/layer\.hidden=false/);
+  assert.match(app,/layer\.hidden=true/);
+  assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
+  assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
+  assert.match(sw,/klavierhaus-admin-v10-global-notification-drawer/);
+  assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
