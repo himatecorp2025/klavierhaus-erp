@@ -456,7 +456,7 @@ async function renderMaster(){
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
-  $("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>handleMasterTool(button.dataset.masterTool)));
+  $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>handleMasterTool(button.dataset.masterTool)));
   $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
   renderMasterList();
   await renderMasterDetail();
@@ -519,7 +519,7 @@ function renderClientList(){
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
   </article>`).join("");
-  $("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
+  $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
   $$("[data-client-contact]",host).forEach(button=>button.addEventListener("click",()=>runClientContactAction(Number(button.dataset.clientId),button.dataset.clientContact)));
 }
 function runClientContactAction(clientId,kind){
@@ -541,7 +541,7 @@ function renderPianoList(){
     <small>${tr("Owner","Tulajdonos")}: ${esc(piano.client_name||"—")}</small>
     <small>${tr("Location","Hely")}: ${esc(piano.effective_location||"—")}</small>
   </button>`).join("");
-  $("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
+  $$("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
 }
 function openMasterMobileDetail(){$("#masterLayout")?.classList.add("detail-open");}
 function closeMasterMobileDetail(){$("#masterLayout")?.classList.remove("detail-open");}
