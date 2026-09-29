@@ -8,7 +8,7 @@ const state={
   user:null,
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
-  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",pianos:[],selectedPianoId:null,intake:[],users:[],
+  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
@@ -320,8 +320,15 @@ function syncNavigationState(view=state.view){
   $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
   $("#mobileMoreButton")?.classList.toggle("active",["planned","finance","documents","cms","profile"].includes(view));
 }
+function masterConfirmDiscard(){
+  if(!state.masterDirty)return true;
+  const ok=window.confirm(tr("You have unsaved changes. Discard them and continue?","Nem mentett módosításaid vannak. Elveted őket és folytatod?"));
+  if(ok)state.masterDirty=false;
+  return ok;
+}
 function navTo(view){
   if(!activeViews.has(view))return;
+  if(state.view==="master"&&view!=="master"&&!masterConfirmDiscard())return;
   state.view=view;history.replaceState({},"",`#${view}`);
   if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
@@ -333,7 +340,8 @@ function bindNavigation(){
     if(!button||button.disabled)return;
     event.preventDefault();navTo(button.dataset.nav);
   });
-  window.addEventListener("hashchange",()=>{const view=location.hash.slice(1);if(activeViews.has(view)){state.view=view;void renderView();}});
+  window.addEventListener("hashchange",()=>{const view=location.hash.slice(1);if(activeViews.has(view)){if(state.view==="master"&&view!=="master"&&!masterConfirmDiscard()){history.replaceState({},"",`#${state.view}`);return;}state.view=view;void renderView();}});
+  window.addEventListener("beforeunload",event=>{if(state.masterDirty){event.preventDefault();event.returnValue="";}});
   $("#languageToggle")?.addEventListener("click",()=>setLanguage(state.language==="en"?"hu":"en"));
 }
 function loading(){return `<div class="loading">${tr("Loading…","Betöltés…")}</div>`;}
@@ -389,6 +397,24 @@ function masterToolButton(kind,label,active=false){
 function clientTypeLabel(value){
   return ({PRIVATE:tr("People","Emberek"),BUSINESS:tr("Business","Vállalkozások"),INSTITUTION:tr("Institution","Intézmények")})[String(value||"PRIVATE").toUpperCase()]||tr("People","Emberek");
 }
+function masterInlineEditable(){
+  return window.innerWidth>=1024&&navigator.maxTouchPoints<=1&&!/iPad|Android|Mobile|Tablet/i.test(navigator.userAgent||"");
+}
+function setMasterDirty(value=true){state.masterDirty=Boolean(value);}
+function masterMapUrl(address){
+  const destination=encodeURIComponent(String(address||"").trim());
+  if(!destination)return "";
+  const apple=/Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent||"");
+  return apple?`https://maps.apple.com/?saddr=Current+Location&daddr=${destination}`:`https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+}
+function openMasterMap(address){
+  const url=masterMapUrl(address);if(!url){toast(tr("No address for this customer.","Az ügyfélhez nem tartozik cím."),"error");return;}
+  window.open(url,"_blank","noopener,noreferrer");
+}
+function masterReviewBadge(client){
+  const count=Number(client?.piano_review_count||0);
+  return count>0?`<span class="master-review-badge" title="${esc(tr("Piano information needs classification","Zongoraadat besorolásra vár"))}">!<small>${count}</small></span>`:"";
+}
 async function renderMaster(){
   const workspace=$("#workspace");
   const [,pianos]=await Promise.all([loadClients(),api("/api/pianos")]);
@@ -396,8 +422,9 @@ async function renderMaster(){
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
   const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS";
+  const canImport=state.user&&["ADMIN","SUPERADMIN"].includes(state.user.role);
   workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients and pianos in one editable workspace.","Ügyfelek és zongorák egyetlen szerkeszthető munkafelületen."),
-    `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
+    `${canImport?'<button id="masterImportBtn" class="secondary-button" type="button">↑ '+tr("Import CSV","CSV import")+'</button><input id="masterImportFile" type="file" accept=".csv,text/csv" hidden>':""}<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
     `<div class="master-layout" id="masterLayout">
       <section class="panel master-list-panel">
         <div class="master-toolbar">
@@ -419,7 +446,17 @@ async function renderMaster(){
       <section id="clientDetail" class="panel client-detail master-detail"></section>
     </div>`;
   $("#addClientBtn").addEventListener("click",()=>openClientDialog());
-  $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>handleMasterTool(button.dataset.masterTool)));
+  $("#masterImportBtn")?.addEventListener("click",()=>$("#masterImportFile")?.click());
+  $("#masterImportFile")?.addEventListener("change",async event=>{
+    const file=event.currentTarget.files?.[0];if(!file)return;
+    const form=new FormData();form.append("file",file,file.name);
+    try{
+      const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
+      toast(tr(`Import completed: ${summary.createdClients} new clients, ${summary.createdPianos} new pianos, ${summary.reviewItems} review items.`,`Import kész: ${summary.createdClients} új ügyfél, ${summary.createdPianos} új zongora, ${summary.reviewItems} ellenőrzendő tétel.`),"success");
+      event.currentTarget.value="";state.masterDirty=false;await renderMaster();
+    }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
+  });
+  $("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>handleMasterTool(button.dataset.masterTool)));
   $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
   renderMasterList();
   await renderMasterDetail();
@@ -434,6 +471,7 @@ function updateMasterToolbar(){
   });
 }
 function handleMasterTool(kind){
+  if(kind!=="SEARCH"&&!masterConfirmDiscard())return;
   if(kind==="SEARCH"){
     state.masterSearchOpen=!state.masterSearchOpen;updateMasterToolbar();
     if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());
@@ -476,12 +514,12 @@ function renderClientList(){
   if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No clients match this view.","Nincs a nézetnek megfelelő ügyfél.")}</div>`;return;}
   host.innerHTML=rows.map(client=>`<article class="client-row ${Number(client.id)===Number(state.selectedClientId)&&state.masterDetailKind==="CLIENT"?"active":""}">
     <button type="button" class="client-row-select" data-client-id="${client.id}">
-      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</strong><small>${esc(clientTypeLabel(client.client_type))}${client.address?` · ${esc(client.address)}`:""}</small></span>
+      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))}${client.address?` · ${esc(client.address)}`:""}</small></span>
       <span class="count">${Number(client.piano_count||0)}</span>
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
   </article>`).join("");
-  $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
+  $("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
   $$("[data-client-contact]",host).forEach(button=>button.addEventListener("click",()=>runClientContactAction(Number(button.dataset.clientId),button.dataset.clientContact)));
 }
 function runClientContactAction(clientId,kind){
@@ -503,7 +541,7 @@ function renderPianoList(){
     <small>${tr("Owner","Tulajdonos")}: ${esc(piano.client_name||"—")}</small>
     <small>${tr("Location","Hely")}: ${esc(piano.effective_location||"—")}</small>
   </button>`).join("");
-  $$("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
+  $("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
 }
 function openMasterMobileDetail(){$("#masterLayout")?.classList.add("detail-open");}
 function closeMasterMobileDetail(){$("#masterLayout")?.classList.remove("detail-open");}
