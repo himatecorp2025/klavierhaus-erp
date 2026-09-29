@@ -541,7 +541,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
     if(before.stage==="planned")return res.status(409).json({error:"JOB_MUST_BE_ACTIVATED"});
     if(before.stage==="completed")return res.status(409).json({error:"JOB_ALREADY_COMPLETED"});
     if(before.ready_for_closeout)return res.status(409).json({error:"ADMIN_CLOSEOUT_REQUIRED"});
-    if(req.user.role==="WORKER"&&before.assigned_technician_id&&String(before.assigned_technician_id)!==String(req.user.id))return res.status(403).json({error:"JOB_ASSIGNED_TO_ANOTHER_TECHNICIAN"});
+    if(req.user.role==="WORKER"){
+      const allowed=[before.current_phase?.responsible_user_id,before.assigned_technician_id].filter(Boolean).map(String);
+      if(allowed.length&&!allowed.includes(String(req.user.id)))return res.status(403).json({error:"JOB_ASSIGNED_TO_ANOTHER_TECHNICIAN"});
+    }
     try{
       const requested=text(req.body?.to_stage,80),next=nextEnabledPhase(id,before.stage),toStage=requested||next?.stage_key;if(!toStage)throw problem("INVALID_HANDOFF_STAGE");
       if(toStage===before.stage)throw problem("INVALID_HANDOFF_STAGE");
