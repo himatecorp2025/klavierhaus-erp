@@ -32,7 +32,7 @@ function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="S
 function newYorkYear(){return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date());}
 function endAt(start,duration){return new Date(new Date(start).getTime()+positiveDuration(duration)*60000).toISOString();}
 
-function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation=null}){
+function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation=null,inventoryService=null}){
   const staff=permit("ADMIN","MANAGER","WORKER");
   const admin=permit("ADMIN");
   function customerMilestone(job,eventType,options){
@@ -575,23 +575,31 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       }
       const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0),duration=Math.max(0,Math.round(Number(req.body?.phase_duration_min||0)));
       if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("INVALID_HANDOFF_COST");
+      const materialUsage=inventoryService?.normalizeUsage?inventoryService.normalizeUsage(req.body?.materials||[]):[];
       const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
       const resourceTechnician=before.assigned_technician_id;
       const note=text(req.body?.phase_note,5000)||null,billingDescription=text(req.body?.billing_description,500)||null;
       const result=db.transaction(()=>{
         const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,billing_description,phase_labor_cost,phase_material_cost,phase_duration_min,created_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,responsible.id,responsible.name,note,billingDescription,labor,material,duration);
+        const handoffId=Number(info.lastInsertRowid);
+        const usage=inventoryService?.consumeForHandoff?inventoryService.consumeForHandoff({jobId:id,handoffId,userId:req.user.id,materials:materialUsage.map(row=>({inventory_item_id:row.item.id,quantity:row.quantity}))}):[];
         completePhase(id,before.stage);
         db.prepare("UPDATE job_workflow_phases SET responsible_user_id=?,starts_at=COALESCE(starts_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(responsible.id,id,toStage);
         activatePhase(id,toStage);
         db.prepare(`UPDATE jobs SET stage=?,workflow_stage_key=?,assigned_technician_id=?,total_labor_cost=ROUND(total_labor_cost+?,2),total_material_cost=ROUND(total_material_cost+?,2),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(storageStage(toStage),toStage,resourceTechnician,labor,material,id);
-        return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),job:jobById(id)};
+        return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),material_usage:usage,job:jobById(id)};
       })();
+      const purchaseRequests=inventoryService?.checkLowStockForUsage?inventoryService.checkLowStockForUsage(result.material_usage,req.user.id):[];
+      result.purchase_requests=purchaseRequests;
       audit(req,"HANDOFF","jobs",String(id),before,result.job);
       if(before.stage==="received")customerMilestone(result.job,"WORK_STARTED");
       res.status(201).json(result);
-    }catch(error){respondError(res,error);}
+    }catch(error){
+      try{inventoryService?.emitInventoryException?.(error,id);}catch(_notificationError){}
+      respondError(res,error);
+    }
   });
 
   app.post("/api/jobs/:id/cancel",auth,admin,(req,res)=>{

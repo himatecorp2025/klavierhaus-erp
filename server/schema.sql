@@ -1061,6 +1061,51 @@ CREATE TABLE IF NOT EXISTS handoff_presets (
   FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sku TEXT NOT NULL UNIQUE,
+  name_en TEXT NOT NULL,
+  name_hu TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT 'pcs',
+  quantity_on_hand REAL NOT NULL DEFAULT 0 CHECK(quantity_on_hand >= 0),
+  reorder_point REAL NOT NULL DEFAULT 0 CHECK(reorder_point >= 0),
+  reorder_quantity REAL NOT NULL DEFAULT 1 CHECK(reorder_quantity > 0),
+  unit_cost REAL NOT NULL DEFAULT 0 CHECK(unit_cost >= 0),
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS handoff_preset_materials (
+  preset_id INTEGER NOT NULL,
+  inventory_item_id INTEGER NOT NULL,
+  default_quantity REAL NOT NULL CHECK(default_quantity > 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (preset_id,inventory_item_id),
+  FOREIGN KEY (preset_id) REFERENCES handoff_presets(id) ON DELETE CASCADE,
+  FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inventory_item_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','approved','ordered','received','cancelled')),
+  requested_quantity REAL NOT NULL CHECK(requested_quantity > 0),
+  received_quantity REAL,
+  reason TEXT,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS intake_assessment_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   intake_id INTEGER NOT NULL,
@@ -1172,6 +1217,41 @@ CREATE TABLE IF NOT EXISTS job_handoffs (
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
   FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_material_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  handoff_id INTEGER NOT NULL,
+  inventory_item_id INTEGER NOT NULL,
+  quantity REAL NOT NULL CHECK(quantity > 0),
+  unit_cost_snapshot REAL NOT NULL DEFAULT 0 CHECK(unit_cost_snapshot >= 0),
+  total_cost REAL NOT NULL DEFAULT 0 CHECK(total_cost >= 0),
+  used_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(handoff_id,inventory_item_id),
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (handoff_id) REFERENCES job_handoffs(id) ON DELETE CASCADE,
+  FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY (used_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inventory_item_id INTEGER NOT NULL,
+  movement_type TEXT NOT NULL CHECK(movement_type IN ('usage','restock','adjustment')),
+  quantity_delta REAL NOT NULL,
+  balance_after REAL NOT NULL CHECK(balance_after >= 0),
+  job_id INTEGER,
+  handoff_id INTEGER,
+  reference TEXT,
+  note TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE RESTRICT,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  FOREIGN KEY (handoff_id) REFERENCES job_handoffs(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS partners (
@@ -1413,6 +1493,11 @@ CREATE INDEX IF NOT EXISTS idx_intake_client ON intake_leads(client_id);
 CREATE INDEX IF NOT EXISTS idx_intake_technician ON intake_leads(assigned_technician_id,status);
 CREATE INDEX IF NOT EXISTS idx_intake_catalog_active ON intake_catalog_items(active,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_handoff_presets_active ON handoff_presets(active,sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_inventory_items_active ON inventory_items(active,name_en,id);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_item_time ON inventory_movements(inventory_item_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_job_material_usage_job ON job_material_usage(job_id,handoff_id,id);
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_item_status ON purchase_requests(inventory_item_id,status,created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_requests_one_open_per_item ON purchase_requests(inventory_item_id) WHERE status='open';
 CREATE INDEX IF NOT EXISTS idx_intake_assessment_intake ON intake_assessment_items(intake_id,sort_order,id);
 CREATE INDEX IF NOT EXISTS idx_jobs_stage ON jobs(stage,cancelled_at,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled_at ON jobs(scheduled_at,cancelled_at,stage);

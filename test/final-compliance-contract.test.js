@@ -106,7 +106,33 @@ test("PWA is English-first, bilingual and implements required operational contro
 
 test("retired ERP domains and duplicate calendar/workflow tables are absent from active schema",()=>{
   const schema=read("server/schema.sql");
-  for(const table of ["planned_jobs","calendar_jobs","workflow_jobs","financial_items","workflow_finance_sources","journal_entries","journal_lines","inventory_items"]){
+  for(const table of ["planned_jobs","calendar_jobs","workflow_jobs","financial_items","workflow_finance_sources","journal_entries","journal_lines"]){
     assert.doesNotMatch(schema,new RegExp("CREATE TABLE IF NOT EXISTS "+table+"\\s*\\("),table);
   }
 });
+
+test("Round J uses the canonical stock catalog instead of the retired legacy inventory shape",()=>{
+  const schema=read("server/schema.sql"),inventory=read("server/inventory.js");
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS inventory_items\s*\([\s\S]*?sku TEXT NOT NULL UNIQUE[\s\S]*?quantity_on_hand REAL NOT NULL[\s\S]*?reorder_point REAL NOT NULL/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS handoff_preset_materials/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS purchase_requests/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS job_material_usage/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS inventory_movements/);
+  assert.match(inventory,/INSUFFICIENT_INVENTORY/);
+  assert.match(inventory,/ensurePurchaseRequest/);
+});
+
+test("Round J connects preset material recipes to the mobile handoff and Admin controls",()=>{
+  const round2=read("public/round2.js"),v6=read("public/v6.js"),admin=read("server/admin-ux-v6.js");
+  assert.match(round2,/handoffMaterialUsage/);
+  assert.match(round2,/data-material-quantity/);
+  assert.match(round2,/body\.materials=/);
+  assert.match(round2,/preset\.materials/);
+  assert.match(v6,/Inventory & procurement/);
+  assert.match(v6,/data-preset-material-check/);
+  assert.match(v6,/body\.materials=/);
+  assert.match(v6,/\/api\/purchase-requests/);
+  assert.match(admin,/setPresetMaterials/);
+});
+
+

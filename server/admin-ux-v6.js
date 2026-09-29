@@ -45,7 +45,7 @@ function diskUpload(target,prefix,{extensions,mimes,max=25*1024*1024}){
   });
 }
 
-function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=""}){
+function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl="",inventoryService=null}){
   const staff=permit("ADMIN","MANAGER","WORKER"),admin=permit("ADMIN"),finance=permit("ADMIN","MANAGER");
   const receiptDir=path.join(uploadDir,"receipts"),brandDir=path.join(uploadDir,"branding-v6");
   const receiptUpload=diskUpload(receiptDir,"receipt",{extensions:RECEIPT_EXTENSIONS,mimes:RECEIPT_MIMES,max:40*1024*1024}).single("file");
@@ -134,11 +134,13 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
     }catch(error){respond(res,error);}
   });
 
+  const decoratePreset=row=>inventoryService?.decoratePreset?inventoryService.decoratePreset(row):{...row,materials:[]};
   app.get("/api/handoff-presets",auth,staff,(req,res)=>{
     const includeInactive=(req.user.role==="ADMIN"||req.user.role==="SUPERADMIN")&&req.query.include_inactive==="1";
-    res.json((includeInactive
+    const rows=includeInactive
       ?db.prepare("SELECT * FROM handoff_presets ORDER BY sort_order,id").all()
-      :db.prepare("SELECT * FROM handoff_presets WHERE active=1 ORDER BY sort_order,id").all()));
+      :db.prepare("SELECT * FROM handoff_presets WHERE active=1 ORDER BY sort_order,id").all();
+    res.json(rows.map(decoratePreset));
   });
   app.post("/api/handoff-presets",auth,admin,(req,res)=>{
     try{
@@ -146,21 +148,30 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
       const labor=money(req.body?.default_labor_cost),material=money(req.body?.default_material_cost),duration=Math.max(0,Math.round(Number(req.body?.default_duration_min||0)));
       if(!titleEn||!titleHu)throw problem("HANDOFF_PRESET_TITLE_REQUIRED");
       if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("HANDOFF_PRESET_VALUES_INVALID");
-      const info=db.prepare(`INSERT INTO handoff_presets(title_en,title_hu,default_labor_cost,default_material_cost,default_duration_min,active,sort_order,created_by_user_id,updated_by_user_id)
-        VALUES(?,?,?,?,?,?,?,?,?)`).run(titleEn,titleHu,labor,material,duration,req.body?.active===false?0:1,Number(req.body?.sort_order||0),req.user.id,req.user.id);
-      const row=db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(Number(info.lastInsertRowid));audit(req,"CREATE","handoff_presets",String(row.id),null,row);res.status(201).json(row);
+      const row=db.transaction(()=>{
+        const info=db.prepare(`INSERT INTO handoff_presets(title_en,title_hu,default_labor_cost,default_material_cost,default_duration_min,active,sort_order,created_by_user_id,updated_by_user_id)
+          VALUES(?,?,?,?,?,?,?,?,?)`).run(titleEn,titleHu,labor,material,duration,req.body?.active===false?0:1,Number(req.body?.sort_order||0),req.user.id,req.user.id);
+        const id=Number(info.lastInsertRowid);if(inventoryService?.setPresetMaterials)inventoryService.setPresetMaterials(id,req.body?.materials||[]);
+        return decoratePreset(db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id));
+      })();
+      audit(req,"CREATE","handoff_presets",String(row.id),null,row);res.status(201).json(row);
     }catch(error){respond(res,error);}
   });
   app.put("/api/handoff-presets/:id",auth,admin,(req,res)=>{
-    const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);if(!before)return res.status(404).json({error:"HANDOFF_PRESET_NOT_FOUND"});
+    const id=integerId(req.params.id),base=id&&db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);if(!base)return res.status(404).json({error:"HANDOFF_PRESET_NOT_FOUND"});
+    const before=decoratePreset(base);
     try{
-      const titleEn=text(req.body?.title_en??before.title_en,240),titleHu=text(req.body?.title_hu??before.title_hu,240);
-      const labor=money(req.body?.default_labor_cost??before.default_labor_cost),material=money(req.body?.default_material_cost??before.default_material_cost),duration=Math.max(0,Math.round(Number(req.body?.default_duration_min??before.default_duration_min)));
+      const titleEn=text(req.body?.title_en??base.title_en,240),titleHu=text(req.body?.title_hu??base.title_hu,240);
+      const labor=money(req.body?.default_labor_cost??base.default_labor_cost),material=money(req.body?.default_material_cost??base.default_material_cost),duration=Math.max(0,Math.round(Number(req.body?.default_duration_min??base.default_duration_min)));
       if(!titleEn||!titleHu)throw problem("HANDOFF_PRESET_TITLE_REQUIRED");
       if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("HANDOFF_PRESET_VALUES_INVALID");
-      db.prepare(`UPDATE handoff_presets SET title_en=?,title_hu=?,default_labor_cost=?,default_material_cost=?,default_duration_min=?,active=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(titleEn,titleHu,labor,material,duration,req.body?.active===undefined?Number(before.active):req.body.active?1:0,Number(req.body?.sort_order??before.sort_order??0),req.user.id,id);
-      const after=db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id);audit(req,"UPDATE","handoff_presets",String(id),before,after);res.json(after);
+      const after=db.transaction(()=>{
+        db.prepare(`UPDATE handoff_presets SET title_en=?,title_hu=?,default_labor_cost=?,default_material_cost=?,default_duration_min=?,active=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(titleEn,titleHu,labor,material,duration,req.body?.active===undefined?Number(base.active):req.body.active?1:0,Number(req.body?.sort_order??base.sort_order??0),req.user.id,id);
+        if(inventoryService?.setPresetMaterials&&Array.isArray(req.body?.materials))inventoryService.setPresetMaterials(id,req.body.materials);
+        return decoratePreset(db.prepare("SELECT * FROM handoff_presets WHERE id=?").get(id));
+      })();
+      audit(req,"UPDATE","handoff_presets",String(id),before,after);res.json(after);
     }catch(error){respond(res,error);}
   });
   app.delete("/api/handoff-presets/:id",auth,admin,(req,res)=>{

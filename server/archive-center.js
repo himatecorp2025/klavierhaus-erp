@@ -45,7 +45,7 @@ function intakeAssessmentPdf({lead,items=[]}){
   return createPdf({pages,size:LETTER,labels,title:`Klavierhaus Intake Assessment ${lead.id}`});
 }
 
-function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transactionalEmail}){
+function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transactionalEmail,notifications=null}){
   const admin=permit("ADMIN");
   const staff=permit("ADMIN","MANAGER","WORKER");
   const target=path.join(uploadDir,"archive");
@@ -169,6 +169,18 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
       if(id&&recipient){
         try{db.prepare(`INSERT INTO intake_assessment_email_log(intake_id,archive_document_id,recipient,language,custom_message,status,error_code,sent_by_user_id)
           VALUES(?,?,?,?,?,'failed',?,?)`).run(id,artifact?.archiveId||null,recipient,language,customMessage||null,text(error?.code||error?.message,120),req.user?.id||null);}catch(_logError){}
+      }
+      if(notifications){
+        try{
+          const recipients=db.prepare("SELECT id FROM users WHERE status='Active' AND (role='ADMIN' OR role='SUPERADMIN' OR is_superadmin=1)").all().map(row=>row.id);
+          if(recipients.length)notifications.emitOnce({
+            category:"DELIVERY_EXCEPTION",entityType:"INTAKE",entityId:String(id),
+            titleEn:"Assessment delivery failed",titleHu:"Az igényfelmérés küldése sikertelen",
+            bodyEn:`Intake #${id} · ${text(error?.code||error?.message,180)}`,
+            bodyHu:`Igény #${id} · ${text(error?.code||error?.message,180)}`,
+            actionUrl:"#intake",severity:"URGENT",recipients
+          });
+        }catch(_notificationError){}
       }
       respond(res,error);
     }

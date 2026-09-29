@@ -6,6 +6,7 @@ const Database = require("better-sqlite3");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
+const canonicalSchemaSql=fs.readFileSync(path.join(__dirname,"schema.sql"),"utf8");
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 fs.mkdirSync(backupDir, { recursive: true });
 
@@ -180,13 +181,19 @@ if(dynamicWorkflowNeedsMigration){
   if(tableExists("workflow_stage_definitions"))db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_dynamic_legacy_workflow_stage_definitions"');
   console.log("[WORKFLOW-DYNAMIC] Legacy five-stage workflow tables isolated");
 }
+const inventoryCatalogNeedsMigration=tableExists("inventory_items")&&(!columns("inventory_items").has("sku")||!columns("inventory_items").has("quantity_on_hand")||!columns("inventory_items").has("reorder_point"));
+if(inventoryCatalogNeedsMigration){
+  if(tableExists("_inventory_legacy_items"))db.exec('DROP TABLE "_inventory_legacy_items"');
+  db.exec('ALTER TABLE "inventory_items" RENAME TO "_inventory_legacy_items"');
+  console.log("[INVENTORY] Legacy inventory_items table isolated before canonical inventory schema creation");
+}
 const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("financial_document");
 if(archiveCategoryNeedsMigration){
   if(tableExists("_documents_legacy_archive"))db.exec('DROP TABLE "_documents_legacy_archive"');
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
   console.log("[DOCUMENTS] Legacy archive category table isolated");
 }
-db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+db.exec(canonicalSchemaSql);
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
     SELECT id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at FROM _documents_legacy_archive`);
@@ -449,7 +456,10 @@ db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
 seedWorkshopUxV5();
 
-const preserved = new Set(["users","account_activations","activation_email_log","activation_email_events","steinway_serial_registry","steinway_model_reference","event_categories","events","event_invitations","event_tickets","event_ticket_documents","event_checkins","event_refund_requests","event_checkout_holds","event_payments","stripe_webhook_events","event_closures","event_attendance_sessions","event_attendance_entries","event_attendance_actions","event_attendance_exports","event_repeat_requests","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","app_settings","landing_sections","website_content_pages","website_reviews","website_showroom_pianos","website_services","website_artists","website_media","website_contact_leads","website_content_versions","website_preview_tokens","website_integration_settings","system_integration_secrets","system_integration_health","system_integration_backups","system_integration_delete_tokens","system_integration_test_tokens","website_integration_oauth_states","marketing_campaigns","website_tracking_events","audit_log","role_permissions","private_appointments","notification_events","notification_recipients","notification_preferences","push_subscriptions","clients","pianos","intake_leads","intake_catalog_items","intake_assessment_items","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache","document_archive"]);
+const preserved=new Set(
+  [...canonicalSchemaSql.matchAll(/CREATE TABLE IF NOT EXISTS\s+([A-Za-z0-9_]+)/gi)].map(match=>match[1])
+);
+
 for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all()) {
   if (row.type === "view") {
     db.exec(`DROP VIEW IF EXISTS ${quoteName(row.name)}`);
@@ -458,7 +468,7 @@ for (const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN 
   if (!preserved.has(row.name)) db.exec(`DROP TABLE IF EXISTS ${quoteName(row.name)}`);
 }
 
-db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+db.exec(canonicalSchemaSql);
 setSetting("round1_core_migration_complete", "1");
 setSetting("round1_schema_version", "1");
 setSetting("round2_workflow_migration_complete", "1");

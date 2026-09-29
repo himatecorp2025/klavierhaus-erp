@@ -284,10 +284,15 @@ async function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
   if(!next||next==="completed"){toast(tr("This job is ready for Admin closeout.","A munka adminisztrátori lezárásra kész."),"error");return;}
   const targetPhase=(job.workflow_phases||[]).find(phase=>phase.stage_key===next)||{};
   const presets=await api("/api/handoff-presets").catch(()=>[]);
+  const renderPresetMaterials=preset=>{
+    const host=$("#handoffMaterialUsage");if(!host)return;
+    const materials=Array.isArray(preset?.materials)?preset.materials:[];
+    host.innerHTML=materials.length?`<div class="detail-note"><strong>${tr("Materials to consume","Felhasználandó anyagok")}</strong><div class="form-grid">${materials.map(item=>`<label class="field"><span>${esc(state.language==="hu"?item.name_hu:item.name_en)} · ${esc(item.sku)} <small>${tr("on hand","készleten")}: ${Number(item.quantity_on_hand||0)} ${esc(item.unit||"")}</small></span><input data-material-quantity data-inventory-item-id="${Number(item.inventory_item_id)}" type="number" min="0" step="0.01" value="${Number(item.default_quantity||0)}"></label>`).join("")}</div></div>`:"";
+  };
   openDialog({title:tr("Complete Phase / Handoff","Fázis lezárása / Átadás"),eyebrow:`${r2StageLabel(job.stage)} → ${r2StageLabel(next)}`,body:`<form id="handoffForm" class="form-grid">
     <div class="detail-note full">${tr("Complete the current phase and move the job to the selected unfinished phase. Intermediate phases may be completed in a different order; Admin Approval remains the final active phase.","Zárd le az aktuális fázist, és helyezd át a munkát a kiválasztott, még nyitott fázisba. A köztes fázisok eltérő sorrendben is teljesíthetők; az Admin jóváhagyás mindig az utolsó aktív fázis.")}</div>
     ${presets.length?`<section class="full handoff-preset-panel"><div class="handoff-preset-head"><strong>${tr("Quick presets","Gyors presetek")}</strong><small>${tr("Tap once, then adjust if needed.","Egy érintés, utána szükség esetén módosítható.")}</small></div><div class="handoff-preset-strip">${presets.slice(0,6).map(p=>`<button type="button" class="handoff-preset-button" data-handoff-preset="${p.id}" data-label="${esc(state.language==="hu"?p.title_hu:p.title_en)}" data-labor="${Number(p.default_labor_cost||0)}" data-material="${Number(p.default_material_cost||0)}" data-duration="${Number(p.default_duration_min||0)}"><strong>${esc(state.language==="hu"?p.title_hu:p.title_en)}</strong><small>${r2Money(p.default_labor_cost)} / ${r2Money(p.default_material_cost)} ${tr("mat","anyag")} · ${Number(p.default_duration_min||0)} min</small></button>`).join("")}</div></section>`:""}
-    <label class="field"><span>${tr("Labor / daily fee","Munkadíj / napi díj")} (USD)</span><input name="phase_labor_cost" type="number" min="0" step="0.01" value="0"></label>
+    <section id="handoffMaterialUsage" class="full"></section>\n    <label class="field"><span>${tr("Labor / daily fee","Munkadíj / napi díj")} (USD)</span><input name="phase_labor_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field"><span>${tr("Material cost","Anyagköltség")} (USD)</span><input name="phase_material_cost" type="number" min="0" step="0.01" value="0"></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="phase_duration_min" type="number" min="0" step="15" value="0"></label>
     <label class="field full"><span>${tr("Internal handoff note","Belső átadási jegyzet")}</span><textarea name="phase_note"></textarea></label>
@@ -301,11 +306,13 @@ async function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
     form.elements.phase_material_cost.value=button.dataset.material||"0";
     form.elements.phase_duration_min.value=button.dataset.duration||"0";
     form.elements.billing_description.value=button.dataset.label||"";
+    renderPresetMaterials(presets.find(preset=>Number(preset.id)===Number(button.dataset.handoffPreset)));
     $$("[data-handoff-preset]").forEach(item=>item.classList.toggle("active",item===button));
   }));
   $("#handoffForm").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     body.phase_labor_cost=Number(body.phase_labor_cost||0);body.phase_material_cost=Number(body.phase_material_cost||0);body.phase_duration_min=Number(body.phase_duration_min||0);
+    body.materials=$("[data-material-quantity]",event.currentTarget).map(input=>({inventory_item_id:Number(input.dataset.inventoryItemId),quantity:Number(input.value||0)})).filter(item=>item.inventory_item_id&&item.quantity>0);
     if(!body.assigned_to_user_id)delete body.assigned_to_user_id;
     const submit=event.currentTarget.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent=tr("Saving…","Mentés…");
     try{await api(`/api/jobs/${job.id}/handoff`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Phase completed and job moved.","Fázis lezárva, munka áthelyezve."),"success");await refresh();}catch(error){submit.disabled=false;submit.textContent=tr("Save & handoff","Mentés és továbbítás");toast(humanError(error),"error");}
