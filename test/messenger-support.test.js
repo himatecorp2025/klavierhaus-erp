@@ -57,14 +57,14 @@ test("ERP Messenger is a dedicated view and mobile Planned moves under compact M
   assert.match(css,/max-height:min\(62vh,470px\)/);
   assert.match(messenger,/\/api\/customer-conversations/);
   assert.match(messenger,/Propose appointment/);
-  assert.match(messenger,/Create Intake/);
+  assert.match(messenger,/Create \/ edit Intake/);
   assert.match(sw,/"\/messenger\.js"/);
 });
 
 test("Intake required-work cards use compact More-like two-column mobile cards",()=>{
   const css=read("public/styles.css");
   assert.match(css,/New Intake work cards use the same compact card language as More/);
-  assert.match(css,/\.assessment-option\{[\s\S]*aspect-ratio:1\.45\/1/);
+  assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);\n  assert.match(css,/\.assessment-option-icon/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
   assert.match(css,/\.assessment-option>input\[type="checkbox"\]\{position:absolute/);
 });
@@ -75,10 +75,29 @@ test("Canonical Messenger backend routes assignment, notifications, appointments
   assert.match(backend,/actionUrl:"#messenger"/);
   assert.match(backend,/recipients:supportRecipients\(row\.assigned_user_id\)/);
   assert.match(backend,/\/api\/customer-conversations\/:id\/appointment-proposals/);
-  assert.match(backend,/\/api\/customer-conversations\/:id\/create-intake/);
+  assert.match(backend,/\/api\/customer-conversations\/:id\/intake-draft/);
+  assert.match(backend,/INTAKE_REQUIRES_REVIEW/);
   assert.match(backend,/source_conversation_id/);
+  assert.doesNotMatch(backend.slice(backend.indexOf("appointment-proposals/:proposalId/respond"),backend.indexOf("attachments/:attachmentId")) ,/INSERT INTO private_appointments/);
   assert.doesNotMatch(backend,/INSERT INTO jobs/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS customer_appointment_proposals/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS support_holidays/);
   assert.match(index,/registerWebsiteConversationRoutes\(\{[\s\S]*transactionalEmail[\s\S]*websiteBaseUrl/);
+});
+
+
+test("Messenger private appointments require staff approval/finalization and expose compact status cards",()=>{
+  const messenger=read("public/messenger.js"),privateApi=read("server/private-appointments.js"),conversation=read("server/website-conversations.js"),schema=read("server/schema.sql"),css=read("public/styles.css");
+  assert.match(css,/\.messenger-status-cards/);
+  assert.match(css,/\.messenger-status-card/);
+  assert.match(messenger,/Private requests/);
+  assert.match(messenger,/Finalize & add to calendar/);
+  assert.match(messenger,/Approve & add to calendar/);
+  assert.match(privateApi,/CREATE|private_appointment_requests/);
+  assert.match(privateApi,/\/api\/private-appointment-requests\/\:id\/approve/);
+  assert.match(privateApi,/\/appointment-proposals\/\:proposalId\/finalize/);
+  assert.match(conversation,/Customer accepted proposed appointment/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS private_appointment_requests/);
+  assert.match(schema,/duration_min INTEGER NOT NULL DEFAULT 60/);
+  assert.match(schema,/expires_at TEXT/);
 });
