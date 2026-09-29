@@ -45,6 +45,7 @@ function v6ToggleSidebar(){
 }
 function v6OpenMore(){
   openDialog({title:tr("More","Továbbiak"),eyebrow:"KLAVIERHAUS ERP",body:`<div class="mobile-more-grid">
+    <button class="mobile-more-card" type="button" data-nav="finance"><span>$</span><strong>${tr("Finance","Pénzügy")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>
