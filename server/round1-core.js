@@ -1,5 +1,7 @@
 "use strict";
 
+const {importLegacyInstrumentClientCsv}=require("./master-data-reconcile");
+
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function validEmail(value){
   const email=text(value,320).toLowerCase();
@@ -81,15 +83,17 @@ function convertIntakeLead(db,lead,body={}){
   })();
 }
 
-function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,notifications=null}){
+function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,masterDataImportUpload=null,notifications=null}){
   const staff=permit("ADMIN","MANAGER","WORKER");
 
   app.get("/api/clients",auth,staff,(req,res)=>{
     const q=text(req.query.q,160).toLowerCase(),like=`%${q}%`;
-    const rows=db.prepare(`SELECT c.*,COUNT(p.id) AS piano_count
-      FROM clients c LEFT JOIN pianos p ON p.client_id=c.id
-      WHERE ?='' OR lower(c.name) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ? OR lower(COALESCE(c.phone,'')) LIKE ?
-      GROUP BY c.id ORDER BY lower(c.name),c.id`).all(q,like,like,like);
+    const rows=db.prepare(`SELECT c.*,
+      (SELECT COUNT(*) FROM pianos p WHERE p.client_id=c.id AND COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED') AS piano_count,
+      (SELECT COUNT(*) FROM client_piano_review_queue r WHERE r.client_id=c.id AND r.status='PENDING') AS piano_review_count
+      FROM clients c
+      WHERE ?='' OR lower(c.name) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ? OR lower(COALESCE(c.phone,'')) LIKE ? OR lower(COALESCE(c.address,'')) LIKE ?
+      ORDER BY lower(c.name),c.id`).all(q,like,like,like,like);
     res.json(rows);
   });
 
@@ -127,6 +131,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
       COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
       FROM pianos p JOIN clients c ON c.id=p.client_id
+      WHERE COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
       ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all());
   });
 
@@ -136,19 +141,47 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
       COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
       FROM pianos p JOIN clients c ON c.id=p.client_id
-      WHERE p.client_id=? ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all(id));
+      WHERE p.client_id=? AND COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
+      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all(id));
+  });
+
+  app.get("/api/clients/:id/piano-review",auth,staff,(req,res)=>{
+    const id=integerId(req.params.id);
+    if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
+    res.json(db.prepare("SELECT * FROM client_piano_review_queue WHERE client_id=? AND status='PENDING' ORDER BY id").all(id));
+  });
+
+  app.post("/api/master-data/import-csv",auth,permit("ADMIN"),(req,res,next)=>{
+    if(!masterDataImportUpload)return res.status(503).json({error:"MASTER_DATA_IMPORT_UNAVAILABLE"});
+    masterDataImportUpload.single("file")(req,res,error=>{
+      if(error)return next(error);
+      if(!req.file?.buffer?.length)return res.status(400).json({error:"MASTER_DATA_CSV_REQUIRED"});
+      try{
+        const summary=importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:"KLAVIERHAUS_MASTER_CSV"});
+        audit(req,"IMPORT","master_data","KLAVIERHAUS_MASTER_CSV",null,summary);
+        res.json(summary);
+      }catch(error){res.status(error.status||400).json({error:error.message||"MASTER_DATA_IMPORT_FAILED"});}
+    });
   });
 
   app.post("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const clientId=integerId(req.params.id);
     if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
     const brand=text(req.body?.brand,200);if(!brand)return res.status(400).json({error:"PIANO_BRAND_REQUIRED"});
-    const info=db.prepare(`INSERT INTO pianos(client_id,brand,model,serial_number,finish,location_notes,last_serviced_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+    const buildYear=req.body?.build_year===undefined||req.body?.build_year===""?null:Number(req.body.build_year);
+    if(buildYear!==null&&(!Number.isInteger(buildYear)||buildYear<1700||buildYear>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
+    const info=db.prepare(`INSERT INTO pianos(client_id,brand,model,serial_number,finish,location_notes,last_serviced_at,build_year,size_display,color,notes,classification_status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
       clientId,brand,text(req.body?.model,200)||null,text(req.body?.serial_number,160)||null,text(req.body?.finish,160)||null,
-      text(req.body?.location_notes,1200)||null,text(req.body?.last_serviced_at,40)||null
+      text(req.body?.location_notes,1200)||null,text(req.body?.last_serviced_at,40)||null,buildYear,text(req.body?.size_display,120)||null,
+      text(req.body?.color,160)||null,text(req.body?.notes,5000)||null
     );
     const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));
+    const reviewId=integerId(req.body?.review_id);
+    if(reviewId){
+      const review=db.prepare("SELECT * FROM client_piano_review_queue WHERE id=? AND client_id=? AND status='PENDING'").get(reviewId,clientId);
+      if(review)db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id,reviewId);
+    }
     audit(req,"CREATE","pianos",String(row.id),null,row);res.status(201).json(row);
   });
 
@@ -158,10 +191,14 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,no
     const clientId=integerId(req.body?.client_id??before.client_id),brand=text(req.body?.brand??before.brand,200);
     if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(400).json({error:"INVALID_CLIENT_ID"});
     if(!brand)return res.status(400).json({error:"PIANO_BRAND_REQUIRED"});
-    db.prepare("UPDATE pianos SET client_id=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    const buildYear=req.body?.build_year===undefined?before.build_year:(req.body.build_year===""?null:Number(req.body.build_year));
+    if(buildYear!==null&&(!Number.isInteger(Number(buildYear))||Number(buildYear)<1700||Number(buildYear)>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
+    db.prepare("UPDATE pianos SET client_id=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(clientId,brand,text(req.body?.model??before.model,200)||null,text(req.body?.serial_number??before.serial_number,160)||null,
         text(req.body?.finish??before.finish,160)||null,text(req.body?.location_notes??before.location_notes,1200)||null,
-        text(req.body?.last_serviced_at??before.last_serviced_at,40)||null,id);
+        text(req.body?.last_serviced_at??before.last_serviced_at,40)||null,buildYear,text(req.body?.size_display??before.size_display,120)||null,
+        text(req.body?.color??before.color,160)||null,text(req.body?.notes??before.notes,5000)||null,id);
+    db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE piano_id=? AND status='PENDING'").run(id,id);
     const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
     audit(req,"UPDATE","pianos",String(id),before,row);res.json(row);
   });

@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
+const {reconcileExistingMasterData}=require("./master-data-reconcile");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
@@ -91,6 +92,15 @@ function messengerV12Backup() {
   console.log(`[MESSENGER-V12] Safety backup created: ${target}`);
   return target;
 }
+function masterDataReconcileBackup() {
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-29-1") return null;
+  try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
+  const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+  const target=path.join(backupDir,`master-data-reconcile-pre-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath,target);
+  console.log(`[MASTER-DATA] Safety backup created: ${target}`);
+  return target;
+}
 function prepareMessengerV12Compatibility() {
   if (tableExists("intake_leads")) ensureColumn("intake_leads","source_conversation_id","TEXT");
   if (tableExists("private_appointments")) {
@@ -109,6 +119,14 @@ function prepareClientSegmentationCompatibility() {
         AND COALESCE(NULLIF(TRIM(client_type),''),'PRIVATE')='PRIVATE'`);
   }
   db.exec('DROP INDEX IF EXISTS "idx_clients_customer_type"');
+}
+function prepareMasterDataCompatibility() {
+  if (!tableExists("pianos")) return;
+  ensureColumn("pianos","build_year","INTEGER");
+  ensureColumn("pianos","size_display","TEXT");
+  ensureColumn("pianos","color","TEXT");
+  ensureColumn("pianos","notes","TEXT");
+  ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
 }
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
@@ -177,6 +195,7 @@ finalComplianceBackup();
 workshopUxV5Backup();
 adminUxV6Backup();
 messengerV12Backup();
+masterDataReconcileBackup();
 dropLegacyDerivedSchemaObjects();
 
 const legacyPianoColumns = columns("pianos");
@@ -231,6 +250,7 @@ if(archiveCategoryNeedsMigration){
 // Add compatibility columns before schema.sql creates indexes that depend on them.
 prepareMessengerV12Compatibility();
 prepareClientSegmentationCompatibility();
+prepareMasterDataCompatibility();
 db.exec(canonicalSchemaSql);
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
@@ -251,6 +271,11 @@ ensureColumn("clients","client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(clie
 ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
 ensureColumn("clients","vip_updated_by_user_id","TEXT");
 ensureColumn("clients","vip_updated_at","TEXT");
+ensureColumn("pianos","build_year","INTEGER");
+ensureColumn("pianos","size_display","TEXT");
+ensureColumn("pianos","color","TEXT");
+ensureColumn("pianos","notes","TEXT");
+ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
@@ -507,6 +532,11 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
+if(setting("master_data_reconcile_version")!=="2026-09-29-1"){
+  const summary=db.transaction(()=>reconcileExistingMasterData(db))();
+  setSetting("master_data_reconcile_version","2026-09-29-1");
+  console.log(`[MASTER-DATA] Reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, review_required=${summary.reviewRequired}`);
+}
 seedWorkshopUxV5();
 
 const preserved=new Set(

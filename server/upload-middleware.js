@@ -126,6 +126,16 @@ function createPianoImportUpload(){
     }
   });
 }
+function createMasterDataImportUpload(){
+  return multer({
+    storage:multer.memoryStorage(),
+    limits:{fileSize:10*1024*1024,files:1},
+    fileFilter:(_req,file,cb)=>{
+      const ok=/\.csv$/i.test(file.originalname||"")||["text/csv","application/csv","text/plain","application/vnd.ms-excel"].includes(String(file.mimetype||"").toLowerCase());
+      cb(ok?null:new Error("INVALID_MASTER_DATA_CSV"),ok);
+    }
+  });
+}
 
 const CUSTOMER_ATTACHMENT_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp",
@@ -198,6 +208,7 @@ module.exports={
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,
+  createMasterDataImportUpload,
   createCompanyDocumentUpload,
   createCustomerConversationUpload,
   inspectImageFile,

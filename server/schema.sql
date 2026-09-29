@@ -1083,9 +1083,62 @@ CREATE TABLE IF NOT EXISTS pianos (
   finish TEXT,
   location_notes TEXT,
   last_serviced_at TEXT,
+  build_year INTEGER CHECK(build_year IS NULL OR build_year BETWEEN 1700 AND 2100),
+  size_display TEXT,
+  color TEXT,
+  notes TEXT,
+  classification_status TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pianos_client_classification ON pianos(client_id,classification_status);
+CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
+
+CREATE TABLE IF NOT EXISTS client_piano_review_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER,
+  piano_id INTEGER,
+  source_name TEXT NOT NULL DEFAULT 'EXISTING_DB',
+  source_instrument_id TEXT,
+  source_brand TEXT,
+  source_model TEXT,
+  source_serial_number TEXT,
+  source_build_year INTEGER,
+  source_note TEXT,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','RESOLVED','DISMISSED')),
+  resolved_piano_id INTEGER,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_name,source_instrument_id),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
+  FOREIGN KEY (resolved_piano_id) REFERENCES pianos(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_piano_review_client ON client_piano_review_queue(client_id,status,id);
+CREATE INDEX IF NOT EXISTS idx_client_piano_review_piano ON client_piano_review_queue(piano_id,status);
+
+CREATE TABLE IF NOT EXISTS master_data_client_source_map (
+  source_name TEXT NOT NULL,
+  source_client_id TEXT NOT NULL,
+  client_id INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_name,source_client_id),
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS master_data_piano_source_map (
+  source_name TEXT NOT NULL,
+  source_instrument_id TEXT NOT NULL,
+  piano_id INTEGER,
+  review_id INTEGER,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_name,source_instrument_id),
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,
+  FOREIGN KEY(review_id) REFERENCES client_piano_review_queue(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS intake_leads (

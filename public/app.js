@@ -8,7 +8,7 @@ const state={
   user:null,
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
-  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",pianos:[],selectedPianoId:null,intake:[],users:[],
+  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
@@ -320,8 +320,15 @@ function syncNavigationState(view=state.view){
   $$(".nav-item[data-nav],.mobile-nav [data-nav]").forEach(button=>button.classList.toggle("active",button.dataset.nav===view));
   $("#mobileMoreButton")?.classList.toggle("active",["planned","finance","documents","cms","profile"].includes(view));
 }
+function masterConfirmDiscard(){
+  if(!state.masterDirty)return true;
+  const ok=window.confirm(tr("You have unsaved changes. Discard them and continue?","Nem mentett módosításaid vannak. Elveted őket és folytatod?"));
+  if(ok)state.masterDirty=false;
+  return ok;
+}
 function navTo(view){
   if(!activeViews.has(view))return;
+  if(state.view==="master"&&view!=="master"&&!masterConfirmDiscard())return;
   state.view=view;history.replaceState({},"",`#${view}`);
   if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
@@ -333,7 +340,8 @@ function bindNavigation(){
     if(!button||button.disabled)return;
     event.preventDefault();navTo(button.dataset.nav);
   });
-  window.addEventListener("hashchange",()=>{const view=location.hash.slice(1);if(activeViews.has(view)){state.view=view;void renderView();}});
+  window.addEventListener("hashchange",()=>{const view=location.hash.slice(1);if(activeViews.has(view)){if(state.view==="master"&&view!=="master"&&!masterConfirmDiscard()){history.replaceState({},"",`#${state.view}`);return;}state.view=view;void renderView();}});
+  window.addEventListener("beforeunload",event=>{if(state.masterDirty){event.preventDefault();event.returnValue="";}});
   $("#languageToggle")?.addEventListener("click",()=>setLanguage(state.language==="en"?"hu":"en"));
 }
 function loading(){return `<div class="loading">${tr("Loading…","Betöltés…")}</div>`;}
@@ -389,6 +397,24 @@ function masterToolButton(kind,label,active=false){
 function clientTypeLabel(value){
   return ({PRIVATE:tr("People","Emberek"),BUSINESS:tr("Business","Vállalkozások"),INSTITUTION:tr("Institution","Intézmények")})[String(value||"PRIVATE").toUpperCase()]||tr("People","Emberek");
 }
+function masterInlineEditable(){
+  return window.innerWidth>=1024&&navigator.maxTouchPoints<=1&&!/iPad|Android|Mobile|Tablet/i.test(navigator.userAgent||"");
+}
+function setMasterDirty(value=true){state.masterDirty=Boolean(value);}
+function masterMapUrl(address){
+  const destination=encodeURIComponent(String(address||"").trim());
+  if(!destination)return "";
+  const apple=/Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(navigator.userAgent||"");
+  return apple?`https://maps.apple.com/?saddr=Current+Location&daddr=${destination}`:`https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+}
+function openMasterMap(address){
+  const url=masterMapUrl(address);if(!url){toast(tr("No address for this customer.","Az ügyfélhez nem tartozik cím."),"error");return;}
+  window.open(url,"_blank","noopener,noreferrer");
+}
+function masterReviewBadge(client){
+  const count=Number(client?.piano_review_count||0);
+  return count>0?`<span class="master-review-badge" title="${esc(tr("Piano information needs classification","Zongoraadat besorolásra vár"))}">!<small>${count}</small></span>`:"";
+}
 async function renderMaster(){
   const workspace=$("#workspace");
   const [,pianos]=await Promise.all([loadClients(),api("/api/pianos")]);
@@ -396,8 +422,9 @@ async function renderMaster(){
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
   const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS";
+  const canImport=state.user&&["ADMIN","SUPERADMIN"].includes(state.user.role);
   workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients and pianos in one editable workspace.","Ügyfelek és zongorák egyetlen szerkeszthető munkafelületen."),
-    `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
+    `${canImport?'<button id="masterImportBtn" class="secondary-button" type="button">↑ '+tr("Import CSV","CSV import")+'</button><input id="masterImportFile" type="file" accept=".csv,text/csv" hidden>':""}<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
     `<div class="master-layout" id="masterLayout">
       <section class="panel master-list-panel">
         <div class="master-toolbar">
@@ -419,6 +446,16 @@ async function renderMaster(){
       <section id="clientDetail" class="panel client-detail master-detail"></section>
     </div>`;
   $("#addClientBtn").addEventListener("click",()=>openClientDialog());
+  $("#masterImportBtn")?.addEventListener("click",()=>$("#masterImportFile")?.click());
+  $("#masterImportFile")?.addEventListener("change",async event=>{
+    const file=event.currentTarget.files?.[0];if(!file)return;
+    const form=new FormData();form.append("file",file,file.name);
+    try{
+      const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
+      toast(tr(`Import completed: ${summary.createdClients} new clients, ${summary.createdPianos} new pianos, ${summary.reviewItems} review items.`,`Import kész: ${summary.createdClients} új ügyfél, ${summary.createdPianos} új zongora, ${summary.reviewItems} ellenőrzendő tétel.`),"success");
+      event.currentTarget.value="";state.masterDirty=false;await renderMaster();
+    }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
+  });
   $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>handleMasterTool(button.dataset.masterTool)));
   $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
   renderMasterList();
@@ -434,6 +471,7 @@ function updateMasterToolbar(){
   });
 }
 function handleMasterTool(kind){
+  if(kind!=="SEARCH"&&!masterConfirmDiscard())return;
   if(kind==="SEARCH"){
     state.masterSearchOpen=!state.masterSearchOpen;updateMasterToolbar();
     if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());
@@ -476,12 +514,12 @@ function renderClientList(){
   if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No clients match this view.","Nincs a nézetnek megfelelő ügyfél.")}</div>`;return;}
   host.innerHTML=rows.map(client=>`<article class="client-row ${Number(client.id)===Number(state.selectedClientId)&&state.masterDetailKind==="CLIENT"?"active":""}">
     <button type="button" class="client-row-select" data-client-id="${client.id}">
-      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</strong><small>${esc(clientTypeLabel(client.client_type))}${client.address?` · ${esc(client.address)}`:""}</small></span>
+      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))}${client.address?` · ${esc(client.address)}`:""}</small></span>
       <span class="count">${Number(client.piano_count||0)}</span>
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
   </article>`).join("");
-  $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
+  $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedClientId=Number(button.dataset.clientId);state.masterDetailKind="CLIENT";renderClientList();await renderClientDetail();openMasterMobileDetail();}));
   $$("[data-client-contact]",host).forEach(button=>button.addEventListener("click",()=>runClientContactAction(Number(button.dataset.clientId),button.dataset.clientContact)));
 }
 function runClientContactAction(clientId,kind){
@@ -503,7 +541,7 @@ function renderPianoList(){
     <small>${tr("Owner","Tulajdonos")}: ${esc(piano.client_name||"—")}</small>
     <small>${tr("Location","Hely")}: ${esc(piano.effective_location||"—")}</small>
   </button>`).join("");
-  $$("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
+  $$("[data-master-piano-id]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedPianoId=Number(button.dataset.masterPianoId);state.masterDetailKind="PIANO";renderPianoList();await renderPianoDetail();openMasterMobileDetail();}));
 }
 function openMasterMobileDetail(){$("#masterLayout")?.classList.add("detail-open");}
 function closeMasterMobileDetail(){$("#masterLayout")?.classList.remove("detail-open");}
@@ -516,19 +554,49 @@ async function renderClientDetail(){
   const client=state.clients.find(row=>Number(row.id)===Number(state.selectedClientId));
   if(!client){host.innerHTML=`<div class="empty-state">${tr("Select a client.","Válassz ügyfelet.")}</div>`;return;}
   host.innerHTML=loading();
-  const [pianos,jobs]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[])]);
+  const [pianos,jobs,reviews]=await Promise.all([
+    api(`/api/clients/${client.id}/pianos`),
+    api(`/api/clients/${client.id}/jobs`).catch(()=>[]),
+    api(`/api/clients/${client.id}/piano-review`).catch(()=>[])
+  ]);
+  const inline=masterInlineEditable();
+  const reviewMarkup=reviews.length?`<section class="master-review-panel"><div class="master-review-panel-head"><span class="master-review-alert">!</span><div><strong>${tr("Piano information needs classification","Zongoraadat besorolásra vár")}</strong><small>${tr("The database indicates this customer has a piano, but the instrument details are incomplete.","Az adatbázis szerint az ügyfélnek van zongorája, de a hangszer adatai hiányosak.")}</small></div></div>${reviews.map(item=>`<article class="master-review-item"><div><strong>${esc([item.source_brand,item.source_model].filter(Boolean).join(" ")||tr("Unclassified piano","Besorolatlan zongora"))}</strong><small>${esc([item.source_serial_number?tr("Serial","Gyári szám")+": "+item.source_serial_number:"",item.source_build_year?tr("Year","Év")+": "+item.source_build_year:"",item.source_note].filter(Boolean).join(" · "))}</small></div><button class="secondary-button" type="button" data-classify-review="${item.id}">${tr("Classify","Besorolás")}</button></article>`).join("")}</section>`:"";
+  const editable=`<form id="clientInlineForm" class="master-inline-form">
+    <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(client.name||"")}" required></label>
+    <label class="field"><span>Email</span><input name="email" type="email" value="${esc(client.email||"")}"></label>
+    <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(client.phone||"")}"></label>
+    <label class="field master-address-field"><span>${tr("Address","Cím")}</span><div class="master-address-input"><input name="address" value="${esc(client.address||"")}"><button class="master-map-button" type="button" data-open-map aria-label="${esc(tr("Open route in Maps","Útvonal megnyitása térképen"))}" title="${esc(tr("Open route in Maps","Útvonal megnyitása térképen"))}">↗</button></div></label>
+    <label class="field"><span>${tr("Client type","Ügyféltípus")}</span><select name="client_type"><option value="PRIVATE" ${String(client.client_type||"PRIVATE")==="PRIVATE"?"selected":""}>${tr("People","Emberek")}</option><option value="BUSINESS" ${client.client_type==="BUSINESS"?"selected":""}>${tr("Business","Vállalkozás")}</option><option value="INSTITUTION" ${client.client_type==="INSTITUTION"?"selected":""}>${tr("Institution","Intézmény")}</option></select></label>
+    <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(client.notes||"")}</textarea></label>
+    <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong><small>${tr("VIP is independent from customer type.","A VIP jelölés független az ügyféltípustól.")}</small></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>
+  </form>`;
+  const readonly=`<div class="contact-line"><span class="contact-pill client-type-chip ${String(client.client_type||"PRIVATE").toLowerCase()}">${esc(clientTypeLabel(client.client_type))}</span>${client.email?`<span class="contact-pill">${esc(client.email)}</span>`:""}${client.phone?`<span class="contact-pill">${esc(client.phone)}</span>`:""}${client.address?`<button class="contact-pill master-readonly-address" type="button" data-open-map>${esc(client.address)} ↗</button>`:""}</div>${client.notes?`<div class="detail-note">${esc(client.notes)}</div>`:""}`;
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
-    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</h2></div><div class="page-actions"><button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button><button id="addPianoBtn" class="primary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
-    <div class="contact-line"><span class="contact-pill client-type-chip ${String(client.client_type||"PRIVATE").toLowerCase()}">${esc(clientTypeLabel(client.client_type))}</span>${client.email?`<span class="contact-pill">${esc(client.email)}</span>`:""}${client.phone?`<span class="contact-pill">${esc(client.phone)}</span>`:""}${client.address?`<span class="contact-pill">${esc(client.address)}</span>`:""}</div>
-    ${client.notes?`<div class="detail-note">${esc(client.notes)}</div>`:""}
+    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
+    ${inline?editable:readonly}
+    ${reviewMarkup}
     <div class="panel-head inline-panel-head"><h3>${tr("Pianos","Zongorák")}</h3><span class="badge">${pianos.length}</span></div>
-    <div class="piano-grid">${pianos.length?pianos.map(piano=>pianoCard(piano)).join(""):`<div class="empty-state">${tr("No piano is linked to this client yet.","Ehhez az ügyfélhez még nincs zongora.")}</div>`}</div>
+    <div class="piano-grid">${pianos.length?pianos.map(piano=>pianoCard(piano)).join(""):`<div class="empty-state">${tr("No classified piano is linked to this client yet.","Ehhez az ügyfélhez még nincs besorolt zongora.")}</div>`}</div>
     <div class="panel-head inline-panel-head"><h3>${tr("Service history","Szerviztörténet")}</h3><span class="badge">${jobs.length}</span></div>
     <div class="service-history-list">${jobs.length?jobs.map(job=>`<article class="history-row"><div><strong>${esc(job.job_code||job.title)}</strong><small>${esc(job.title)} · ${esc(job.piano_brand||"")} ${esc(job.piano_model||"")}</small></div><span class="badge">${job.cancelled_at?tr("Cancelled","Megszakítva"):job.stage==="completed"?tr("Completed","Lezárva"):esc(job.stage)}</span>${job.completed_by_name?`<small>${tr("Closed by","Lezárta")}: ${esc(job.completed_by_name)}</small>`:""}</article>`).join(""):`<div class="empty-state">${tr("No service history yet.","Még nincs szerviztörténet.")}</div>`}</div>`;
-  $("[data-master-back]")?.addEventListener("click",closeMasterMobileDetail);
-  $("#editClientBtn").addEventListener("click",()=>openClientDialog(client));
-  $("#addPianoBtn").addEventListener("click",()=>openPianoDialog(client));
-  $$("[data-piano-card]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedPianoId=Number(button.dataset.pianoCard);state.masterDetailKind="PIANO";await renderPianoDetail();openMasterMobileDetail();}));
+  $("[data-master-back]")?.addEventListener("click",()=>{if(masterConfirmDiscard())closeMasterMobileDetail();});
+  $("#editClientBtn")?.addEventListener("click",()=>openClientDialog(client));
+  $("#addPianoBtn")?.addEventListener("click",()=>{if(masterConfirmDiscard())openPianoDialog(client);});
+  $$("[data-open-map]",host).forEach(button=>button.addEventListener("click",()=>{const address=inline?$("#clientInlineForm")?.elements?.address?.value:client.address;openMasterMap(address);}));
+  $$("[data-classify-review]",host).forEach(button=>button.addEventListener("click",()=>{const item=reviews.find(row=>Number(row.id)===Number(button.dataset.classifyReview));if(masterConfirmDiscard())openPianoDialog(client,null,item);}));
+  $$("[data-piano-card]",host).forEach(button=>button.addEventListener("click",async()=>{if(!masterConfirmDiscard())return;state.selectedPianoId=Number(button.dataset.pianoCard);state.masterDetailKind="PIANO";await renderPianoDetail();openMasterMobileDetail();}));
+  const form=$("#clientInlineForm");
+  if(form){
+    form.addEventListener("input",()=>setMasterDirty(true));form.addEventListener("change",()=>setMasterDirty(true));
+    $("#saveClientBtn")?.addEventListener("click",()=>form.requestSubmit());
+    form.addEventListener("submit",async event=>{
+      event.preventDefault();const body=Object.fromEntries(new FormData(form));body.is_vip=Boolean(form.elements.is_vip?.checked);
+      try{
+        const saved=await api(`/api/clients/${client.id}`,{method:"PUT",body:JSON.stringify(body)});
+        setMasterDirty(false);state.selectedClientId=Number(saved.id);toast(tr("Client saved.","Ügyfél mentve."),"success");await renderMaster();
+      }catch(error){toast(humanError(error),"error");}
+    });
+  }
 }
 function pianoCard(piano){
   return `<button class="piano-card" type="button" data-piano-card="${piano.id}"><h3>${esc([piano.brand,piano.model].filter(Boolean).join(" "))}</h3><dl>
@@ -543,17 +611,47 @@ async function renderPianoDetail(){
   if(!piano){host.innerHTML=`<div class="empty-state">${tr("Select a piano.","Válassz zongorát.")}</div>`;return;}
   const client=state.clients.find(row=>Number(row.id)===Number(piano.client_id));
   const effective=piano.location_notes||client?.address||piano.client_address||"";
-  host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
-    <div class="detail-title"><div><span class="eyebrow">${tr("PIANO","ZONGORA")} #${piano.id}</span><h2>${esc([piano.brand,piano.model].filter(Boolean).join(" "))}</h2></div><button id="editPianoBtn" class="primary-button" type="button">${tr("Edit piano","Zongora szerkesztése")}</button></div>
-    <div class="piano-detail-grid">
+  const inline=masterInlineEditable();
+  const editable=`<form id="pianoInlineForm" class="master-inline-form piano-inline-form">
+    <label class="field"><span>${tr("Owner","Tulajdonos")} *</span><select name="client_id" required>${state.clients.map(row=>`<option value="${row.id}" ${Number(row.id)===Number(piano.client_id)?"selected":""}>${esc(row.name)}</option>`).join("")}</select></label>
+    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required value="${esc(piano.brand||"")}"></label>
+    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(piano.model||"")}"></label>
+    <label class="field"><span>${tr("Serial number","Gyári szám")}</span><input name="serial_number" value="${esc(piano.serial_number||"")}"></label>
+    <label class="field"><span>${tr("Year","Év")}</span><input name="build_year" type="number" min="1700" max="2100" value="${esc(piano.build_year||"")}"></label>
+    <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(piano.finish||"")}"></label>
+    <label class="field"><span>${tr("Size","Méret")}</span><input name="size_display" value="${esc(piano.size_display||"")}"></label>
+    <label class="field"><span>${tr("Color","Szín")}</span><input name="color" value="${esc(piano.color||"")}"></label>
+    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(piano.location_notes||"")}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")} ${!piano.location_notes&&effective?`· ${esc(effective)}`:""}</small></label>
+    <label class="field"><span>${tr("Last service","Utolsó szerviz")}</span><input name="last_serviced_at" type="date" value="${esc(piano.last_serviced_at||"")}"></label>
+    <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(piano.notes||"")}</textarea></label>
+  </form>`;
+  const readonly=`<div class="piano-detail-grid">
       <div><span>${tr("Owner","Tulajdonos")}</span><strong>${esc(client?.name||piano.client_name||"—")}</strong></div>
       <div><span>${tr("Serial number","Gyári szám")}</span><strong>${esc(piano.serial_number||"—")}</strong></div>
-      <div><span>${tr("Finish","Kivitel")}</span><strong>${esc(piano.finish||"—")}</strong></div>
+      <div><span>${tr("Year","Év")}</span><strong>${esc(piano.build_year||"—")}</strong></div>
+      <div><span>${tr("Finish","Kivitel")}</span><strong>${esc(piano.finish||piano.color||"—")}</strong></div>
+      <div><span>${tr("Size","Méret")}</span><strong>${esc(piano.size_display||"—")}</strong></div>
       <div><span>${tr("Location","Hely")}</span><strong>${esc(effective||"—")}</strong><small>${piano.location_notes?tr("Piano-specific location","Zongorához megadott külön hely"):tr("Inherited from customer address","Az ügyfél címéből örökölve")}</small></div>
       <div><span>${tr("Last service","Utolsó szerviz")}</span><strong>${esc(piano.last_serviced_at||"—")}</strong></div>
+      ${piano.notes?`<div class="full"><span>${tr("Notes","Megjegyzés")}</span><strong>${esc(piano.notes)}</strong></div>`:""}
     </div>`;
-  $("[data-master-back]")?.addEventListener("click",()=>{if(state.masterMode==="CLIENTS"){state.masterDetailKind="CLIENT";void renderClientDetail();}else closeMasterMobileDetail();});
+  host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
+    <div class="detail-title"><div><span class="eyebrow">${tr("PIANO","ZONGORA")} #${piano.id}</span><h2>${esc([piano.brand,piano.model].filter(Boolean).join(" "))}</h2></div><div class="page-actions">${inline?`<button id="savePianoBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editPianoBtn" class="primary-button" type="button">${tr("Edit piano","Zongora szerkesztése")}</button>`}</div></div>
+    ${inline?editable:readonly}`;
+  $("[data-master-back]")?.addEventListener("click",()=>{if(!masterConfirmDiscard())return;if(state.masterMode==="CLIENTS"){state.masterDetailKind="CLIENT";void renderClientDetail();}else closeMasterMobileDetail();});
   $("#editPianoBtn")?.addEventListener("click",()=>openPianoDialog(client,piano));
+  const form=$("#pianoInlineForm");
+  if(form){
+    form.addEventListener("input",()=>setMasterDirty(true));form.addEventListener("change",()=>setMasterDirty(true));
+    $("#savePianoBtn")?.addEventListener("click",()=>form.requestSubmit());
+    form.addEventListener("submit",async event=>{
+      event.preventDefault();const body=Object.fromEntries(new FormData(form));body.client_id=Number(body.client_id);if(body.build_year==="")body.build_year=null;
+      try{
+        const saved=await api(`/api/pianos/${piano.id}`,{method:"PUT",body:JSON.stringify(body)});
+        setMasterDirty(false);state.selectedPianoId=Number(saved.id);toast(tr("Piano saved.","Zongora mentve."),"success");await renderMaster();openMasterMobileDetail();
+      }catch(error){toast(humanError(error),"error");}
+    });
+  }
 }
 function clientForm(client={}){
   return `<form id="clientEditor" class="form-grid">
@@ -578,24 +676,41 @@ function openClientDialog(client=null){
     }catch(error){toast(humanError(error),"error");}
   });
 }
-function openPianoDialog(client=null,piano=null){
+function openPianoDialog(client=null,piano=null,review=null){
   const owner=client||state.clients.find(row=>Number(row.id)===Number(piano?.client_id))||state.clients[0]||{};
-  openDialog({title:piano?tr("Edit piano","Zongora szerkesztése"):tr("New piano","Új zongora"),eyebrow:owner.name||tr("MASTER DATA","TÖRZSADATOK"),body:`<form id="pianoEditor" class="form-grid">
+  const seed={
+    brand:piano?.brand||review?.source_brand||"",
+    model:piano?.model||review?.source_model||"",
+    serial_number:piano?.serial_number||review?.source_serial_number||"",
+    build_year:piano?.build_year||review?.source_build_year||"",
+    finish:piano?.finish||"",
+    size_display:piano?.size_display||"",
+    color:piano?.color||"",
+    location_notes:piano?.location_notes||"",
+    last_serviced_at:piano?.last_serviced_at||"",
+    notes:piano?.notes||review?.source_note||""
+  };
+  openDialog({title:piano?tr("Edit piano","Zongora szerkesztése"):review?tr("Classify piano","Zongora besorolása"):tr("New piano","Új zongora"),eyebrow:owner.name||tr("MASTER DATA","TÖRZSADATOK"),body:`<form id="pianoEditor" class="form-grid">
     <label class="field"><span>${tr("Owner","Tulajdonos")} *</span><select name="client_id" required>${state.clients.map(row=>`<option value="${row.id}" ${Number(row.id)===Number(piano?.client_id||owner.id)?"selected":""}>${esc(row.name)}</option>`).join("")}</select></label>
-    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required autofocus value="${esc(piano?.brand||"")}" placeholder="Steinway & Sons"></label>
-    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(piano?.model||"")}" placeholder="B-211"></label>
-    <label class="field"><span>${tr("Serial","Gyári szám")}</span><input name="serial_number" value="${esc(piano?.serial_number||"")}"></label>
-    <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(piano?.finish||"")}" placeholder="Ebony"></label>
-    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(piano?.location_notes||"")}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")}</small></label>
-    <label class="field"><span>${tr("Last service","Utolsó szerviz")}</span><input name="last_serviced_at" type="date" value="${esc(piano?.last_serviced_at||"")}"></label>
+    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required autofocus value="${esc(seed.brand)}" placeholder="Steinway & Sons"></label>
+    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(seed.model)}" placeholder="B-211"></label>
+    <label class="field"><span>${tr("Serial","Gyári szám")}</span><input name="serial_number" value="${esc(seed.serial_number)}"></label>
+    <label class="field"><span>${tr("Year","Év")}</span><input name="build_year" type="number" min="1700" max="2100" value="${esc(seed.build_year)}"></label>
+    <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(seed.finish)}" placeholder="Ebony"></label>
+    <label class="field"><span>${tr("Size","Méret")}</span><input name="size_display" value="${esc(seed.size_display)}"></label>
+    <label class="field"><span>${tr("Color","Szín")}</span><input name="color" value="${esc(seed.color)}"></label>
+    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(seed.location_notes)}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")}</small></label>
+    <label class="field"><span>${tr("Last service","Utolsó szerviz")}</span><input name="last_serviced_at" type="date" value="${esc(seed.last_serviced_at)}"></label>
+    <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(seed.notes)}</textarea></label>
+    ${review?`<input type="hidden" name="review_id" value="${review.id}">`:""}
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save piano","Zongora mentése")}</button></div>
   </form>`});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
   $("#pianoEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);if(body.build_year==="")body.build_year=null;if(body.review_id)body.review_id=Number(body.review_id);
     try{
       const saved=await api(piano?`/api/pianos/${piano.id}`:`/api/clients/${body.client_id}/pianos`,{method:piano?"PUT":"POST",body:JSON.stringify(body)});
-      state.selectedPianoId=Number(saved.id);state.masterDetailKind="PIANO";closeDialog();toast(piano?tr("Piano updated.","Zongora frissítve."):tr("Piano added.","Zongora hozzáadva."),"success");await renderMaster();openMasterMobileDetail();
+      state.selectedPianoId=Number(saved.id);state.masterDetailKind="PIANO";closeDialog();toast(piano?tr("Piano updated.","Zongora frissítve."):tr("Piano saved.","Zongora mentve."),"success");await renderMaster();openMasterMobileDetail();
     }catch(error){toast(humanError(error),"error");}
   });
 }
