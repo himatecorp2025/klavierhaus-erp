@@ -633,20 +633,26 @@ async function r2RenderCalendar(){
   if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode="week";
   state.r2CalendarDate=state.r2CalendarDate||r2Today();
   const range=r2Range(state.r2CalendarDate,state.r2CalendarMode),tech=state.r2CalendarTech||"";
-  const data=await api(`/api/calendar?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${tech?`&technician_id=${encodeURIComponent(tech)}`:""}`);
+  const [data,privateAppointments]=await Promise.all([
+    api(`/api/calendar?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${tech?`&technician_id=${encodeURIComponent(tech)}`:""}`),
+    api(`/api/private-appointments?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)
+  ]);
+  const privateRows=(privateAppointments||[]).map(r2PrivateCalendarRow),jobRows=data.jobs||[],calendarRows=state.r2CalendarPrivateOnly?privateRows:[...jobRows,...privateRows];
   host.innerHTML=`<section class="panel calendar-panel"><div class="calendar-toolbar"><div class="calendar-nav"><button id="calendarPrev" class="secondary-button" type="button" aria-label="${tr("Previous","Előző")}">←</button><button id="calendarToday" class="secondary-button" type="button">${tr("Today","Ma")}</button><button id="calendarNext" class="secondary-button" type="button" aria-label="${tr("Next","Következő")}">→</button></div>
     <strong class="calendar-range-title">${esc(r2CalendarTitle(range,state.r2CalendarMode))}</strong>
-    <div class="calendar-toolbar-right"><div class="segmented-control compact"><button type="button" data-calendar-mode="day" class="${state.r2CalendarMode==="day"?"active":""}">${tr("Day","Nap")}</button><button type="button" data-calendar-mode="week" class="${state.r2CalendarMode==="week"?"active":""}">${tr("Week","Hét")}</button><button type="button" data-calendar-mode="month" class="${state.r2CalendarMode==="month"?"active":""}">${tr("Month","Hónap")}</button></div><select id="calendarTechFilter"><option value="">${tr("All technicians","Minden technikus")}</option>${r2TechnicianOptions(tech)}</select></div></div>
+    <div class="calendar-toolbar-right"><button id="calendarPrivateFilter" class="secondary-button private-filter-button ${state.r2CalendarPrivateOnly?"active":""}" type="button">◈ ${tr("Private","Privát")}</button><div class="segmented-control compact"><button type="button" data-calendar-mode="day" class="${state.r2CalendarMode==="day"?"active":""}">${tr("Day","Nap")}</button><button type="button" data-calendar-mode="week" class="${state.r2CalendarMode==="week"?"active":""}">${tr("Week","Hét")}</button><button type="button" data-calendar-mode="month" class="${state.r2CalendarMode==="month"?"active":""}">${tr("Month","Hónap")}</button></div><select id="calendarTechFilter"><option value="">${tr("All technicians","Minden technikus")}</option>${r2TechnicianOptions(tech)}</select></div></div>
     <div class="calendar-drag-help">${tr("Desktop: drag events to another time/day and resize from the lower edge. Mobile: press and hold for 1.5 seconds, then drag.","Asztali gépen húzd az eseményt másik időpontra/napra, az alsó élén pedig méretezheted. Mobilon tartsd nyomva 1,5 másodpercig, majd húzd át.")}</div>
-    ${state.r2CalendarMode==="month"?r2RenderMonthGrid(range,data.jobs||[]):r2RenderTimeGrid(range,data.jobs||[])}
+    ${state.r2CalendarMode==="month"?r2RenderMonthGrid(range,calendarRows):r2RenderTimeGrid(range,calendarRows)}
   </section>`;
   const move=delta=>{state.r2CalendarDate=state.r2CalendarMode==="month"?r2MonthAdd(state.r2CalendarDate,delta):r2DateAdd(range.startDate,state.r2CalendarMode==="day"?delta:delta*7);void r2RenderCalendar();};
   $("#calendarPrev").addEventListener("click",()=>move(-1));$("#calendarToday").addEventListener("click",()=>{state.r2CalendarDate=r2Today();void r2RenderCalendar();});$("#calendarNext").addEventListener("click",()=>move(1));
   $$("[data-calendar-mode]",host).forEach(button=>button.addEventListener("click",()=>{state.r2CalendarMode=button.dataset.calendarMode;localStorage.setItem("kh_calendar_mode",state.r2CalendarMode);void r2RenderCalendar();}));
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
-  $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
-  r2BindCalendarPointer(host,data.jobs||[]);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);
-  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,data.jobs||[]);},30000);
+  $("#calendarPrivateFilter").addEventListener("click",()=>{state.r2CalendarPrivateOnly=!state.r2CalendarPrivateOnly;void r2RenderCalendar();});
+  $("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
+  $("[data-private-appointment]",host).forEach(button=>button.addEventListener("click",()=>{const row=(privateAppointments||[]).find(item=>String(item.id)===String(button.dataset.privateAppointment));if(row)r2OpenPrivateAppointment(row,r2RenderCalendar);}));
+  r2BindCalendarPointer(host,jobRows);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);
+  clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);},30000);
 }
 async function r2LoadWorkflowBucket(bucket,closedType=null){
   const next=["active","closed"].includes(bucket)?bucket:"active",type=closedType||state.r2ClosedType||"completed";
