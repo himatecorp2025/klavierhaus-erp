@@ -179,10 +179,12 @@ function resetBranding(db){
 }
 function factoryReset(db,scope,options={}){
   if(!SCOPES.has(scope))throw Object.assign(new Error("INVALID_WEBSITE_RESET_SCOPE"),{status:400});
-  if(scope==="all"||scope==="pages")db.transaction(()=>resetPages(db))();
-  if(scope==="all"||scope==="collections")resetCollections(db,options);
-  if(scope==="all"||scope==="branding")db.transaction(()=>resetBranding(db))();
-  return counts(db);
+  return db.transaction(()=>{
+    if(scope==="all"||scope==="pages")resetPages(db);
+    if(scope==="all"||scope==="collections")resetCollections(db,options);
+    if(scope==="all"||scope==="branding")resetBranding(db);
+    return counts(db);
+  })();
 }
 function parseMeta(row){try{return JSON.parse(row.metadata_json||"{}");}catch(_error){return {};}}
 function serializeBackup(row){return {...row,metadata:parseMeta(row)};}
