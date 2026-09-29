@@ -320,6 +320,19 @@ function startHeatmapTracking() {
   window.addEventListener("pagehide", () => flushHeatmap(true), { once: true });document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushHeatmap(true); });getDeviceToken().catch(() => {});
 }
 
+function normalizePrivateAppointmentWallTime(value){
+  const raw=String(value||"").trim();let year,month,day,hour,minute,match;
+  if(language==="hu"){match=raw.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})[.]?\s+(\d{1,2}):(\d{2})$/);if(match)[,year,month,day,hour,minute]=match;}
+  else{match=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);if(match){month=match[1];day=match[2];year=match[3];hour=match[4];minute=match[5];const meridiem=String(match[6]||"").toUpperCase();if(meridiem){let h=Number(hour);if(h<1||h>12)return "";if(meridiem==="PM"&&h!==12)h+=12;if(meridiem==="AM"&&h===12)h=0;hour=String(h);}}}
+  if(!year)return "";const y=Number(year),m=Number(month),d=Number(day),h=Number(hour),min=Number(minute),probe=new Date(Date.UTC(y,m-1,d,h,min));
+  if(y<2000||m<1||m>12||d<1||d>31||h<0||h>23||min<0||min>59||min%15!==0||probe.getUTCFullYear()!==y||probe.getUTCMonth()!==m-1||probe.getUTCDate()!==d)return "";
+  return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`;
+}
+function privateAppointmentValues(form){
+  const values=Object.fromEntries(new FormData(form).entries()),scheduled=normalizePrivateAppointmentWallTime(values.scheduled_at_display);
+  if(!scheduled)throw new Error("PRIVATE_APPOINTMENT_TIME_INVALID");delete values.scheduled_at_display;values.scheduled_at=scheduled;values.language=language;values.source_path=location.pathname;return values;
+}
+
 const serviceDialog = document.querySelector("[data-service-dialog]");
 let serviceDialogTrigger = null;
 document.querySelectorAll(".dialog-close").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close("cancel")));
@@ -342,8 +355,8 @@ document.querySelectorAll("[data-service-request]").forEach((button) => button.a
 serviceDialog?.addEventListener("click",(event)=>{if(event.target===serviceDialog)serviceDialog.close("cancel");});
 serviceDialog?.addEventListener("close",()=>serviceDialogTrigger?.focus());
 document.querySelector("[data-service-form]")?.addEventListener("submit",async(event)=>{
-  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-service-result]"),values=Object.fromEntries(new FormData(form).entries());
-  values.language=language;values.source_path=location.pathname;
+  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-service-result]");let values;
+  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Érvényes New York-i időpontot adjon meg a jelzett magyar formátumban.":"Enter a valid New York appointment time in the shown US format.";return;}
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
@@ -369,8 +382,8 @@ document.querySelectorAll("[data-private-viewing-open]").forEach((button)=>butto
 privateViewingDialog?.addEventListener("click",(event)=>{if(event.target===privateViewingDialog)privateViewingDialog.close("cancel");});
 privateViewingDialog?.addEventListener("close",()=>privateViewingTrigger?.focus());
 privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventListener("submit",async(event)=>{
-  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-private-viewing-result]"),values=Object.fromEntries(new FormData(form).entries());
-  values.language=language;values.source_path=location.pathname;
+  event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-private-viewing-result]");let values;
+  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Érvényes New York-i időpontot adjon meg a jelzett magyar formátumban.":"Enter a valid New York appointment time in the shown US format.";return;}
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
@@ -469,18 +482,13 @@ function renderCustomerMessages(messages = [], conversation = null) {
     });
     customerChatMessages.append(item);
   });
-  (conversation?.appointment_proposals || []).filter(item=>item.status==="PROPOSED").forEach(proposal=>{
-    const card=document.createElement("article");
-    card.className="customer-chat__proposal";
-    const start=new Date(proposal.starts_at),end=new Date(proposal.ends_at);
-    const formatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"});
-    const endFormatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",timeStyle:"short"});
-    const title=document.createElement("strong");title.textContent=language==="hu"?"Javasolt időpont":"Proposed appointment";
-    const when=document.createElement("p");when.textContent=`${formatter.format(start)} – ${endFormatter.format(end)} ET`;
-    const actions=document.createElement("div");actions.className="customer-chat__proposal-actions";
-    const accept=document.createElement("button");accept.type="button";accept.className="button button--primary";accept.dataset.proposalDecision="ACCEPTED";accept.dataset.proposalId=proposal.id;accept.textContent=language==="hu"?"Elfogadom":"Accept";
-    const decline=document.createElement("button");decline.type="button";decline.className="button button--ghost";decline.dataset.proposalDecision="DECLINED";decline.dataset.proposalId=proposal.id;decline.textContent=language==="hu"?"Más időpontot kérek":"Request another time";
-    actions.append(accept,decline);card.append(title,when,actions);customerChatMessages.append(card);
+  (conversation?.appointment_proposals || []).slice(-4).forEach(proposal=>{
+    const card=document.createElement("article"),scheduled=Boolean(proposal.private_appointment_id),proposed=proposal.status==="PROPOSED",declined=proposal.status==="DECLINED";
+    card.className=`customer-chat__proposal ${scheduled?"is-scheduled":declined?"is-declined":proposed?"is-proposed":"is-resolved"}`;
+    const start=new Date(proposal.starts_at),end=new Date(proposal.ends_at),formatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}),endFormatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",timeStyle:"short"});
+    const title=document.createElement("strong");title.textContent=language==="hu"?"Időpontjavaslat":"Appointment proposal";const when=document.createElement("p");when.textContent=`${formatter.format(start)} – ${endFormatter.format(end)} ET`;card.append(title,when);
+    const status=document.createElement("small");status.className="customer-chat__proposal-status";status.textContent=scheduled?(language==="hu"?"✓ Elfogadva · bekerült a naptárba":"✓ Accepted · added to calendar"):declined?(language==="hu"?"Másik időpontot kért":"Another time requested"):proposed?(language==="hu"?"Válaszra vár":"Waiting for your response"):proposal.status;card.append(status);
+    if(proposed){const actions=document.createElement("div");actions.className="customer-chat__proposal-actions";const accept=document.createElement("button");accept.type="button";accept.className="button button--primary";accept.dataset.proposalDecision="ACCEPTED";accept.dataset.proposalId=proposal.id;accept.textContent=language==="hu"?"Elfogadom":"Accept";const decline=document.createElement("button");decline.type="button";decline.className="button button--ghost";decline.dataset.proposalDecision="DECLINED";decline.dataset.proposalId=proposal.id;decline.textContent=language==="hu"?"Más időpontot kérek":"Request another time";actions.append(accept,decline);card.append(actions);}customerChatMessages.append(card);
   });
   customerChatMessages.scrollTop = customerChatMessages.scrollHeight;
 }
@@ -511,7 +519,7 @@ async function loadCustomerConversation(token) {
     if (!response.ok) throw new Error("CONVERSATION_NOT_FOUND");
     const conversation = await response.json();
     customerConversationToken = token;
-    const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status).join(",")]);
+    const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(","),(conversation.private_appointments||[]).map(item=>item.id+":"+item.status).join(",")]);
     renderSupportStatus(conversation.support||{});
     renderCustomerMessages(conversation.messages || [], conversation);
     if (nextSnapshot !== customerConversationSnapshot && customerChatResult) customerChatResult.textContent = conversation.status === "CLOSED" ? (language === "hu" ? "A beszélgetés lezárult." : "The conversation is closed.") : (language === "hu" ? "A beszélgetés betöltve." : "Conversation loaded.");
@@ -565,13 +573,13 @@ if (customerChat && customerChatToggle && customerChatPanel && customerChatForm)
       const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"APPOINTMENT_RESPONSE_FAILED");
       customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);
       if(customerChatResult)customerChatResult.textContent=button.dataset.proposalDecision==="ACCEPTED"
-        ?(language==="hu"?"Az időpontot elfogadta.":"Appointment accepted.")
+        ?(language==="hu"?"Az időpontot elfogadta; a foglalás automatikusan bekerült a naptárba.":"Appointment accepted and automatically confirmed in the calendar.")
         :(language==="hu"?"Jeleztük, hogy másik időpontot kér.":"We have let the team know you need another time.");
     }catch(_error){button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az időpontválasz nem sikerült.":"We could not save your appointment response.";}
   });
   customerChatPollTimer = window.setInterval(() => {
     if (customerConversationToken) loadCustomerConversation(customerConversationToken);
-  }, 3500);
+  }, 2000);
   customerChatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(customerChatForm);
