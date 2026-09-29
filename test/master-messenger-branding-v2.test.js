@@ -41,7 +41,7 @@ test("Master Data renders exactly the seven approved icon-only controls",()=>{
   const app=read("public/app.js");
   const calls=[...app.matchAll(/masterToolButton\("(SEARCH|CLIENTS|VIP|PRIVATE|BUSINESS|INSTITUTION|PIANOS)"/g)].map(match=>match[1]);
   assert.deepEqual(calls,["SEARCH","CLIENTS","VIP","PRIVATE","BUSINESS","INSTITUTION","PIANOS"]);
-  assert.match(app,/function masterToolButton[\s\S]*master-tool-svg/);
+  assert.match(app,/function masterIconSvg[\s\S]*master-tool-svg/);\n  assert.match(app,/function masterToolButton/);
   assert.doesNotMatch(app,/clientVipFilter|data-client-filter=/);
 });
 
