@@ -2115,3 +2115,9 @@ input,select,textarea,button{max-width:100%}
   .master-list .client-row-select{min-height:58px!important}
   .master-review-item{grid-template-columns:1fr}
 }
+
+/* Master Data unsaved-change decision dialog. */
+.master-unsaved-dialog{display:grid;gap:14px}
+.master-unsaved-dialog>p{margin:0;color:var(--muted);line-height:1.5}
+.master-unsaved-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+@media(max-width:640px){.master-unsaved-actions{display:grid;grid-template-columns:1fr}.master-unsaved-actions button{width:100%}}
