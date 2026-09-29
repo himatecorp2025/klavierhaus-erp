@@ -194,6 +194,7 @@ function renderNotificationDrawer(){
   list.innerHTML=rows.length?rows.map(notificationCard).join(""):`<div class="notification-empty"><span>✓</span><strong>${tr("You're up to date.","Minden naprakész.")}</strong><p>${tr("No active notifications need attention.","Nincs aktív értesítés, amellyel foglalkozni kell.")}</p></div>`;
   const title=$("#notificationDrawerTitle");if(title)title.textContent=tr("Notifications","Értesítések");
   const soundLabel=$("#notificationSoundLabel");if(soundLabel)soundLabel.textContent=tr("Sound","Hang");
+  const snoozeAll=$("#notificationSnoozeAll");if(snoozeAll)snoozeAll.textContent=tr("Dismiss all · 3h","Összes bezárása · 3 óra");
   const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
   $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
   $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
