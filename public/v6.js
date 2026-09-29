@@ -432,9 +432,10 @@ renderIntake=async function(){
 function v6RenderIntakeList(){
   const host=$("#intakeList"),q=String($("#intakeSearch")?.value||"").trim().toLowerCase(),status=$("#intakeStatusFilter")?.value||"";
   const rows=state.intake.filter(row=>(!status||row.status===status)&&(!q||`${row.raw_client_name||""} ${row.client_name||""} ${row.raw_contact||""} ${row.reported_issue||""}`.toLowerCase().includes(q)));
-  host.innerHTML=rows.length?rows.map(row=>`<article class="intake-card ${esc(row.estimated_urgency)}"><div class="urgency-bar"></div><div><h3>${esc(row.client_name||row.raw_client_name||tr("New prospect","Új érdeklődő"))}</h3><p>${esc(row.reported_issue)}</p><div class="intake-meta"><span class="badge">${esc(intakeStatusLabel(row.status))}</span><span class="badge">📎 ${Array.isArray(row.media_urls)?row.media_urls.length:0}</span><span class="badge estimate-badge">${tr("Estimate","Becsült ár")}: ${r3Money(row.estimated_total||0)}</span></div></div><div class="intake-card-actions"><button class="secondary-button icon-text-button" type="button" data-intake-pdf="${row.id}" title="${tr("Export PDF and archive it","PDF export és archiválás")}">📄 PDF</button>${row.job_id?`<button class="secondary-button" type="button" data-nav="planned">✓ ${esc(row.job_code||tr("Job","Munka"))}</button>`:row.status!=="archived"?`<button class="primary-button" type="button" data-convert-job="${row.id}">${tr("Approve / create job","Jóváhagyás / munka létrehozása")}</button>`:""}</div></article>`).join(""):`<section class="panel empty-state">${tr("No intake requests to display.","Nincs megjeleníthető igény.")}</section>`;
+  host.innerHTML=rows.length?rows.map(row=>`<article class="intake-card ${esc(row.estimated_urgency)}"><div class="urgency-bar"></div><div><h3>${esc(row.client_name||row.raw_client_name||tr("New prospect","Új érdeklődő"))}</h3><p>${esc(row.reported_issue)}</p><div class="intake-meta"><span class="badge">${esc(intakeStatusLabel(row.status))}</span><span class="badge">📎 ${Array.isArray(row.media_urls)?row.media_urls.length:0}</span><span class="badge estimate-badge">${tr("Estimate","Becsült ár")}: ${r3Money(row.estimated_total||0)}</span></div></div><div class="intake-card-actions"><button class="secondary-button icon-text-button" type="button" data-intake-pdf="${row.id}" title="${tr("Export PDF and archive it","PDF export és archiválás")}">📄 PDF</button><button class="secondary-button icon-text-button" type="button" data-intake-send="${row.id}">✉ ${tr("Send assessment","Felmérés küldése")}</button>${row.job_id?`<button class="secondary-button" type="button" data-nav="planned">✓ ${esc(row.job_code||tr("Job","Munka"))}</button>`:row.status!=="archived"?`<button class="primary-button" type="button" data-convert-job="${row.id}">${tr("Approve / create job","Jóváhagyás / munka létrehozása")}</button>`:""}</div></article>`).join(""):`<section class="panel empty-state">${tr("No intake requests to display.","Nincs megjeleníthető igény.")}</section>`;
   $$("[data-convert-job]",host).forEach(button=>button.addEventListener("click",()=>openConvertToJobDialog(state.intake.find(row=>Number(row.id)===Number(button.dataset.convertJob)))));
   $$("[data-intake-pdf]",host).forEach(button=>button.addEventListener("click",()=>v6ExportIntakePdf(Number(button.dataset.intakePdf))));
+  $$("[data-intake-send]",host).forEach(button=>button.addEventListener("click",()=>v6OpenSendAssessment(state.intake.find(row=>Number(row.id)===Number(button.dataset.intakeSend)))));
 }
 async function v6ExportIntakePdf(id){
   try{
@@ -444,6 +445,26 @@ async function v6ExportIntakePdf(id){
     link.href=url;link.download="intake-assessment-"+id+".pdf";document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
     toast(tr("Assessment PDF exported and saved to Documents.","Az igényfelmérési PDF elkészült és a Dokumentumok közé került."),"success");
   }catch(error){toast(humanError(error),"error");}
+}
+async function v6OpenSendAssessment(lead){
+  if(!lead)return;
+  const suggested=String(lead.client_email||lead.raw_contact||"").includes("@")?String(lead.client_email||lead.raw_contact||""):"";
+  openDialog({title:tr("Send assessment","Igényfelmérés küldése"),eyebrow:tr("CUSTOMER COMMUNICATION","ÜGYFÉLKOMMUNIKÁCIÓ"),body:`<form id="sendAssessmentForm" class="form-grid">
+    <label class="field full"><span>${tr("Recipient email","Címzett e-mail")} *</span><input name="recipient_email" type="email" required value="${esc(suggested)}" autocomplete="email"></label>
+    <label class="field"><span>${tr("Language","Nyelv")}</span><select name="language"><option value="en" ${(lead.client_preferred_language||state.language)==="en"?"selected":""}>English</option><option value="hu" ${(lead.client_preferred_language||state.language)==="hu"?"selected":""}>Magyar</option></select></label>
+    <label class="field"><span>${tr("PDF attachment","PDF melléklet")}</span><select name="attach_pdf"><option value="yes">${tr("Attach PDF","PDF csatolása")}</option><option value="no">${tr("Email summary only","Csak e-mail összefoglaló")}</option></select></label>
+    <label class="field full"><span>${tr("Optional message","Opcionális üzenet")}</span><textarea name="message" placeholder="${tr("Add a short personal note if needed…","Szükség esetén írj rövid személyes üzenetet…")}"></textarea></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">✉ ${tr("Send assessment","Felmérés küldése")}</button></div>
+  </form>`});
+  $("#sendAssessmentForm").addEventListener("submit",async event=>{
+    event.preventDefault();const form=new FormData(event.currentTarget),button=event.currentTarget.querySelector('button[type="submit"]');
+    const body={recipient_email:String(form.get("recipient_email")||"").trim(),language:String(form.get("language")||"en"),message:String(form.get("message")||""),attach_pdf:form.get("attach_pdf")!=="no"};
+    button.disabled=true;
+    try{
+      await api(`/api/intake/${lead.id}/send-assessment`,{method:"POST",body:JSON.stringify(body)});
+      closeDialog();toast(tr("Assessment sent and archived.","Az igényfelmérés elküldve és archiválva."),"success");await renderIntake();
+    }catch(error){button.disabled=false;toast(humanError(error),"error");}
+  });
 }
 openIntakeDialog=async function(){
   const [catalog]=await Promise.all([api("/api/intake-catalog"),loadUsers()]);

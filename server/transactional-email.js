@@ -144,6 +144,24 @@ function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumb
   return {subject,text,html};
 }
 
+function buildIntakeAssessmentEmail({ clientName, piano, issue, items = [], estimatedTotal = 0, customMessage = "", language = "en" }) {
+  const hu=language==="hu";
+  const name=clientName||(hu?"Ügyfelünk":"Valued Client");
+  const pianoText=[piano?.brand,piano?.model,piano?.serial_number].filter(Boolean).join(" · ")||(hu?"A hangszer adatai a mellékletben találhatók.":"Instrument details are included in the attachment.");
+  const amount=Number(estimatedTotal||0).toLocaleString("en-US",{style:"currency",currency:"USD"});
+  const selected=(Array.isArray(items)?items:[]).slice(0,8).map(item=>item?.item_title_en||item?.item_title_hu).filter(Boolean);
+  const subject=hu?"Klavierhaus · Igényfelmérés és becslés":"Klavierhaus · Service assessment and estimate";
+  const intro=hu
+    ? `Tisztelt ${name}! Mellékelten küldjük a zongorájához készített igényfelmérést és előzetes becslést.`
+    : `Dear ${name}, please find attached the service assessment and preliminary estimate prepared for your piano.`;
+  const disclaimer=hu
+    ? "Ez a dokumentum igényfelmérés és előzetes becslés, nem számla. A tényleges munka csak külön jóváhagyás után kerül a műhely munkafolyamatába."
+    : "This document is a service assessment and preliminary estimate, not an invoice. Work enters the workshop workflow only after separate approval.";
+  const text=[intro,customMessage,pianoText,issue?(`${hu?"Jelzett igény":"Requested service"}: ${issue}`):"",selected.length?(`${hu?"Javasolt munkák":"Selected work"}: ${selected.join(", ")}`):"",`${hu?"Becsült összeg":"Estimated total"}: ${amount}`,disclaimer,hu?"Köszönjük bizalmát! — Klavierhaus":"Thank you for your trust. — Klavierhaus"].filter(Boolean).join("\n\n");
+  const html=`<!doctype html><html><body style="margin:0;background:#f6f7f9;color:#111827;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:30px"><p style="margin:0 0 12px;color:#4b5563;letter-spacing:.12em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-size:26px">${escapeHtml(subject)}</h1><p>${escapeHtml(intro)}</p>${customMessage?`<p>${escapeHtml(customMessage)}</p>`:""}<p><strong>${escapeHtml(pianoText)}</strong></p>${issue?`<p>${escapeHtml(issue)}</p>`:""}${selected.length?`<ul>${selected.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>`:""}<p style="padding:14px;border-radius:10px;background:#f3f4f6"><strong>${escapeHtml(hu?"Becsült összeg":"Estimated total")}: ${escapeHtml(amount)}</strong></p><p style="font-size:13px;color:#4b5563">${escapeHtml(disclaimer)}</p></div></div></body></html>`;
+  return {subject,text,html};
+}
+
 function buildTicketDocumentsEmail({ name, event, language = "en" }) {
   const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
   return {
@@ -325,6 +343,24 @@ function createTransactionalEmail(env = process.env) {
       if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
       return {providerMessageId:String(data.id)};
     },
+    async sendIntakeAssessment({ to, clientName, piano, issue, items, estimatedTotal, assessmentPdf, customMessage = "", language = "en", idempotencyKey }) {
+      assertEnabled();
+      if(!apiKey||!from)throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"),{code:"EMAIL_DELIVERY_NOT_CONFIGURED"});
+      const content=buildIntakeAssessmentEmail({clientName,piano,issue,items,estimatedTotal,customMessage,language});
+      const {data,error}=await resend.emails.send({
+        from,
+        to:[normalizeRecipient(to)],
+        subject:content.subject,
+        html:content.html,
+        text:content.text,
+        ...(replyTo?{replyTo}:{}),
+        ...(assessmentPdf?{attachments:[{filename:"klavierhaus-intake-assessment.pdf",content:assessmentPdf}]}:{}),
+        tags:[{name:"category",value:"intake_assessment"}]
+      },{idempotencyKey});
+      if(error||!data?.id)throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"),{code:safeProviderCode(error)});
+      return {providerMessageId:String(data.id)};
+    },
+
     async sendCustomerConversationAutoReply({ to, name, conversationUrl, language, idempotencyKey }) {
       assertEnabled();
       if (!apiKey || !from) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
@@ -350,4 +386,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, createTransactionalEmail };
