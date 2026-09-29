@@ -1829,3 +1829,20 @@ input,select,textarea,button{max-width:100%}
   .mobile-nav button{padding-inline:2px}
   .mobile-nav button small{font-size:7.5px}
 }
+
+
+/* Handoff presets: compact on desktop, touch-first on tablet and phone. */
+.handoff-preset-panel{display:grid;gap:8px}
+.handoff-preset-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.handoff-preset-head small{color:var(--muted)}
+.handoff-preset-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.handoff-preset-button{display:grid;gap:4px;align-content:center;min-height:58px;padding:9px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--ink);text-align:left}
+.handoff-preset-button strong{font-size:12px}
+.handoff-preset-button small{font-size:9px;color:var(--muted);line-height:1.25}
+.handoff-preset-button.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+@media(max-width:900px){.handoff-preset-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){
+  .handoff-preset-head{display:grid}
+  .handoff-preset-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .handoff-preset-button{min-height:54px;padding:8px}
+}
