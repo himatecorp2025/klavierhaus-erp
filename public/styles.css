@@ -2121,3 +2121,22 @@ input,select,textarea,button{max-width:100%}
 .master-unsaved-dialog>p{margin:0;color:var(--muted);line-height:1.5}
 .master-unsaved-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 @media(max-width:640px){.master-unsaved-actions{display:grid;grid-template-columns:1fr}.master-unsaved-actions button{width:100%}}
+
+/* Intake, Messenger and Master Data visual corrections. */
+.assessment-grid--continuous{width:100%}
+.assessment-option-category{position:absolute;top:9px;left:10px;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:7px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.messenger-thread-head{justify-content:flex-start}
+.messenger-system-status{justify-self:center;display:inline-flex;align-items:center;gap:6px;width:max-content;max-width:92%;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:9px}
+.messenger-system-status>span{font-size:11px;line-height:1}.messenger-system-status>strong{font-size:9px;font-weight:800}
+.messenger-system-status.pending_staff{border-color:color-mix(in srgb,var(--accent) 42%,var(--line));color:var(--accent)}
+.messenger-system-status.pending_customer{border-color:color-mix(in srgb,#c99a45 45%,var(--line));color:#b57b1d}
+.messenger-system-status.closed{border-color:color-mix(in srgb,#3fb870 52%,var(--line));color:#3fb870}
+.master-piano-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:8px 8px 10px;border-bottom:1px solid var(--line)}
+.master-piano-summary>span{display:grid;gap:2px;padding:8px 9px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.master-piano-summary strong{font-size:15px}.master-piano-summary small{color:var(--muted);font-size:8px;line-height:1.25}
+.master-piano-summary .needs-review{border-color:color-mix(in srgb,#c83c3c 45%,var(--line));background:color-mix(in srgb,#c83c3c 7%,var(--surface-2))}
+.master-piano-summary .needs-review strong{color:#d85b5b}
+.piano-review-row{border:1px solid color-mix(in srgb,#c83c3c 42%,var(--line))!important;background:color-mix(in srgb,#c83c3c 5%,var(--surface))!important;margin-top:6px}
+.piano-review-row:hover{border-color:#c83c3c!important;background:color-mix(in srgb,#c83c3c 10%,var(--surface))!important}
+.piano-review-title{display:flex;align-items:center;gap:7px;min-width:0}.piano-review-title .master-review-alert{width:21px;height:21px;flex-basis:21px;font-size:11px}.piano-review-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:700px){.master-piano-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.assessment-option-category{font-size:6.5px}}
