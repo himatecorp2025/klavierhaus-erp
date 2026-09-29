@@ -660,7 +660,7 @@ test("Intake assessment PDF is exported and retained in Documents",async()=>{
 });
 
 
-test("Private appointments preserve exact piano/service context and do not consume workshop capacity",async()=>{
+test("Private appointment requests require staff approval, preserve context and do not consume workshop capacity",async()=>{
   const token=shared.adminToken;
   appDb.prepare(`INSERT OR REPLACE INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,title_en,title_hu,image_url,availability_status,published)
     VALUES('WP-PRIVATE-1','private-steinway-b','private-steinway-b-hu','Steinway & Sons','B','Steinway B','Steinway B','/uploads/website/private-b.jpg','AVAILABLE',1)`).run();
@@ -673,45 +673,63 @@ test("Private appointments preserve exact piano/service context and do not consu
   }});
   assert.equal(job.status,201,JSON.stringify(job.payload));
 
-  const pianoResponse=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-    name:"Private Piano Guest",phone:"+1 212 555 0101",scheduled_at:"2035-08-20T10:00",note:"Please prepare the piano in the main showroom.",piano_id:"WP-PRIVATE-1",language:"en",source_path:"/pianos/private-steinway-b"
-  })});
-  assert.equal(pianoResponse.status,201);
-  const pianoPayload=await pianoResponse.json();
-  assert.equal(pianoPayload.appointment.appointment_type,"PIANO_VIEWING");
-  assert.equal(pianoPayload.appointment.piano_id,"WP-PRIVATE-1");
-  assert.equal(pianoPayload.appointment.service_id,null);
-  assert.equal(pianoPayload.appointment.note,"Please prepare the piano in the main showroom.");
-  assert.equal(pianoPayload.appointment.scheduled_at,"2035-08-20T14:00:00.000Z");
-  shared.privateAppointmentId=pianoPayload.appointment.id;
+  async function submitAndApprove(body){
+    const submitted=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    assert.equal(submitted.status,201);
+    const payload=await submitted.json();
+    assert.equal(payload.pending_approval,true);
+    assert.equal(payload.request.status,"REQUESTED");
+    assert.equal(appDb.prepare("SELECT COUNT(*) c FROM private_appointments WHERE conversation_id IS NULL AND name=?").get(body.name).c,0,"public request must not enter calendar before staff approval");
+    const approved=await request("/api/private-appointment-requests/"+encodeURIComponent(payload.request.id)+"/approve",{token,method:"POST",body:{
+      scheduled_at:body.scheduled_at,duration_min:body.duration_min||60,assigned_user_id:"U-F-MANAGER"
+    }});
+    assert.equal(approved.status,200,JSON.stringify(approved.payload));
+    assert.equal(approved.payload.status,"APPROVED");
+    assert.equal(approved.payload.appointment.status,"SCHEDULED");
+    assert.equal(Number(approved.payload.appointment.duration_min),Number(body.duration_min||60));
+    return {request:payload.request,appointment:approved.payload.appointment};
+  }
 
-  const serviceResponse=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-    name:"Private Service Guest",phone:"+1 212 555 0102",scheduled_at:"2035-08-21T11:30",note:"Discuss tuning before a recital.",service_id:"WS-PRIVATE-1",language:"en",source_path:"/services/private-tuning"
-  })});
-  assert.equal(serviceResponse.status,201);
-  const servicePayload=await serviceResponse.json();
-  assert.equal(servicePayload.appointment.appointment_type,"SERVICE_CONSULTATION");
-  assert.equal(servicePayload.appointment.service_id,"WS-PRIVATE-1");
+  const piano=await submitAndApprove({
+    name:"Private Piano Guest",email:"private-piano@example.com",phone:"+1 212 555 0101",scheduled_at:"2035-08-20T10:00",duration_min:60,
+    note:"Please prepare the piano in the main showroom.",piano_id:"WP-PRIVATE-1",language:"en",source_path:"/pianos/private-steinway-b"
+  });
+  assert.equal(piano.request.appointment_type,"PIANO_VIEWING");
+  assert.equal(piano.request.piano_id,"WP-PRIVATE-1");
+  assert.equal(piano.appointment.piano_id,"WP-PRIVATE-1");
+  assert.equal(piano.appointment.service_id,null);
+  assert.equal(piano.appointment.note,"Please prepare the piano in the main showroom.");
+  assert.equal(piano.appointment.scheduled_at,"2035-08-20T14:00:00.000Z");
+  shared.privateAppointmentId=piano.appointment.id;
 
-  const generic=await fetch(origin+"/api/public/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-    name:"Private Visit Guest",phone:"+1 212 555 0103",scheduled_at:"2035-08-22T12:00",note:"General private visit.",language:"en",source_path:"/"
-  })});
-  assert.equal(generic.status,201);
-  const genericPayload=await generic.json();
-  assert.equal(genericPayload.appointment.appointment_type,"PRIVATE_VISIT");
+  const service=await submitAndApprove({
+    name:"Private Service Guest",email:"private-service@example.com",phone:"+1 212 555 0102",scheduled_at:"2035-08-21T11:30",duration_min:90,
+    note:"Discuss tuning before a recital.",service_id:"WS-PRIVATE-1",language:"en",source_path:"/services/private-tuning"
+  });
+  assert.equal(service.request.appointment_type,"SERVICE_CONSULTATION");
+  assert.equal(service.appointment.service_id,"WS-PRIVATE-1");
+  assert.equal(Number(service.appointment.duration_min),90);
+
+  const generic=await submitAndApprove({
+    name:"Private Visit Guest",email:"private-visit@example.com",phone:"+1 212 555 0103",scheduled_at:"2035-08-22T12:00",duration_min:120,
+    note:"General private visit.",language:"en",source_path:"/"
+  });
+  assert.equal(generic.request.appointment_type,"PRIVATE_VISIT");
+  assert.equal(Number(generic.appointment.duration_min),120);
 
   const list=await request("/api/private-appointments?status=SCHEDULED",{token});
   assert.equal(list.status,200,JSON.stringify(list.payload));
-  assert.ok(list.payload.some(row=>row.id===pianoPayload.appointment.id&&row.piano_title_en==="Steinway B"));
-  assert.ok(list.payload.some(row=>row.id===servicePayload.appointment.id&&row.service_title_en==="Concert Tuning"));
+  assert.ok(list.payload.some(row=>row.id===piano.appointment.id&&row.piano_title_en==="Steinway B"));
+  assert.ok(list.payload.some(row=>row.id===service.appointment.id&&row.service_title_en==="Concert Tuning"));
 
-  const completed=await request("/api/private-appointments/"+encodeURIComponent(servicePayload.appointment.id),{token,method:"PUT",body:{
-    status:"COMPLETED",scheduled_at:"2035-08-21T11:30",name:"Private Service Guest",phone:"+1 212 555 0102",note:"Completed",assigned_user_id:"U-F-MANAGER"
+  const completed=await request("/api/private-appointments/"+encodeURIComponent(service.appointment.id),{token,method:"PUT",body:{
+    status:"COMPLETED",assigned_user_id:"U-F-MANAGER"
   }});
   assert.equal(completed.status,200,JSON.stringify(completed.payload));
   assert.equal(completed.payload.status,"COMPLETED");
   assert.equal(completed.payload.assigned_user_id,"U-F-MANAGER");
 });
+
 
 test("VIP client status is durable, filterable data and can be switched both directions",async()=>{
   const token=shared.adminToken,id=shared.client.id;
