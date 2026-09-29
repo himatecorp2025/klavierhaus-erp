@@ -160,8 +160,9 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <label class="field"><span>${tr("Location","Helyszín")}</span><select name="location_type"><option value="workshop">${tr("Workshop","Műhely")}</option><option value="on_site">${tr("On site","Helyszíni")}</option></select></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
     <label class="field full"><span>${tr("Service address","Szervizcím")}</span><input name="site_address"></label>
+    <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select><small>${tr("Defaults to the creator; this person owns the full workflow.","Alapértelmezetten a létrehozó; ő felel a teljes munkafolyamatért.")}</small></label>
     ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(defaults.datetime||r2DefaultInput(defaults.date))}" required></label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
-    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Choose the phases this job actually needs. Completed is always mandatory.","Jelöld ki, mely fázisokra van szüksége ennek a munkának. A Lezárva mindig kötelező.")}</p></div></div>${r2WorkflowPlanRows()}</section>
+    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set the responsible person and editable timing for each phase. Times may be moved backward or forward later.","Fázisonként add meg a felelőst és a módosítható időket. Az időpontok később vissza- vagy előre is mozgathatók.")}</p></div></div>${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
   </form>`});
   async function loadPianos(){
@@ -173,7 +174,12 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   $("#jobCreateForm").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);
     body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
-    if(scheduled)body.scheduled_at=r2NyInputToIso(body.scheduled_at);if(!body.assigned_technician_id)delete body.assigned_technician_id;
+    if(scheduled){
+      body.scheduled_at=r2NyInputToIso(body.scheduled_at);
+      const received=body.workflow_phases.find(phase=>phase.stage_key==="received");
+      if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
+    }
+    if(!body.assigned_technician_id)delete body.assigned_technician_id;
     try{await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();}
     catch(error){toast(humanError(error),"error");}
   });
@@ -199,7 +205,8 @@ async function r2OpenEditJob(job,refresh){
     <label class="field full"><span>${tr("Description","Leírás")}</span><textarea name="description">${esc(job.description||"")}</textarea></label>
     <label class="field"><span>${tr("Location","Helyszín")}</span><select name="location_type"><option value="workshop" ${job.location_type==="workshop"?"selected":""}>${tr("Workshop","Műhely")}</option><option value="on_site" ${job.location_type==="on_site"?"selected":""}>${tr("On site","Helyszíni")}</option></select></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
-    <label class="field full"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
+    <label class="field"><span>${tr("Calendar technician","Naptári technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
+    <label class="field"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
     <label class="field full"><span>${tr("Internal notes","Belső megjegyzés")}</span><textarea name="internal_notes">${esc(job.internal_notes||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
   $("#jobEditForm").addEventListener("submit",async event=>{
