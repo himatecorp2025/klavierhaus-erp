@@ -489,6 +489,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       const stage=firstEnabledStage(id);if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
+      db.prepare("UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,?),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       activatePhase(id,stage);
       const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
@@ -506,6 +507,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
+      if(stage==="received")db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='received'").run(scheduledAt,id);
       if(before.stage==="planned")activatePhase(id,stage);
       const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
@@ -554,15 +556,17 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit}){
       }
       const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0);
       if(!(labor>=0)||!(material>=0))throw problem("INVALID_HANDOFF_COST");
-      const fallbackAssignee=before.assigned_technician_id||req.user.id;
-      const assigned=technician(req.body?.assigned_to_user_id||fallbackAssignee,{optional:false});
+      const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
+      const resourceTechnician=["WORKER","MANAGER","ADMIN"].includes(responsible.role)?responsible.id:before.assigned_technician_id;
       const note=text(req.body?.phase_note,5000)||null;
       const result=db.transaction(()=>{
         const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,phase_labor_cost,phase_material_cost,created_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,assigned.id,assigned.name,note,labor,material);
-        completePhase(id,before.stage);activatePhase(id,toStage);
+          VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`).run(id,before.stage,toStage,req.user.id,req.user.name,responsible.id,responsible.name,note,labor,material);
+        completePhase(id,before.stage);
+        db.prepare("UPDATE job_workflow_phases SET responsible_user_id=?,starts_at=COALESCE(starts_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(responsible.id,id,toStage);
+        activatePhase(id,toStage);
         db.prepare(`UPDATE jobs SET stage=?,workflow_stage_key=?,assigned_technician_id=?,total_labor_cost=ROUND(total_labor_cost+?,2),total_material_cost=ROUND(total_material_cost+?,2),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(storageStage(toStage),toStage,assigned.id,labor,material,id);
+          .run(storageStage(toStage),toStage,resourceTechnician,labor,material,id);
         return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),job:jobById(id)};
       })();
       audit(req,"HANDOFF","jobs",String(id),before,result.job);res.status(201).json(result);
