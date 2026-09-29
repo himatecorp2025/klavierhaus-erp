@@ -1221,8 +1221,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   summary TEXT NOT NULL,
   notes TEXT,
   issue_date TEXT NOT NULL,
+  service_date TEXT,
   due_date TEXT NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD' CHECK(currency='USD'),
+  snapshot_json TEXT NOT NULL DEFAULT '{}',
   subtotal_labor REAL NOT NULL DEFAULT 0,
   subtotal_material REAL NOT NULL DEFAULT 0,
   subtotal_adjustment REAL NOT NULL DEFAULT 0,
@@ -1262,6 +1264,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   quantity REAL NOT NULL DEFAULT 1 CHECK(quantity > 0),
   unit_price REAL NOT NULL DEFAULT 0,
   total_price REAL NOT NULL DEFAULT 0,
+  labor_amount REAL NOT NULL DEFAULT 0,
+  material_amount REAL NOT NULL DEFAULT 0,
+  phase_key TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
@@ -1323,6 +1328,24 @@ CREATE TABLE IF NOT EXISTS intake_assessment_email_log (
   FOREIGN KEY (archive_document_id) REFERENCES document_archive(id) ON DELETE SET NULL,
   FOREIGN KEY (sent_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS automation_outbox (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+  available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_at TEXT,
+  last_error TEXT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_automation_outbox_due ON automation_outbox(status,available_at,created_at);
 
 CREATE TABLE IF NOT EXISTS kpi_summary_cache (
   month_key TEXT PRIMARY KEY,
