@@ -10,7 +10,7 @@ const state={
   view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
-  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
+  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
 const activeViews=new Set(["workshop","planned","intake","master","finance","documents","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
@@ -128,7 +128,7 @@ function setSession(payload){
 }
 function clearSession(){
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
-  clearInterval(state.notificationTimer);state.notificationTimer=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
+  clearInterval(state.notificationTimer);state.notificationTimer=null;clearTimeout(state.notificationReconnectTimer);state.notificationReconnectTimer=null;state.notificationSource?.close?.();state.notificationSource=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
 }
 function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");}
 function updateNewYorkClock(){
@@ -222,6 +222,26 @@ async function refreshNotifications({allowSound=true}={}){
     if(allowSound&&newRows.length)playNotificationSound();
   }catch(_error){}
 }
+function stopNotificationRealtime(){
+  clearTimeout(state.notificationReconnectTimer);state.notificationReconnectTimer=null;
+  state.notificationSource?.close?.();state.notificationSource=null;
+}
+function scheduleNotificationRealtime(){
+  if(!state.token||!state.user||state.notificationReconnectTimer)return;
+  state.notificationReconnectTimer=setTimeout(()=>{state.notificationReconnectTimer=null;void startNotificationRealtime();},2000);
+}
+async function startNotificationRealtime(){
+  if(!state.token||!state.user||!("EventSource" in window))return;
+  stopNotificationRealtime();
+  try{
+    const ticket=await api("/api/notifications/realtime-ticket",{method:"POST",body:"{}"});
+    if(!ticket?.ticket)return scheduleNotificationRealtime();
+    const source=new EventSource("/api/notifications/stream?ticket="+encodeURIComponent(ticket.ticket));state.notificationSource=source;
+    source.addEventListener("ready",event=>{try{const payload=JSON.parse(event.data||"{}");if(Number.isFinite(Number(payload.active_count)))updateAppBadge(payload.active_count);}catch(_error){}});
+    source.addEventListener("notification",()=>void refreshNotifications());
+    source.onerror=()=>{if(state.notificationSource===source){source.close();state.notificationSource=null;scheduleNotificationRealtime();}};
+  }catch(_error){scheduleNotificationRealtime();}
+}
 function openNotificationDrawer(){
   const layer=$("#notificationLayer"),drawer=$("#notificationDrawer"),bell=$("#notificationBell");if(!layer||!drawer)return;
   clearTimeout(layer._hideTimer);layer.hidden=false;layer.setAttribute("aria-hidden","false");drawer.setAttribute("aria-hidden","false");
@@ -284,7 +304,7 @@ function bindNotificationUi(){
 function initNotificationCenter(){
   if(!state.token||!state.user)return;
   bindNotificationUi();clearInterval(state.notificationTimer);state.notificationTimer=setInterval(()=>void refreshNotifications(),60000);
-  void refreshNotifications({allowSound:false});
+  void refreshNotifications({allowSound:false});void startNotificationRealtime();
   if("Notification" in window&&Notification.permission==="granted")void ensurePushSubscription();
 }
 
