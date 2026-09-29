@@ -1359,3 +1359,14 @@ select option{background:var(--surface);color:var(--ink)}
   .assessment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .assessment-option{padding:10px}
 }
+
+
+/* CALENDAR WORKFLOW STATUS COLORS */
+.calendar-event-block.status-scheduled,.month-event-pill.status-scheduled{border-left-color:#2f7cff;background:color-mix(in srgb,#2f7cff 14%,var(--surface))}
+.calendar-event-block.status-in_progress,.month-event-pill.status-in_progress{border-left-color:#e6ad2f;background:color-mix(in srgb,#e6ad2f 13%,var(--surface))}
+.calendar-event-block.status-blocked,.month-event-pill.status-blocked{border-left-color:#9666ff;background:color-mix(in srgb,#9666ff 14%,var(--surface))}
+.calendar-event-block.status-overdue,.month-event-pill.status-overdue{border-left-color:#e55c62;background:color-mix(in srgb,#e55c62 15%,var(--surface))}
+.calendar-event-block.status-completed,.month-event-pill.status-completed{border-left-color:#2f9b68;background:color-mix(in srgb,#2f9b68 15%,var(--surface))}
+.calendar-event-block.status-cancelled,.month-event-pill.status-cancelled{border-left-color:#e55c62;background:color-mix(in srgb,#e55c62 15%,var(--surface))}
+.intake-card-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.icon-text-button{white-space:nowrap}
