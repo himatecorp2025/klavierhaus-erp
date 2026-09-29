@@ -206,8 +206,9 @@ async function renderMaster(){
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients, pianos and service history in one fast view.","Ügyfelek, zongorák és szerviztörténet egyetlen gyors nézetben."),
     `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
-    `<div class="master-layout"><section class="panel"><div class="panel-head"><div class="search-field"><input id="clientSearch" type="search" placeholder="${tr("Name, email or phone…","Név, e-mail vagy telefon…")}"></div></div><div id="clientList" class="client-list"></div></section><section id="clientDetail" class="panel client-detail"></section></div>`;
+    `<div class="master-layout"><section class="panel"><div class="panel-head client-list-toolbar"><div class="search-field"><input id="clientSearch" type="search" placeholder="${tr("Name, email or phone…","Név, e-mail vagy telefon…")}"></div><button id="clientVipFilter" class="secondary-button ${state.clientVipOnly?"active":""}" type="button">★ VIP</button></div><div id="clientList" class="client-list"></div></section><section id="clientDetail" class="panel client-detail"></section></div>`;
   $("#addClientBtn").addEventListener("click",()=>openClientDialog());
+  $("#clientVipFilter").addEventListener("click",()=>{state.clientVipOnly=!state.clientVipOnly;renderMaster();});
   $("#clientSearch").addEventListener("input",debounce(async event=>{
     await loadClients(event.target.value);renderClientList();
     if(state.selectedClientId&&!state.clients.some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=state.clients[0]?.id||null;
@@ -217,9 +218,10 @@ async function renderMaster(){
 }
 function renderClientList(){
   const host=$("#clientList");if(!host)return;
-  if(!state.clients.length){host.innerHTML=`<div class="empty-state">${tr("No results.","Nincs találat.")}</div>`;return;}
-  host.innerHTML=state.clients.map(client=>`<button type="button" class="client-row ${Number(client.id)===Number(state.selectedClientId)?"active":""}" data-client-id="${client.id}">
-    <span><strong>${esc(client.name)}</strong><small>${esc([client.email,client.phone].filter(Boolean).join(" · ")||tr("No contact details","Nincs elérhetőség"))}</small></span><span class="count">${Number(client.piano_count||0)}</span>
+  const rows=(state.clients||[]).filter(client=>!state.clientVipOnly||Number(client.is_vip||0)===1);
+  if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No results.","Nincs találat.")}</div>`;return;}
+  host.innerHTML=rows.map(client=>`<button type="button" class="client-row ${Number(client.id)===Number(state.selectedClientId)?"active":""}" data-client-id="${client.id}">
+    <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</strong><small>${esc([client.email,client.phone].filter(Boolean).join(" · ")||tr("No contact details","Nincs elérhetőség"))}</small></span><span class="count">${Number(client.piano_count||0)}</span>
   </button>`).join("");
   $$("[data-client-id]",host).forEach(button=>button.addEventListener("click",async()=>{state.selectedClientId=Number(button.dataset.clientId);renderClientList();await renderClientDetail();}));
 }
@@ -229,7 +231,7 @@ async function renderClientDetail(){
   if(!client){host.innerHTML=`<div class="empty-state">${tr("Select a client.","Válassz ügyfelet.")}</div>`;return;}
   host.innerHTML=loading();
   const [pianos,jobs]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[])]);
-  host.innerHTML=`<div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${esc(client.name)}</h2></div><div class="page-actions"><button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button><button id="addPianoBtn" class="primary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
+  host.innerHTML=`<div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(client.name)}</h2></div><div class="page-actions"><button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button><button id="addPianoBtn" class="primary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
     <div class="contact-line">${client.email?`<span class="contact-pill">✉ ${esc(client.email)}</span>`:""}${client.phone?`<span class="contact-pill">☎ ${esc(client.phone)}</span>`:""}${client.address?`<span class="contact-pill">⌂ ${esc(client.address)}</span>`:""}</div>
     ${client.notes?`<div class="detail-note">${esc(client.notes)}</div>`:""}
     <div class="panel-head inline-panel-head"><h3>${tr("Pianos","Zongorák")}</h3><span class="badge">${pianos.length}</span></div>
@@ -253,6 +255,7 @@ function clientForm(client={}){
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(client.phone||"")}"></label>
     <label class="field"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(client.address||"")}"></label>
     <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes">${esc(client.notes||"")}</textarea></label>
+    <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong><small>${tr("Mark this client as a VIP client.","Jelöld VIP ügyfélként.")}</small></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Save","Mentés")}</button></div>
   </form>`;
 }
@@ -260,7 +263,7 @@ function openClientDialog(client=null){
   openDialog({title:client?tr("Edit client","Ügyfél szerkesztése"):tr("New client","Új ügyfél"),eyebrow:tr("MASTER DATA","TÖRZSADATOK"),body:clientForm(client||{})});
   $("[data-close-dialog]").addEventListener("click",closeDialog);
   $("#clientEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.is_vip=Boolean(event.currentTarget.elements.is_vip?.checked);
     try{
       const saved=await api(client?`/api/clients/${client.id}`:"/api/clients",{method:client?"PUT":"POST",body:JSON.stringify(body)});
       state.selectedClientId=Number(saved.id);closeDialog();toast(tr("Client saved.","Ügyfél mentve."),"success");await renderMaster();
