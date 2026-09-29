@@ -212,11 +212,22 @@ ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("jobs","workflow_owner_user_id","TEXT");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
+ensureColumn("job_handoffs","phase_duration_min","INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0)");
 db.prepare("UPDATE jobs SET workflow_owner_user_id=COALESCE(workflow_owner_user_id,created_by_user_id) WHERE workflow_owner_user_id IS NULL").run();
 db.prepare(`UPDATE job_workflow_phases SET responsible_user_id=COALESCE(responsible_user_id,(SELECT created_by_user_id FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
   WHERE responsible_user_id IS NULL`).run();
 db.prepare(`UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,(SELECT scheduled_at FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
   WHERE stage_key='received' AND starts_at IS NULL`).run();
+if(tableExists("handoff_presets")&&Number(db.prepare("SELECT COUNT(*) count FROM handoff_presets").get()?.count||0)===0){
+  const seed=db.prepare("INSERT INTO handoff_presets(title_en,title_hu,default_labor_cost,default_material_cost,default_duration_min,active,sort_order) VALUES(?,?,?,?,?,1,?)");
+  [
+    ["Tuning","Hangolás",220,0,90,10],
+    ["Regulation","Mechanika szabályozás",450,45,180,20],
+    ["String replacement","Húrcsere",120,35,60,30],
+    ["Voicing","Intonálás",300,15,120,40]
+  ].forEach(row=>seed.run(...row));
+}
+
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
