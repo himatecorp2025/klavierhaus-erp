@@ -111,9 +111,10 @@ test("Invoice closeout keeps the manual decision gate and durable automation sta
   assert.match(finance,/automationOutbox\.register\("SEND_INVOICE"/);
   assert.match(finance,/dedupeKey:`invoice-send-\$\{invoiceId\}`/);
   assert.match(finance,/SELECT \* FROM job_handoffs WHERE job_id=\?/);
-  assert.match(pdf,/COMMERCIAL INVOICE/);
-  assert.match(pdf,/1 1 1 rg 0 0 612 792 re f/);
-  assert.doesNotMatch(pdf,/function businessInvoicePage[\s\S]*?\$\{DARK\} rg 0 0 612 792 re f/);
+  const businessPdf=pdf.slice(pdf.indexOf("function businessInvoicePage"),pdf.indexOf("function monthlyReportPage"));
+  assert.match(businessPdf,/COMMERCIAL INVOICE/);
+  assert.match(businessPdf,/1 1 1 rg 0 0 612 792 re f/);
+  assert.doesNotMatch(businessPdf,/DARK.*0 0 612 792 re f/);
   assert.match(ui,/Complete & Save Draft/);
   assert.match(ui,/Complete & Send Invoice/);
   assert.match(index,/createAutomationOutbox/);
