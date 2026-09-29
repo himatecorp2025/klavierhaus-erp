@@ -153,6 +153,7 @@ function registerWebsiteConversationRoutes({
       db.prepare("UPDATE customer_appointment_proposals SET status=?,responded_at=CURRENT_TIMESTAMP,expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(decision,decision==="ACCEPTED"?holdExpiry():proposal.expires_at,proposal.id);
       db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);
+      if(decision==="DECLINED")db.prepare("UPDATE private_appointment_requests SET status='REQUESTED',proposal_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE proposal_id=? AND status='PROPOSED'").run(proposal.id);
       event(row.id,decision==="ACCEPTED"?"APPOINTMENT_ACCEPTED":"APPOINTMENT_DECLINED",{toStatus:"PENDING_STAFF",details:{proposal_id:proposal.id}});
     })();
     const after=byId(row.id);
