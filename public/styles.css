@@ -1375,3 +1375,80 @@ select option{background:var(--surface);color:var(--ink)}
 .archive-intake-items{display:grid;gap:6px;margin-top:10px}
 .archive-intake-items>div{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
 .archive-intake-items span{min-width:0;overflow-wrap:anywhere}
+
+
+/* PRIVATE APPOINTMENTS + VIP + NOTIFICATIONS V9 */
+.vip-client-star{color:#c99a45;text-shadow:0 0 16px rgba(201,154,69,.18)}
+.client-list-toolbar{display:flex;align-items:center;gap:8px}
+.client-list-toolbar .search-field{flex:1}
+#clientVipFilter.active{border-color:#c99a45;color:#9b6a18;background:color-mix(in srgb,#c99a45 14%,var(--surface))}
+.vip-toggle-row strong{color:#b57b1d}
+
+.private-filter-button{border-color:color-mix(in srgb,#c99a45 48%,var(--line));color:#a8741e}
+.private-filter-button.active{background:color-mix(in srgb,#c99a45 18%,var(--surface));border-color:#c99a45;color:#8a5a0f}
+.private-appointments-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.private-appointment-card{border-color:color-mix(in srgb,#c99a45 44%,var(--line));border-left:4px solid #c99a45;background:linear-gradient(145deg,color-mix(in srgb,#c99a45 13%,var(--surface)),var(--surface))}
+.private-appointment-card .job-code,.private-status-chip{color:#b47d21}
+.private-appointment-card.private-status-completed{border-left-color:#2f9b68;background:color-mix(in srgb,#2f9b68 9%,var(--surface))}
+.private-appointment-card.private-status-cancelled{border-left-color:#e55c62;background:color-mix(in srgb,#e55c62 9%,var(--surface))}
+.private-context-note{border-color:color-mix(in srgb,#c99a45 35%,var(--line));background:color-mix(in srgb,#c99a45 10%,var(--surface))}
+.calendar-event-block.private-appointment-event,.month-event-pill.private-appointment-event{
+  border-color:color-mix(in srgb,#c99a45 55%,var(--line));border-left-color:#c99a45!important;
+  background:linear-gradient(135deg,color-mix(in srgb,#c99a45 22%,var(--surface)),color-mix(in srgb,#c99a45 8%,var(--surface)))!important;color:var(--ink)
+}
+.calendar-event-block.private-appointment-event span,.calendar-event-block.private-appointment-event small{color:color-mix(in srgb,#9c6c1f 75%,var(--ink))}
+.private-appointment-event.is-private-completed{border-left-color:#2f9b68!important;background:color-mix(in srgb,#2f9b68 14%,var(--surface))!important}
+.private-appointment-event.is-cancelled{border-left-color:#e55c62!important;background:color-mix(in srgb,#e55c62 14%,var(--surface))!important}
+
+.header-tools{grid-template-columns:auto auto auto}
+.notification-bell{position:relative;display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:13px;background:var(--surface);color:var(--ink);font-size:18px}
+.notification-bell:hover,.notification-bell[aria-expanded="true"]{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));background:var(--surface-2)}
+.notification-bell-icon{transform:rotate(45deg);font-weight:900}
+.notification-badge{position:absolute;top:-6px;right:-7px;min-width:21px;height:21px;padding:0 5px;border:2px solid var(--surface);border-radius:999px;background:#cf2f38;color:#fff;font-size:10px;font-weight:900;line-height:17px;text-align:center}
+.notification-backdrop{position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.2);backdrop-filter:blur(2px);animation:notificationFadeIn .18s ease both}
+.notification-drawer{position:fixed;z-index:10030;top:0;right:0;width:min(430px,calc(100vw - 18px));height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 70px rgba(0,0,0,.22);transform:translateX(105%);opacity:.75;pointer-events:none;transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+.notification-drawer.open{transform:translateX(0);opacity:1;pointer-events:auto}
+.notification-drawer-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px;border-bottom:1px solid var(--line)}
+.notification-drawer-header h2{margin:3px 0 0;font-size:22px}
+.notification-drawer-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.notification-sound-toggle{display:flex;align-items:center;gap:8px;font-size:12px}
+.notification-sound-toggle input{width:18px;height:18px}
+.notification-list{min-height:0;overflow:auto;padding:12px;display:grid;align-content:start;gap:9px}
+.notification-card{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:13px 36px 13px 12px;border:1px solid var(--line);border-radius:15px;background:var(--surface-2);animation:notificationSlideIn .24s cubic-bezier(.2,.8,.2,1) both;transition:opacity .18s ease,transform .18s ease}
+.notification-card.is-unread{border-color:color-mix(in srgb,var(--accent) 38%,var(--line));background:color-mix(in srgb,var(--accent-soft) 44%,var(--surface))}
+.notification-card.is-leaving{opacity:0;transform:translateX(36px)}
+.notification-card.severity-warning,.notification-card.severity-urgent{border-left:4px solid #e55c62}
+.notification-card.severity-success{border-left:4px solid #2f9b68}
+.notification-card-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:var(--surface);font-weight:900;color:var(--accent)}
+.notification-card.severity-warning .notification-card-icon,.notification-card.severity-urgent .notification-card-icon{color:#e55c62}
+.notification-card.severity-success .notification-card-icon{color:#2f9b68}
+.notification-card-body{min-width:0;display:grid;gap:6px}
+.notification-card-title{display:flex;align-items:flex-start;justify-content:space-between;gap:9px}
+.notification-card-title strong{font-size:12px;line-height:1.3}
+.notification-card-title small{flex:none;color:var(--muted);font-size:9px}
+.notification-card-body p{margin:0;color:var(--muted);font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.notification-card-actions{display:flex;gap:7px;align-items:center;justify-content:flex-end;margin-top:3px;flex-wrap:wrap}
+.compact-button{min-height:32px;padding:0 10px;font-size:10px}
+.notification-card-close{position:absolute;right:8px;top:8px;width:25px;height:25px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:17px}
+.notification-card-close:hover{background:var(--surface);color:var(--ink)}
+.notification-empty{display:grid;place-items:center;text-align:center;gap:7px;padding:60px 24px;color:var(--muted)}
+.notification-empty>span{display:grid;place-items:center;width:52px;height:52px;border-radius:18px;background:color-mix(in srgb,#2f9b68 15%,var(--surface));color:#2f9b68;font-size:22px}
+.notification-empty strong{color:var(--ink)}
+.notification-empty p{margin:0;font-size:11px}
+@keyframes notificationSlideIn{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:translateX(0)}}
+@keyframes notificationFadeIn{from{opacity:0}to{opacity:1}}
+
+@media(max-width:900px){
+  .private-appointments-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .header-tools{gap:7px}
+  .notification-bell{width:40px;height:40px}
+}
+@media(max-width:620px){
+  .private-appointments-grid{grid-template-columns:1fr}
+  .notification-drawer{width:100vw}
+  .ny-clock{min-width:92px;padding-right:7px}
+  .ny-clock span{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .notification-drawer,.notification-card,.notification-backdrop{transition:none!important;animation:none!important}
+}
