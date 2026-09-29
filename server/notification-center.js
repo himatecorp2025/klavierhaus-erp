@@ -123,7 +123,7 @@ function createNotificationCenter({db,env=process.env}={}){
       if(!openLeadIds.has(String(event.entity_id)))db.prepare("UPDATE notification_events SET resolved_at=CURRENT_TIMESTAMP WHERE id=?").run(event.id);
     }
 
-    const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title,j.assigned_user_id
+    const overdue=db.prepare(`SELECT p.job_id,p.stage_key,p.due_at,j.job_code,j.title,COALESCE(p.responsible_user_id,j.workflow_owner_user_id,j.assigned_technician_id) AS assigned_user_id
       FROM job_workflow_phases p JOIN jobs j ON j.id=p.job_id
       WHERE p.enabled=1 AND p.completed_at IS NULL AND p.due_at IS NOT NULL AND datetime(p.due_at)<CURRENT_TIMESTAMP
       AND j.cancelled_at IS NULL AND j.stage NOT IN ('planned','completed')`).all();
