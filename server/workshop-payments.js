@@ -215,6 +215,7 @@ function createWorkshopPayments({
       db.prepare("UPDATE invoices SET status='paid',payment_method='Credit Card / Stripe',paid_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nyDate(),invoiceId);
       db.prepare("UPDATE workshop_invoice_checkouts SET status='PAID',stripe_payment_intent_id=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(paymentIntent,checkout.id);
+      db.prepare("DELETE FROM kpi_summary_cache").run();
     })();
 
     if(automationOutbox){
