@@ -52,7 +52,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
       bodyEn:`${row.name} · ${context} · ${when}${row.note?` · ${row.note}`:""}`,
       bodyHu:`${row.name} · ${context} · ${when}${row.note?` · ${row.note}`:""}`,
       actionUrl:"/?view=workshop&private=1",severity:kind==="cancelled"?"WARNING":kind==="completed"?"SUCCESS":"INFO",
-      actorUserId:actor?.id||null
+      actorUserId:actor?.id||null,recipients:row.assigned_user_id?[row.assigned_user_id]:null
     });
   };
   function validateContext(body){
