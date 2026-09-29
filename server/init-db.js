@@ -242,6 +242,11 @@ ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(est
 ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("private_appointments","scheduled_end_at","TEXT");
 ensureColumn("private_appointments","conversation_id","TEXT");
+ensureColumn("private_appointments","email","TEXT");
+ensureColumn("private_appointments","duration_min","INTEGER NOT NULL DEFAULT 60 CHECK(duration_min >= 15 AND duration_min <= 480)");
+ensureColumn("customer_appointment_proposals","expires_at","TEXT");
+ensureColumn("customer_appointment_proposals","finalized_at","TEXT");
+ensureColumn("customer_appointment_proposals","finalized_by_user_id","TEXT");
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
 ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("jobs","workflow_owner_user_id","TEXT");
