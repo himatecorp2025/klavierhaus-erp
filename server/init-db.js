@@ -180,7 +180,22 @@ if(dynamicWorkflowNeedsMigration){
   if(tableExists("workflow_stage_definitions"))db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_dynamic_legacy_workflow_stage_definitions"');
   console.log("[WORKFLOW-DYNAMIC] Legacy five-stage workflow tables isolated");
 }
+const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("financial_document");
+if(archiveCategoryNeedsMigration){
+  if(tableExists("_documents_legacy_archive"))db.exec('DROP TABLE "_documents_legacy_archive"');
+  db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
+  console.log("[DOCUMENTS] Legacy archive category table isolated");
+}
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+if(tableExists("_documents_legacy_archive")){
+  db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
+    SELECT id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at FROM _documents_legacy_archive`);
+  db.exec('DROP TABLE "_documents_legacy_archive"');
+  db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_category_time ON document_archive(category,archived_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_entity ON document_archive(entity_type,entity_id)");
+  console.log("[DOCUMENTS] Archive categories migrated");
+}
+
 // schema.sql enables FK enforcement for normal runtime use. The migration must keep
 // it disabled until all legacy parent/child tables have been retired, otherwise
 // DROP TABLE on an obsolete parent can fire SQLite's FK constraint triggers.
@@ -190,6 +205,14 @@ ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(them
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0)");
 ensureColumn("jobs","workflow_stage_key","TEXT");
+ensureColumn("jobs","workflow_owner_user_id","TEXT");
+ensureColumn("job_workflow_phases","starts_at","TEXT");
+ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
+db.prepare("UPDATE jobs SET workflow_owner_user_id=COALESCE(workflow_owner_user_id,created_by_user_id) WHERE workflow_owner_user_id IS NULL").run();
+db.prepare(`UPDATE job_workflow_phases SET responsible_user_id=COALESCE(responsible_user_id,(SELECT created_by_user_id FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
+  WHERE responsible_user_id IS NULL`).run();
+db.prepare(`UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,(SELECT scheduled_at FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
+  WHERE stage_key='received' AND starts_at IS NULL`).run();
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");

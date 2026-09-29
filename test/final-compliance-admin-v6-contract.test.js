@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v7-dynamic-workflow-cms-images/);
+  assert.match(sw,/klavierhaus-admin-v8-workflow-documents-intake/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -132,4 +132,37 @@ test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   assert.match(v6,/function v6CmsPreviewUrl/);
   assert.match(v6,/url\.pathname\.startsWith\("\/uploads\/website\/"\)/);
   assert.match(v6,/data-cms-original-src/);
+});
+
+
+test("Workflow status, responsibility, intake grid and Documents UX contracts are present",()=>{
+  const html=read("public/index.html"),app=read("public/app.js"),ui=read("public/round2.js"),v6=read("public/v6.js"),css=read("public/styles.css"),schema=read("server/schema.sql"),archive=read("server/archive-center.js");
+  assert.match(html,/data-nav="documents"/);
+  assert.match(app,/state\.view==="documents"/);
+  assert.match(v6,/async function renderDocuments/);
+  assert.match(v6,/financial_document/);
+  assert.match(v6,/intake_assessment/);
+  assert.match(v6,/exported_report/);
+  assert.match(v6,/data-intake-pdf/);
+  assert.match(v6,/\/api\/intake\/"\+id\+"\/export-pdf/);
+  assert.match(schema,/workflow_owner_user_id TEXT/);
+  assert.match(schema,/starts_at TEXT/);
+  assert.match(schema,/responsible_user_id TEXT/);
+  assert.match(ui,/data-job-drag-handle/);
+  assert.match(ui,/r2CreateDragGhost/);
+  assert.match(ui,/workflow-touch-drag-ghost/);
+  assert.match(ui,/Planned start/);
+  assert.match(ui,/Workflow owner/);
+  assert.match(ui,/phase-status-/);
+  assert.match(css,/stage-card\.status-scheduled/);
+  assert.match(css,/stage-card\.status-in_progress/);
+  assert.match(css,/stage-card\.status-blocked/);
+  assert.match(css,/stage-card\.status-overdue/);
+  assert.match(css,/stage-card\.status-completed/);
+  assert.match(css,/stage-card\.status-cancelled/);
+  assert.match(css,/\.assessment-grid\{grid-template-columns:repeat\(3/);
+  assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2/);
+  assert.match(v6,/assessment-price"><span>\$<\/span>/);
+  assert.match(archive,/intakeAssessmentPdf/);
+  assert.match(archive,/\/api\/intake\/:id\/export-pdf/);
 });

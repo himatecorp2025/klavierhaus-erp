@@ -986,6 +986,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   estimated_duration_min INTEGER NOT NULL DEFAULT 120 CHECK(estimated_duration_min > 0),
   stage TEXT NOT NULL DEFAULT 'planned' CHECK(stage IN ('planned','received','in_progress','qa_review','admin_approval','completed')),
   workflow_stage_key TEXT,
+  workflow_owner_user_id TEXT,
   assigned_technician_id TEXT,
   total_labor_cost REAL NOT NULL DEFAULT 0 CHECK(total_labor_cost >= 0),
   total_material_cost REAL NOT NULL DEFAULT 0 CHECK(total_material_cost >= 0),
@@ -1005,6 +1006,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE RESTRICT,
   FOREIGN KEY (intake_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
+  FOREIGN KEY (workflow_owner_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -1032,7 +1034,9 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   stage_key TEXT NOT NULL,
   position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 7),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  starts_at TEXT,
   due_at TEXT,
+  responsible_user_id TEXT,
   blocker_code TEXT CHECK(blocker_code IS NULL OR blocker_code IN ('material_procurement','parts_procurement','material_issue','waiting_client','waiting_technician','waiting_admin','waiting_invoice','other')),
   blocker_note TEXT,
   activated_at TEXT,
@@ -1040,7 +1044,8 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(job_id,stage_key),
-  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (responsible_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS job_handoffs (
@@ -1253,7 +1258,7 @@ CREATE INDEX IF NOT EXISTS idx_website_tracking_round1 ON website_tracking_event
 -- as immutable snapshots while active modules only show live records.
 CREATE TABLE IF NOT EXISTS document_archive (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','internal_correspondence','company_message','company_document')),
+  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
   title TEXT NOT NULL,
   description TEXT,
   entity_type TEXT,

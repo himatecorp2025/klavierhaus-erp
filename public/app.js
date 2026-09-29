@@ -11,7 +11,7 @@ const state={
   clients:[],selectedClientId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null
 };
-const activeViews=new Set(["workshop","planned","intake","master","finance","cms","profile"]);
+const activeViews=new Set(["workshop","planned","intake","master","finance","documents","cms","profile"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
@@ -22,7 +22,7 @@ const chromeText={
   account_activation:["ACCOUNT ACTIVATION","FIÓK AKTIVÁLÁS"],confirm_login:["Confirm your login","Erősítsd meg a belépést"],
   six_digit_code:["6-digit code","6 jegyű kód"],activate:["Activate","Aktiválás"],resend_code:["Send a new code","Új kód küldése"],back_to_login:["Back to login","Vissza a belépéshez"],
   nav_workshop:["Workshop & Calendar","Műhely & Naptár"],nav_intake:["Intake","Igényfelmérés"],nav_planned:["Planned Jobs","Tervezett munkák"],
-  nav_master:["Master Data","Törzsadatok"],nav_finance:["Finance","Pénzügy"],nav_cms:["Website CMS","Weboldal CMS"],
+  nav_master:["Master Data","Törzsadatok"],nav_finance:["Finance","Pénzügy"],nav_documents:["Documents","Dokumentumok"],nav_cms:["Website CMS","Weboldal CMS"],
   mobile_workshop:["Workshop","Műhely"],mobile_planned:["Planned","Tervezett"],mobile_intake:["Intake","Igény"],mobile_master:["Master","Törzs"],
   mobile_finance:["Finance","Pénzügy"],mobile_profile:["Profile","Profil"],new_york_time:["New York time","New York-i idő"]
 };
@@ -102,7 +102,8 @@ function humanError(error){
     WORKFLOW_PHASE_NOT_AVAILABLE:["The selected workflow phase is not available for this job.","A kiválasztott munkafázis ennél a munkánál nem érhető el."],
     WORKFLOW_PHASE_ALREADY_COMPLETED:["That workflow phase has already been completed.","Ez a munkafázis már lezárult."],
     WORKFLOW_PHASES_REMAINING:["Complete the remaining intermediate phases before Admin Approval.","Az Admin jóváhagyás előtt zárd le a még nyitott köztes fázisokat."],
-    INVALID_CLOSED_WORKFLOW_TYPE:["Choose Completed or Cancelled workflows.","Válassz a Lezárt vagy Törölt munkafolyamatok közül."]
+    INVALID_CLOSED_WORKFLOW_TYPE:["Choose Completed or Cancelled workflows.","Válassz a Lezárt vagy Törölt munkafolyamatok közül."],
+    INVALID_RESPONSIBLE_USER_ID:["Choose an active workflow responsible person.","Válassz aktív munkafolyamat-felelőst."]
   };
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
@@ -186,6 +187,7 @@ async function renderView(){
     else if(state.view==="planned")await renderPlanned();
     else if(state.view==="master")await renderMaster();
     else if(state.view==="finance")await renderFinance();
+    else if(state.view==="documents")await renderDocuments();
     else if(state.view==="cms")await renderCms();
     else if(state.view==="profile")await renderProfile();
     else await renderIntake();

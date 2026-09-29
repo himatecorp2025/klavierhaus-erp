@@ -37,7 +37,7 @@ test("Round 1 schema and APIs implement media, review state and zero-duplicate c
   assert.match(upload,/100\*1024\*1024/);
 });
 
-test("Round 2 uses separate planned pipeline and exactly five active workflow phases",()=>{
+test("Round 2 uses a separate planned pipeline and data-driven workflow phases",()=>{
   const schema=read("server/schema.sql"),workflow=read("server/round2-workflow.js");
   assert.match(schema,/stage TEXT NOT NULL DEFAULT 'planned' CHECK\(stage IN \('planned','received','in_progress','qa_review','admin_approval','completed'\)\)/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS job_handoffs\s*\(/);
@@ -50,7 +50,9 @@ test("Round 2 uses separate planned pipeline and exactly five active workflow ph
   assert.match(workflow,/j\.stage='planned' AND j\.scheduled_at IS NULL/);
   for(const stage of ["received","in_progress","qa_review","admin_approval","completed"])assert.ok(workflow.includes('key:"'+stage+'"'),stage);
   assert.doesNotMatch(workflow,/key:"blocked"/);
-  assert.match(workflow,/assigned_to_user_id\|\|fallbackAssignee/);
+  assert.match(workflow,/responsible_user_id/);
+  assert.match(workflow,/workflow_owner_user_id/);
+  assert.match(workflow,/MAX_WORKFLOW_STAGES=7/);
   assert.match(workflow,/phase_labor_cost\|\|0/);
   assert.match(workflow,/ADMIN_CLOSEOUT_REQUIRED/);
   assert.match(workflow,/cancelled_by_name/);
@@ -98,7 +100,7 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.segmented-control/);
   assert.match(css,/\.typeahead-menu/);
-  assert.match(sw,/klavierhaus-admin-v7-dynamic-workflow-cms-images/);
+  assert.match(sw,/klavierhaus-admin-v8-workflow-documents-intake/);
   assert.match(sw,/url\.pathname\.startsWith\("\/api\/"\)/);
 });
 

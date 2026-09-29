@@ -4,8 +4,10 @@ const fs=require("node:fs");
 const path=require("node:path");
 const crypto=require("node:crypto");
 const multer=require("multer");
+const {LETTER,createPdf,textCommand,safeText}=require("./document-pdf");
 
-const CATEGORIES=new Set(["deleted_invoice","internal_correspondence","company_message","company_document"]);
+const CATEGORIES=new Set(["deleted_invoice","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
+const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","intake_assessment"]);
 const EXTENSIONS=new Set([".pdf",".doc",".docx",".xls",".xlsx",".csv",".txt",".jpg",".jpeg",".png",".webp",".gif"]);
 const MIMES=new Set([
   "application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -17,9 +19,35 @@ function integerId(value){const n=Number(value);return Number.isSafeInteger(n)&&
 function json(value){try{return JSON.parse(String(value||"{}"));}catch(_error){return {};}}
 function problem(code,status=400){const e=new Error(code);e.status=status;return e;}
 function respond(res,error){res.status(Number(error?.status||400)).json({error:error?.message||"ARCHIVE_REQUEST_FAILED"});}
+function money(value){return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(value||0));}
+function clip(value,max=92){const source=safeText(value);return source.length>max?source.slice(0,max-1)+"…":source;}
+function intakeAssessmentPdf({lead,items=[]}){
+  const BLACK="0.10 0.10 0.10",MUTED="0.38 0.38 0.38",BLUE="0.10 0.32 0.72";
+  const chunks=[];for(let i=0;i<Math.max(1,items.length);i+=14)chunks.push(items.slice(i,i+14));if(!chunks.length)chunks.push([]);
+  const labels=[lead.client_name,lead.raw_client_name,lead.reported_issue,lead.piano_brand,lead.piano_model,...items.flatMap(row=>[row.item_title_en,row.item_title_hu])];
+  const pages=chunks.map((chunk,pageIndex)=>()=>{let y=742,out="";
+    out+=textCommand("KLAVIERHAUS · INTAKE ASSESSMENT",48,y,16,BLUE,{bold:true});y-=28;
+    out+=textCommand(`Assessment #${lead.id} · page ${pageIndex+1}/${chunks.length}`,48,y,9,MUTED);y-=28;
+    if(pageIndex===0){
+      const client=lead.client_name||lead.raw_client_name||"New prospect",piano=[lead.piano_brand,lead.piano_model,lead.piano_serial_number].filter(Boolean).join(" · ")||"Not specified";
+      for(const [label,value] of [["Client",client],["Piano",piano],["Service location",lead.service_location],["Urgency",lead.estimated_urgency],["Created",lead.created_at],["Assigned",lead.technician_name||"Unassigned"]]){
+        out+=textCommand(label.toUpperCase(),48,y,7,MUTED);out+=textCommand(clip(value,72),160,y,10,BLACK);y-=20;
+      }
+      y-=6;out+=textCommand("REQUEST / ISSUE",48,y,8,MUTED);y-=18;
+      const issue=safeText(lead.reported_issue||"");for(let i=0;i<issue.length;i+=82){out+=textCommand(clip(issue.slice(i,i+82),82),48,y,9,BLACK);y-=16;}y-=10;
+      out+=textCommand("SELECTED WORK",48,y,9,BLUE,{bold:true});y-=22;
+    }else{out+=textCommand("SELECTED WORK · CONTINUED",48,y,9,BLUE,{bold:true});y-=22;}
+    if(!chunk.length){out+=textCommand("No assessment items selected.",48,y,9,MUTED);y-=18;}
+    chunk.forEach((row,index)=>{const title=row.item_title_en||row.item_title_hu||`Item ${index+1}`;out+=textCommand(clip(title,66),48,y,9,BLACK);out+=textCommand(money(row.price),460,y,9,BLACK,{bold:true});y-=18;if(row.notes){out+=textCommand(clip(row.notes,80),64,y,8,MUTED);y-=15;}});
+    if(pageIndex===chunks.length-1){y-=12;out+=textCommand("ESTIMATED TOTAL",48,y,9,MUTED);out+=textCommand(money(lead.estimated_total),430,y,13,BLUE,{bold:true});y-=26;out+=textCommand(`Media attachments: ${Array.isArray(lead.media_urls)?lead.media_urls.length:0}`,48,y,8,MUTED);}
+    return out;
+  });
+  return createPdf({pages,size:LETTER,labels,title:`Klavierhaus Intake Assessment ${lead.id}`});
+}
 
 function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
   const admin=permit("ADMIN");
+  const staff=permit("ADMIN","MANAGER","WORKER");
   const target=path.join(uploadDir,"archive");
   fs.mkdirSync(target,{recursive:true});
   const upload=multer({
@@ -61,7 +89,7 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
       if(error)return respond(res,error);
       try{
         const category=text(req.body?.category,80),title=text(req.body?.title,300),description=text(req.body?.description,5000);
-        if(!CATEGORIES.has(category)||category==="deleted_invoice")throw problem("INVALID_ARCHIVE_CATEGORY");
+        if(!CATEGORIES.has(category)||SYSTEM_ONLY_CATEGORIES.has(category))throw problem("INVALID_ARCHIVE_CATEGORY");
         if(!title)throw problem("ARCHIVE_TITLE_REQUIRED");
         const file=req.file||null,publicPath=file?`/uploads/archive/${path.basename(file.path)}`:null;
         const info=db.prepare(`INSERT INTO document_archive(category,title,description,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
@@ -74,6 +102,31 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir}){
         respond(res,e);
       }
     });
+  });
+
+  app.post("/api/intake/:id/export-pdf",auth,staff,(req,res)=>{
+    try{
+      const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
+      const lead=db.prepare(`SELECT l.*,c.name client_name,c.email client_email,c.phone client_phone,
+        p.brand piano_brand,p.model piano_model,p.serial_number piano_serial_number,u.name technician_name
+        FROM intake_leads l LEFT JOIN clients c ON c.id=l.client_id LEFT JOIN pianos p ON p.id=l.piano_id
+        LEFT JOIN users u ON u.id=l.assigned_technician_id WHERE l.id=?`).get(id);
+      if(!lead)throw problem("INTAKE_NOT_FOUND",404);
+      lead.media_urls=json(lead.media_urls||"[]");
+      const items=db.prepare("SELECT * FROM intake_assessment_items WHERE intake_id=? ORDER BY sort_order,id").all(id);
+      const pdf=intakeAssessmentPdf({lead,items}),filename=`intake-assessment-${id}-${Date.now()}.pdf`,filePath=path.join(target,filename);
+      fs.writeFileSync(filePath,pdf,{flag:"wx"});
+      const publicPath=`/uploads/archive/${filename}`,snapshot={source:"intake_assessment_export",intake:lead,items};
+      const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id)
+        VALUES('intake_assessment',?,?,?,?,?,?,?,?,?,?,?)`).run(
+        `Intake Assessment #${id} · ${lead.client_name||lead.raw_client_name||"Prospect"}`,lead.reported_issue||null,"intake",String(id),
+        `intake-assessment-${id}.pdf`,filename,"application/pdf",pdf.length,publicPath,JSON.stringify(snapshot),req.user.id
+      );
+      const archiveId=Number(info.lastInsertRowid),row=db.prepare(`${select} WHERE a.id=?`).get(archiveId);
+      audit(req,"EXPORT_PDF","intake",String(id),null,{archive_document_id:archiveId,file_path:publicPath});
+      res.setHeader("X-Archive-Document-Id",String(archiveId));
+      res.type("application/pdf").set("Content-Disposition",`attachment; filename="intake-assessment-${id}.pdf"`).send(pdf);
+    }catch(error){respond(res,error);}
   });
 
   app.get("/api/archive/documents/:id/download",auth,admin,(req,res)=>{
