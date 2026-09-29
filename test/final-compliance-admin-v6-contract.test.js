@@ -24,7 +24,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v10-global-notification-drawer/);
+  assert.match(sw,/klavierhaus-admin-v11-responsive-pwa/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -215,6 +215,22 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v10-global-notification-drawer/);
+  assert.match(sw,/klavierhaus-admin-v11-responsive-pwa/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
+});
+
+
+test("Responsive PWA layout keeps intake tiles compact and removes desktop-only minimum widths",()=>{
+  const css=read("public/styles.css"),round2=read("public/round2.js"),sw=read("public/service-worker.js");
+  assert.match(css,/RESPONSIVE PWA V11/);
+  assert.match(css,/\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(auto-fill,minmax\(142px,156px\)\)/);
+  assert.match(css,/\.assessment-option\{[\s\S]*max-width:156px;[\s\S]*aspect-ratio:1\/1/);
+  assert.match(css,/@media\(max-width:640px\)[\s\S]*\.assessment-grid\{[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css,/@media\(max-width:640px\)[\s\S]*\.app-dialog,[\s\S]*width:100vw!important/);
+  assert.match(css,/@media\(max-width:640px\)[\s\S]*\.form-grid\{grid-template-columns:1fr!important/);
+  assert.match(css,/@media\(max-width:640px\)[\s\S]*\.workflow-board\{[\s\S]*minmax\(82vw,82vw\)/);
+  assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
+  assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
+  assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
+  assert.match(sw,/klavierhaus-admin-v11-responsive-pwa/);
 });

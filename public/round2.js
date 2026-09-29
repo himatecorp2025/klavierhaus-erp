@@ -629,8 +629,9 @@ function r2BindCalendarCreate(host){
 async function r2RenderCalendar(){
   clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   const host=$("#workshopContent");if(!host)return;
-  state.r2CalendarMode=state.r2CalendarMode||localStorage.getItem("kh_calendar_mode")||"week";
-  if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode="week";
+  const storedCalendarMode=localStorage.getItem("kh_calendar_mode");
+  state.r2CalendarMode=state.r2CalendarMode||storedCalendarMode||(window.matchMedia?.("(max-width:700px)")?.matches?"day":"week");
+  if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode=window.matchMedia?.("(max-width:700px)")?.matches?"day":"week";
   state.r2CalendarDate=state.r2CalendarDate||r2Today();
   const range=r2Range(state.r2CalendarDate,state.r2CalendarMode),tech=state.r2CalendarTech||"";
   const [data,privateAppointments]=await Promise.all([
