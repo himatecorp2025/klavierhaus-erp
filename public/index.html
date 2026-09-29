@@ -93,6 +93,9 @@
             <strong id="newYorkClock">--:--</strong>
             <small id="newYorkDate">---</small>
           </div>
+          <button id="notificationBell" class="notification-bell" type="button" aria-label="Notifications" aria-expanded="false" aria-controls="notificationDrawer">
+            <span class="notification-bell-icon" aria-hidden="true">♢</span><span id="notificationBadge" class="notification-badge" hidden>0</span>
+          </button>
           <button id="themeToggle" class="theme-switch" type="button" aria-label="Theme">
             <span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span>
           </button>
@@ -104,6 +107,18 @@
       </header>
 
       <main id="workspace" class="workspace" tabindex="-1"></main>
+      <div id="notificationBackdrop" class="notification-backdrop" hidden></div>
+      <aside id="notificationDrawer" class="notification-drawer" aria-hidden="true" aria-labelledby="notificationDrawerTitle">
+        <header class="notification-drawer-header">
+          <div><span class="eyebrow">KLAVIERHAUS</span><h2 id="notificationDrawerTitle">Notifications</h2></div>
+          <button id="notificationDrawerClose" class="icon-button" type="button" aria-label="Close">×</button>
+        </header>
+        <div class="notification-drawer-controls">
+          <label class="notification-sound-toggle"><input id="notificationSoundToggle" type="checkbox" checked><span>♪</span><strong id="notificationSoundLabel">Sound</strong></label>
+          <button id="notificationSnoozeAll" class="secondary-button" type="button">3h</button>
+        </div>
+        <div id="notificationList" class="notification-list" aria-live="polite"></div>
+      </aside>
     </div>
 
     <nav class="mobile-nav" aria-label="Mobile navigation">
