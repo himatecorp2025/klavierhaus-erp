@@ -653,7 +653,7 @@ async function renderPianoDetail(){
     });
   }
 }
-function clientForm(client={}){function clientForm(client={}){
+function clientForm(client={}){
   return `<form id="clientEditor" class="form-grid">
     <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(client.name||"")}" required autofocus></label>
     <label class="field"><span>Email</span><input name="email" type="email" value="${esc(client.email||"")}"></label>
