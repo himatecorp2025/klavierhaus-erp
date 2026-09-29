@@ -14,8 +14,9 @@ const dbPath=path.join(temp,"legacy.sqlite");
 const backupDir=path.join(temp,"backups");
 const env={...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir,JWT_SECRET:"final-migration-test-secret-1234567890"};
 
-function run(label){
-  const result=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env,encoding:"utf8"});
+function run(label,options={}){
+  const runEnv={...env,...(options.env||{})};
+  const result=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env:runEnv,encoding:"utf8"});
   if(result.status!==0)throw new Error(`${label}_FAILED\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
 }
@@ -144,6 +145,43 @@ try{
   assert.ok(backups.some(name=>name.startsWith("workshop-ux-v5-pre-migration-")),"Workshop UX v5 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("admin-ux-v6-pre-migration-")),"Admin UX v6 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("messenger-v12-pre-migration-")),"Messenger v12 safety backup missing");
+
+  // Reproduce the Render production shape that already has clients/is_vip but
+  // predates the new client_type column. Schema indexes must not run before
+  // the compatibility column is added.
+  const prodDbPath=path.join(temp,"render-production-like.sqlite");
+  const prodBackupDir=path.join(temp,"render-production-like-backups");
+  const prod=new Database(prodDbPath);
+  prod.exec(`
+    PRAGMA foreign_keys=OFF;
+    CREATE TABLE app_settings(setting_key TEXT PRIMARY KEY,setting_value TEXT,updated_by TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE clients(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      notes TEXT,
+      preferred_language TEXT NOT NULL DEFAULT 'en',
+      is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
+      vip_updated_by_user_id TEXT,
+      vip_updated_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO clients(name,email,phone,is_vip) VALUES('Render Legacy Client','render.legacy@example.com','212-555-0111',1);
+  `);
+  prod.close();
+  run("RENDER_CLIENT_TYPE_COMPATIBILITY",{env:{DB_PATH:prodDbPath,BACKUP_DIR:prodBackupDir}});
+  const prodMigrated=new Database(prodDbPath,{readonly:true});
+  const prodClientColumns=prodMigrated.prepare("PRAGMA table_info(clients)").all().map(row=>row.name);
+  assert.ok(prodClientColumns.includes("client_type"),"production clients.client_type must be added before schema indexes");
+  assert.equal(prodMigrated.prepare("SELECT client_type,is_vip FROM clients WHERE email='render.legacy@example.com'").get().client_type,"PRIVATE");
+  assert.equal(prodMigrated.prepare("SELECT client_type,is_vip FROM clients WHERE email='render.legacy@example.com'").get().is_vip,1);
+  assert.ok(prodMigrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_clients_client_type'").get(),"client_type index must exist after production compatibility migration");
+  assert.equal(Boolean(prodMigrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_clients_customer_type'").get()),false,"retired customer_type index must be absent");
+  prodMigrated.close();
+
   console.log("Final six-module migration smoke passed");
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
