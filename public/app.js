@@ -34,7 +34,8 @@ function applyChromeLanguage(){
     if(pair)node.textContent=state.language==="hu"?pair[1]:pair[0];
   });
   const toggle=$("#languageToggle");if(toggle)toggle.textContent=state.language==="en"?"HU":"EN";
-  const profile=$("#profileButton");if(profile)profile.setAttribute("aria-label",tr("Account menu","Fiókmenü"));\n  const welcome=$("#headerWelcome");if(welcome&&state.user)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
+  const profile=$("#profileButton");if(profile)profile.setAttribute("aria-label",tr("Account menu","Fiókmenü"));
+  const welcome=$("#headerWelcome");if(welcome&&state.user)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
   const close=$("#appDialog [data-dialog-close]");if(close)close.setAttribute("aria-label",tr("Close","Bezárás"));
   updateNewYorkClock();
 }
