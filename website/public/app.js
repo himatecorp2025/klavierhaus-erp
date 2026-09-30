@@ -607,7 +607,9 @@ window.addEventListener("orientationchange",()=>setTimeout(syncCustomerChatViewp
 
 function customerPianoAvatar(){
   const span=document.createElement("span");span.className="customer-chat__message-avatar";span.setAttribute("aria-hidden","true");
-  span.innerHTML='<svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg>';
+  const configured=customerChat?.querySelector("[data-chat-logo]:not([hidden])");
+  if(configured?.src){const image=document.createElement("img");image.src=configured.src;image.alt="";image.className="customer-chat__message-avatar-logo";span.append(image);}
+  else span.innerHTML='<svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg>';
   return span;
 }
 function customerChatTime(value){
@@ -705,10 +707,11 @@ function customerStructuredMessage(message){
   }
   if(type==="PRIVATE_APPOINTMENT_REQUEST"){
     const card=document.createElement("section");card.className="customer-chat__structured-summary customer-chat__structured-summary--appointment";
-    const title=document.createElement("strong");title.textContent=language==="hu"?"✓ Privát időpontkérés elküldve":"✓ Private appointment requested";card.append(title);
-    if(data.scheduled_at){const p=document.createElement("p");try{p.textContent=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(data.scheduled_at))+" ET";}catch(_error){p.textContent=data.scheduled_at;}card.append(p);}
+    const title=document.createElement("strong");title.textContent=language==="hu"?"✓ Privát időpont kiválasztva":"✓ Private appointment time selected";card.append(title);
+    if(data.scheduled_at){const p=document.createElement("p");try{p.textContent=(language==="hu"?"Időpont: ":"Date & time: ")+new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(data.scheduled_at))+" ET";}catch(_error){p.textContent=data.scheduled_at;}card.append(p);}
     const reason=document.createElement("p");reason.textContent=(language==="hu"?"Ügy: ":"Purpose: ")+customerAppointmentReasonLabel(data.appointment_reason);card.append(reason);
-    const status=document.createElement("small");status.textContent=language==="hu"?"A Klavierhaus visszahívással erősíti meg az időpontot.":"Klavierhaus will confirm the appointment by phone.";card.append(status);return card;
+    if(data.duration_min){const duration=document.createElement("p");duration.textContent=(language==="hu"?"Időtartam: ":"Duration: ")+Number(data.duration_min)+" "+(language==="hu"?"perc":"min");card.append(duration);}
+    const status=document.createElement("small");status.textContent=language==="hu"?"A kérés rögzítve. A Klavierhaus telefonon visszaigazolja az időpontot.":"Request recorded. Klavierhaus will confirm the appointment by phone.";card.append(status);return card;
   }
   return null;
 }
