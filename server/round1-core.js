@@ -1,9 +1,7 @@
 "use strict";
 
-const crypto=require("node:crypto");
 const {MASTER_IMPORT_CONTRACT,auditStoredMasterImport,importLegacyInstrumentClientCsv,refreshClientLastVisit}=require("./master-data-reconcile");
 const MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4";
-const MASTER_DATA_BOOTSTRAP_SHA256="0472b4d49cb5413f287adb0b725f20ab3c08b09d42d559c35d9efcdfa996847a";
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function validEmail(value){
@@ -236,27 +234,6 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       JOIN master_data_client_source_map m ON m.source_name=v.source_name AND m.source_client_id=v.source_client_id
       WHERE m.client_id=? ORDER BY v.field_name,v.first_source_row,v.value`).all(id);
     res.json({sources,values});
-  });
-
-  // Temporary production bootstrap: accepts only the exact private source file and self-disables once READY.
-  app.post("/api/internal/master-data-bootstrap",(req,res,next)=>{
-    const existing=auditStoredMasterImport(db,MASTER_IMPORT_CONTRACT.sourceName);
-    if(existing.ok)return res.status(410).json({status:"READY",rows:existing.rows,columns:existing.columns,sourceClients:existing.sourceClients,mappedPianos:existing.mappedPianos,ownerlessPianos:existing.ownerlessPianos,controlClientPianos:existing.controlClientPianos});
-    if(!masterDataImportUpload)return res.status(503).json({error:"MASTER_DATA_IMPORT_UNAVAILABLE"});
-    masterDataImportUpload.single("file")(req,res,error=>{
-      if(error)return next(error);
-      if(!req.file?.buffer?.length)return res.status(400).json({error:"MASTER_DATA_CSV_REQUIRED"});
-      const digest=crypto.createHash("sha256").update(req.file.buffer).digest("hex");
-      if(digest!==MASTER_DATA_BOOTSTRAP_SHA256)return res.status(403).json({error:"MASTER_DATA_SOURCE_MISMATCH"});
-      try{
-        const summary=db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:MASTER_IMPORT_CONTRACT.sourceName}))();
-        db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('master_data_reconcile_version',?,NULL,CURRENT_TIMESTAMP)
-          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=NULL,updated_at=CURRENT_TIMESTAMP`).run(MASTER_DATA_RECONCILE_VERSION);
-        db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('master_data_import_status','READY',NULL,CURRENT_TIMESTAMP)
-          ON CONFLICT(setting_key) DO UPDATE SET setting_value='READY',updated_by=NULL,updated_at=CURRENT_TIMESTAMP`).run();
-        res.json({status:"READY",...summary});
-      }catch(error){res.status(error.status||400).json({error:error.message||"MASTER_DATA_IMPORT_FAILED",details:error.details||null});}
-    });
   });
 
   app.post("/api/master-data/import-csv",auth,permit("ADMIN"),(req,res,next)=>{
