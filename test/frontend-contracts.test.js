@@ -444,7 +444,7 @@ test("attendance, helpdesk, notification audit and document actions are wired in
   assert.match(appSource, /downloadCustomerConversationReport/);
   assert.doesNotMatch(appSource, /notification-detail-close/);
   assert.match(websiteStyles, /\.customer-chat\{[^}]*right:/);
-  assert.match(websiteStyles, /\.customer-chat__toggle\{[^}]*border-radius:3px[^}]*color:#f2eee4/);
+  assert.match(websiteStyles, /\.customer-chat__toggle\{[^}]*border:1px solid var\(--gold-bright\)[^}]*color:#f2eee4/);\n  assert.match(websiteStyles,/Safari mobile\/tablet public chat launcher \+ Messenger SVG/);
 });
 
 test("guest list provides a toolbar export action and uses the authenticated PDF endpoint", () => {
