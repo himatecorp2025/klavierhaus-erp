@@ -18,8 +18,15 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(html,/id="mobileMoreButton"/);
   const mobileNav=html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)?.[0]||"";
   assert.equal((mobileNav.match(/<button/g)||[]).length,5);
+  assert.equal((mobileNav.match(/class="mobile-nav-svg"/g)||[]).length,5);
+  assert.doesNotMatch(mobileNav,/[▦✦＋◫•••]/);
   assert.doesNotMatch(mobileNav,/data-nav="finance"/);
+  assert.match(v6,/function v6MobileMenuIconSvg\(kind\)/);
+  assert.match(v6,/v6MobileMenuIconSvg\("planned"\)[\s\S]*v6MobileMenuIconSvg\("finance"\)[\s\S]*v6MobileMenuIconSvg\("documents"\)[\s\S]*v6MobileMenuIconSvg\("cms"\)[\s\S]*v6MobileMenuIconSvg\("profile"\)[\s\S]*v6MobileMenuIconSvg\("settings"\)/);
+  assert.doesNotMatch(v6,/class="mobile-more-card"[^>]*>[\s\S]{0,80}<span>[◷$▤◎◉⚙]<\/span>/);
   assert.match(v6,/data-nav="finance"[\s\S]*Documents[\s\S]*Website CMS[\s\S]*Profile[\s\S]*Settings/);
+  assert.match(css,/\.mobile-nav-svg\{[\s\S]*width:22px;[\s\S]*height:22px/);
+  assert.match(css,/\.mobile-more-svg\{[\s\S]*width:28px;[\s\S]*height:28px/);
   assert.match(css,/Canonical mobile\/tablet navigation contract:[\s\S]*repeat\(5,minmax\(0,1fr\)\)/);
   assert.match(html,/src="\/v6\.js"/);
   assert.match(v6,/kh_theme_user_/);
