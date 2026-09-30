@@ -384,7 +384,7 @@ for(const [name,definition] of [
   ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
 ])ensureColumn("clients",name,definition);
 for(const [name,definition] of [
-  ["category","TEXT"],["build_year","INTEGER"],["size_display","TEXT"],["color","TEXT"],["notes","TEXT"],["last_service_title","TEXT"],
+  ["category","TEXT"],["build_year","INTEGER"],["size_display","TEXT"],["color","TEXT"],["notes","TEXT"],["location_address","TEXT"],["last_service_title","TEXT"],
   ["last_service_description","TEXT"],["next_service_date","TEXT"],["date_of_purchase","TEXT"],["warranty","TEXT"],["latest_info_frequency","TEXT"],
   ["latest_info_humidity","TEXT"],["latest_info_temperature","TEXT"],["classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))"]
 ])ensureColumn("pianos",name,definition);
@@ -396,6 +396,11 @@ ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("customer_conversations","client_id","INTEGER");
 ensureColumn("customer_conversations","activity_cycle","INTEGER NOT NULL DEFAULT 1 CHECK(activity_cycle >= 1)");
 ensureColumn("customer_conversations","last_notified_activity_cycle","INTEGER NOT NULL DEFAULT 0 CHECK(last_notified_activity_cycle >= 0)");
+ensureColumn("customer_messages","message_type","TEXT NOT NULL DEFAULT 'TEXT'");
+ensureColumn("customer_messages","metadata_json","TEXT NOT NULL DEFAULT '{}'");
+ensureColumn("private_appointments","appointment_reason","TEXT NOT NULL DEFAULT 'OTHER'");
+ensureColumn("private_appointment_requests","appointment_reason","TEXT NOT NULL DEFAULT 'OTHER'");
+ensureColumn("customer_appointment_proposals","appointment_reason","TEXT NOT NULL DEFAULT 'OTHER'");
 ensureColumn("private_appointments","scheduled_end_at","TEXT");
 ensureColumn("private_appointments","conversation_id","TEXT");
 ensureColumn("private_appointments","client_id","INTEGER");

@@ -356,6 +356,37 @@ a {
 .customer-chat .form-result { min-height: 1.2em; color: var(--gold-bright); font-size: .72rem; }
 .customer-chat .form-result.is-error { color: #e4a39a; }
 
+.customer-chat__heading{position:relative;padding-right:5.4rem}
+.customer-chat__heading-actions{position:absolute;right:0;top:0;display:flex;align-items:center;gap:.35rem}
+.customer-chat__panel-close,.customer-chat__booking-open{display:grid;place-items:center;width:2.25rem;height:2.25rem;padding:0;border:1px solid var(--gold-dark);color:var(--gold-bright);background:transparent;cursor:pointer}
+.customer-chat__booking-open{display:none}
+.customer-chat__booking-open svg{width:1.08rem;height:1.08rem;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.customer-chat__consent{align-items:center!important;flex-wrap:nowrap}
+.customer-chat__consent input{margin-top:0!important}
+.customer-chat__consent span{min-width:0}
+.customer-chat__interactive-card,.customer-chat__structured-summary{display:grid;gap:.55rem;width:100%;padding:.7rem;border:1px solid var(--gold-dark);background:rgba(183,154,96,.07)}
+.customer-chat__interactive-card>strong,.customer-chat__structured-summary>strong{color:var(--gold-bright);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase}
+.customer-chat__interactive-card p,.customer-chat__structured-summary p{margin:0!important;font-size:.74rem!important}
+.customer-chat__structured-summary small{color:var(--ivory-muted);font-size:.66rem}
+.customer-chat__interactive-form{display:grid!important;gap:.55rem!important}
+.customer-chat__piano-fields{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.customer-chat__piano-fields[hidden]{display:none}
+.customer-chat__booking-dialog{width:min(32rem,calc(100vw - 1rem));max-height:calc(100dvh - 1rem);padding:0;border:1px solid var(--gold-dark);border-radius:0;color:var(--ivory);background:#090908;box-shadow:var(--shadow)}
+.customer-chat__booking-dialog::backdrop{background:rgba(0,0,0,.72);backdrop-filter:blur(4px)}
+.customer-chat__booking-form{padding:1rem}
+.customer-chat__booking-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;padding-bottom:.75rem;border-bottom:1px solid var(--line)}
+.customer-chat__booking-head .eyebrow{margin:0 0 .2rem}
+.customer-chat__booking-head h3{margin:0;color:var(--gold-bright);font-family:var(--display);font-size:1.35rem;font-weight:500}
+.customer-chat__booking-head button{width:2rem;height:2rem;border:1px solid var(--gold-dark);color:var(--gold-bright);background:transparent;font-size:1.2rem}
+.customer-chat__booking-grid{display:grid;grid-template-columns:1fr 1fr;gap:.65rem}
+.customer-chat__booking-grid .service-field-wide,.customer-chat__booking-grid [data-private-slot-picker]{grid-column:1/-1}
+@media(max-width:600px){
+  .customer-chat__booking-open{display:grid}
+  .customer-chat__booking-dialog{width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem)}
+  .customer-chat__booking-grid,.customer-chat__piano-fields{grid-template-columns:1fr}
+  .customer-chat__heading{padding-right:5.2rem}
+}
+
 @media (max-width: 680px) {
   .customer-chat { right: max(.75rem, env(safe-area-inset-right)); bottom: max(.75rem, env(safe-area-inset-bottom)); width: calc(100vw - 1.5rem); }
   .customer-chat__panel { max-height: min(78vh, 40rem); }

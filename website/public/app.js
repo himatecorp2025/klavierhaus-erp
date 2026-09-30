@@ -584,6 +584,7 @@ const customerChatEmojis = ["😀","😊","🙏","👍","❤️","🎹","🎵","
 let customerConversationToken = "";
 let customerChatPollTimer = null;
 let customerConversationSnapshot = "";
+let customerConversationData = null;
 let customerChatPendingFiles = [];
 let customerChatRecorder = null;
 let customerChatRecorderStream = null;
@@ -637,7 +638,7 @@ function setCustomerChatPanel(open){
   }
 }
 function clearCustomerConversationSession(){
-  customerConversationToken="";customerConversationSnapshot="";
+  customerConversationToken="";customerConversationSnapshot="";customerConversationData=null;
   try{localStorage.removeItem(customerConversationKey);}catch(_error){}
   customerChatPendingFiles=[];renderCustomerChatFiles();applyCustomerChatMode(false);
 }
@@ -663,6 +664,77 @@ function appendCustomerAttachment(parent,attachment){
   }
   const link=document.createElement("a");link.href=url;link.target="_blank";link.rel="noopener";link.textContent="↳ "+name;parent.append(link);
 }
+function customerAppointmentReasonLabel(value){
+  const key=String(value||"OTHER").toUpperCase();
+  if(language==="hu")return key==="PIANO_VIEWING"?"Zongora megtekintés":key==="SERVICE_REQUEST"?"Szolgáltatás igénybevétele":"Egyéb ügy";
+  return key==="PIANO_VIEWING"?"Piano viewing":key==="SERVICE_REQUEST"?"Service request":"Other";
+}
+function customerStructuredMessage(message){
+  const type=String(message.message_type||"TEXT").toUpperCase(),data=message.metadata||{};
+  if(type==="CUSTOMER_PROFILE_FORM"){
+    const card=document.createElement("section");card.className="customer-chat__interactive-card";
+    const title=document.createElement("strong");title.textContent=language==="hu"?"Ügyfél- és zongoraadatok":"Customer & piano details";
+    const lead=document.createElement("p");lead.textContent=language==="hu"?"Kérjük, ellenőrizze és egészítse ki az adatokat.":"Please review and complete the details.";
+    const form=document.createElement("form");form.dataset.customerProfileForm="1";form.className="customer-chat__interactive-form";
+    const makeInput=(labelText,name,value="",typeName="text")=>{const label=document.createElement("label"),span=document.createElement("span"),input=document.createElement("input");span.textContent=labelText;input.name=name;input.type=typeName;input.value=value||"";if(name==="phone")input.required=true;label.append(span,input);return label;};
+    form.append(makeInput(language==="hu"?"Telefonszám":"Phone","phone",data.phone||"","tel"),makeInput(language==="hu"?"Ügyfél címe":"Customer address","address",data.address||""));
+    const pianoLabel=document.createElement("label"),pianoSpan=document.createElement("span"),select=document.createElement("select");pianoSpan.textContent=language==="hu"?"Zongora":"Piano";select.name="piano_id";
+    const newOption=document.createElement("option");newOption.value="";newOption.textContent=language==="hu"?"+ Új zongora":"+ Add new piano";select.append(newOption);
+    (Array.isArray(data.pianos)?data.pianos:[]).forEach(piano=>{const option=document.createElement("option");option.value=String(piano.id);option.textContent=[piano.brand,piano.model,piano.serial_number?("SN "+piano.serial_number):""].filter(Boolean).join(" · ");select.append(option);});
+    pianoLabel.append(pianoSpan,select);form.append(pianoLabel);
+    const newFields=document.createElement("div");newFields.className="customer-chat__piano-fields";newFields.dataset.newPianoFields="1";
+    newFields.append(makeInput(language==="hu"?"Márka":"Brand","piano_brand"),makeInput(language==="hu"?"Modell":"Model","piano_model"),makeInput(language==="hu"?"Sorozatszám":"Serial number","piano_serial"),makeInput(language==="hu"?"Zongora helyszíne":"Piano location","piano_location_address",data.address||""));
+    form.append(newFields);select.addEventListener("change",()=>{newFields.hidden=Boolean(select.value);});
+    const submit=document.createElement("button");submit.type="submit";submit.className="button button--primary";submit.textContent=language==="hu"?"Adatok elküldése":"Send details";form.append(submit);
+    card.append(title,lead,form);return card;
+  }
+  if(type==="PRIVATE_APPOINTMENT_PICKER"){
+    const card=document.createElement("section");card.className="customer-chat__interactive-card customer-chat__interactive-card--appointment";
+    const title=document.createElement("strong");title.textContent=language==="hu"?"Privát időpont foglalása":"Book a private appointment";
+    const lead=document.createElement("p");lead.textContent=language==="hu"?"Válasszon a ténylegesen szabad New York-i időpontok közül.":"Choose from genuinely available New York times.";
+    const open=document.createElement("button");open.type="button";open.className="button button--primary";open.dataset.chatOpenBooking="1";open.textContent=language==="hu"?"Szabad időpontok":"Available times";
+    card.append(title,lead,open);return card;
+  }
+  if(type==="CUSTOMER_PROFILE_SUBMITTED"){
+    const card=document.createElement("section");card.className="customer-chat__structured-summary";const title=document.createElement("strong");title.textContent=language==="hu"?"✓ Adatok elküldve":"✓ Details submitted";card.append(title);
+    if(data.phone){const p=document.createElement("p");p.textContent=(language==="hu"?"Telefon: ":"Phone: ")+data.phone;card.append(p);}
+    if(data.address){const p=document.createElement("p");p.textContent=(language==="hu"?"Cím: ":"Address: ")+data.address;card.append(p);}
+    if(data.piano){const p=document.createElement("p");p.textContent=(language==="hu"?"Zongora: ":"Piano: ")+[data.piano.brand,data.piano.model].filter(Boolean).join(" ");card.append(p);}
+    return card;
+  }
+  if(type==="PRIVATE_APPOINTMENT_REQUEST"){
+    const card=document.createElement("section");card.className="customer-chat__structured-summary customer-chat__structured-summary--appointment";
+    const title=document.createElement("strong");title.textContent=language==="hu"?"✓ Privát időpontkérés elküldve":"✓ Private appointment requested";card.append(title);
+    if(data.scheduled_at){const p=document.createElement("p");try{p.textContent=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}).format(new Date(data.scheduled_at))+" ET";}catch(_error){p.textContent=data.scheduled_at;}card.append(p);}
+    const reason=document.createElement("p");reason.textContent=(language==="hu"?"Ügy: ":"Purpose: ")+customerAppointmentReasonLabel(data.appointment_reason);card.append(reason);
+    const status=document.createElement("small");status.textContent=language==="hu"?"A Klavierhaus visszahívással erősíti meg az időpontot.":"Klavierhaus will confirm the appointment by phone.";card.append(status);return card;
+  }
+  return null;
+}
+function prefillCustomerChatBooking(){
+  const dialog=customerChat?.querySelector("[data-chat-booking-dialog]"),form=dialog?.querySelector("[data-chat-booking-form]");if(!form)return;
+  const data=customerConversationData||{},client=data.linked_client||{};
+  if(form.elements.name)form.elements.name.value=client.name||data.name||"";
+  if(form.elements.email)form.elements.email.value=client.email||data.email||"";
+  if(form.elements.phone)form.elements.phone.value=client.phone||"";
+}
+function openCustomerChatBooking(){
+  if(!customerConversationToken){if(customerChatResult)customerChatResult.textContent=language==="hu"?"Előbb indítsa el a beszélgetést.":"Start the conversation first.";return;}
+  const dialog=customerChat?.querySelector("[data-chat-booking-dialog]"),form=dialog?.querySelector("[data-chat-booking-form]");if(!dialog||!form)return;
+  form.reset();prefillCustomerChatBooking();privatePickerEnsure(form);privatePickerReset(form);dialog.showModal();form.querySelector('[name="phone"]')?.focus();
+}
+async function submitCustomerChatBooking(form){
+  const result=form.querySelector("[data-chat-booking-result]");let values;
+  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Válasszon szabad időpontot.":"Choose an available time.";return;}
+  values.conversation_token=customerConversationToken;if(result)result.textContent=language==="hu"?"Küldés…":"Sending…";
+  try{
+    const response=await fetch("/api/site/private-appointments",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)}),payload=await response.json().catch(()=>({}));
+    if(response.status===409){const picker=form.querySelector("[data-private-slot-picker]"),state=picker?privatePickerGet(picker):null;if(picker&&state?.selectedDate)await privatePickerLoadSlots(picker,state.selectedDate);if(result)result.textContent=language==="hu"?"Az időpont időközben foglalttá vált. Válasszon másikat.":"That time just became unavailable. Choose another.";return;}
+    if(!response.ok)throw new Error(payload.error||"PRIVATE_APPOINTMENT_FAILED");
+    if(result)result.textContent=language==="hu"?"Időpontkérés elküldve. A Klavierhaus telefonon visszaigazolja.":"Appointment request sent. Klavierhaus will confirm by phone.";
+    customerConversationSnapshot="";await loadCustomerConversation(customerConversationToken);window.setTimeout(()=>{customerChat?.querySelector("[data-chat-booking-dialog]")?.close("success");},650);
+  }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült.":"We could not send the appointment request.";}
+}
 function renderCustomerMessages(messages = [], conversation = null) {
   if (!customerChatMessages) return;
   customerChatMessages.replaceChildren();
@@ -676,7 +748,8 @@ function renderCustomerMessages(messages = [], conversation = null) {
     row.className=`customer-chat__message-row customer-chat__message-row--${staff?"staff":"customer"}`;
     if(staff)row.append(customerPianoAvatar());
     const item=document.createElement("article");item.className=`customer-chat__message customer-chat__message--${staff?"staff":"customer"}`;
-    if(message.body){const body=document.createElement("p");body.textContent=message.body;item.append(body);}
+    const structured=customerStructuredMessage(message);
+    if(structured)item.append(structured);else if(message.body){const body=document.createElement("p");body.textContent=message.body;item.append(body);}
     (message.attachments||[]).forEach(attachment=>appendCustomerAttachment(item,attachment));
     const meta=document.createElement("small");meta.className="customer-chat__message-time";meta.textContent=customerChatTime(message.created_at)+(staff?"":"  ✓✓");item.append(meta);
     row.append(item);customerChatMessages.append(row);
@@ -720,7 +793,7 @@ async function loadCustomerConversation(token) {
   try {
     const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(token)}`,{credentials:"same-origin",cache:"no-store"});
     if(!response.ok)throw new Error("CONVERSATION_NOT_FOUND");
-    const conversation=await response.json();customerConversationToken=token;
+    const conversation=await response.json();customerConversationToken=token;customerConversationData=conversation;
     const nextSnapshot=JSON.stringify([conversation.status,conversation.updated_at,conversation.messages?.length||0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(",")]);
     renderSupportStatus(conversation.support||{});
     if(conversation.status==="CLOSED"){renderCustomerMessages(conversation.messages||[],conversation);showCustomerConversationClosed(conversation);customerConversationSnapshot=nextSnapshot;return;}
@@ -729,7 +802,7 @@ async function loadCustomerConversation(token) {
     customerConversationSnapshot=nextSnapshot;
   }catch(_error){
     if(!new URLSearchParams(location.search).get("conversation"))localStorage.removeItem(customerConversationKey);
-    customerConversationToken="";applyCustomerChatMode(false);
+    customerConversationToken="";customerConversationData=null;applyCustomerChatMode(false);
   }
 }
 function setCustomerChatLookupMessage(text,isError=false){
@@ -789,7 +862,7 @@ async function submitCustomerChat(){
     const response=await fetch(endpoint,{method:"POST",credentials:"same-origin",body:payload}),result=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(result.error||"CONVERSATION_FAILED");
     if(result.access_token){customerConversationToken=result.access_token;localStorage.setItem(customerConversationKey,customerConversationToken);}
-    const conversation=result.conversation||result;customerConversationSnapshot="";customerChatPendingFiles=[];renderCustomerChatFiles();
+    const conversation=result.conversation||result;customerConversationData=conversation;customerConversationSnapshot="";customerChatPendingFiles=[];renderCustomerChatFiles();
     if(customerChatMessageInput)customerChatMessageInput.value="";
     applyCustomerChatMode(Boolean(customerConversationToken));renderCustomerMessages(conversation.messages||[],conversation);renderSupportStatus(conversation.support||{});
     if(customerChatResult)customerChatResult.textContent="";
@@ -804,6 +877,9 @@ async function submitCustomerChat(){
 if(customerChat&&customerChatToggle&&customerChatPanel&&customerChatForm){
   customerChatToggle.addEventListener("click",()=>{const open=customerChatToggle.getAttribute("aria-expanded")==="true";setCustomerChatPanel(!open);});
   customerChat?.querySelector("[data-chat-panel-close]")?.addEventListener("click",()=>setCustomerChatPanel(false));
+  customerChat?.querySelector("[data-chat-booking-open]")?.addEventListener("click",openCustomerChatBooking);
+  customerChat?.querySelector("[data-chat-booking-close]")?.addEventListener("click",()=>customerChat?.querySelector("[data-chat-booking-dialog]")?.close("cancel"));
+  customerChat?.querySelector("[data-chat-booking-form]")?.addEventListener("submit",event=>{event.preventDefault();void submitCustomerChatBooking(event.currentTarget);});
   customerChat?.querySelector("[data-chat-welcome-close]")?.addEventListener("click",()=>customerChatWelcome?.classList.add("is-dismissed"));
   window.setTimeout(()=>customerChatWelcome?.classList.add("is-dismissed"),9000);
   try{customerConversationToken=localStorage.getItem(customerConversationKey)||new URLSearchParams(location.search).get("conversation")||"";}catch(_error){customerConversationToken="";}
@@ -814,7 +890,13 @@ if(customerChat&&customerChatToggle&&customerChatPanel&&customerChatForm){
   customerChat?.querySelector("[data-chat-voice]")?.addEventListener("click",()=>startCustomerRecorder("audio"));
   customerChat?.querySelector("[data-chat-emoji]")?.addEventListener("click",()=>{const picker=customerChat.querySelector("[data-chat-emoji-picker]");if(picker)picker.hidden=!picker.hidden;});
   customerChatMessageInput?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();void submitCustomerChat();}});
+  customerChatMessages?.addEventListener("submit",async event=>{
+    const form=event.target.closest("[data-customer-profile-form]");if(!form||!customerConversationToken)return;event.preventDefault();const button=form.querySelector('button[type="submit"]');if(button)button.disabled=true;
+    try{const payload=Object.fromEntries(new FormData(form).entries()),response=await fetch("/api/site/customer-conversations/"+encodeURIComponent(customerConversationToken)+"/customer-profile",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"CUSTOMER_PROFILE_FAILED");customerConversationData=result;customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);}
+    catch(_error){if(button)button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az adatok mentése nem sikerült.":"We could not save the details.";}
+  });
   customerChatMessages?.addEventListener("click",async event=>{
+    const booking=event.target.closest("[data-chat-open-booking]");if(booking){openCustomerChatBooking();return;}
     const button=event.target.closest("[data-proposal-decision]");if(!button||!customerConversationToken)return;button.disabled=true;
     try{const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/appointment-proposals/${encodeURIComponent(button.dataset.proposalId)}/respond`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:button.dataset.proposalDecision})});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"APPOINTMENT_RESPONSE_FAILED");customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);if(customerChatResult)customerChatResult.textContent=button.dataset.proposalDecision==="ACCEPTED"?(language==="hu"?"Az időpontot elfogadta; a foglalás automatikusan bekerült a naptárba.":"Appointment accepted and automatically confirmed in the calendar."):(language==="hu"?"Jeleztük, hogy másik időpontot kér.":"We have let the team know you need another time.");}
     catch(_error){button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az időpontválasz nem sikerült.":"We could not save your appointment response.";}

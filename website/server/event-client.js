@@ -136,6 +136,9 @@ function createEventClient(options = {}) {
     lookupCustomerConversations(email) {
       return request("/api/public/customer-conversations/lookup", { method: "POST", body: JSON.stringify({ email }) });
     },
+    customerProfile(token, profile) {
+      return request(`/api/public/customer-conversations/${encodeURIComponent(token)}/customer-profile`, { method: "POST", body: JSON.stringify(profile) });
+    },
     customerConversationMessage(token, message, files = []) {
       if (!files.length) return request(`/api/public/customer-conversations/${encodeURIComponent(token)}/messages`, { method: "POST", body: JSON.stringify(message) });
       const form = new FormData();
