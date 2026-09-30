@@ -88,7 +88,7 @@ test("unsaved desktop Master Data still uses Save Discard Cancel and nullable pi
 });
 
 test("raw source rows are retained and source IDs are visible and searchable in Master Data",()=>{
-  const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js");
+  const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js"),app=read("public/app.js");
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_import_rows/);
   assert.match(schema,/raw_json TEXT NOT NULL/);
   assert.match(reconcile,/persistImportRow/);
