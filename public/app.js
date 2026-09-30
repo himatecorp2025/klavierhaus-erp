@@ -600,6 +600,7 @@ async function renderMaster(){
   state.pianos=Array.isArray(pianoOverview?.classified)?pianoOverview.classified:[];
   state.pianoReviews=Array.isArray(pianoOverview?.review)?pianoOverview.review:[];
   state.pianoOverview=pianoOverview?.totals||{classified:state.pianos.length,review:state.pianoReviews.length,total_entities:state.pianos.length,source_rows:0,source_groups:0,owner_linked:state.pianos.filter(row=>row.client_id).length,owner_pending:state.pianos.filter(row=>!row.client_id).length};
+  state.masterMigration=pianoOverview?.migration||{};
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
   const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS",canImport=state.user&&["ADMIN","SUPERADMIN"].includes(state.user.role);
@@ -633,7 +634,7 @@ async function renderMaster(){
     const form=new FormData();form.append("file",file,file.name);
     try{
       const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import completed: ${summary.sourceRowsPersisted}/${summary.rows} source rows preserved across ${summary.columns||33} columns, ${summary.sourceClients} source clients, ${summary.createdPianos} new pianos, ${summary.ownerlessPianos} owner pending.`,`Import kész: ${summary.sourceRowsPersisted}/${summary.rows} forrássor megőrizve ${summary.columns||33} oszlopból, ${summary.sourceClients} forrás-ügyfél, ${summary.createdPianos} új zongora, ${summary.ownerlessPianos} tulajdonosra vár.`),"success");
+      toast(tr(`Import verified: ${summary.sourceRowsPersisted}/${summary.rows} rows · ${summary.columns||33}/33 columns · ${summary.sourceClients} clients · ${summary.totalPianos} pianos · Paul Mills ${summary.controlClientPianos}/9 pianos.`,`Import ellenőrizve: ${summary.sourceRowsPersisted}/${summary.rows} sor · ${summary.columns||33}/33 oszlop · ${summary.sourceClients} ügyfél · ${summary.totalPianos} zongora · Paul Mills ${summary.controlClientPianos}/9 zongora.`),"success");
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
@@ -719,17 +720,19 @@ function runClientContactAction(clientId,kind){
 function renderPianoList(){
   const host=$("#masterList");if(!host)return;
   const rows=filteredMasterPianos(),reviews=filteredMasterPianoReviews(),totals=state.pianoOverview||{};
+  const migration=state.masterMigration||{};
   const summary=`<div class="master-piano-summary">
     <span><strong>${Number(totals.total_entities??(state.pianos||[]).length)}</strong><small>${tr("visible instruments","látható hangszer")}</small></span>
     <span><strong>${Number(totals.owner_linked??(state.pianos||[]).filter(row=>row.client_id).length)}</strong><small>${tr("owner linked","tulajdonoshoz kapcsolva")}</small></span>
     <span class="${Number(totals.owner_pending||0)>0?"needs-review":""}"><strong>${Number(totals.owner_pending??(state.pianos||[]).filter(row=>!row.client_id).length)}</strong><small>${tr("owner data pending","tulajdonos adatpótlásra vár")}</small></span>
     ${Number(totals.review||0)>0?`<span class="needs-review"><strong>${Number(totals.review)}</strong><small>${tr("data conflicts","adatütközés")}</small></span>`:""}
-    ${Number(totals.source_rows||0)>0?`<span><strong>${Number(totals.source_rows)}</strong><small>${tr("import source rows","import forrássor")}</small></span>`:`<span class="import-missing"><strong>!</strong><small>${tr("master CSV not imported yet","a master CSV még nincs importálva")}</small></span>`}
+    ${migration.ok?`<span><strong>${Number(migration.rows||0)}/339</strong><small>${tr("source contract verified","forráskontraktus ellenőrizve")}</small></span>`:`<span class="import-missing needs-review"><strong>${Number(migration.rows||0)}/339</strong><small>${tr("source import incomplete","forrásimport hiányos")}</small></span>`}
   </div>`;
   if(!rows.length&&!reviews.length){host.innerHTML=summary+`<div class="empty-state">${tr("No pianos match this view.","Nincs a nézetnek megfelelő zongora.")}</div>`;return;}
   const visible=rows.map(piano=>`<button type="button" class="piano-list-row ${Number(piano.id)===Number(state.selectedPianoId)?"active":""}" data-master-piano-id="${piano.id}">
     <strong>${esc([masterValue(piano.brand,{brand:true}),piano.model].filter(Boolean).join(" "))}</strong>
     <small>${tr("Serial","Gyári szám")}: <span class="${masterPendingClass(piano.serial_number)}">${esc(masterValue(piano.serial_number))}</span></small>
+    <small>${tr("Size / color / year","Méret / szín / év")}: ${esc([piano.size_display,piano.color,piano.build_year].filter(value=>String(value??"").trim()).join(" · ")||masterPendingText())}</small>
     <small>${tr("Owner","Tulajdonos")}: <span class="${masterPendingClass(piano.client_name)}">${esc(masterValue(piano.client_name))}</span></small>
     <small>${tr("Location","Hely")}: <span class="${masterPendingClass(piano.effective_location)}">${esc(masterValue(piano.effective_location))}</span></small>
   </button>`).join("");
