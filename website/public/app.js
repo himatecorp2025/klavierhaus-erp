@@ -627,6 +627,7 @@ function setCustomerChatPanel(open){
   if(!customerChatToggle||!customerChatPanel)return;
   const isOpen=Boolean(open);
   customerChatToggle.setAttribute("aria-expanded",String(isOpen));customerChatPanel.hidden=!isOpen;
+  customerChat?.classList.toggle("is-panel-open",isOpen);
   document.documentElement.classList.toggle("customer-chat-open",isOpen&&customerChatMobileMode());
   if(isOpen){
     customerChatWelcome?.classList.add("is-dismissed");syncCustomerChatViewport();

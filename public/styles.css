@@ -2543,3 +2543,53 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
 @media(max-width:640px){
   .app-dialog.app-dialog--wide{width:calc(100% - 16px)}
 }
+
+
+/* Admin navigation SVG refresh — approved 50% sidebar scale increase */
+.app-shell{grid-template-columns:320px minmax(0,1fr)}
+.app-shell.sidebar-collapsed{grid-template-columns:88px minmax(0,1fr)}
+.sidebar-nav{gap:6px;padding:14px 12px}
+.sidebar-nav .nav-item{
+  grid-template-columns:52px minmax(0,1fr);
+  min-height:64px;
+  padding:0 14px;
+  font-size:19.5px;
+  line-height:1.15;
+  gap:4px;
+}
+.nav-icon{
+  width:42px;
+  height:42px;
+  font-size:24px;
+}
+.nav-svg{
+  display:block;
+  width:30px;
+  height:30px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.75;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  overflow:visible;
+}
+.app-shell.sidebar-collapsed .sidebar-nav .nav-item{min-height:64px}
+.profile-menu>button{gap:10px}
+.profile-menu-icon{
+  display:grid;
+  place-items:center;
+  flex:0 0 22px;
+  width:22px;
+  height:22px;
+  color:currentColor;
+}
+.profile-menu-icon svg{
+  display:block;
+  width:20px;
+  height:20px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}

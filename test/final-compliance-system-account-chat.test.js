@@ -18,6 +18,15 @@ test("Klavierhaus System account chrome separates login, profile and settings",(
   assert.match(html,/id="headerWelcome"/);
   assert.match(app,/KLAVIERHAUS SYSTEM/);
   assert.match(app,/"settings"/);
+  assert.match(app,/else if\(state\.view==="settings"\)await renderSettings\(\)/);
+  assert.match(html,/data-nav="workshop"[\s\S]*class="nav-svg"/);
+  assert.match(html,/data-nav="intake"[\s\S]*class="nav-svg"/);
+  assert.match(html,/data-nav="messenger"[\s\S]*class="nav-svg"/);
+  assert.match(html,/data-nav="master"[\s\S]*class="nav-svg"/);
+  assert.match(html,/data-nav="cms"[\s\S]*class="nav-svg"/);
+  assert.match(html,/data-profile-menu="profile"[\s\S]*profile-menu-icon/);
+  assert.match(html,/data-profile-menu="settings"[\s\S]*profile-menu-icon/);
+  assert.match(html,/data-profile-menu="logout"[\s\S]*profile-menu-icon/);
   assert.match(v6,/document\.documentElement\.dataset\.theme="dark"/);
   assert.match(v6,/login_logo_url/);
   assert.match(v6,/async function renderSettings/);
@@ -28,6 +37,18 @@ test("Klavierhaus System account chrome separates login, profile and settings",(
   assert.match(admin,/app\.put\("\/api\/me\/profile"/);
   assert.match(admin,/app\.post\("\/api\/me\/profile-image"/);
   assert.match(admin,/route:"login-logo"/);
+});
+
+test("desktop sidebar uses the approved larger SVG navigation scale",()=>{
+  const html=read("public/index.html"),css=read("public/styles.css");
+  assert.equal((html.match(/class="nav-svg"/g)||[]).length,8);
+  assert.doesNotMatch(html,/<nav class="sidebar-nav">[\s\S]*?<span class="nav-icon">[▦✓✦◷◫$▤◎]/);
+  assert.match(css,/\.app-shell\{grid-template-columns:320px minmax\(0,1fr\)\}/);
+  assert.match(css,/\.app-shell\.sidebar-collapsed\{grid-template-columns:88px minmax\(0,1fr\)\}/);
+  assert.match(css,/\.sidebar-nav \.nav-item\{[\s\S]*font-size:19\.5px/);
+  assert.match(css,/\.nav-icon\{[\s\S]*width:42px;[\s\S]*height:42px/);
+  assert.match(css,/\.nav-svg\{[\s\S]*width:30px;[\s\S]*height:30px/);
+  assert.equal((html.match(/class="profile-menu-icon"/g)||[]).length,3);
 });
 
 test("full Website factory reset is rendered only for Superadmin",()=>{
@@ -42,6 +63,9 @@ test("full Website factory reset is rendered only for Superadmin",()=>{
 test("public customer service matches the approved Messenger interaction contract",()=>{
   const server=read("website/server/index.js"),client=read("website/public/app.js"),css=read("website/public/styles.css"),conversation=read("server/website-conversations.js"),upload=read("server/upload-middleware.js");
   assert.match(server,/Klavierhaus Customer Service/);
+  assert.match(server,/customer-chat__toggle-icon/);
+  assert.match(server,/M8\.5 12h\.01M12 12h\.01M15\.5 12h\.01/);
+  assert.doesNotMatch(server,/data-chat-toggle[^>]*>[\\s\\S]{0,120}✦/);
   assert.match(server,/data-chat-camera/);
   assert.match(server,/data-chat-photo-input/);
   assert.match(server,/data-chat-voice/);
@@ -58,6 +82,9 @@ test("public customer service matches the approved Messenger interaction contrac
   assert.match(css,/approved Messenger reference/);
   assert.match(css,/grid-template-columns:2\.8rem 2\.8rem 2\.8rem minmax\(0,1fr\)/);
   assert.match(css,/background:linear-gradient\(145deg,#e0c27f,#c6a45d\)/);
+  assert.match(css,/Safari mobile\/tablet public chat launcher \+ Messenger SVG/);
+  assert.match(css,/\.customer-chat:not\(\.is-panel-open\)[\s\S]*bottom:max\(14px,env\(safe-area-inset-bottom\)\)!important/);
+  assert.match(client,/customerChat\?\.classList\.toggle\("is-panel-open",isOpen\)/);
   assert.match(conversation,/Welcome to Klavierhaus Customer Service/);
   assert.match(conversation,/!body&&!\(req\.files\|\|\[\]\)\.length/);
   assert.match(upload,/video\/mp4/);
