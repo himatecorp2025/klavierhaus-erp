@@ -61,16 +61,27 @@ function v6CloseMore(){
   const popover=$("#mobileMorePopover");if(!popover)return;
   popover.hidden=true;$("#mobileMoreButton")?.setAttribute("aria-expanded","false");
 }
+function v6MobileMenuIconSvg(kind){
+  const paths={
+    planned:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
+    finance:'<circle cx="12" cy="12" r="8.5"/><path d="M15 8.5h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9M12 6v12"/>',
+    documents:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/>',
+    cms:'<path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.8a1.8 1.8 0 0 1 0-3.6H15a6 6 0 0 0 6-6c0-2.7-3.6-4.8-9-4.8Z"/><circle cx="7.5" cy="9" r=".8"/><circle cx="10" cy="6.5" r=".8"/><circle cx="14" cy="6.5" r=".8"/><circle cx="17" cy="9" r=".8"/>',
+    profile:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.52-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.03 4.2l.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.52 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/>'
+  };
+  return `<span class="mobile-more-icon" aria-hidden="true"><svg class="mobile-more-svg" viewBox="0 0 24 24">${paths[kind]||paths.planned}</svg></span>`;
+}
 function v6OpenMore(){
   const popover=$("#mobileMorePopover"),grid=$("#mobileMoreGrid");if(!popover||!grid)return;
   if(!popover.hidden){v6CloseMore();return;}
   grid.innerHTML=`
-    <button class="mobile-more-card" type="button" data-nav="planned"><span>◷</span><strong>${tr("Planned Jobs","Tervezett munkák")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="finance"><span>$</span><strong>${tr("Finance","Pénzügy")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile","Profil")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="settings"><span>⚙</span><strong>${tr("Settings","Beállítások")}</strong></button>`;
+    <button class="mobile-more-card" type="button" data-nav="planned">${v6MobileMenuIconSvg("planned")}<strong>${tr("Planned Jobs","Tervezett munkák")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="finance">${v6MobileMenuIconSvg("finance")}<strong>${tr("Finance","Pénzügy")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="documents">${v6MobileMenuIconSvg("documents")}<strong>${tr("Documents","Dokumentumok")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="cms">${v6MobileMenuIconSvg("cms")}<strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="profile">${v6MobileMenuIconSvg("profile")}<strong>${tr("Profile","Profil")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="settings">${v6MobileMenuIconSvg("settings")}<strong>${tr("Settings","Beállítások")}</strong></button>`;
   popover.hidden=false;$("#mobileMoreButton")?.setAttribute("aria-expanded","true");
 }
 function v6SyncAccountChrome(){
