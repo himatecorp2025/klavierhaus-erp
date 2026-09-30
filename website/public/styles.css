@@ -299,6 +299,11 @@ a {
 }
 .customer-chat__toggle:hover { transform: translateY(-2px); box-shadow: 0 1.2rem 2.8rem rgba(0,0,0,.5); }
 .customer-chat__toggle:focus-visible { outline: 2px solid var(--ivory); outline-offset: 4px; }
+.customer-chat__logo{display:block;max-width:100%;max-height:100%;object-fit:contain}
+.customer-chat__logo[hidden],.customer-chat__logo-fallback[hidden]{display:none!important}
+.customer-chat__logo--toggle{width:2.55rem;height:2.55rem;padding:.18rem;object-fit:contain}
+.customer-chat__identity-mark{display:grid;place-items:center;flex:0 0 3.15rem;width:3.15rem;height:3.15rem}
+.customer-chat__logo--identity{width:3.15rem;height:3.15rem;padding:.2rem;border:1px solid #d0b67f;border-radius:50%;background:#0b0b09;object-fit:contain}
 .customer-chat__welcome {
   display: flex;
   align-items: center;
@@ -1086,6 +1091,14 @@ main {
 
 .legal-copy + .legal-copy {
   margin-top: 1.4rem;
+}
+
+.legal-document{
+  color:var(--ivory-soft);
+  font-size:1rem;
+  line-height:1.85;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
 }
 
 .section--legal ul {
