@@ -369,6 +369,7 @@ async function renderFinance(){
   $("#monthlyPdfBtn").addEventListener("click",()=>r3DownloadPdf("/api/finance/monthly-report.pdf?month="+encodeURIComponent(state.r3Month),"Klavierhaus-Finance-"+state.r3Month+".pdf"));
   $("#manualInvoiceBtn").addEventListener("click",()=>r3OpenManualInvoice(renderFinance));$("#directExpensesBtn").addEventListener("click",()=>r3OpenDirectExpenses(renderFinance));
   $("#partnersBtn")?.addEventListener("click",()=>r3OpenPartnerManager(renderFinance));$("#financeSettingsBtn")?.addEventListener("click",()=>r3OpenFinanceSettings(renderFinance));r3FilterInvoices();
+  if(state.pendingNotificationInvoiceId){const invoiceId=Number(state.pendingNotificationInvoiceId);state.pendingNotificationInvoiceId=null;if(invoiceId&&invoices.some(row=>Number(row.id)===invoiceId))await r3OpenInvoice(invoiceId,renderFinance);}
 }
 
 // V6 bootstrap is invoked by public/v6.js after UI overrides are installed.
