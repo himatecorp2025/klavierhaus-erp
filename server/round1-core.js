@@ -1,6 +1,7 @@
 "use strict";
 
-const {importLegacyInstrumentClientCsv,refreshClientLastVisit}=require("./master-data-reconcile");
+const {MASTER_IMPORT_CONTRACT,auditStoredMasterImport,importLegacyInstrumentClientCsv,refreshClientLastVisit}=require("./master-data-reconcile");
+const MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4";
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function validEmail(value){
@@ -199,10 +200,12 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       COALESCE(NULLIF(TRIM(r.source_brand),''),'No brand') AS display_brand,
       NULLIF(TRIM(r.source_model),'') AS display_model,NULLIF(TRIM(r.source_serial_number),'') AS display_serial_number
       FROM client_piano_review_queue r LEFT JOIN clients c ON c.id=r.client_id WHERE r.status='PENDING' ORDER BY r.id`).all();
-    const sourceRows=db.prepare("SELECT COUNT(*) AS count FROM master_data_piano_source_map").get()?.count||0;
-    const ownerLinked=pianos.filter(row=>row.client_id!==null&&row.client_id!==undefined).length,ownerPending=pianos.length-ownerLinked;
-    res.json({classified:pianos,review,totals:{classified:pianos.length,review:review.length,total_entities:pianos.length,source_rows:Number(sourceRows),source_groups:Number(sourceRows),owner_linked:ownerLinked,owner_pending:ownerPending}});
+    const migration=auditStoredMasterImport(db,MASTER_IMPORT_CONTRACT.sourceName);
+    const sourceRows=Number(migration.rows||0),ownerLinked=pianos.filter(row=>row.client_id!==null&&row.client_id!==undefined).length,ownerPending=pianos.length-ownerLinked;
+    res.json({classified:pianos,review,migration,totals:{classified:pianos.length,review:review.length,total_entities:pianos.length,source_rows:sourceRows,source_groups:sourceRows,owner_linked:ownerLinked,owner_pending:ownerPending}});
   });
+
+  app.get("/api/master-data/import-status",auth,staff,(_req,res)=>res.json(auditStoredMasterImport(db,MASTER_IMPORT_CONTRACT.sourceName)));
 
   app.get("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const id=integerId(req.params.id);
@@ -239,8 +242,12 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       if(error)return next(error);
       if(!req.file?.buffer?.length)return res.status(400).json({error:"MASTER_DATA_CSV_REQUIRED"});
       try{
-        const summary=db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:"KLAVIERHAUS_MASTER_CSV"}))();
-        audit(req,"IMPORT","master_data","KLAVIERHAUS_MASTER_CSV",null,summary);res.json(summary);
+        const summary=db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:MASTER_IMPORT_CONTRACT.sourceName}))();
+        db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('master_data_reconcile_version',?,?,CURRENT_TIMESTAMP)
+          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(MASTER_DATA_RECONCILE_VERSION,req.user.id);
+        db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('master_data_import_status','READY',?,CURRENT_TIMESTAMP)
+          ON CONFLICT(setting_key) DO UPDATE SET setting_value='READY',updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(req.user.id);
+        audit(req,"IMPORT","master_data",MASTER_IMPORT_CONTRACT.sourceName,null,summary);res.json(summary);
       }catch(error){res.status(error.status||400).json({error:error.message||"MASTER_DATA_IMPORT_FAILED",details:error.details||null});}
     });
   });
