@@ -4,6 +4,15 @@ const crypto=require("node:crypto");
 
 const INSTITUTION_KEYWORDS=["University","School","Academy","Church","Synagog","Temple","Museum","Foundation","Institute","Rappresentanza","Consulate","Embassy","Society","Hospital","Library"];
 const PARTNER_KEYWORDS=["Workshop","Piano Studios","Studio One","Tuner","Technician","Restoration"];
+const MASTER_HEADERS=["ID","CATEGORY","BRAND","MODEL","SIZE","COLOR","SERIAL NUMBER","YEAR BUILT","NOTE","DATE OF PURCHASE","WARRANTY","LAST SERVICE DATE","LAST SERVICE TITLE","LAST SERVICE DESCRIPTION","NEXT SERVICE DATE","LATEST INFO FREQUENCY","LATEST INFO HUMIDITY","LATEST INFO TEMPERATURE","ID","FIRST NAME","LAST NAME","COMPANY NAME","CONTACT NAME","STREET","CITY","DISTRICT","POSTCODE","COUNTRY","MOBILE PHONE","LINE PHONE","E-MAIL","NOTE","SHORT MEMO TO NAME"];
+const MASTER_IMPORT_CONTRACT={sourceName:"KLAVIERHAUS_MASTER_CSV",rows:339,columns:33,sourceClients:309,linkedPianos:329,ownerlessPianos:10,nonEmptyValues:5025,controlClientId:"3084",controlPianos:9};
+const INSTRUMENT_SOURCE_FIELDS=[
+  ["category","category"],["brand","brand"],["model","model"],["size_display","size_display"],["color","color"],["serial_number","serial_number"],["build_year","build_year"],
+  ["note","notes"],["date_of_purchase","date_of_purchase"],["warranty","warranty"],["last_serviced_at","last_serviced_at"],["last_service_title","last_service_title"],
+  ["last_service_description","last_service_description"],["next_service_date","next_service_date"],["latest_info_frequency","latest_info_frequency"],
+  ["latest_info_humidity","latest_info_humidity"],["latest_info_temperature","latest_info_temperature"]
+];
+const CLIENT_SOURCE_FIELDS=["first_name","last_name","company_name","contact_name","street","city","district","postcode","country","mobile_phone","line_phone","email","notes","short_memo_to_name"];
 
 const clean=(value,max=10000)=>String(value??"").replace(/\u0000/g,"").trim().slice(0,max);
 function norm(value){return clean(value).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"");}
@@ -63,10 +72,12 @@ function parseLegacyInstrumentClientCsv(content){
   const rows=csvRows(content);
   if(rows.length<3)throw Object.assign(new Error("MASTER_DATA_CSV_EMPTY"),{status:400});
   const headers=(rows[1]||[]).map(value=>clean(value).toUpperCase());
-  const required=new Map([[0,"ID"],[1,"CATEGORY"],[2,"BRAND"],[3,"MODEL"],[4,"SIZE"],[5,"COLOR"],[6,"SERIAL NUMBER"],[7,"YEAR BUILT"],[18,"ID"],[19,"FIRST NAME"],[20,"LAST NAME"],[21,"COMPANY NAME"],[22,"CONTACT NAME"],[23,"STREET"],[24,"CITY"],[25,"DISTRICT"],[26,"POSTCODE"],[27,"COUNTRY"],[28,"MOBILE PHONE"],[29,"LINE PHONE"],[30,"E-MAIL"]]);
-  for(const [index,label] of required)if(headers[index]!==label)throw Object.assign(new Error("MASTER_DATA_CSV_FORMAT_UNSUPPORTED"),{status:400});
+  if(headers.length!==MASTER_HEADERS.length||MASTER_HEADERS.some((label,index)=>headers[index]!==label)){
+    throw Object.assign(new Error("MASTER_DATA_CSV_FORMAT_UNSUPPORTED"),{status:400,details:{expected_headers:MASTER_HEADERS,received_headers:headers}});
+  }
   return rows.slice(2).map((values,index)=>{
-    const row=[...values];while(row.length<33)row.push("");
+    if(values.length>MASTER_HEADERS.length)throw Object.assign(new Error("MASTER_DATA_CSV_ROW_TOO_WIDE"),{status:400,details:{source_row:index+3,columns:values.length}});
+    const row=[...values];while(row.length<MASTER_HEADERS.length)row.push("");
     const instrument={
       source_id:clean(row[0],80),category:clean(row[1],80),brand:clean(row[2],200)||"No brand",model:clean(row[3],200),
       size_display:clean(row[4],120),color:clean(row[5],160),serial_number:clean(row[6],200),build_year:validYear(row[7]),
@@ -85,6 +96,92 @@ function parseLegacyInstrumentClientCsv(content){
 }
 function combineNotes(...values){return [...new Set(values.flatMap(value=>String(value||"").split(/\n+/)).map(value=>value.trim()).filter(Boolean))].join("\n");}
 function tableExists(db,name){return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));}
+function normalizeCompare(value){return String(value??"").replace(/\r\n?/g,"\n").trim();}
+function fieldMatches(sourceValue,storedValue,{contains=false,numeric=false}={}){
+  if(sourceValue===null||sourceValue===undefined||normalizeCompare(sourceValue)==="")return true;
+  if(numeric)return Number(sourceValue)===Number(storedValue);
+  const source=normalizeCompare(sourceValue),stored=normalizeCompare(storedValue);
+  return contains?stored.includes(source):stored===source;
+}
+function dateRank(value){const raw=clean(value,120);if(!raw)return null;const parsed=Date.parse(raw);return Number.isFinite(parsed)?parsed:null;}
+function refreshClientLastVisit(db,clientId){
+  const id=Number(clientId);if(!Number.isSafeInteger(id)||id<=0||!tableExists(db,"clients")||!tableExists(db,"pianos"))return null;
+  const rows=db.prepare("SELECT id,last_serviced_at FROM pianos WHERE client_id=? AND TRIM(COALESCE(last_serviced_at,''))<>'' ORDER BY id").all(id);
+  let best=null,bestRank=null;
+  for(const row of rows){const rank=dateRank(row.last_serviced_at);if(rank===null)continue;if(bestRank===null||rank>bestRank){best=row.last_serviced_at;bestRank=rank;}}
+  db.prepare("UPDATE clients SET last_visit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(best,id);return best;
+}
+function refreshSourceClientLastVisits(db,sourceName){
+  if(!tableExists(db,"master_data_client_source_map"))return 0;
+  const ids=db.prepare("SELECT DISTINCT client_id FROM master_data_client_source_map WHERE source_name=? ORDER BY client_id").all(sourceName).map(row=>row.client_id).filter(Boolean);
+  ids.forEach(id=>refreshClientLastVisit(db,id));return ids.length;
+}
+function integrityError(code,details){return Object.assign(new Error(code),{status:409,details});}
+function sourceClientFieldPresent(db,sourceName,sourceClientId,field,value){
+  if(normalizeCompare(value)==="")return true;
+  if(tableExists(db,"master_data_client_field_values")){
+    const row=db.prepare("SELECT 1 FROM master_data_client_field_values WHERE source_name=? AND source_client_id=? AND field_name=? AND value=? LIMIT 1").get(sourceName,sourceClientId,field,clean(value,5000));
+    if(row)return true;
+  }
+  const mapped=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,sourceClientId);
+  if(!mapped?.client_id)return false;
+  const client=db.prepare("SELECT * FROM clients WHERE id=?").get(mapped.client_id);if(!client)return false;
+  return fieldMatches(value,client[field],{contains:field==="notes"});
+}
+function assertMasterImportIntegrity(db,{records,sourceName}){
+  const sourceRows=tableExists(db,"master_data_source_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=?").get(sourceName)?.c||0):0;
+  const mappedPianos=tableExists(db,"master_data_piano_source_map")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_piano_source_map WHERE source_name=? AND piano_id IS NOT NULL").get(sourceName)?.c||0):0;
+  const sourceClients=new Set(records.map(record=>record.client.source_id).filter(Boolean));
+  const ownerlessRows=records.filter(record=>!record.client.source_id).length;
+  const linkedRows=records.length-ownerlessRows;
+  const sourceNonEmptyValues=records.reduce((sum,record)=>sum+(record.raw.values||[]).filter(value=>clean(value)!=="").length,0);
+  let preservedNonEmptyValues=0,checkedNonEmptyValues=0;
+  const failures=[];
+  for(const record of records){
+    const sourceInstrumentId=sourceInstrumentKey(record);
+    const map=db.prepare("SELECT piano_id FROM master_data_piano_source_map WHERE source_name=? AND source_instrument_id=?").get(sourceName,sourceInstrumentId);
+    const piano=map?.piano_id?db.prepare("SELECT * FROM pianos WHERE id=?").get(map.piano_id):null;
+    const rawValues=record.raw.values||[];
+    for(let index=0;index<MASTER_HEADERS.length;index++){
+      const raw=rawValues[index];if(clean(raw)==="")continue;checkedNonEmptyValues++;
+      let ok=false;
+      if(index===0)ok=Boolean(map?.piano_id&&String(sourceInstrumentId)===clean(raw,80));
+      else if(index>=1&&index<=17){
+        const pair=INSTRUMENT_SOURCE_FIELDS[index-1],sourceKey=pair?.[0],dbKey=pair?.[1];
+        if(sourceKey&&piano)ok=fieldMatches(record.instrument[sourceKey],piano[dbKey],{contains:sourceKey==="note",numeric:sourceKey==="build_year"});
+      }else if(index===18){
+        const clientMap=record.client.source_id?db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,record.client.source_id):null;
+        ok=Boolean(clientMap?.client_id&&String(record.client.source_id)===clean(raw,80));
+      }else if(index>=19&&index<=32){
+        const field=CLIENT_SOURCE_FIELDS[index-19];
+        ok=Boolean(record.client.source_id&&field&&sourceClientFieldPresent(db,sourceName,record.client.source_id,field,record.client[field]));
+      }
+      if(ok)preservedNonEmptyValues++;else failures.push({source_row:record.row_number,column_index:index,column:MASTER_HEADERS[index],source_instrument_id:record.instrument.source_id||null,source_client_id:record.client.source_id||null});
+    }
+    if(piano){
+      if(record.client.source_id){
+        const clientMap=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,record.client.source_id);
+        if(!clientMap?.client_id||Number(piano.client_id)!==Number(clientMap.client_id))failures.push({source_row:record.row_number,column:"CLIENT RELATION",source_instrument_id:record.instrument.source_id||null,source_client_id:record.client.source_id||null});
+      }else if(piano.client_id!==null&&piano.client_id!==undefined)failures.push({source_row:record.row_number,column:"OWNERLESS RELATION",source_instrument_id:record.instrument.source_id||null,actual_client_id:piano.client_id});
+    }
+  }
+  const controlMap=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,MASTER_IMPORT_CONTRACT.controlClientId);
+  const controlPianos=controlMap?.client_id?Number(db.prepare(`SELECT COUNT(DISTINCT m.piano_id) c FROM master_data_import_rows m
+    JOIN pianos p ON p.id=m.piano_id WHERE m.source_name=? AND m.source_client_id=? AND p.client_id=?`).get(sourceName,MASTER_IMPORT_CONTRACT.controlClientId,controlMap.client_id)?.c||0):0;
+  const metrics={rows:records.length,columns:MASTER_HEADERS.length,sourceRows,mappedPianos,sourceClients:sourceClients.size,linkedPianos:linkedRows,ownerlessPianos:ownerlessRows,sourceNonEmptyValues,checkedNonEmptyValues,preservedNonEmptyValues,controlClientRows:controlMap?1:0,controlClientPianos:controlPianos,failures:failures.slice(0,25)};
+  if(sourceName===MASTER_IMPORT_CONTRACT.sourceName){
+    const contractFailures=[];
+    for(const key of ["rows","columns","sourceClients","linkedPianos","ownerlessPianos","sourceNonEmptyValues"])if(metrics[key]!==MASTER_IMPORT_CONTRACT[key])contractFailures.push({metric:key,expected:MASTER_IMPORT_CONTRACT[key],actual:metrics[key]});
+    if(sourceRows!==MASTER_IMPORT_CONTRACT.rows)contractFailures.push({metric:"persistedSourceRows",expected:MASTER_IMPORT_CONTRACT.rows,actual:sourceRows});
+    if(mappedPianos!==MASTER_IMPORT_CONTRACT.rows)contractFailures.push({metric:"mappedPianos",expected:MASTER_IMPORT_CONTRACT.rows,actual:mappedPianos});
+    if(controlMap?1:0!==1)contractFailures.push({metric:"controlClientRows",expected:1,actual:controlMap?1:0});
+    if(controlPianos!==MASTER_IMPORT_CONTRACT.controlPianos)contractFailures.push({metric:"controlClientPianos",expected:MASTER_IMPORT_CONTRACT.controlPianos,actual:controlPianos});
+    if(checkedNonEmptyValues!==sourceNonEmptyValues||preservedNonEmptyValues!==sourceNonEmptyValues)contractFailures.push({metric:"preservedNonEmptyValues",expected:sourceNonEmptyValues,actual:preservedNonEmptyValues});
+    if(failures.length)contractFailures.push({metric:"fieldOrRelationFailures",expected:0,actual:failures.length,sample:failures.slice(0,10)});
+    if(contractFailures.length)throw integrityError("MASTER_DATA_INTEGRITY_FAILED",{contract:MASTER_IMPORT_CONTRACT,metrics,failures:contractFailures});
+  }else if(failures.length)throw integrityError("MASTER_DATA_INTEGRITY_FAILED",{metrics});
+  return metrics;
+}
 function sourceClientIds(db,clientId){
   if(!tableExists(db,"master_data_client_source_map"))return [];
   return db.prepare("SELECT source_name,source_client_id FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(clientId);
@@ -439,6 +536,8 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
     persistImportRow(db,{sourceName,record,clientId:piano.client_id,pianoId:piano.id});
   }
   const after=reconcileExistingMasterData(db);
+  refreshSourceClientLastVisits(db,sourceName);
+  const integrity=assertMasterImportIntegrity(db,{records,sourceName});
   const sourceNonEmptyValues=records.reduce((sum,record)=>sum+(record.raw.values||[]).filter(value=>clean(value)!=="").length,0);
   const sourceRowsPersisted=tableExists(db,"master_data_source_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=?").get(sourceName)?.c||0):records.length;
   const clientTypes=tableExists(db,"master_data_client_source_map")?db.prepare(`SELECT c.client_type,COUNT(DISTINCT c.id) count FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name=? AND c.deleted_at IS NULL GROUP BY c.client_type`).all(sourceName).reduce((out,row)=>(out[row.client_type]=Number(row.count),out),{}):{};
@@ -450,10 +549,10 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
     ?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=? AND client_id IS NOT NULL").get(sourceName)?.c||0)
     :Number(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id IS NOT NULL").get()?.c||0);
   const allPianos=tableExists(db,"master_data_source_rows")?sourceRowsPersisted:Number(db.prepare("SELECT COUNT(*) c FROM pianos").get()?.c||0);
-  return {rows:records.length,columns:33,sourceClients:sourceClientIds.size,sourceNonEmptyValues,createdClients,updatedClients,matchedExistingClients,deletedClientsSkipped,createdPianos,updatedPianos,ownerlessPianos,sourceRowsPersisted,clientTypes,linkedPianos,totalPianos:allPianos,controlClientSourceId:"3084",controlClientRows:controlMap?1:0,controlClientPianos:controlPianos,integrity:{allSourceRowsPreserved:sourceRowsPersisted===records.length,onePianoPerSourceRow:records.length===sourceRowsPersisted,controlClientExactlyOne:!sourceClientIds.has("3084")||Boolean(controlMap),controlClientHasNinePianos:!sourceClientIds.has("3084")||controlPianos===9},reviewItems:0,unassigned:ownerlessPianos,sourceDuplicateGroups:0,...after};
+  return {rows:records.length,columns:MASTER_HEADERS.length,sourceClients:sourceClientIds.size,sourceNonEmptyValues,createdClients,updatedClients,matchedExistingClients,deletedClientsSkipped,createdPianos,updatedPianos,ownerlessPianos,sourceRowsPersisted,clientTypes,linkedPianos,totalPianos:allPianos,controlClientSourceId:MASTER_IMPORT_CONTRACT.controlClientId,controlClientRows:controlMap?1:0,controlClientPianos:controlPianos,integrity:{allSourceRowsPreserved:sourceRowsPersisted===records.length,onePianoPerSourceRow:records.length===sourceRowsPersisted,allNonEmptyValuesPreserved:integrity.preservedNonEmptyValues===integrity.sourceNonEmptyValues,controlClientExactlyOne:!sourceClientIds.has(MASTER_IMPORT_CONTRACT.controlClientId)||Boolean(controlMap),controlClientHasNinePianos:!sourceClientIds.has(MASTER_IMPORT_CONTRACT.controlClientId)||controlPianos===MASTER_IMPORT_CONTRACT.controlPianos,verifiedNonEmptyValues:integrity.preservedNonEmptyValues},reviewItems:0,unassigned:ownerlessPianos,sourceDuplicateGroups:0,...after};
 }
 function reconcileExistingMasterData(db){
   const relationshipRepairBefore=repairSourceRelationships(db),resolvedLegacyReviews=promotePendingReviews(db),normalizedPianos=normalizeExistingPianos(db),mergedClients=mergeExistingClients(db),relationshipRepairAfter=repairSourceRelationships(db),mergedPianos=mergeExistingPianos(db);
   return {mergedClients,mergedPianos,normalizedPianos,resolvedLegacyReviews,relinkedPianos:relationshipRepairBefore.relinkedPianos+relationshipRepairAfter.relinkedPianos,reviewRequired:0};
 }
-module.exports={parseLegacyInstrumentClientCsv,importLegacyInstrumentClientCsv,reconcileExistingMasterData,repairSourceRelationships,rehydrateStoredMasterData,classifyClientRows,normSerial,brandFamily,pianoClassified};
+module.exports={MASTER_HEADERS,MASTER_IMPORT_CONTRACT,parseLegacyInstrumentClientCsv,importLegacyInstrumentClientCsv,reconcileExistingMasterData,repairSourceRelationships,rehydrateStoredMasterData,assertMasterImportIntegrity,refreshClientLastVisit,refreshSourceClientLastVisits,classifyClientRows,normSerial,brandFamily,pianoClassified};
