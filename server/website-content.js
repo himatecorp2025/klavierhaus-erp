@@ -13,6 +13,34 @@ const MAX_DOCUMENT_BYTES = 300000;
 const PAGE_ROUTE_SETTINGS_KEY = "website_page_route_settings";
 const WEBSITE_DESIGN_SETTINGS_KEY = "website_design_settings";
 const DESIGN_COLOR_KEYS = ["black", "ivory", "cream", "gold", "gold_bright", "muted", "line"];
+const CMS_PAGE_ADMIN = Object.freeze({
+  global:{group:"global",group_order:0,page_order:0,label_en:"Global navigation & footer",label_hu:"Globális navigáció és lábléc"},
+  home:{group:"landing",group_order:1,page_order:0,label_en:"Landing Page",label_hu:"Landing Page"},
+  artists:{group:"artists",group_order:2,page_order:0,label_en:"Artist Page",label_hu:"Artist Page"},
+  mission:{group:"culture",group_order:3,page_order:0,label_en:"Culture Page",label_hu:"Culture Page"},
+  events:{group:"culture",group_order:3,page_order:1,label_en:"Culture · Events",label_hu:"Culture · Események"},
+  salon:{group:"culture",group_order:3,page_order:2,label_en:"Culture · Klavierhaus Salon",label_hu:"Culture · Klavierhaus Szalon"},
+  pianos:{group:"pianos",group_order:4,page_order:0,label_en:"Piano Page",label_hu:"Piano Page"},
+  steinway:{group:"pianos",group_order:4,page_order:1,label_en:"Piano · Steinway",label_hu:"Piano · Steinway"},
+  services:{group:"services",group_order:5,page_order:0,label_en:"Service Page",label_hu:"Service Page"},
+  restoration:{group:"services",group_order:5,page_order:1,label_en:"Service · Restoration",label_hu:"Service · Restaurálás"},
+  tuning:{group:"services",group_order:5,page_order:2,label_en:"Service · Tuning & Technical Care",label_hu:"Service · Hangolás és technikai gondoskodás"},
+  concert:{group:"services",group_order:5,page_order:3,label_en:"Service · Concert Piano",label_hu:"Service · Koncertzongora"},
+  our:{group:"our",group_order:6,page_order:0,label_en:"Our Page",label_hu:"Our / Rólunk"},
+  contact:{group:"contact",group_order:7,page_order:0,label_en:"Contact Page",label_hu:"Contact / Kapcsolat"},
+  privacy:{group:"privacy",group_order:8,page_order:0,label_en:"Privacy / Legal",label_hu:"Privacy / Jogi tartalom"}
+});
+const CMS_GROUP_LABELS = Object.freeze({
+  global:{en:"Global",hu:"Globális"},
+  landing:{en:"Landing Page",hu:"Landing Page"},
+  artists:{en:"Artist Page",hu:"Artist Page"},
+  culture:{en:"Culture Page",hu:"Culture Page"},
+  pianos:{en:"Piano Page",hu:"Piano Page"},
+  services:{en:"Service Page",hu:"Service Page"},
+  our:{en:"Our Page",hu:"Our / Rólunk"},
+  contact:{en:"Contact Page",hu:"Contact / Kapcsolat"},
+  privacy:{en:"Privacy / Legal",hu:"Privacy / Jogi tartalom"}
+});
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -59,18 +87,54 @@ function parsePageRoutes(raw) {
 }
 
 function defaultWebsiteDesignSettings() {
-  return { black: "#080807", ivory: "#f2efe8", cream: "#e8e1d5", gold: "#b79a60", gold_bright: "#d9bd7a", muted: "#aaa49a", line: "rgba(183,154,96,.28)", display: "Cormorant Garamond", sans: "Inter", logo_url: "", favicon_url: "" };
+  return { black: "#080807", ivory: "#f2efe8", cream: "#e8e1d5", gold: "#b79a60", gold_bright: "#d9bd7a", muted: "#aaa49a", line: "rgba(183,154,96,.28)", display: "Cormorant Garamond", sans: "Inter", logo_url: "", favicon_url: "", chat_logo_url: "" };
 }
 
 function parseDesignSettings(raw) {
   const value = defaultWebsiteDesignSettings();
-  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for(const key of ["logo_url","favicon_url"]) if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); } catch (_error) { /* defaults */ }
+  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for(const key of ["logo_url","favicon_url"]) if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed.chat_logo_url || ""))) value.chat_logo_url = String(parsed.chat_logo_url); } catch (_error) { /* defaults */ }
   return value;
 }
 
 function fallbackPage(pageKey, language) {
   if (pageKey === "global") return clone(globalCopy[normalizeLanguage(language)] || null);
   return clone(pages[normalizeLanguage(language)]?.[pageKey] || null);
+}
+
+function normalizeLegacyPageLinks(value) {
+  if(Array.isArray(value))return value.map(normalizeLegacyPageLinks);
+  if(!value||typeof value!=="object")return value;
+  const next=Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalizeLegacyPageLinks(item)]));
+  if(next.key==="story")next.key="our";
+  if(next.key==="ticketTerms")next.key="privacy";
+  return next;
+}
+
+function canonicalizeGlobalContent(content, language) {
+  const fallback = fallbackPage("global", language) || {};
+  const source = normalizeLegacyPageLinks(content && typeof content === "object" ? content : {});
+  const storedNav = Array.isArray(source.nav) ? source.nav : [];
+  const byKey = new Map(storedNav.map((item) => [String(item?.key || ""), item]));
+  const nav = (fallback.nav || []).map((item) => {
+    const stored = byKey.get(item.key);
+    return stored && typeof stored === "object" ? { ...stored, ...item, key:item.key } : item;
+  });
+  const next={ ...source, nav, footerOur:source.footerOur||source.footerStory||fallback.footerOur };
+  delete next.footerStory;
+  delete next.footerTerms;
+  return next;
+}
+function canonicalizePageContent(pageKey,language,content){
+  let next=normalizeLegacyPageLinks(content);
+  if(pageKey==="global")return canonicalizeGlobalContent(next,language);
+  if(pageKey==="privacy"){
+    const fallback=fallbackPage("privacy",language)||{};
+    const ids=new Set(Array.isArray(next?.sections)?next.sections.map(section=>section?.id):[]);
+    if(!ids.has(language==="hu"?"adatkezeles":"privacy-policy")||!ids.has(language==="hu"?"altalanos-szerzodesi-feltetelek":"terms-and-conditions")){
+      next={...next,sections:clone(fallback.sections||[])};
+    }
+  }
+  return next;
 }
 
 function sanitizeContent(value, depth = 0) {
@@ -124,10 +188,10 @@ function registerWebsiteContentRoutes(options) {
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
-    let content = parseStoredPage(row, pageKey, language);
-    if (pageKey === "global" && Array.isArray(content?.nav)) {
+    let content = canonicalizePageContent(pageKey, language, parseStoredPage(row, pageKey, language));
+    if (pageKey === "global") {
       const active = new Set(landingSections().filter((item) => Number(item.is_active) === 1).map((item) => item.section_key));
-      const sectionForNav = { events:"salon_events", pianos:"featured_pianos", services:"craftsmanship", contact:"contact_cta" };
+      const sectionForNav = { pianos:"featured_pianos", services:"craftsmanship" };
       content = { ...content, nav: content.nav.filter((item) => !sectionForNav[item.key] || active.has(sectionForNav[item.key])) };
     }
     return {
@@ -194,12 +258,20 @@ function registerWebsiteContentRoutes(options) {
   app.get("/api/website-content/pages", auth, admin, (_req, res) => {
     res.json({
       website_base_url: websiteBaseUrl,
-      pages: [...PAGE_KEYS].filter((pageKey) => fallbackPage(pageKey, "en") || fallbackPage(pageKey, "hu")).map((pageKey) => ({
-        page_key: pageKey,
-        routes: pageRoutes()[pageKey] || routeDefinitions[pageKey] || { en: "/", hu: "/hu/" },
-        title_en: pageKey === "global" ? "Global navigation & footer" : (fallbackPage(pageKey, "en")?.seo?.title || pageKey),
-        title_hu: pageKey === "global" ? "Globális navigáció és lábléc" : (fallbackPage(pageKey, "hu")?.seo?.title || pageKey)
-      }))
+      pages: [...PAGE_KEYS].filter((pageKey) => fallbackPage(pageKey, "en") || fallbackPage(pageKey, "hu")).map((pageKey) => {
+        const adminMeta=CMS_PAGE_ADMIN[pageKey]||{group:"other",group_order:99,page_order:99,label_en:pageKey,label_hu:pageKey};
+        return {
+          page_key: pageKey,
+          routes: pageRoutes()[pageKey] || routeDefinitions[pageKey] || { en: "/", hu: "/hu/" },
+          title_en: adminMeta.label_en,
+          title_hu: adminMeta.label_hu,
+          admin_group: adminMeta.group,
+          admin_group_order: adminMeta.group_order,
+          admin_page_order: adminMeta.page_order,
+          admin_group_label_en: CMS_GROUP_LABELS[adminMeta.group]?.en || adminMeta.group,
+          admin_group_label_hu: CMS_GROUP_LABELS[adminMeta.group]?.hu || adminMeta.group
+        };
+      }).sort((a,b)=>a.admin_group_order-b.admin_group_order||a.admin_page_order-b.admin_page_order||a.page_key.localeCompare(b.page_key))
     });
   });
 

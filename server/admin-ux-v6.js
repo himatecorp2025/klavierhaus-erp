@@ -263,6 +263,7 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
     {route:"favicon",key:"favicon_url",min:32},
     {route:"public-logo",key:null,min:192},
     {route:"public-favicon",key:null,min:32},
+    {route:"chat-logo",key:null,min:96},
     {route:"erp-logo-dark",key:"erp_logo_dark_url",min:192,legacy:true},
     {route:"erp-logo-light",key:"erp_logo_light_url",min:192},
     {route:"login-logo",key:"login_logo_url",min:192},

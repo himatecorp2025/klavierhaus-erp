@@ -177,8 +177,13 @@ function v6CmsMeta(){
 }
 function v6CmsMetaKey(path){return path.join(".");}
 function v6CmsSectionTitle(key,index){
-  const special={hero:tr("Hero section","Hero szekció"),seo:"SEO",sections:tr("Page sections","Oldalszekciók"),brand:tr("Brand identity","Arculat"),nav:tr("Navigation","Navigáció"),items:tr("Cards / items","Kártyák / elemek")};
-  return special[key]||cmsFieldLabel(key,index);
+  const normalized=String(key||"").toLowerCase();
+  const special={hero:tr("Hero section","Hero szekció"),seo:"SEO",sections:tr("Page sections","Oldalszekciók"),brand:tr("Brand identity","Arculat"),nav:tr("Navigation","Navigáció"),items:tr("Cards / items","Kártyák / elemek"),imagealt:tr("Image alt text · SEO & accessibility","Kép ALT szöveg · SEO és akadálymentesség"),content:tr("Full legal text","Teljes jogi szöveg")};
+  return special[normalized]||cmsFieldLabel(key,index);
+}
+function v6CmsItemTitle(item,label,index){
+  if(item&&typeof item==="object"&&!Array.isArray(item))return String(item.title||item.eyebrow||item.label||item.id||(label+" "+(index+1)));
+  return label+" "+(index+1);
 }
 function v6CmsImageField(value,path,key){
   const meta=v6CmsMeta()[v6CmsMetaKey(path)]||{focal_x:50,focal_y:50};
@@ -202,18 +207,19 @@ function v6CmsImageField(value,path,key){
   </article>`;
 }
 function v6CmsRender(value,path=[],key="",index=0){
-  if(key==="_cms_media")return "";
+  if(key==="_cms_media"||["template","id","type"].includes(String(key)))return "";
   const label=v6CmsSectionTitle(key,index);
   if(Array.isArray(value)){
-    return `<section class="cms-builder-section"><header><div><span class="eyebrow">${tr("COLLECTION","GYŰJTEMÉNY")}</span><h3>${esc(label)}</h3><p>${value.length} ${tr("items","elem")}</p></div><button type="button" class="secondary-button" data-cms-add="${v6CmsPath(path)}">＋ ${tr("Add item","Elem hozzáadása")}</button></header><div class="cms-builder-list">${value.map((item,itemIndex)=>`<article class="cms-builder-item"><div class="cms-builder-item-head"><strong>${esc(label)} #${itemIndex+1}</strong><button class="text-button danger-text" type="button" data-cms-remove="${v6CmsPath([...path,itemIndex])}">${tr("Remove","Eltávolítás")}</button></div>${v6CmsRender(item,[...path,itemIndex],key,itemIndex)}</article>`).join("")||`<div class="cms-empty">${tr("No items yet.","Még nincs elem.")}</div>`}</div></section>`;
+    return `<section class="cms-builder-section"><header><div><span class="eyebrow">${tr("COLLECTION","GYŰJTEMÉNY")}</span><h3>${esc(label)}</h3><p>${value.length} ${tr("items","elem")}</p></div><button type="button" class="secondary-button" data-cms-add="${v6CmsPath(path)}">＋ ${tr("Add item","Elem hozzáadása")}</button></header><div class="cms-builder-list">${value.map((item,itemIndex)=>`<article class="cms-builder-item"><div class="cms-builder-item-head"><strong>${esc(v6CmsItemTitle(item,label,itemIndex))}</strong><button class="text-button danger-text" type="button" data-cms-remove="${v6CmsPath([...path,itemIndex])}">${tr("Remove","Eltávolítás")}</button></div>${v6CmsRender(item,[...path,itemIndex],key,itemIndex)}</article>`).join("")||`<div class="cms-empty">${tr("No items yet.","Még nincs elem.")}</div>`}</div></section>`;
   }
   if(value&&typeof value==="object"){
     return `<section class="cms-builder-section"><header><div><span class="eyebrow">${String(key||"SECTION").toUpperCase()}</span><h3>${esc(label)}</h3></div></header><div class="cms-builder-fields">${Object.entries(value).map(([childKey,child],childIndex)=>v6CmsRender(child,[...path,childKey],childKey,childIndex)).join("")}</div></section>`;
   }
   if(typeof value==="boolean")return `<label class="cms-toggle-row"><span>${esc(label)}</span><input type="checkbox" data-cms-path="${v6CmsPath(path)}" ${value?"checked":""}></label>`;
   if(v6CmsImageKey(key))return v6CmsImageField(value,path,key);
-  const str=String(value??""),long=/text|body|description|quote|biography|lead|intro/i.test(key)||str.length>110;
-  return `<label class="field cms-primitive"><span>${esc(label)}</span>${long?`<textarea data-cms-path="${v6CmsPath(path)}">${esc(str)}</textarea>`:`<input data-cms-path="${v6CmsPath(path)}" value="${esc(str)}">`}</label>`;
+  const str=String(value??""),isAlt=/alt$/i.test(String(key||""))||/imagealt/i.test(String(key||"")),long=/text|body|description|quote|biography|lead|intro|content|paragraph/i.test(key)||str.length>110;
+  const help=isAlt?`<small class="cms-field-help">${tr("Used in the image ALT attribute for SEO and accessibility. It is not shown as visible page text.","A kép ALT attribútumába kerül SEO és akadálymentesség céljából; nem jelenik meg látható képaláírásként.")}</small>`:"";
+  return `<label class="field cms-primitive"><span>${esc(label)}</span>${help}${long?`<textarea data-cms-path="${v6CmsPath(path)}">${esc(str)}</textarea>`:`<input data-cms-path="${v6CmsPath(path)}" value="${esc(str)}">`}</label>`;
 }
 async function v6UploadWebsiteImage(file){
   const form=new FormData();form.append("website_image",file);
@@ -327,6 +333,7 @@ async function v6RenderBranding(){
   host.innerHTML=`<div class="branding-grid">
     ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Independent header logo on the public website.","A publikus weboldal önálló fejléc-logója."))}
     ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),design.favicon_url,tr("Independent browser-tab icon for the public website.","A publikus weboldal önálló böngészőfül-ikonja."))}
+    ${v6BrandAssetCard("chatLogo",tr("Chat Logo","Chat logó"),design.chat_logo_url,tr("Dedicated Klavierhaus logo used only inside the public customer chat. One dark-design version is enough.","Külön Klavierhaus logó kizárólag a publikus ügyfélchathez. Nem kell világos/sötét változat."))}
     ${v6BrandAssetCard("erpLogoDark",tr("System logo · dark mode","System logó · sötét mód"),assets.erp_logo_dark_url,tr("Klavierhaus System logo used in dark mode.","A Klavierhaus System sötét módban használt logója."))}
     ${v6BrandAssetCard("erpLogoLight",tr("System logo · light mode","System logó · világos mód"),assets.erp_logo_light_url,tr("Klavierhaus System logo used in light mode.","A Klavierhaus System világos módban használt logója."))}\n    ${v6BrandAssetCard("loginLogo",tr("Login logo","Login logó"),assets.login_logo_url,tr("Dedicated logo for the permanently dark login screen.","Külön logó az állandóan sötét login felülethez."))}
     ${v6BrandAssetCard("appIcon",tr("PWA / app icon","PWA / alkalmazásikon"),assets.app_icon_url,tr("Independent installed-app and touch icon.","Önálló telepített alkalmazás- és touch ikon."))}
@@ -342,7 +349,7 @@ async function v6RenderBranding(){
   async function uploadBranding(endpoint,file){const form=new FormData();form.append("file",file);return api(endpoint,{method:"POST",body:form});}
   $("#websiteDesignForm")?.addEventListener("submit",async event=>{
     event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));
-    try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||"",favicon_url:design.favicon_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
+    try{await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,...values,logo_url:design.logo_url||"",favicon_url:design.favicon_url||"",chat_logo_url:design.chat_logo_url||""})});toast(tr("Website design saved.","Weboldal-dizájn mentve."),"success");await v6RenderBranding();}catch(error){toast(humanError(error),"error");}
   });
   $$("[data-brand-file]",host).forEach(input=>input.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0],kind=event.currentTarget.dataset.brandFile;if(!file)return;
@@ -353,6 +360,9 @@ async function v6RenderBranding(){
       }else if(kind==="websiteFavicon"){
         const out=await uploadBranding("/api/settings/branding/public-favicon",file),url=out.absolute_url||out.url;
         await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,favicon_url:url})});
+      }else if(kind==="chatLogo"){
+        const out=await uploadBranding("/api/settings/branding/chat-logo",file),url=out.absolute_url||out.url;
+        await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,chat_logo_url:url})});
       }else if(kind==="erpLogoDark")await uploadBranding("/api/settings/branding/erp-logo-dark",file);
       else if(kind==="erpLogoLight")await uploadBranding("/api/settings/branding/erp-logo-light",file);
       else if(kind==="loginLogo")await uploadBranding("/api/settings/branding/login-logo",file);
@@ -461,6 +471,24 @@ async function v6RenderWebsiteRecovery(){
   $$("[data-website-restore]",host).forEach(button=>button.addEventListener("click",()=>{const backup=backups.find(row=>String(row.id)===button.dataset.websiteRestore);if(backup)v6OpenRecoveryConfirm({mode:"restore",backup});}));
 }
 
+
+function v6CmsSidebarMarkup(){
+  const groups=new Map();
+  for(const page of state.cmsPages||[]){
+    const key=page.admin_group||"other";
+    if(!groups.has(key))groups.set(key,{order:Number(page.admin_group_order??99),label:state.language==="hu"?(page.admin_group_label_hu||page.admin_group_label_en||key):(page.admin_group_label_en||key),pages:[]});
+    groups.get(key).pages.push(page);
+  }
+  return [...groups.values()].sort((a,b)=>a.order-b.order).map(group=>{
+    const pages=group.pages.sort((a,b)=>Number(a.admin_page_order??99)-Number(b.admin_page_order??99));
+    return `<section class="cms-sidebar-group"><div class="cms-sidebar-group-title">${esc(group.label)}</div><div class="cms-sidebar-group-pages">${pages.map(page=>{
+      const title=state.language==="hu"?(page.title_hu||page.title_en||page.page_key):(page.title_en||page.page_key);
+      const route=page.routes?.[state.cmsLanguage]||page.routes?.en||"";
+      return `<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button"><strong>${esc(title)}</strong><small>${esc(route)}</small></button>`;
+    }).join("")}</div></section>`;
+  }).join("");
+}
+
 renderCms=async function(){
   const workspace=$("#workspace");
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role)){workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Admin access required.","Admin jogosultság szükséges."));return;}
@@ -473,7 +501,7 @@ renderCms=async function(){
   if(state.cmsMode==="collections")return v6RenderCollections();
   if(state.cmsMode==="branding")return v6RenderBranding();
   if(state.cmsMode==="recovery")return v6RenderWebsiteRecovery();
-  main.innerHTML=`<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${state.cmsPages.map(page=>`<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button">${esc(state.language==="hu"?(page.title_hu||page.title_en||page.page_key):(page.title_en||page.page_key))}</button>`).join("")}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
+  main.innerHTML=`<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${v6CmsSidebarMarkup()}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
   $$("[data-cms-page]").forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
   await v6LoadCmsPage();
 };

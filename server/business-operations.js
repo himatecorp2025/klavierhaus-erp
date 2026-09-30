@@ -11,6 +11,7 @@ const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods")
 const { buildConversationAutoReplyEmail, buildConversationReplyEmail } = require("./transactional-email");
 const { workflowBillablePhaseSubtotal } = require("./accounting-domain");
 const { generateCustomerConversationReportPdf } = require("./helpdesk-pdf");
+const { fallbackPage } = require("./website-content");
 const {
   attendanceError,
   attendanceRows,
@@ -1957,27 +1958,40 @@ function registerBusinessOperationsRoutes(options) {
   app.get("/api/marketing/seo/audit", auth, admin, (_req, res) => {
     const settingsRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_seo_settings'").get();
     let settings = {}; try { settings = JSON.parse(settingsRow?.setting_value || "{}"); } catch (_error) { settings = {}; }
-    const pages = ["home", "story", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy", "ticketTerms"];
+    const pages = ["home", "our", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy"];
+    const imageSeo=(value)=>{
+      let image_count=0,missing_alt_count=0;
+      const visit=node=>{
+        if(Array.isArray(node)){node.forEach(visit);return;}
+        if(!node||typeof node!=="object")return;
+        const image=clean(node.image||node.image_url||node.portrait_url,1000);
+        if(image){image_count+=1;const alt=clean(node.imageAlt||node.image_alt||node.portrait_alt,500);if(!alt)missing_alt_count+=1;}
+        Object.values(node).forEach(visit);
+      };
+      visit(value);return {image_count,missing_alt_count};
+    };
     const result = [];
     for (const pageKey of pages) {
       const rows = db.prepare("SELECT language,content_json FROM website_content_pages WHERE page_key=?").all(pageKey);
-      const keywordsEn = Array.isArray(settings.page_keywords_en?.[pageKey]) ? settings.page_keywords_en[pageKey] : [];
-      const keywordsHu = Array.isArray(settings.page_keywords_hu?.[pageKey]) ? settings.page_keywords_hu[pageKey] : [];
+      const keywordsEn = Array.isArray(settings.page_keywords_en?.[pageKey]) ? settings.page_keywords_en[pageKey] : (pageKey==="our"&&Array.isArray(settings.page_keywords_en?.story)?settings.page_keywords_en.story:[]);
+      const keywordsHu = Array.isArray(settings.page_keywords_hu?.[pageKey]) ? settings.page_keywords_hu[pageKey] : (pageKey==="our"&&Array.isArray(settings.page_keywords_hu?.story)?settings.page_keywords_hu.story:[]);
       const languages = ["en", "hu"].map((language) => {
-        const row = rows.find((item) => item.language === language);
-        let content = {}; try { content = JSON.parse(row?.content_json || "{}"); } catch (_error) { content = {}; }
+        const fallback=fallbackPage(pageKey,language)||{},row = rows.find((item) => item.language === language);
+        let stored = {}; try { stored = JSON.parse(row?.content_json || "{}"); } catch (_error) { stored = {}; }
+        const content={...fallback,...stored,seo:{...(fallback.seo||{}),...(stored.seo||{})},hero:{...(fallback.hero||{}),...(stored.hero||{})},sections:Array.isArray(stored.sections)?stored.sections:(fallback.sections||[])};
         const title = clean(content.seo?.title || content.hero?.title, 300);
         const description = clean(content.seo?.description || content.hero?.lead, 400);
         const keywords = language === "hu" ? keywordsHu : keywordsEn;
-        const issues = [];
+        const images=imageSeo(content),issues = [];
         if (!title) issues.push("MISSING_TITLE"); else if (title.length < 20 || title.length > 65) issues.push("TITLE_LENGTH");
         if (!description) issues.push("MISSING_DESCRIPTION"); else if (description.length < 70 || description.length > 170) issues.push("DESCRIPTION_LENGTH");
         if (!keywords.length) issues.push("NO_TARGET_KEYWORD");
-        return { language, title, description, keyword_count: keywords.length, issues, score: Math.max(0, 100 - issues.length * 25) };
+        if(images.missing_alt_count)issues.push("MISSING_IMAGE_ALT");
+        return { language, title, description, keyword_count: keywords.length, ...images, issues, score: Math.max(0, 100 - issues.length * 20) };
       });
       result.push({ page_key: pageKey, languages });
     }
-    res.json({ generated_at: new Date().toISOString(), pages: result, note: "This is a deterministic metadata/content audit; rankings require Search Console, Analytics and human content review." });
+    res.json({ generated_at: new Date().toISOString(), pages: result, technical_seo:["server-rendered title","meta description","canonical","hreflang","Open Graph","WebPage JSON-LD","Organization JSON-LD","image ALT"], note: "This is a deterministic rendered-content audit; rankings require Search Console, Analytics and human content review." });
   });
 }
 

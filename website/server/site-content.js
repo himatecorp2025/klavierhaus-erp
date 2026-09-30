@@ -9,11 +9,11 @@
  * redesigning the public website.
  */
 
-const VERSION = "1.2.4";
+const VERSION = "1.2.5";
 
 const routeDefinitions = Object.freeze({
   home: { en: "/", hu: "/hu/" },
-  story: { en: "/story", hu: "/hu/tortenetunk" },
+  our: { en: "/our", hu: "/hu/rolunk" },
   pianos: { en: "/pianos", hu: "/hu/zongorak" },
   steinway: { en: "/pianos/steinway", hu: "/hu/zongorak/steinway" },
   services: { en: "/services", hu: "/hu/szolgaltatasok" },
@@ -25,8 +25,7 @@ const routeDefinitions = Object.freeze({
   salon: { en: "/events/klavierhaus-salon", hu: "/hu/esemenyek/klavierhaus-szalon" },
   mission: { en: "/cultural-mission", hu: "/hu/kulturalis-kuldetes" },
   contact: { en: "/contact", hu: "/hu/kapcsolat" },
-  privacy: { en: "/privacy", hu: "/hu/adatkezeles" },
-  ticketTerms: { en: "/ticket-terms", hu: "/hu/jegyvasarlasi-feltetelek" }
+  privacy: { en: "/privacy", hu: "/hu/adatkezeles" }
 });
 
 const shared = Object.freeze({
@@ -73,21 +72,20 @@ const globalCopy = Object.freeze({
     scrollLabel: "Scroll",
     navigationLabel: "Primary navigation",
     nav: [
-      { key: "events", label: "Events" },
-      { key: "artists", label: "Artists" },
+      { key: "artists", label: "Artist" },
       { key: "mission", label: "Culture" },
-      { key: "pianos", label: "Pianos" },
-      { key: "services", label: "Services" }
+      { key: "pianos", label: "Piano" },
+      { key: "services", label: "Service" },
+      { key: "our", label: "Our" }
     ],
     consultationLabel: "Private consultation",
     footerStatement: "A private world of music, artistry, and uncompromising piano craft in New York.",
     footerExplore: "Explore",
     footerVisit: "Visit",
     footerLegal: "Legal",
-    footerStory: "Our story",
+    footerOur: "Our",
     footerContact: "Contact",
-    footerPrivacy: "Privacy",
-    footerTerms: "Ticket & refund terms",
+    footerPrivacy: "Privacy & Terms",
     rights: "All rights reserved.",
     imageCredit: "Editorial imagery is maintained by authorized Klavierhaus administrators.",
     backHome: "Return home",
@@ -204,21 +202,20 @@ const globalCopy = Object.freeze({
     scrollLabel: "Görgetés",
     navigationLabel: "Fő navigáció",
     nav: [
-      { key: "events", label: "Események" },
-      { key: "artists", label: "Művészek" },
-      { key: "mission", label: "Kultúra" },
-      { key: "pianos", label: "Zongorák" },
-      { key: "services", label: "Szolgáltatások" }
+      { key: "artists", label: "Artist" },
+      { key: "mission", label: "Culture" },
+      { key: "pianos", label: "Piano" },
+      { key: "services", label: "Service" },
+      { key: "our", label: "Our" }
     ],
     consultationLabel: "Privát konzultáció",
     footerStatement: "A zene, a művészet és a kompromisszumok nélküli zongoraépítés különleges New York-i világa.",
     footerExplore: "Felfedezés",
     footerVisit: "Látogatás",
     footerLegal: "Jogi információk",
-    footerStory: "Történetünk",
+    footerOur: "Rólunk",
     footerContact: "Kapcsolat",
-    footerPrivacy: "Adatkezelés",
-    footerTerms: "Jegyvásárlási és visszatérítési feltételek",
+    footerPrivacy: "Adatkezelés és ÁSZF",
     rights: "Minden jog fenntartva.",
     imageCredit: "A szerkesztőségi képeket a Klavierhaus jogosult adminisztrátorai kezelik.",
     backHome: "Vissza a főoldalra",
@@ -336,7 +333,7 @@ const pages = Object.freeze({
           ],
           image: shared.salonImage,
           imageAlt: "A pianist sharing music with an intimate audience at Klavierhaus",
-          link: { label: "Discover our story", key: "story" }
+          link: { label: "Discover our story", key: "our" }
         },
         {
           id: "testimonial",
@@ -396,13 +393,17 @@ const pages = Object.freeze({
         }
       ]
     },
-    story: {
+    our: {
       template: "editorial",
-      seo: { title: "Our Story | Klavierhaus New York", description: "Discover the Klavierhaus legacy of expressive piano craft, restoration, and cultural life in New York." },
-      hero: { eyebrow: "Our story", title: "A quiet musical renaissance in New York.", lead: "For more than three decades, Klavierhaus has pursued a simple but demanding idea: a piano should carry color, poetry, and a human voice.", image: shared.heroImage, imageAlt: "A concert grand piano in a refined Klavierhaus-inspired interior" },
+      seo: { title: "Our | Klavierhaus New York", description: "Meet Klavierhaus: our founder, history, mission, piano craft, and cultural vision in New York." },
+      hero: { eyebrow: "Our", title: "A house built around the living voice of music.", lead: "Klavierhaus brings together piano craft, artists, culture, and personal musical encounters in New York.", image: shared.heroImage, imageAlt: "Klavierhaus grand piano in an elegant New York interior" },
       sections: [
-        { id: "legacy", type: "statement", eyebrow: "Legacy", title: "A living craft, carried forward.", body: ["At the heart of Klavierhaus is the knowledge of master craftsman Sujatri Reisinger, whose work draws on the expressive traditions of historic European and American instruments.", "The aim is not nostalgia. It is to preserve what is eternally valuable in a piano—lyricism, color, sensitivity, and the ability to answer the hands and imagination of the pianist."] },
-        { id: "future", type: "visual", eyebrow: "The next movement", title: "Tradition becomes meaningful when it is shared.", body: ["Klavierhaus is preparing its legacy for a new generation of craftspeople, artists, collectors, and listeners."], image: shared.craftImage, imageAlt: "Piano craftsmanship in a dark, elegant atelier", link: { label: "Our cultural mission", key: "mission" } }
+        { id: "company", type: "statement", eyebrow: "Klavierhaus", title: "Who we are.", body: ["Klavierhaus is a New York piano house devoted to exceptional instruments, uncompromising technical craft, and a cultural life shaped around attentive listening."], image: shared.salonImage, imageAlt: "Klavierhaus salon prepared for an intimate musical encounter" },
+        { id: "founder", type: "visual", eyebrow: "Founder", title: "A tradition carried by people.", body: ["Klavierhaus was shaped by a belief that choosing, preparing, and caring for a piano begins with understanding the musician and the voice of the instrument."], image: shared.artistSalonImage, imageAlt: "Portrait and musical setting representing the people behind Klavierhaus" },
+        { id: "history", type: "statement", eyebrow: "History", title: "A continuing New York story.", body: ["Through its New York story, Klavierhaus has brought together piano preparation, restoration, private consultation, and cultural exchange under one roof."], image: shared.craftImage, imageAlt: "Piano craftsmanship representing the history of Klavierhaus" },
+        { id: "mission", type: "visual", reverse: true, eyebrow: "Mission", title: "Craft exists in service of music.", body: ["Our mission is to protect the expressive potential of exceptional instruments and create the conditions in which musicians, listeners, and pianos can meet with attention and depth."], image: shared.heroImage, imageAlt: "Grand piano representing the Klavierhaus musical mission", link: { label: "Our cultural mission", key: "mission" } },
+        { id: "philosophy", type: "editorial", eyebrow: "Our philosophy", title: "The sound matters because the human experience matters.", body: ["We approach sound as a relationship between instrument, room, musician, and listener. Technical precision matters because it allows character, color, and musical intention to emerge."], image: shared.salonImage, imageAlt: "Piano and listener in a refined Klavierhaus musical environment" },
+        { id: "consultation", type: "cta", eyebrow: "Visit Klavierhaus", title: "Meet the house in person.", body: "Arrange a private consultation in New York.", link: { label: "Private consultation", key: "consultation" } }
       ]
     },
     pianos: {
@@ -522,18 +523,11 @@ const pages = Object.freeze({
     },
     privacy: {
       template: "legal",
-      seo: { title: "Privacy | Klavierhaus", description: "Development-stage privacy information for the new Klavierhaus public website." },
-      hero: { eyebrow: "Legal", title: "Privacy information", lead: "Development-stage notice for the temporary Klavierhaus public website." },
+      seo: { title: "Privacy & Terms | Klavierhaus", description: "Klavierhaus privacy information, data-processing notice, and general terms and conditions." },
+      hero: { eyebrow: "Legal", title: "Privacy & Terms", lead: "Official privacy, data-processing and contractual information published by Klavierhaus." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Current development status", paragraphs: ["This temporary website provides development checkout with seven supported payment methods. Credit Card uses Stripe Sandbox without live payment; the other supported methods create a pending reservation until settlement is confirmed. Service enquiries and event-interest requests can be submitted through the active forms; the information entered is transmitted to the Klavierhaus administration system for follow-up.", "Optional analytics and marketing measurement remain disabled until the visitor gives the corresponding consent. Standard technical server logs may process information required to deliver and protect the website, such as request time, requested resource, browser information, and network address."], list: ["Essential storage supports the requested website functions. Analytics and marketing technologies are controlled separately in Tracking settings.", "The public website remains marked noindex during development.", "A complete, legally reviewed privacy notice must be published before the final klavierhaus.com launch and live payments.", "Questions may be sent to info@klavierhaus.com."], note: "This development notice describes the current test environment and must receive legal review before launch." }
-      ]
-    },
-    ticketTerms: {
-      template: "legal",
-      seo: { title: "Ticket & Refund Terms | Klavierhaus", description: "Development draft of the Klavierhaus event ticket and refund rules." },
-      hero: { eyebrow: "Legal", title: "Ticket and refund terms", lead: "Development draft reflecting the agreed event rules. Seven payment methods are available; Credit Card uses Stripe Sandbox in the current test environment." },
-      sections: [
-        { id: "terms-draft", type: "legal", title: "Agreed operating principles", paragraphs: ["Public paid ticket orders use the selected payment method. Credit Card can be confirmed immediately through Stripe Sandbox; Bank Transfer / ACH, Zelle, Check, Payment Link, PayPal and Cash remain pending until settlement is confirmed by Klavierhaus.", "General admission capacity applies; there is no numbered seating plan."], list: ["If Klavierhaus cancels an event, the ticket price is refunded in full.", "If Klavierhaus reschedules an event, the ticket remains valid; a refund may be requested until more than 48 hours before the new start time.", "If the purchaser cancels more than 48 hours before the event, a refund is available.", "At exactly 48 hours or less before the event, purchaser cancellation and non-attendance are not refundable.", "Partial refunds are not offered.", "Admission is managed from the protected guest list."], note: "Stripe Sandbox transactions do not move real money. This draft must receive legal review before live ticket sales are enabled." }
+        { id: "privacy-policy", type: "legal", title: "Privacy & data-processing notice", content: "Paste the current Klavierhaus Privacy Policy and data-processing notice here." },
+        { id: "terms-and-conditions", type: "legal", title: "Terms & Conditions", content: "Paste the current Klavierhaus Terms & Conditions here." }
       ]
     }
   }),
@@ -554,7 +548,7 @@ const pages = Object.freeze({
         secondary: { label: "Privát látogatás egyeztetése", key: "services" }
       },
       sections: [
-        { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], image: shared.salonImage, imageAlt: "Zongoraművész és közönsége egy meghitt Klavierhaus eseményen", link: { label: "Történetünk", key: "story" } },
+        { id: "manifesto", type: "statement", eyebrow: "A ház", title: "Nem egyszerűen a zongorák helye. Annak a helye, amit a zene lehetővé tesz.", body: ["A Klavierhaus egyesíti a zongora kifejező lelkületét, az azt megszólaltató művészeket és a látványosság helyett valódi közelséget kereső közönséget.", "Itt a mesterség a kultúrát szolgálja. Minden hangszer, előadás és személyes találkozás alapja a figyelem: a hangszínre, az érintésre és a hang emberi élményére."], image: shared.salonImage, imageAlt: "Zongoraművész és közönsége egy meghitt Klavierhaus eseményen", link: { label: "Történetünk", key: "our" } },
         { id: "testimonial", type: "quote", quote: "Számomra a Klavierhaus igazi zenei kincs.", attribution: "Richard Goode" },
         { id: "culture", type: "visual", reverse: true, eyebrow: "Kulturális küldetés", title: "Megőrizni a zene érzelmi nyelvét.", body: ["Egy rohanó világban a Klavierhaus védi azokat a ritka feltételeket, amelyek között a szépség teljességében hallható: egy kivételes hangszer, egy érzékeny művész és egy közönség, amely elég közel van minden színváltozás érzékeléséhez."], image: shared.heroImage, imageAlt: "Elegáns privát térben megvilágított koncertzongora", link: { label: "Kulturális küldetésünk", key: "mission" } },
         { id: "artists", type: "editorial", eyebrow: "Művészek", title: "A hangszer akkor válik teljessé, amikor a művész lélegzetet ad neki.", body: ["Művészoldalainkon a Klavierhaus kulturális programjához kapcsolódó zenészeket, alkotótársakat és művészi hangokat mutatjuk be."], image: shared.artistSalonImage, imageAlt: "Zongoraművész bensőséges közönség előtt egy elegáns Klavierhaus szalonban", link: { label: "Művészeink", key: "artists" } },
@@ -566,13 +560,17 @@ const pages = Object.freeze({
         { id: "consultation", type: "cta", eyebrow: "Személyes meghívás", title: "Vannak hangszerek, amelyeket nem leírni, hanem megtapasztalni kell.", body: "Egyeztessen privát látogatást a New York-i Klavierhausba.", link: { label: "Privát konzultáció kérése", key: "consultation" } }
       ]
     },
-    story: {
+    our: {
       template: "editorial",
-      seo: { title: "Történetünk | Klavierhaus New York", description: "Ismerje meg a Klavierhaus örökségét: kifejező zongoraépítés, restaurálás és kulturális élet New Yorkban." },
-      hero: { eyebrow: "Történetünk", title: "Csendes zenei reneszánsz New Yorkban.", lead: "A Klavierhaus több mint három évtizede követ egy egyszerű, mégis rendkívül igényes gondolatot: a zongorának színt, költészetet és emberi hangot kell hordoznia.", image: shared.heroImage, imageAlt: "Koncertzongora elegáns, Klavierhaus-hangulatú térben" },
+      seo: { title: "Rólunk | Klavierhaus New York", description: "Ismerje meg a Klavierhaust: alapítóinkat, történetünket, küldetésünket, zongorás mesterségünket és kulturális szemléletünket New Yorkban." },
+      hero: { eyebrow: "Our", title: "Egy ház, amely a zene élő hangja köré épült.", lead: "A Klavierhaus a zongorás mesterséget, a művészeket, a kultúrát és a személyes zenei találkozásokat kapcsolja össze New Yorkban.", image: shared.heroImage, imageAlt: "Klavierhaus koncertzongora elegáns New York-i enteriőrben" },
       sections: [
-        { id: "legacy", type: "statement", eyebrow: "Örökség", title: "Élő mesterség, amely tovább öröklődik.", body: ["A Klavierhaus középpontjában Sujatri Reisinger mester tudása áll, akinek munkája történelmi európai és amerikai hangszerek kifejező hagyományára épül.", "A cél nem a múlt utánzása. Az a feladat, hogy megőrizzük mindazt, ami örök értékű egy zongorában: a líraiságot, a színeket, az érzékenységet, valamint a képességet, hogy válaszoljon a zongorista kezére és képzeletére."] },
-        { id: "future", type: "visual", eyebrow: "A következő tétel", title: "A hagyomány akkor válik jelentőssé, amikor megosztjuk.", body: ["A Klavierhaus örökségét a mesterek, művészek, gyűjtők és hallgatók következő nemzedéke számára készíti elő."], image: shared.craftImage, imageAlt: "Zongoraépítő mesterség egy sötét, elegáns műhelyben", link: { label: "Kulturális küldetésünk", key: "mission" } }
+        { id: "company", type: "statement", eyebrow: "Klavierhaus", title: "Kik vagyunk.", body: ["A Klavierhaus New York-i zongoraház, amely kivételes hangszerekkel, kompromisszumok nélküli szakmai munkával és a figyelmes hallgatás köré épülő kulturális élettel foglalkozik."], image: shared.salonImage, imageAlt: "Klavierhaus szalon bensőséges zenei találkozásra előkészítve" },
+        { id: "founder", type: "visual", eyebrow: "Alapító", title: "A hagyományt emberek viszik tovább.", body: ["A Klavierhaust az a meggyőződés formálta, hogy a zongora kiválasztása, előkészítése és gondozása a zenész és a hangszer saját hangjának megértésével kezdődik."], image: shared.artistSalonImage, imageAlt: "A Klavierhaus mögött álló embereket megidéző portré és zenei környezet" },
+        { id: "history", type: "statement", eyebrow: "Történet", title: "Egy folytatódó New York-i történet.", body: ["A Klavierhaus New York-i történetében a zongorák előkészítése, restaurálása, a személyes konzultáció és a kulturális találkozások egyetlen szakmai közeggé kapcsolódtak össze."], image: shared.craftImage, imageAlt: "A Klavierhaus történetét jelképező zongorás mesterség" },
+        { id: "mission", type: "visual", reverse: true, eyebrow: "Küldetés", title: "A mesterség a zenét szolgálja.", body: ["Küldetésünk, hogy megőrizzük a kivételes hangszerek kifejezőerejét, és olyan közeget teremtsünk, ahol zenész, hallgató és zongora figyelemmel és mélységgel találkozhat."], image: shared.heroImage, imageAlt: "A Klavierhaus zenei küldetését megjelenítő koncertzongora", link: { label: "Kulturális küldetésünk", key: "mission" } },
+        { id: "philosophy", type: "editorial", eyebrow: "Filozófiánk", title: "A hang azért számít, mert az emberi élmény számít.", body: ["A hangra a hangszer, a tér, a zenész és a hallgató kapcsolatként tekintünk. A technikai pontosság azért fontos, mert teret ad a karakternek, a színeknek és a zenei szándéknak."], image: shared.salonImage, imageAlt: "Zongora és hallgató kifinomult Klavierhaus zenei környezetben" },
+        { id: "consultation", type: "cta", eyebrow: "Látogatás", title: "Ismerje meg személyesen a Klavierhaust.", body: "Egyeztessen privát konzultációt New Yorkban.", link: { label: "Privát konzultáció", key: "consultation" } }
       ]
     },
     pianos: {
@@ -692,18 +690,11 @@ const pages = Object.freeze({
     },
     privacy: {
       template: "legal",
-      seo: { title: "Adatkezelés | Klavierhaus", description: "A Klavierhaus új nyilvános weboldalának fejlesztési adatkezelési tájékoztatója." },
-      hero: { eyebrow: "Jogi információk", title: "Adatkezelési tájékoztató", lead: "Fejlesztési tájékoztató a Klavierhaus ideiglenes nyilvános weboldalához." },
+      seo: { title: "Adatkezelés és ÁSZF | Klavierhaus", description: "A Klavierhaus adatkezelési tájékoztatója, adatvédelmi információi és általános szerződési feltételei." },
+      hero: { eyebrow: "Jogi információk", title: "Adatkezelés és ÁSZF", lead: "A Klavierhaus által közzétett hivatalos adatvédelmi, adatkezelési és szerződéses információk." },
       sections: [
-        { id: "privacy-status", type: "legal", title: "Jelenlegi fejlesztési állapot", paragraphs: ["Az ideiglenes weboldal fejlesztési fizetési folyamatot biztosít hét támogatott fizetési móddal. Bankkártyánál Stripe Sandbox működik valódi pénzmozgás nélkül; a többi támogatott mód a rendezés visszaigazolásáig függőben lévő foglalást hoz létre. A szolgáltatási érdeklődések és az események újraszervezésére vonatkozó kérések az aktív űrlapokon elküldhetők; a megadott adatok utánkövetés céljából a Klavierhaus adminisztrációs rendszerébe kerülnek.", "Az opcionális analitikai és marketingmérés mindaddig kikapcsolva marad, amíg a látogató az adott célhoz hozzá nem járul. A weboldal működéséhez és védelméhez szükséges szabványos technikai szervernaplók kezelhetnek olyan adatokat, mint a kérés időpontja, a kért erőforrás, a böngésző adatai és a hálózati cím."], list: ["A szükséges tárolás a kért weboldalfunkciókat biztosítja. Az analitikai és marketingtechnológiák külön vezérelhetők a Követési beállításokban.", "A nyilvános weboldal a fejlesztés alatt noindex állapotban marad.", "A végleges klavierhaus.com indulása és az éles fizetés előtt teljes, jogilag ellenőrzött adatkezelési tájékoztatót kell közzétenni.", "Kérdés esetén az info@klavierhaus.com cím használható."], note: "Ez a fejlesztési tájékoztató a jelenlegi tesztkörnyezetet írja le, és indulás előtt jogi ellenőrzést igényel." }
-      ]
-    },
-    ticketTerms: {
-      template: "legal",
-      seo: { title: "Jegyvásárlási és visszatérítési feltételek | Klavierhaus", description: "A Klavierhaus eseményjegyekre és visszatérítésre vonatkozó fejlesztési szabálytervezete." },
-      hero: { eyebrow: "Jogi információk", title: "Jegyvásárlási és visszatérítési feltételek", lead: "A megállapodott eseményszabályokat tükröző fejlesztési tervezet. Hét fizetési mód érhető el; bankkártyánál a jelenlegi tesztkörnyezetben Stripe Sandbox működik." },
-      sections: [
-        { id: "terms-draft", type: "legal", title: "Elfogadott működési alapelvek", paragraphs: ["A nyilvános fizetős jegyrendelés a kiválasztott fizetési módot használja. Bankkártyánál a Stripe Sandbox visszaigazolása azonnali lehet; Bank Transfer / ACH, Zelle, Check, Payment Link, PayPal és Cash esetén a foglalás a Klavierhaus általi pénzügyi visszaigazolásig függőben marad.", "Általános férőhelyes rendszer működik, számozott ülésrend nélkül."], list: ["Ha a Klavierhaus törli az eseményt, a teljes jegyár visszatérítésre kerül.", "Ha a Klavierhaus áthelyezi az eseményt, a jegy érvényes marad; visszatérítés az új kezdés előtt több mint 48 óráig kérhető.", "Ha a vásárló több mint 48 órával az esemény előtt mondja le, visszatérítés jár.", "Pontosan 48 órával vagy azon belül a vásárlói lemondás és a távolmaradás nem visszatéríthető.", "Részleges visszatérítés nincs.", "A beléptetés a védett vendéglista alapján történik."], note: "A Stripe Sandbox-tranzakciók nem mozgatnak valódi pénzt. Az éles jegyértékesítés előtt ez a tervezet jogi ellenőrzést igényel." }
+        { id: "adatkezeles", type: "legal", title: "Adatkezelési és adatvédelmi nyilatkozat", content: "Ide másolható be a Klavierhaus aktuális adatkezelési és adatvédelmi nyilatkozata." },
+        { id: "altalanos-szerzodesi-feltetelek", type: "legal", title: "Általános szerződési feltételek", content: "Ide másolható be a Klavierhaus aktuális általános szerződési feltételeinek teljes szövege." }
       ]
     }
   })
