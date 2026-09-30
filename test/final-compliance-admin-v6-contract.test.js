@@ -10,7 +10,8 @@ const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-driven",()=>{
   const html=read("public/index.html"),v6=read("public/v6.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
   assert.match(html,/id="appSidebar"/);
-  assert.match(html,/id="sidebarToggle"/);\n  assert.match(html,/id="headerSidebarToggle"/);
+  assert.match(html,/id="sidebarToggle"/);
+  assert.match(html,/id="headerSidebarToggle"/);
   assert.match(html,/id="themeToggle"/);
   assert.doesNotMatch(html,/id="loginThemeToggle"/);
   assert.match(html,/mobile-intake-primary/);
@@ -23,7 +24,10 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(html,/src="\/v6\.js"/);
   assert.match(v6,/kh_theme_user_/);
   assert.match(v6,/\/api\/me\/preferences/);
-  assert.match(v6,/kh_sidebar_collapsed_/);\n  assert.match(v6,/headerSidebarToggle/);\n  assert.match(v6,/v6SyncSidebarButtons/);\n  assert.match(css,/\\.header-sidebar-toggle/);
+  assert.match(v6,/kh_sidebar_collapsed_/);
+  assert.match(v6,/headerSidebarToggle/);
+  assert.match(v6,/v6SyncSidebarButtons/);
+  assert.match(css,/\.header-sidebar-toggle/);
   assert.match(css,/:root\[data-theme="dark"\]/);
   assert.match(css,/:root\[data-theme="light"\]/);
   assert.match(css,/\.app-sidebar/);
