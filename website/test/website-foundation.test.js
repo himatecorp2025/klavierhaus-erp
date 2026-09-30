@@ -25,7 +25,7 @@ test("health endpoint identifies stage-one public website", async () => {
     assert.deepEqual(await response.json(), {
       status: "ok",
       service: "klavierhaus-public-website",
-      version: "1.2.5",
+      version: "1.2.4",
       commit: "unknown",
       indexing: "disabled",
       event_api: "not-configured"
@@ -56,8 +56,8 @@ test("every English and Hungarian route renders localized canonical metadata", a
 test("private appointment assets are cache-busted and the picker is reinitialized when dialogs open", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
     const body = await (await fetch(`${origin}/`)).text();
-    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.5/);
-    assert.match(body, /\/assets\/app\.js\?v=1\.2\.5/);
+    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.4-private-picker-20260930-1/);
+    assert.match(body, /\/assets\/app\.js\?v=1\.2\.4-private-picker-20260930-1/);
   });
   const browser=fs.readFileSync(path.join(__dirname,"..","public","app.js"),"utf8");
   const css=fs.readFileSync(path.join(__dirname,"..","public","styles.css"),"utf8");
