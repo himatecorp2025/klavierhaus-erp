@@ -13,7 +13,8 @@ function makeDb(){
       id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,first_name TEXT,last_name TEXT,company_name TEXT,contact_name TEXT,
       email TEXT,mobile_phone TEXT,line_phone TEXT,phone TEXT,street TEXT,city TEXT,district TEXT,postcode TEXT,country TEXT,address TEXT,
       notes TEXT,short_memo_to_name TEXT,preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'PRIVATE',
-      is_vip INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      is_vip INTEGER NOT NULL DEFAULT 0,deleted_at TEXT,deleted_by_user_id TEXT,archive_document_id INTEGER,deletion_reason TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE pianos(
       id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER,category TEXT,brand TEXT NOT NULL DEFAULT 'No brand',model TEXT,serial_number TEXT,finish TEXT,
@@ -73,6 +74,9 @@ test("complete CSV import preserves every non-ID field, source clients stay dist
   ]);
   const first=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"TEST_CSV"});
   assert.equal(first.rows,3);
+  assert.equal(first.columns,33);
+  assert.equal(first.sourceRowsPersisted,3);
+  assert.ok(first.sourceNonEmptyValues>0);
   assert.equal(first.sourceClients,2);
   assert.equal(first.ownerlessPianos,1);
   assert.equal(first.reviewItems,0);
@@ -80,6 +84,12 @@ test("complete CSV import preserves every non-ID field, source clients stay dist
   assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos").get().c,3);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM client_piano_review_queue WHERE status='PENDING'").get().c,0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_import_rows").get().c,3);
+  const raw=JSON.parse(db.prepare("SELECT raw_json FROM master_data_import_rows WHERE source_name='TEST_CSV' AND source_instrument_id='100'").get().raw_json);
+  assert.equal(raw.columns.length,33);
+  assert.equal(raw.values.length,33);
+  assert.equal(raw.values[2],"Steinway & Sons");
+  assert.equal(raw.values[4],"170");
+  assert.equal(raw.values[30],"same@example.test");
 
   const firstClient=db.prepare("SELECT * FROM clients WHERE id=(SELECT client_id FROM master_data_client_source_map WHERE source_name='TEST_CSV' AND source_client_id='500')").get();
   assert.equal(firstClient.first_name,"Joan");
@@ -132,5 +142,37 @@ test("complete CSV import preserves every non-ID field, source clients stay dist
 test("Master Data source rejects unsupported CSV shape",()=>{
   const db=makeDb();
   assert.throws(()=>importLegacyInstrumentClientCsv(db,{content:"a,b\n1,2",sourceName:"BAD"}),/MASTER_DATA_CSV/);
+  db.close();
+});
+
+
+test("CSV import links to an unclaimed existing client but never merges two distinct source client IDs",()=>{
+  const db=makeDb();
+  const existingId=Number(db.prepare("INSERT INTO clients(name,email,phone,address) VALUES(?,?,?,?)").run("Existing Customer","existing@example.test","2125550100","100 Main St, New York, NY, 10001, United States").lastInsertRowid);
+  const csv=sourceCsv([
+    sourceRow({instrumentId:"200",brand:"Fazioli",model:"F212",clientId:"900",first:"Existing",last:"Customer",street:"100 Main St",city:"New York",district:"NY",postcode:"10001",country:"United States",linePhone:"2125550100",email:"existing@example.test"}),
+    sourceRow({instrumentId:"201",brand:"Yamaha",model:"C3",clientId:"901",first:"Existing",last:"Customer",street:"200 Other St",city:"New York",district:"NY",postcode:"10002",country:"United States",linePhone:"2125550100",email:"existing@example.test"})
+  ]);
+  const summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"MATCH_TEST"});
+  const map900=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name='MATCH_TEST' AND source_client_id='900'").get();
+  const map901=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name='MATCH_TEST' AND source_client_id='901'").get();
+  assert.equal(map900.client_id,existingId);
+  assert.notEqual(map901.client_id,existingId);
+  assert.notEqual(map901.client_id,map900.client_id);
+  assert.equal(summary.matchedExistingClients,1);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(existingId).c,1);
+  db.close();
+});
+
+test("archived client source mapping is a tombstone and reimport does not resurrect the client",()=>{
+  const db=makeDb();
+  const id=Number(db.prepare("INSERT INTO clients(name,email,deleted_at) VALUES(?,?,CURRENT_TIMESTAMP)").run("Archived Customer","archived@example.test").lastInsertRowid);
+  db.prepare("INSERT INTO master_data_client_source_map(source_name,source_client_id,client_id) VALUES('TOMBSTONE','777',?)").run(id);
+  const csv=sourceCsv([sourceRow({instrumentId:"300",brand:"Bösendorfer",model:"225",clientId:"777",first:"Archived",last:"Customer",email:"archived@example.test"})]);
+  const summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"TOMBSTONE"});
+  assert.equal(summary.deletedClientsSkipped,1);
+  assert.equal(db.prepare("SELECT deleted_at FROM clients WHERE id=?").get(id).deleted_at!==null,true);
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=(SELECT piano_id FROM master_data_piano_source_map WHERE source_name='TOMBSTONE' AND source_instrument_id='300')").get();
+  assert.equal(piano.client_id,null);
   db.close();
 });
