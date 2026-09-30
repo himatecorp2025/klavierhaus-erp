@@ -85,7 +85,7 @@ test("unsaved desktop Master Data still uses Save Discard Cancel and nullable pi
   assert.match(app,/body\.client_id=body\.client_id\?Number\(body\.client_id\):null/);
 });
 
-test("raw source rows are retained and source IDs are visible and searchable in Master Data",()=>{
+test("raw source rows remain retained and searchable without exposing technical import-history panels",()=>{
   const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js"),app=read("public/app.js");
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_import_rows/);
   assert.match(schema,/raw_json TEXT NOT NULL/);
@@ -93,13 +93,12 @@ test("raw source rows are retained and source IDs are visible and searchable in 
   assert.match(reconcile,/JSON\.stringify\(record\.raw\)/);
   assert.match(reconcile,/master_data_client_source_map/);
   assert.match(reconcile,/master_data_piano_source_map/);
-  assert.match(app,/Source client ID/);
-  assert.match(app,/Forrás ügyfél-ID/);
-  assert.match(app,/Source instrument ID/);
-  assert.match(app,/Forrás hangszer-ID/);
-  assert.match(app,/source_client_id/);
-  assert.match(app,/source_instrument_id/);
-  assert.match(app,/Imported source history/);
+  assert.match(app,/client\.source_client_id/);
+  assert.match(app,/piano\.source_instrument_id/);
+  assert.match(app,/piano\.source_client_id/);
+  assert.doesNotMatch(app,/Imported source history|Importált forráselőzmények/);
+  assert.doesNotMatch(app,/Source data|Forrásadatok/);
+  assert.doesNotMatch(app,/masterClientSourceHistoryMarkup|masterPianoSourceMarkup/);
 });
 
 test("PWA cache is bumped for the full 33-column Master Data release",()=>{
