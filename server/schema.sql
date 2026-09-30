@@ -493,6 +493,8 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   reopen_reason TEXT,
   reopened_at TEXT,
   reopened_by_user_id TEXT,
+  activity_cycle INTEGER NOT NULL DEFAULT 1 CHECK(activity_cycle >= 1),
+  last_notified_activity_cycle INTEGER NOT NULL DEFAULT 0 CHECK(last_notified_activity_cycle >= 0),
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
@@ -583,6 +585,7 @@ CREATE TABLE IF NOT EXISTS support_holidays (
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_status_activity ON customer_conversations(status,last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_conversations_resume ON customer_conversations(email,category,name,status,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_assignee ON customer_conversations(assigned_user_id,status,last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation_time ON customer_messages(conversation_id,created_at,id);
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -1096,7 +1099,7 @@ CREATE TABLE IF NOT EXISTS clients (
   notes TEXT,
   short_memo_to_name TEXT,
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
-  client_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
+  client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
   vip_updated_by_user_id TEXT,
   vip_updated_at TEXT,
@@ -1200,6 +1203,38 @@ CREATE TABLE IF NOT EXISTS master_data_import_rows (
 );
 CREATE INDEX IF NOT EXISTS idx_master_data_import_client ON master_data_import_rows(client_id,source_name);
 CREATE INDEX IF NOT EXISTS idx_master_data_import_piano ON master_data_import_rows(piano_id,source_name);
+
+CREATE TABLE IF NOT EXISTS master_data_source_rows (
+  source_name TEXT NOT NULL,
+  source_row_number INTEGER NOT NULL,
+  source_instrument_id TEXT,
+  source_client_id TEXT,
+  client_id INTEGER,
+  piano_id INTEGER,
+  raw_json TEXT NOT NULL,
+  raw_sha256 TEXT NOT NULL,
+  nonempty_cell_count INTEGER NOT NULL DEFAULT 0 CHECK(nonempty_cell_count >= 0),
+  imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_name,source_row_number),
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_data_source_rows_client ON master_data_source_rows(source_name,source_client_id,source_row_number);
+CREATE INDEX IF NOT EXISTS idx_master_data_source_rows_instrument ON master_data_source_rows(source_name,source_instrument_id,source_row_number);
+
+CREATE TABLE IF NOT EXISTS master_data_client_field_values (
+  source_name TEXT NOT NULL,
+  source_client_id TEXT NOT NULL,
+  field_name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  first_source_row INTEGER NOT NULL,
+  last_source_row INTEGER NOT NULL,
+  occurrences INTEGER NOT NULL DEFAULT 1 CHECK(occurrences > 0),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_name,source_client_id,field_name,value)
+);
+CREATE INDEX IF NOT EXISTS idx_master_data_client_field_values_client ON master_data_client_field_values(source_name,source_client_id,field_name);
 
 CREATE TABLE IF NOT EXISTS intake_leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
