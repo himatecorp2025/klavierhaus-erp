@@ -312,14 +312,21 @@ function repairSourceRelationships(db){
   for(const row of rows){
     const clientMap=db.prepare(`SELECT m.client_id FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id
       WHERE m.source_name=? AND m.source_client_id=? AND c.deleted_at IS NULL`).get(row.source_name,row.source_client_id);
-    if(!clientMap?.client_id)continue;
+    let clientId=clientMap?.client_id||null;
+    if(!clientId&&row.client_id&&db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(row.client_id)){
+      clientId=row.client_id;
+      db.prepare(`INSERT INTO master_data_client_source_map(source_name,source_client_id,client_id,updated_at)
+        VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_client_id) DO UPDATE SET client_id=excluded.client_id,updated_at=CURRENT_TIMESTAMP`)
+        .run(row.source_name,row.source_client_id,clientId);
+    }
+    if(!clientId)continue;
     let pianoId=row.piano_id||null;
     if(!pianoId&&row.source_instrument_id)pianoId=db.prepare("SELECT piano_id FROM master_data_piano_source_map WHERE source_name=? AND source_instrument_id=?").get(row.source_name,row.source_instrument_id)?.piano_id||null;
     if(!pianoId)continue;
     const piano=db.prepare("SELECT id,client_id FROM pianos WHERE id=?").get(pianoId);if(!piano)continue;
-    if(Number(piano.client_id||0)!==Number(clientMap.client_id)){db.prepare("UPDATE pianos SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(clientMap.client_id,piano.id);relinkedPianos++;}
-    if(tableExists(db,"master_data_source_rows")){db.prepare("UPDATE master_data_source_rows SET client_id=?,piano_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_row_number=?").run(clientMap.client_id,piano.id,row.source_name,row.source_row_number);auditRowsUpdated++;}
-    if(tableExists(db,"master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET client_id=?,piano_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_instrument_id=?").run(clientMap.client_id,piano.id,row.source_name,row.source_instrument_id);
+    if(Number(piano.client_id||0)!==Number(clientId)){db.prepare("UPDATE pianos SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(clientId,piano.id);relinkedPianos++;}
+    if(tableExists(db,"master_data_source_rows")){db.prepare("UPDATE master_data_source_rows SET client_id=?,piano_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_row_number=?").run(clientId,piano.id,row.source_name,row.source_row_number);auditRowsUpdated++;}
+    if(tableExists(db,"master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET client_id=?,piano_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_instrument_id=?").run(clientId,piano.id,row.source_name,row.source_instrument_id);
   }
   return {relinkedPianos,auditRowsUpdated};
 }
