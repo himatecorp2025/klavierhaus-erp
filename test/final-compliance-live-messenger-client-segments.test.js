@@ -149,7 +149,7 @@ test("17 public appointment UI is explicit about HU US formats and New York time
   assert.match(html,/name="scheduled_at_display" type="datetime-local" step="900"/);
   assert.match(html,/data-private-calendar/);
   assert.match(browser,/scheduled_at_display/);
-  assert.match(browser,/\^\\d\{4\}-\\d\{2\}-\\d\{2\}T\\d\{2\}:\\d\{2\}\$/);
+  assert.ok(browser.includes('match=raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/)'));
   assert.match(backend,/America\/New_York/);
 });
 
