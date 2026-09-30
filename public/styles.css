@@ -886,6 +886,15 @@ select option{background:var(--surface);color:var(--ink)}
 .cms-sidebar,.cms-editor{background:var(--surface);border-color:var(--line)}
 .cms-page-button{color:var(--muted)}
 .cms-page-button:hover,.cms-page-button.active{background:var(--accent-soft);color:var(--accent)}
+.cms-sidebar-group{display:grid;gap:5px;padding:6px 0 10px;border-bottom:1px solid var(--line)}
+.cms-sidebar-group:last-child{border-bottom:0}
+.cms-sidebar-group-title{padding:5px 10px;color:var(--muted);font-size:9px;font-weight:850;letter-spacing:.11em;text-transform:uppercase}
+.cms-sidebar-group-pages{display:grid;gap:3px}
+.cms-page-button{display:grid!important;align-content:center;gap:2px;height:auto!important;padding:9px 11px!important}
+.cms-page-button strong{font-size:11px;line-height:1.25}
+.cms-page-button small{color:var(--muted);font-size:8px;font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cms-page-button.active small{color:inherit;opacity:.72}
+.cms-field-help{display:block;margin-top:-2px;color:var(--muted);font-size:9px;line-height:1.4;font-weight:500}
 .cms-toolbar{align-items:flex-start}
 .cms-toolbar h2{margin:3px 0 5px}
 .cms-toolbar p{margin:0;color:var(--muted);font-size:12px}
