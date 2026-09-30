@@ -18,8 +18,15 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(html,/id="mobileMoreButton"/);
   const mobileNav=html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)?.[0]||"";
   assert.equal((mobileNav.match(/<button/g)||[]).length,5);
+  assert.equal((mobileNav.match(/class="mobile-nav-svg"/g)||[]).length,5);
+  assert.doesNotMatch(mobileNav,/[▦✦＋◫•••]/);
   assert.doesNotMatch(mobileNav,/data-nav="finance"/);
+  assert.match(v6,/function v6MobileMenuIconSvg\(kind\)/);
+  assert.match(v6,/v6MobileMenuIconSvg\("planned"\)[\s\S]*v6MobileMenuIconSvg\("finance"\)[\s\S]*v6MobileMenuIconSvg\("documents"\)[\s\S]*v6MobileMenuIconSvg\("cms"\)[\s\S]*v6MobileMenuIconSvg\("profile"\)[\s\S]*v6MobileMenuIconSvg\("settings"\)/);
+  assert.doesNotMatch(v6,/class="mobile-more-card"[^>]*>[\s\S]{0,80}<span>[◷$▤◎◉⚙]<\/span>/);
   assert.match(v6,/data-nav="finance"[\s\S]*Documents[\s\S]*Website CMS[\s\S]*Profile[\s\S]*Settings/);
+  assert.match(css,/\.mobile-nav-svg\{[\s\S]*width:22px;[\s\S]*height:22px/);
+  assert.match(css,/\.mobile-more-svg\{[\s\S]*width:28px;[\s\S]*height:28px/);
   assert.match(css,/Canonical mobile\/tablet navigation contract:[\s\S]*repeat\(5,minmax\(0,1fr\)\)/);
   assert.match(html,/src="\/v6\.js"/);
   assert.match(v6,/kh_theme_user_/);
@@ -33,7 +40,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v30-nav-settings-chat/);
+  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -279,7 +286,7 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v30-nav-settings-chat/);
+  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
 
@@ -296,5 +303,5 @@ test("Responsive PWA layout keeps intake tiles compact and removes desktop-only 
   assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
   assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
   assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
-  assert.match(sw,/klavierhaus-admin-v30-nav-settings-chat/);
+  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
 });
