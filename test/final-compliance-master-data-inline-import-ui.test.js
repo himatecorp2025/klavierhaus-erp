@@ -104,5 +104,5 @@ test("piano-specific location remains optional and client address stays the effe
 });
 
 test("PWA cache is bumped for Intake Messenger and Master Data corrections",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v19-archive-website-recovery/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v20-system-account-chat/);
 });

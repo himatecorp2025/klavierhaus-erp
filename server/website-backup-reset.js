@@ -15,7 +15,7 @@ const TABLE_GROUPS=Object.freeze({
 const PAGE_SETTING_KEYS=Object.freeze([PAGE_ROUTE_SETTINGS_KEY,"website_seo_settings"]);
 const COLLECTION_SETTING_KEYS=Object.freeze(["website_sample_content_v1",SAMPLE_VERSION_KEY]);
 const BRANDING_SETTING_KEYS=Object.freeze([
-  "company_name","short_name","logo_url","favicon_url","erp_logo_dark_url","erp_logo_light_url",
+  "company_name","short_name","logo_url","favicon_url","erp_logo_dark_url","erp_logo_light_url","login_logo_url",
   "app_icon_url","login_background_url","branding_version",WEBSITE_DESIGN_SETTINGS_KEY
 ]);
 const ALL_SETTING_KEYS=Object.freeze([...new Set([...PAGE_SETTING_KEYS,...COLLECTION_SETTING_KEYS,...BRANDING_SETTING_KEYS])]);
@@ -172,6 +172,7 @@ function resetBranding(db){
   setSetting(db,"favicon_url","/icons/icon-512.png");
   setSetting(db,"erp_logo_dark_url","/icons/icon-512.png");
   setSetting(db,"erp_logo_light_url","/icons/icon-512.png");
+  setSetting(db,"login_logo_url","/icons/icon-512.png");
   setSetting(db,"app_icon_url","/icons/icon-512.png");
   setSetting(db,"login_background_url","");
   setSetting(db,WEBSITE_DESIGN_SETTINGS_KEY,JSON.stringify(defaults));

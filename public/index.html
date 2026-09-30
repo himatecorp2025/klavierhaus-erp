@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Klavierhaus">
-  <title>Klavierhaus ERP</title>
+  <title>Klavierhaus System</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link id="appFavicon" rel="icon" href="/icons/icon-192.png">
   <link id="appTouchIcon" rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -18,15 +18,12 @@
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <main id="loginScreen" class="login-screen">
-    <button id="loginThemeToggle" class="theme-switch login-theme-switch" type="button" aria-label="Theme">
-      <span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span>
-    </button>
     <section class="login-card" aria-labelledby="loginTitle">
       <div class="brand-lockup">
         <img id="loginBrandLogo" src="/icons/icon-192.png" alt="">
         <div>
           <span class="eyebrow">KLAVIERHAUS · NEW YORK</span>
-          <h1 id="loginTitle">ERP</h1>
+          <h1 id="loginTitle">System</h1>
         </div>
       </div>
       <p class="login-copy" data-i18n="login_copy">Sign in to the Klavierhaus internal workspace.</p>
@@ -63,9 +60,9 @@
   <div id="appShell" class="app-shell hidden">
     <aside id="appSidebar" class="app-sidebar" aria-label="Main navigation">
       <div class="sidebar-brand-row">
-        <a class="app-brand sidebar-brand" href="#workshop" data-nav="workshop" aria-label="Klavierhaus ERP">
+        <a class="app-brand sidebar-brand" href="#workshop" data-nav="workshop" aria-label="Klavierhaus System">
           <img id="headerBrandLogo" src="/icons/icon-192.png" alt="">
-          <span><strong>Klavierhaus</strong><small>ERP</small></span>
+          <span><strong>Klavierhaus</strong><small>System</small></span>
         </a>
         <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Collapse navigation">‹</button>
       </div>
@@ -84,10 +81,10 @@
 
     <div class="app-main-column">
       <header class="app-header">
-        <button id="mobileBrandButton" class="mobile-brand-button" type="button" data-nav="workshop" aria-label="Klavierhaus ERP">
+        <button id="mobileBrandButton" class="mobile-brand-button" type="button" data-nav="workshop" aria-label="Klavierhaus System">
           <img id="mobileBrandLogo" src="/icons/icon-192.png" alt="">
         </button>
-        <div class="header-spacer"></div>
+        <div class="header-welcome" id="headerWelcome" aria-live="polite"></div>
         <div class="header-tools">
           <div class="ny-clock" aria-live="off">
             <span data-i18n="new_york_time">New York time</span>
@@ -100,9 +97,16 @@
           <button id="themeToggle" class="theme-switch" type="button" aria-label="Theme">
             <span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span>
           </button>
-          <div class="header-actions">
+          <div class="header-actions profile-menu-shell">
             <button id="languageToggle" class="language-toggle" type="button" aria-label="Language">HU</button>
-            <button id="profileButton" class="profile-button" type="button" data-nav="profile" aria-label="Profile and settings"><span id="profileInitials">KH</span></button>
+            <button id="profileButton" class="profile-button" type="button" aria-label="Account menu" aria-haspopup="menu" aria-expanded="false"><span id="profileInitials">KH</span><img id="profileAvatarImage" alt="" hidden></button>
+            <div id="profileMenu" class="profile-menu" role="menu" hidden>
+              <div class="profile-menu-identity"><span id="profileMenuAvatar" class="profile-menu-avatar">KH</span><span><strong id="profileMenuName"></strong><small id="profileMenuRole"></small></span></div>
+              <button type="button" role="menuitem" data-profile-menu="profile">Profile</button>
+              <button type="button" role="menuitem" data-profile-menu="settings">Settings</button>
+              <div class="profile-menu-separator"></div>
+              <button type="button" role="menuitem" class="profile-menu-logout" data-profile-menu="logout">Logout</button>
+            </div>
           </div>
         </div>
       </header>

@@ -451,48 +451,71 @@ const customerChatMessages = customerChat?.querySelector("[data-chat-messages]")
 const customerChatWelcome = customerChat?.querySelector("[data-chat-welcome]");
 const customerChatSupportStatus = customerChat?.querySelector("[data-chat-support-status]");
 const customerChatFileList = customerChat?.querySelector("[data-chat-file-list]");
+const customerChatComposer = customerChat?.querySelector("[data-chat-composer]");
+const customerChatRecording = customerChat?.querySelector("[data-chat-recording]");
+const customerChatMessageInput = customerChat?.querySelector("#customer-chat-message");
+const customerChatPhotoInput = customerChat?.querySelector("[data-chat-photo-input]");
 const customerConversationKey = "klavierhaus_customer_conversation_v1";
+const customerChatEmojis = ["😀","😊","🙏","👍","❤️","🎹","🎵","✨","📷","🔧","✅","👋","🙂","😄","🤝","💬"];
 let customerConversationToken = "";
 let customerChatPollTimer = null;
 let customerConversationSnapshot = "";
+let customerChatPendingFiles = [];
+let customerChatRecorder = null;
+let customerChatRecorderStream = null;
+let customerChatRecorderTimer = null;
 
-function applyCustomerChatMode(active,conversation=null){
+function customerPianoAvatar(){
+  const span=document.createElement("span");span.className="customer-chat__message-avatar";span.setAttribute("aria-hidden","true");
+  span.innerHTML='<svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg>';
+  return span;
+}
+function customerChatTime(value){
+  try{return new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit"}).format(new Date(value));}
+  catch(_error){return "";}
+}
+function applyCustomerChatMode(active){
   if(!customerChat||!customerChatForm)return;
   const isActive=Boolean(active);
   customerChat.classList.toggle("is-active",isActive);
   customerChatForm.dataset.chatMode=isActive?"active":"new";
   const intake=customerChatForm.querySelector("[data-chat-intake-fields]");
-  if(intake){intake.hidden=isActive;intake.querySelectorAll("input,select").forEach(control=>{control.disabled=isActive;});}
+  if(intake){intake.hidden=isActive;intake.querySelectorAll("input,select,button").forEach(control=>{control.disabled=isActive;});}
+  if(customerChatComposer)customerChatComposer.hidden=!isActive;
   if(customerChatLookupForm)customerChatLookupForm.hidden=isActive;
-  if(isActive&&conversation){
-    const heading=customerChat.querySelector(".customer-chat__heading h2");
-    if(heading)heading.textContent=conversation.name||(language==="hu"?"Beszélgetés":"Conversation");
+  if(isActive)window.setTimeout(()=>customerChatMessageInput?.focus({preventScroll:true}),60);
+}
+function appendCustomerAttachment(parent,attachment){
+  const url=attachment.url||"#",mime=String(attachment.mime_type||"").toLowerCase(),name=attachment.original_name||attachment.stored_name||"Attachment";
+  if(mime.startsWith("image/")){
+    const link=document.createElement("a");link.className="customer-chat__media customer-chat__media--image";link.href=url;link.target="_blank";link.rel="noopener";
+    const image=document.createElement("img");image.src=url;image.alt=name;image.loading="lazy";link.append(image);parent.append(link);return;
   }
+  if(mime.startsWith("video/")){
+    const video=document.createElement("video");video.className="customer-chat__media customer-chat__media--video";video.src=url;video.controls=true;video.playsInline=true;video.preload="metadata";parent.append(video);return;
+  }
+  if(mime.startsWith("audio/")){
+    const audio=document.createElement("audio");audio.className="customer-chat__media customer-chat__media--audio";audio.src=url;audio.controls=true;audio.preload="metadata";parent.append(audio);return;
+  }
+  const link=document.createElement("a");link.href=url;link.target="_blank";link.rel="noopener";link.textContent="↳ "+name;parent.append(link);
 }
 function renderCustomerMessages(messages = [], conversation = null) {
   if (!customerChatMessages) return;
   customerChatMessages.replaceChildren();
   if (conversation?.status === "CLOSED") {
-    const status = document.createElement("p");
-    status.className = "customer-chat__status customer-chat__status--closed";
+    const status = document.createElement("p");status.className="customer-chat__status customer-chat__status--closed";
     status.textContent = language === "hu" ? "Ez a beszélgetés lezárult. Új üzenettel ugyanitt folytatható." : "This conversation is closed. You can continue here by sending a new message.";
     customerChatMessages.append(status);
   }
   messages.forEach((message) => {
-    const item = document.createElement("article");
-    item.className = `customer-chat__message customer-chat__message--${message.direction === "STAFF" ? "staff" : "customer"}`;
-    const body = document.createElement("p");
-    body.textContent = message.body || "";
-    item.append(body);
-    (message.attachments || []).forEach((attachment) => {
-      const link = document.createElement("a");
-      link.href = attachment.url || "#";
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = `↳ ${attachment.original_name || attachment.stored_name || "Attachment"}`;
-      item.append(link);
-    });
-    customerChatMessages.append(item);
+    const staff=message.direction==="STAFF",row=document.createElement("div");
+    row.className=`customer-chat__message-row customer-chat__message-row--${staff?"staff":"customer"}`;
+    if(staff)row.append(customerPianoAvatar());
+    const item=document.createElement("article");item.className=`customer-chat__message customer-chat__message--${staff?"staff":"customer"}`;
+    if(message.body){const body=document.createElement("p");body.textContent=message.body;item.append(body);}
+    (message.attachments||[]).forEach(attachment=>appendCustomerAttachment(item,attachment));
+    const meta=document.createElement("small");meta.className="customer-chat__message-time";meta.textContent=customerChatTime(message.created_at)+(staff?"":"  ✓✓");item.append(meta);
+    row.append(item);customerChatMessages.append(row);
   });
   (conversation?.appointment_proposals || []).slice(-4).forEach(proposal=>{
     const card=document.createElement("article"),scheduled=Boolean(proposal.private_appointment_id),proposed=proposal.status==="PROPOSED",declined=proposal.status==="DECLINED";
@@ -500,152 +523,136 @@ function renderCustomerMessages(messages = [], conversation = null) {
     const start=new Date(proposal.starts_at),end=new Date(proposal.ends_at),formatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"}),endFormatter=new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",timeStyle:"short"});
     const title=document.createElement("strong");title.textContent=language==="hu"?"Időpontjavaslat":"Appointment proposal";const when=document.createElement("p");when.textContent=`${formatter.format(start)} – ${endFormatter.format(end)} ET`;card.append(title,when);
     const status=document.createElement("small");status.className="customer-chat__proposal-status";status.textContent=scheduled?(language==="hu"?"✓ Elfogadva · bekerült a naptárba":"✓ Accepted · added to calendar"):declined?(language==="hu"?"Másik időpontot kért":"Another time requested"):proposed?(language==="hu"?"Válaszra vár":"Waiting for your response"):proposal.status;card.append(status);
-    if(proposed){const actions=document.createElement("div");actions.className="customer-chat__proposal-actions";const accept=document.createElement("button");accept.type="button";accept.className="button button--primary";accept.dataset.proposalDecision="ACCEPTED";accept.dataset.proposalId=proposal.id;accept.textContent=language==="hu"?"Elfogadom":"Accept";const decline=document.createElement("button");decline.type="button";decline.className="button button--ghost";decline.dataset.proposalDecision="DECLINED";decline.dataset.proposalId=proposal.id;decline.textContent=language==="hu"?"Más időpontot kérek":"Request another time";actions.append(accept,decline);card.append(actions);}customerChatMessages.append(card);
+    if(proposed){const actions=document.createElement("div");actions.className="customer-chat__proposal-actions";const accept=document.createElement("button");accept.type="button";accept.className="button button--primary";accept.dataset.proposalDecision="ACCEPTED";accept.dataset.proposalId=proposal.id;accept.textContent=language==="hu"?"Elfogadom":"Accept";const decline=document.createElement("button");decline.type="button";decline.className="button button--ghost";decline.dataset.proposalDecision="DECLINED";decline.dataset.proposalId=proposal.id;decline.textContent=language==="hu"?"Más időpontot kérek":"Request another time";actions.append(accept,decline);card.append(actions);}
+    customerChatMessages.append(card);
   });
-  customerChatMessages.scrollTop = customerChatMessages.scrollHeight;
+  customerChatMessages.scrollTop=customerChatMessages.scrollHeight;
 }
-
 function renderCustomerChatFiles(){
-  if(!customerChatFileList)return;
-  customerChatFileList.replaceChildren();
-  [...(customerChatForm?.elements.attachments?.files||[])].forEach(file=>{
-    const chip=document.createElement("span");chip.className="customer-chat__file-chip";chip.textContent=`${file.name} · ${Math.max(1,Math.round(file.size/1024))} KB`;customerChatFileList.append(chip);
+  if(!customerChatFileList)return;customerChatFileList.replaceChildren();
+  customerChatPendingFiles.forEach((file,index)=>{
+    const chip=document.createElement("span");chip.className="customer-chat__file-chip";
+    const text=document.createElement("span");text.textContent=`${file.name} · ${Math.max(1,Math.round(file.size/1024))} KB`;
+    const remove=document.createElement("button");remove.type="button";remove.dataset.chatRemoveFile=String(index);remove.setAttribute("aria-label",language==="hu"?"Csatolmány eltávolítása":"Remove attachment");remove.textContent="×";
+    chip.append(text,remove);customerChatFileList.append(chip);
   });
+}
+function addCustomerChatFiles(files){
+  const next=[...customerChatPendingFiles,...files].slice(0,10);customerChatPendingFiles=next;renderCustomerChatFiles();
 }
 function renderSupportStatus(status){
   if(!customerChatSupportStatus)return;
   const open=Boolean(status?.open);customerChatSupportStatus.classList.toggle("is-live",open);
   customerChatSupportStatus.textContent=open
-    ? (language==="hu"?"● Élő ügyfélszolgálat elérhető · 9:00–17:00 ET":"● Live support available · 9:00 AM–5:00 PM ET")
-    : (language==="hu"?"○ Ügyfélszolgálat offline · hagyjon üzenetet, a következő ügyfélszolgálati időben válaszolunk.":"○ Support is offline · leave a message and we will reply during the next support window.");
+    ? (language==="hu"?"● Online · Élő ügyfélszolgálat elérhető":"● Online · Live customer service available")
+    : (language==="hu"?"○ Offline · üzenetét megkapjuk és a következő ügyfélszolgálati időben válaszolunk.":"○ Offline · leave a message and we will reply during the next support window.");
 }
 async function loadSupportStatus(){
   try{const response=await fetch("/api/site/support-status",{credentials:"same-origin",cache:"no-store"});renderSupportStatus(await response.json());}
   catch(_error){renderSupportStatus({open:false});}
 }
-
 async function loadCustomerConversation(token) {
   if (!token) return;
   try {
-    const response = await fetch(`/api/site/customer-conversations/${encodeURIComponent(token)}`, { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error("CONVERSATION_NOT_FOUND");
-    const conversation = await response.json();
-    customerConversationToken = token;
-    const nextSnapshot = JSON.stringify([conversation.status, conversation.updated_at, conversation.messages?.length || 0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(","),(conversation.private_appointments||[]).map(item=>item.id+":"+item.status).join(",")]);
-    renderSupportStatus(conversation.support||{});
-    applyCustomerChatMode(true,conversation);
-    renderCustomerMessages(conversation.messages || [], conversation);
-    if (nextSnapshot !== customerConversationSnapshot && customerChatResult) customerChatResult.textContent = conversation.status === "CLOSED" ? (language === "hu" ? "A beszélgetés lezárult." : "The conversation is closed.") : "";
-    customerConversationSnapshot = nextSnapshot;
-  } catch (_error) {
-    if (!new URLSearchParams(location.search).get("conversation")) localStorage.removeItem(customerConversationKey);
-    customerConversationToken="";
-    applyCustomerChatMode(false);
+    const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(token)}`,{credentials:"same-origin",cache:"no-store"});
+    if(!response.ok)throw new Error("CONVERSATION_NOT_FOUND");
+    const conversation=await response.json();customerConversationToken=token;
+    const nextSnapshot=JSON.stringify([conversation.status,conversation.updated_at,conversation.messages?.length||0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(",")]);
+    renderSupportStatus(conversation.support||{});applyCustomerChatMode(true);renderCustomerMessages(conversation.messages||[],conversation);
+    if(nextSnapshot!==customerConversationSnapshot&&customerChatResult)customerChatResult.textContent=conversation.status==="CLOSED"?(language==="hu"?"A beszélgetés lezárult.":"The conversation is closed."):"";
+    customerConversationSnapshot=nextSnapshot;
+  }catch(_error){
+    if(!new URLSearchParams(location.search).get("conversation"))localStorage.removeItem(customerConversationKey);
+    customerConversationToken="";applyCustomerChatMode(false);
   }
 }
-
-function setCustomerChatLookupMessage(text, isError = false) {
-  if (!customerChatLookupResult) return;
-  customerChatLookupResult.replaceChildren();
-  const message = document.createElement("span");
-  message.textContent = text;
-  customerChatLookupResult.append(message);
-  customerChatLookupResult.classList.toggle("is-error", isError);
+function setCustomerChatLookupMessage(text,isError=false){
+  if(!customerChatLookupResult)return;customerChatLookupResult.replaceChildren();const message=document.createElement("span");message.textContent=text;customerChatLookupResult.append(message);customerChatLookupResult.classList.toggle("is-error",isError);
+}
+function validateCustomerChatFiles(files){
+  if(files.length>10)throw new Error("CUSTOMER_ATTACHMENT_COUNT");
+  const allowed=/\.(?:jpe?g|png|webp|gif|avif|heic|heif|tiff?|bmp|mp4|mov|m4v|webm|3gp|mp3|m4a|aac|wav|ogg|oga|pdf|docx?)$/i;
+  files.forEach(file=>{if(file.size>50*1024*1024||!allowed.test(file.name||""))throw new Error("CUSTOMER_ATTACHMENT_INVALID");});
+}
+function chatMediaExtension(mime,kind){
+  if(kind==="video")return mime.includes("mp4")?".mp4":".webm";
+  if(mime.includes("mp4"))return ".m4a";if(mime.includes("ogg"))return ".ogg";return ".webm";
+}
+function stopCustomerRecorder(){
+  if(customerChatRecorder&&customerChatRecorder.state!=="inactive")customerChatRecorder.stop();
+}
+async function startCustomerRecorder(kind){
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){if(customerChatResult)customerChatResult.textContent=language==="hu"?"A böngésző nem támogatja ezt a rögzítési módot.":"This browser does not support recording.";return;}
+  if(customerChatRecorder){stopCustomerRecorder();return;}
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia(kind==="video"?{video:{facingMode:{ideal:"environment"}},audio:true}:{audio:true});
+    customerChatRecorderStream=stream;const chunks=[],recorder=new MediaRecorder(stream);customerChatRecorder=recorder;
+    const started=Date.now(),maxMs=kind==="video"?60000:300000;
+    if(customerChatRecording){
+      customerChatRecording.hidden=false;customerChatRecording.replaceChildren();
+      const preview=kind==="video"?document.createElement("video"):null;if(preview){preview.autoplay=true;preview.muted=true;preview.playsInline=true;preview.srcObject=stream;customerChatRecording.append(preview);}
+      const info=document.createElement("div"),timer=document.createElement("strong"),stop=document.createElement("button");info.className="customer-chat__recording-info";stop.type="button";stop.className="customer-chat__recording-stop";stop.textContent=language==="hu"?"■ Leállítás":"■ Stop";info.append(timer,stop);customerChatRecording.append(info);stop.addEventListener("click",stopCustomerRecorder);
+      const tick=()=>{const elapsed=Math.min(maxMs,Date.now()-started),seconds=Math.floor(elapsed/1000);timer.textContent=(kind==="video"?(language==="hu"?"Videó":"Video"):(language==="hu"?"Hangüzenet":"Voice message"))+` · 0:${String(seconds).padStart(2,"0")}${kind==="video"?" / 1:00":""}`;};tick();customerChatRecorderTimer=window.setInterval(tick,250);
+    }
+    recorder.addEventListener("dataavailable",event=>{if(event.data?.size)chunks.push(event.data);});
+    recorder.addEventListener("stop",()=>{
+      clearInterval(customerChatRecorderTimer);customerChatRecorderTimer=null;
+      stream.getTracks().forEach(track=>track.stop());
+      const mime=recorder.mimeType||(kind==="video"?"video/webm":"audio/webm"),blob=new Blob(chunks,{type:mime});
+      if(blob.size){const stamp=new Date().toISOString().replace(/[:.]/g,"-"),file=new File([blob],`klavierhaus-${kind}-${stamp}${chatMediaExtension(mime,kind)}`,{type:mime,lastModified:Date.now()});addCustomerChatFiles([file]);}
+      customerChatRecorder=null;customerChatRecorderStream=null;if(customerChatRecording){customerChatRecording.hidden=true;customerChatRecording.replaceChildren();}
+    },{once:true});
+    recorder.start(250);window.setTimeout(()=>{if(customerChatRecorder===recorder&&recorder.state!=="inactive")recorder.stop();},maxMs);
+  }catch(_error){if(customerChatResult)customerChatResult.textContent=language==="hu"?"A kamera vagy mikrofon nem érhető el. Ellenőrizze a böngésző engedélyeit.":"Camera or microphone access is unavailable. Check your browser permissions.";}
+}
+function buildEmojiPicker(){
+  const picker=customerChat?.querySelector("[data-chat-emoji-picker]");if(!picker)return;picker.replaceChildren();
+  customerChatEmojis.forEach(emoji=>{const button=document.createElement("button");button.type="button";button.textContent=emoji;button.addEventListener("click",()=>{if(!customerChatMessageInput)return;const start=customerChatMessageInput.selectionStart??customerChatMessageInput.value.length,end=customerChatMessageInput.selectionEnd??start;customerChatMessageInput.setRangeText(emoji,start,end,"end");customerChatMessageInput.focus();picker.hidden=true;});picker.append(button);});
+}
+async function submitCustomerChat(){
+  const data=new FormData(customerChatForm),active=Boolean(customerConversationToken),message=String(data.get("message")||"").trim(),files=[...customerChatPendingFiles];
+  if(!active){
+    if(!customerChatForm.reportValidity())return;
+  }else if(!message&&!files.length)return;
+  try{validateCustomerChatFiles(files);}catch(error){if(customerChatResult)customerChatResult.textContent=error.message==="CUSTOMER_ATTACHMENT_COUNT"?(language==="hu"?"Legfeljebb 10 csatolmány küldhető.":"You can send up to 10 attachments."):(language==="hu"?"A csatolmány formátuma vagy mérete nem engedélyezett.":"The attachment type or size is not allowed.");return;}
+  if(customerChatResult)customerChatResult.textContent=language==="hu"?"Küldés…":"Sending…";
+  try{
+    const endpoint=active?`/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/messages`:"/api/site/customer-conversations";
+    const payload=new FormData();payload.set("message",message);files.forEach(file=>payload.append("attachments",file,file.name));
+    if(!active){payload.set("name",String(data.get("name")||""));payload.set("email",String(data.get("email")||""));payload.set("category",String(data.get("category")||"SERVICE"));payload.set("consent_contact",data.get("consent_contact")==="on"?"true":"false");payload.set("language",language);payload.set("source_path",location.pathname);}
+    const response=await fetch(endpoint,{method:"POST",credentials:"same-origin",body:payload}),result=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.error||"CONVERSATION_FAILED");
+    if(result.access_token){customerConversationToken=result.access_token;localStorage.setItem(customerConversationKey,customerConversationToken);}
+    const conversation=result.conversation||result;customerConversationSnapshot="";customerChatPendingFiles=[];renderCustomerChatFiles();
+    if(customerChatMessageInput)customerChatMessageInput.value="";
+    applyCustomerChatMode(Boolean(customerConversationToken));renderCustomerMessages(conversation.messages||[],conversation);renderSupportStatus(conversation.support||{});
+    if(customerChatResult)customerChatResult.textContent="";
+  }catch(error){if(customerChatResult)customerChatResult.textContent=error.message==="CONVERSATION_IDENTITY_REQUIRED"?(language==="hu"?"A beszélgetés indításához név, érvényes e-mail-cím és témakör szükséges.":"Name, a valid email address and topic are required to start the conversation."):(language==="hu"?"A küldés nem sikerült.":"We could not send your message.");}
 }
 
-function validateCustomerChatFiles(files) {
-  if (files.length > 10) throw new Error("CUSTOMER_ATTACHMENT_COUNT");
-  const allowed = /\.(?:jpe?g|png|webp|gif|avif|heic|heif|tiff?|bmp|pdf|docx?)$/i;
-  files.forEach((file) => {
-    if (file.size > 50 * 1024 * 1024 || !allowed.test(file.name || "")) throw new Error("CUSTOMER_ATTACHMENT_INVALID");
-  });
-}
-
-if (customerChat && customerChatToggle && customerChatPanel && customerChatForm) {
-  customerChatToggle.addEventListener("click", () => {
-    const open = customerChatToggle.getAttribute("aria-expanded") === "true";
-    customerChatToggle.setAttribute("aria-expanded", String(!open));
-    customerChatPanel.hidden = open;
-    customerChatWelcome?.classList.add("is-dismissed");
-  });
-  customerChat?.querySelector("[data-chat-welcome-close]")?.addEventListener("click", () => customerChatWelcome?.classList.add("is-dismissed"));
-  window.setTimeout(() => customerChatWelcome?.classList.add("is-dismissed"), 9000);
-  try { customerConversationToken = localStorage.getItem(customerConversationKey) || new URLSearchParams(location.search).get("conversation") || ""; } catch (_error) { customerConversationToken = ""; }
-  loadSupportStatus();
-  applyCustomerChatMode(Boolean(customerConversationToken));
-  loadCustomerConversation(customerConversationToken);
-  customerChatForm.elements.attachments?.addEventListener("change",renderCustomerChatFiles);
+if(customerChat&&customerChatToggle&&customerChatPanel&&customerChatForm){
+  customerChatToggle.addEventListener("click",()=>{const open=customerChatToggle.getAttribute("aria-expanded")==="true";customerChatToggle.setAttribute("aria-expanded",String(!open));customerChatPanel.hidden=open;customerChatWelcome?.classList.add("is-dismissed");});
+  customerChat?.querySelector("[data-chat-welcome-close]")?.addEventListener("click",()=>customerChatWelcome?.classList.add("is-dismissed"));
+  window.setTimeout(()=>customerChatWelcome?.classList.add("is-dismissed"),9000);
+  try{customerConversationToken=localStorage.getItem(customerConversationKey)||new URLSearchParams(location.search).get("conversation")||"";}catch(_error){customerConversationToken="";}
+  loadSupportStatus();applyCustomerChatMode(Boolean(customerConversationToken));loadCustomerConversation(customerConversationToken);buildEmojiPicker();
+  customerChatPhotoInput?.addEventListener("change",event=>{addCustomerChatFiles([...(event.currentTarget.files||[])]);event.currentTarget.value="";});
+  customerChatFileList?.addEventListener("click",event=>{const button=event.target.closest("[data-chat-remove-file]");if(!button)return;customerChatPendingFiles.splice(Number(button.dataset.chatRemoveFile),1);renderCustomerChatFiles();});
+  customerChat?.querySelector("[data-chat-camera]")?.addEventListener("click",()=>startCustomerRecorder("video"));
+  customerChat?.querySelector("[data-chat-voice]")?.addEventListener("click",()=>startCustomerRecorder("audio"));
+  customerChat?.querySelector("[data-chat-emoji]")?.addEventListener("click",()=>{const picker=customerChat.querySelector("[data-chat-emoji-picker]");if(picker)picker.hidden=!picker.hidden;});
+  customerChatMessageInput?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();void submitCustomerChat();}});
   customerChatMessages?.addEventListener("click",async event=>{
-    const button=event.target.closest("[data-proposal-decision]");if(!button||!customerConversationToken)return;
-    button.disabled=true;
-    try{
-      const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/appointment-proposals/${encodeURIComponent(button.dataset.proposalId)}/respond`,{
-        method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:button.dataset.proposalDecision})
-      });
-      const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"APPOINTMENT_RESPONSE_FAILED");
-      customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);
-      if(customerChatResult)customerChatResult.textContent=button.dataset.proposalDecision==="ACCEPTED"
-        ?(language==="hu"?"Az időpontot elfogadta; a foglalás automatikusan bekerült a naptárba.":"Appointment accepted and automatically confirmed in the calendar.")
-        :(language==="hu"?"Jeleztük, hogy másik időpontot kér.":"We have let the team know you need another time.");
-    }catch(_error){button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az időpontválasz nem sikerült.":"We could not save your appointment response.";}
+    const button=event.target.closest("[data-proposal-decision]");if(!button||!customerConversationToken)return;button.disabled=true;
+    try{const response=await fetch(`/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/appointment-proposals/${encodeURIComponent(button.dataset.proposalId)}/respond`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:button.dataset.proposalDecision})});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"APPOINTMENT_RESPONSE_FAILED");customerConversationSnapshot="";renderCustomerMessages(result.messages||[],result);if(customerChatResult)customerChatResult.textContent=button.dataset.proposalDecision==="ACCEPTED"?(language==="hu"?"Az időpontot elfogadta; a foglalás automatikusan bekerült a naptárba.":"Appointment accepted and automatically confirmed in the calendar."):(language==="hu"?"Jeleztük, hogy másik időpontot kér.":"We have let the team know you need another time.");}
+    catch(_error){button.disabled=false;if(customerChatResult)customerChatResult.textContent=language==="hu"?"Az időpontválasz nem sikerült.":"We could not save your appointment response.";}
   });
-  customerChatPollTimer = window.setInterval(() => {
-    if (customerConversationToken) loadCustomerConversation(customerConversationToken);
-  }, 2000);
-  customerChatForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const data = new FormData(customerChatForm);
-    const message = String(data.get("message") || "").trim();
-    if (!message) return;
-    const files = [...(customerChatForm.elements.attachments?.files || [])];
-    try { validateCustomerChatFiles(files); } catch (error) {
-      if (customerChatResult) customerChatResult.textContent = error.message === "CUSTOMER_ATTACHMENT_COUNT" ? (language === "hu" ? "Legfeljebb 10 csatolmány küldhető." : "You can send up to 10 attachments.") : (language === "hu" ? "A csatolmány formátuma vagy mérete nem engedélyezett." : "The attachment type or size is not allowed.");
-      return;
-    }
-    if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Küldés…" : "Sending…";
-    try {
-      const endpoint = customerConversationToken ? `/api/site/customer-conversations/${encodeURIComponent(customerConversationToken)}/messages` : "/api/site/customer-conversations";
-      const payload = new FormData();
-      payload.set("message", message);
-      files.forEach((file) => payload.append("attachments", file, file.name));
-      if (!customerConversationToken) {
-        payload.set("name", String(data.get("name") || ""));
-        payload.set("email", String(data.get("email") || ""));
-        payload.set("category", String(data.get("category") || "SERVICE"));
-        payload.set("consent_contact", data.get("consent_contact") === "on" ? "true" : "false");
-        payload.set("language", language);
-        payload.set("source_path", location.pathname);
-      }
-      const response = await fetch(endpoint, { method: "POST", credentials: "same-origin", body: payload });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "CONVERSATION_FAILED");
-      if (result.access_token) {
-        customerConversationToken = result.access_token;
-        localStorage.setItem(customerConversationKey, customerConversationToken);
-      }
-      const conversation = result.conversation || result;
-      customerConversationSnapshot = "";
-      customerChatForm.reset();renderCustomerChatFiles();
-      applyCustomerChatMode(Boolean(customerConversationToken),conversation);
-      renderCustomerMessages(conversation.messages || [], conversation);
-      renderSupportStatus(conversation.support||{});
-      if (customerConversationToken) localStorage.setItem(customerConversationKey, customerConversationToken);
-      if (customerChatResult) customerChatResult.textContent = language === "hu" ? "Köszönjük, üzenetét rögzítettük." : "Thank you, your message has been received.";
-    } catch (error) {
-      if (customerChatResult) customerChatResult.textContent = error.message === "CONVERSATION_IDENTITY_REQUIRED" ? (language === "hu" ? "Ehhez az ügytípushoz név és érvényes e-mail-cím szükséges." : "This request requires your name and a valid email address.") : (language === "hu" ? "A küldés nem sikerült." : "We could not send your message.");
-    }
-  });
-  customerChatLookupForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const email = String(new FormData(customerChatLookupForm).get("lookup_email") || "").trim();
-    setCustomerChatLookupMessage(language === "hu" ? "Keresés…" : "Searching…");
-    try {
-      const response = await fetch("/api/site/customer-conversations/lookup", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "LOOKUP_FAILED");
-      setCustomerChatLookupMessage(language === "hu"
-        ? "Ha ehhez az e-mail-címhez tartozik korábbi beszélgetés, a hozzáférés kizárólag a korábban kapott biztonságos beszélgetési linken keresztül lehetséges."
-        : "If previous conversations exist for this email address, access is available only through the secure conversation link previously provided.");
-    } catch (_error) { setCustomerChatLookupMessage(language === "hu" ? "A keresés nem sikerült." : "We could not find the conversations.", true); }
+  customerChatPollTimer=window.setInterval(()=>{if(customerConversationToken)loadCustomerConversation(customerConversationToken);},2000);
+  customerChatForm.addEventListener("submit",event=>{event.preventDefault();void submitCustomerChat();});
+  customerChatLookupForm?.addEventListener("submit",async event=>{
+    event.preventDefault();const email=String(new FormData(customerChatLookupForm).get("lookup_email")||"").trim();setCustomerChatLookupMessage(language==="hu"?"Keresés…":"Searching…");
+    try{const response=await fetch("/api/site/customer-conversations/lookup",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"LOOKUP_FAILED");setCustomerChatLookupMessage(language==="hu"?"Ha ehhez az e-mail-címhez tartozik korábbi beszélgetés, a hozzáférés kizárólag a korábban kapott biztonságos beszélgetési linken keresztül lehetséges.":"If previous conversations exist for this email address, access is available only through the secure conversation link previously provided.");}
+    catch(_error){setCustomerChatLookupMessage(language==="hu"?"A keresés nem sikerült.":"We could not find the conversations.",true);}
   });
 }
+

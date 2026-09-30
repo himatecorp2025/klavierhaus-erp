@@ -196,10 +196,10 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
 
   const chatCopy = language === "hu" ? {
     welcome: "Üdvözöljük a Klavierhausnál. Miben segíthetünk?",
-    title: "Személyes segítség, diszkréten.", lead: "Írjon nekünk — csapatunk rövidesen válaszol.", name: "Név (opcionális)", email: "E-mail-cím (opcionális)", topic: "Téma", message: "Üzenet", attachments: "Csatolmányok (legfeljebb 10 fájl, fájlonként 50 MB)", consent: "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot.", send: "Üzenet küldése", lookup: "Korábbi beszélgetések keresése", lookupPlaceholder: "E-mail-cím a korábbi ügyekhez", lookupSend: "Keresés", close: "Bezárás"
+    title: "Klavierhaus Ügyfélszolgálat", lead: "Online • Általában pár percen belül válaszolunk", name: "Név", email: "E-mail-cím", topic: "Milyen témában segíthetünk?", message: "Írj üzenetet…", attachments: "Média", consent: "Hozzájárulok, hogy a megkeresésemmel kapcsolatban felvegyék velem a kapcsolatot.", send: "Beszélgetés indítása", lookup: "Korábbi beszélgetések keresése", lookupPlaceholder: "E-mail-cím a korábbi ügyekhez", lookupSend: "Keresés", close: "Bezárás"
   } : {
     welcome: "Welcome to Klavierhaus. How may we assist you?",
-    title: "Personal assistance, discreetly.", lead: "Send us a message — our team will reply shortly.", name: "Name (optional)", email: "Email (optional)", topic: "Topic", message: "Message", attachments: "Attachments (up to 10 files, 50 MB each)", consent: "I consent to being contacted about this enquiry.", send: "Send message", lookup: "Find previous conversations", lookupPlaceholder: "Email address for previous cases", lookupSend: "Find", close: "Close"
+    title: "Klavierhaus Customer Service", lead: "Online • Usually replies within a few minutes", name: "Name", email: "Email", topic: "What can we help with?", message: "Write a message…", attachments: "Media", consent: "I consent to being contacted about this enquiry.", send: "Start conversation", lookup: "Find previous conversations", lookupPlaceholder: "Email address for previous cases", lookupSend: "Find", close: "Close"
   };
   return `<a class="skip-link" href="#main-content">${escapeHtml(copy.skipLabel)}</a>
   <header class="site-header" data-site-header>
@@ -224,21 +224,32 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
     <div class="customer-chat__welcome" data-chat-welcome role="status"><span>${escapeHtml(chatCopy.welcome)}</span><button type="button" data-chat-welcome-close aria-label="${escapeHtml(chatCopy.close)}">×</button></div>
     <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span aria-hidden="true">✦</span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
-      <div class="customer-chat__heading"><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p><p class="customer-chat__status" data-chat-support-status aria-live="polite"></p></div>
+      <div class="customer-chat__heading">
+        <div class="customer-chat__identity"><span class="customer-chat__piano-avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg></span><div><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div></div>
+        <p class="customer-chat__status" data-chat-support-status aria-live="polite"></p>
+      </div>
       <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
       <form class="customer-chat__form" data-chat-form>
         <div class="customer-chat__intake" data-chat-intake-fields>
-          <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name"></label>
-          <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email"></label>
-          <label>${escapeHtml(chatCopy.topic)}<select name="category"><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="PIANO">${language === "hu" ? "Zongora és bemutatóterem" : "Piano & showroom"}</option><option value="REPAIR">${language === "hu" ? "Javítás és szerviz" : "Repair & service"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private visit / appointment"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
+          <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name" required></label>
+          <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
+          <label>${escapeHtml(chatCopy.topic)}<select name="category" required><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="PIANO">${language === "hu" ? "Zongora és bemutatóterem" : "Piano & showroom"}</option><option value="REPAIR">${language === "hu" ? "Javítás és szerviz" : "Repair & service"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private visit / appointment"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
           <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
+          <button class="button button--primary customer-chat__start" type="submit">${escapeHtml(chatCopy.send)}</button>
         </div>
-        <div class="customer-chat__composer">
-          <label class="customer-chat__attach-button" title="${language === "hu" ? "Fájl csatolása" : "Attach file"}" aria-label="${language === "hu" ? "Fájl csatolása" : "Attach file"}"><input name="attachments" type="file" multiple accept="image/*,.heic,.heif,.avif,.pdf,.doc,.docx"><span aria-hidden="true">📎</span></label>
-          <label class="sr-only" for="customer-chat-message">${escapeHtml(chatCopy.message)}</label>
-          <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" required placeholder="${escapeHtml(chatCopy.message)}"></textarea>
-          <button class="customer-chat__send-button" type="submit" aria-label="${escapeHtml(chatCopy.send)}"><span aria-hidden="true">➤</span></button>
+        <div class="customer-chat__composer" data-chat-composer hidden>
+          <button class="customer-chat__media-button" type="button" data-chat-camera aria-label="${language === "hu" ? "Legfeljebb egyperces videó készítése" : "Record up to one minute of video"}"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/></svg></button>
+          <label class="customer-chat__media-button" aria-label="${language === "hu" ? "Fotó készítése vagy csatolása" : "Take or attach a photo"}"><input data-chat-photo-input type="file" multiple accept="image/*,.heic,.heif,.avif"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg></label>
+          <button class="customer-chat__media-button" type="button" data-chat-voice aria-label="${language === "hu" ? "Hangüzenet rögzítése" : "Record voice message"}"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg></button>
+          <div class="customer-chat__input-shell">
+            <label class="sr-only" for="customer-chat-message">${escapeHtml(chatCopy.message)}</label>
+            <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" enterkeyhint="send" placeholder="${escapeHtml(chatCopy.message)}"></textarea>
+            <button class="customer-chat__emoji-button" type="button" data-chat-emoji aria-label="${language === "hu" ? "Emoji" : "Emoji"}">☺</button>
+            <div class="customer-chat__emoji-picker" data-chat-emoji-picker hidden></div>
+          </div>
+          <button class="sr-only" type="submit" data-chat-hidden-submit>${language === "hu" ? "Küldés" : "Send"}</button>
         </div>
+        <div class="customer-chat__recording" data-chat-recording hidden></div>
         <div class="customer-chat__file-list" data-chat-file-list></div>
         <p class="form-result" data-chat-result aria-live="polite"></p>
       </form>
@@ -1246,7 +1257,7 @@ function createApp(options = {}) {
     limits: { fileSize: 50 * 1024 * 1024, files: 10 },
     fileFilter: (_req, file, callback) => {
       const extension = path.extname(file.originalname || "").toLowerCase();
-      const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".pdf", ".doc", ".docx"]);
+      const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".mp4", ".mov", ".m4v", ".webm", ".3gp", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".pdf", ".doc", ".docx"]);
       callback(allowed.has(extension) ? null : new Error("INVALID_CUSTOMER_ATTACHMENT"), allowed.has(extension));
     }
   });
@@ -1273,7 +1284,7 @@ function createApp(options = {}) {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+    res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()");
     res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}' https://www.googletagmanager.com https://www.clarity.ms; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://www.clarity.ms; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
     if (!allowIndexing) res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
     next();

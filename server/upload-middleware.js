@@ -139,10 +139,14 @@ function createMasterDataImportUpload(){
 
 const CUSTOMER_ATTACHMENT_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tif", ".tiff", ".bmp",
+  ".mp4", ".mov", ".m4v", ".webm", ".3gp",
+  ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga",
   ".pdf", ".doc", ".docx"
 ]);
 const CUSTOMER_ATTACHMENT_MIMES = new Set([
   ...IMAGE_MIMES, "image/heic-sequence", "image/heif-sequence",
+  "video/mp4", "video/quicktime", "video/x-m4v", "video/webm", "video/3gpp",
+  "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm",
   "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ]);
 

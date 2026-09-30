@@ -90,15 +90,17 @@ test("09 ERP Messenger reply composer supports paperclip file attachments",()=>{
   assert.match(source,/new FormData\(\)/);
 });
 
-test("10 public customer Messenger uses compact attach wide message send order",()=>{
+test("10 public customer Messenger uses video photo voice wide message emoji order",()=>{
   const html=read("website/server/index.js"),css=read("website/public/styles.css");
-  const start=html.indexOf('<div class="customer-chat__composer">'),end=html.indexOf("</div>",start),block=html.slice(start,end);
+  const start=html.indexOf('<div class="customer-chat__composer" data-chat-composer hidden>'),end=html.indexOf("</div>",start),block=html.slice(start,end);
   assert.ok(start>=0);
-  assert.ok(block.indexOf("customer-chat__attach-button")<block.indexOf("customer-chat-message"));
-  assert.ok(block.indexOf("customer-chat-message")<block.indexOf("customer-chat__send-button"));
-  assert.match(block,/📎/);
-  assert.match(css,/customer-chat__composer\{display:grid;grid-template-columns:2\.75rem minmax\(0,1fr\) 2\.75rem/);
-  assert.match(css,/customer-chat__composer textarea\{width:100%!important;min-width:0!important/);
+  assert.ok(block.indexOf("data-chat-camera")<block.indexOf("data-chat-photo-input"));
+  assert.ok(block.indexOf("data-chat-photo-input")<block.indexOf("data-chat-voice"));
+  assert.ok(block.indexOf("data-chat-voice")<block.indexOf("customer-chat-message"));
+  assert.ok(block.indexOf("customer-chat-message")<block.indexOf("data-chat-emoji"));
+  assert.doesNotMatch(block,/customer-chat__send-button/);
+  assert.match(css,/grid-template-columns:2\.8rem 2\.8rem 2\.8rem minmax\(0,1fr\)/);
+  assert.match(css,/customer-chat__input-shell textarea/);
 });
 
 test("11 appointment proposals remain visible as chat cards through accepted and declined states",()=>{

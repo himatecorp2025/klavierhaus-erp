@@ -2160,3 +2160,68 @@ input,select,textarea,button{max-width:100%}
 .recovery-target{display:grid;gap:3px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
 #intakeDeletePanel{margin-top:2px;border-color:color-mix(in srgb,#c83c3c 45%,var(--line));background:color-mix(in srgb,#c83c3c 6%,var(--surface-2))}
 @media(max-width:760px){.website-recovery-grid{grid-template-columns:1fr}.backup-row{grid-template-columns:1fr}.backup-row button{justify-self:start}}
+
+
+/* System account, fixed-dark login and recovery UX. */
+.login-screen{
+  color-scheme:dark;
+  background:
+    linear-gradient(rgba(5,5,5,.42),rgba(5,5,5,.66)),
+    var(--login-background,radial-gradient(circle at 28% 12%,rgba(31,94,255,.1),transparent 34%)),
+    #090a0c!important;
+  background-position:center!important;background-size:cover!important;
+}
+.login-card{
+  border-color:rgba(255,255,255,.1)!important;
+  background:rgba(15,17,21,.94)!important;
+  color:#f4f2ed!important;
+  box-shadow:0 30px 90px rgba(0,0,0,.55)!important;
+}
+.login-card .eyebrow,.login-card .login-copy,.login-card label>span{color:#b9b5ad!important}
+.login-card input{border-color:rgba(255,255,255,.14)!important;background:#17191e!important;color:#fff!important}
+.login-card .primary-button{background:#f0f2f7!important;color:#11151d!important}
+.header-welcome{min-width:0;padding-left:2px;font-size:13px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-menu-shell{position:relative}
+.profile-button{overflow:hidden}
+.profile-button img{width:100%;height:100%;object-fit:cover}
+.profile-menu{
+  position:absolute;z-index:80;right:0;top:calc(100% + 10px);width:min(260px,calc(100vw - 28px));padding:8px;
+  border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 18px 50px rgba(10,16,28,.2)
+}
+.profile-menu[hidden]{display:none}
+.profile-menu-identity{display:flex;align-items:center;gap:10px;padding:10px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:5px}
+.profile-menu-identity>span:last-child{display:grid;min-width:0}.profile-menu-identity strong,.profile-menu-identity small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.profile-menu-identity small{color:var(--muted)}
+.profile-menu-avatar{display:grid;place-items:center;flex:0 0 40px;width:40px;height:40px;border-radius:50%;overflow:hidden;background:#171b23;color:#fff;font-weight:800}
+.profile-menu-avatar img{width:100%;height:100%;object-fit:cover}
+.profile-menu>button{display:flex;width:100%;min-height:42px;align-items:center;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-weight:700;text-align:left}
+.profile-menu>button:hover{background:var(--surface-2)}
+.profile-menu-separator{height:1px;background:var(--line);margin:5px 6px}
+.profile-menu .profile-menu-logout{color:var(--danger)}
+.profile-self-layout{display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:16px}
+.profile-self-card,.profile-editor-panel,.personal-settings-card,.team-settings-card{padding:22px}
+.profile-photo-editor{display:flex;align-items:center;gap:16px}.profile-photo-editor h2{margin:0 0 5px}.profile-photo-editor p{margin:0 0 8px}
+.profile-avatar.large,.profile-avatar-image.large{width:96px;height:96px;border-radius:28px;flex:0 0 96px}
+.profile-avatar-image{display:block;object-fit:cover}
+.profile-avatar.small,.profile-avatar-image.small{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;flex:0 0 38px;background:#171b23;color:#fff;font-size:12px;font-weight:800}
+.profile-photo-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}
+.profile-photo-upload{position:relative;display:inline-flex!important;align-items:center;justify-content:center;cursor:pointer}.profile-photo-upload input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.settings-layout{display:grid;gap:16px}
+.settings-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.settings-choice{display:grid;gap:14px;padding:16px;border:1px solid var(--line);border-radius:16px;background:var(--surface-2)}
+.settings-choice>div:first-child{display:grid;gap:4px}.settings-choice small{color:var(--muted)}
+.settings-segments{width:max-content;max-width:100%}
+.team-person{display:flex;align-items:center;gap:10px;min-width:0}.team-person>span{min-width:0}.team-person strong,.team-person small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.team-row{grid-template-columns:minmax(0,1fr) auto auto}
+.website-recovery>.panel,.recovery-scope-card,.recovery-backup-list{padding:20px}
+.recovery-scope-card{min-height:210px}.recovery-scope-card h3{margin:2px 0 0}.recovery-scope-card p{padding-right:6px}
+@media(max-width:900px){
+  .header-welcome{display:none}
+  .profile-self-layout,.settings-choice-grid{grid-template-columns:1fr}
+  .team-row{grid-template-columns:minmax(0,1fr) auto}.team-actions{grid-column:1/-1;justify-self:start}
+}
+@media(max-width:560px){
+  .profile-self-card,.profile-editor-panel,.personal-settings-card,.team-settings-card{padding:16px}
+  .profile-photo-editor{align-items:flex-start}
+  .profile-avatar.large,.profile-avatar-image.large{width:76px;height:76px;flex-basis:76px;border-radius:22px}
+  .profile-menu{position:fixed;right:12px;top:66px}
+}

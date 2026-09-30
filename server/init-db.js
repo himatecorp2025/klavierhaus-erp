@@ -277,6 +277,8 @@ ensureColumn("pianos","color","TEXT");
 ensureColumn("pianos","notes","TEXT");
 ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
+ensureColumn("users","language_preference","TEXT NOT NULL DEFAULT 'en' CHECK(language_preference IN ('en','hu'))");
+ensureColumn("users","profile_image_url","TEXT");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("customer_conversations","client_id","INTEGER");
@@ -379,10 +381,11 @@ function seedWorkshopUxV5() {
 
 db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated_by) VALUES
   ('company_name','Klavierhaus','SYSTEM'),
-  ('short_name','KH ERP','SYSTEM'),
+  ('short_name','KH System','SYSTEM'),
   ('logo_url','/icons/icon-512.png','SYSTEM'),
   ('erp_logo_dark_url','/icons/icon-512.png','SYSTEM'),
   ('erp_logo_light_url','/icons/icon-512.png','SYSTEM'),
+  ('login_logo_url','/icons/icon-512.png','SYSTEM'),
   ('app_icon_url','/icons/icon-512.png','SYSTEM'),
   ('login_background_url','','SYSTEM'),
   ('branding_version','1','SYSTEM')`).run();

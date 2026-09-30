@@ -11,32 +11,33 @@ test("active public conversation switches from intake fields to Messenger-only c
   const html=read("website/server/index.js"),browser=read("website/public/app.js");
   assert.match(html,/data-chat-intake-fields/);
   assert.match(html,/customer-chat__composer/);
-  assert.match(browser,/function applyCustomerChatMode\(active,conversation=null\)/);
+  assert.match(browser,/function applyCustomerChatMode\(active\)/);
   assert.match(browser,/intake\.hidden=isActive/);
   assert.match(browser,/control\.disabled=isActive/);
   assert.match(browser,/customerChatLookupForm\.hidden=isActive/);
   assert.match(browser,/applyCustomerChatMode\(Boolean\(customerConversationToken\)\)/);
-  assert.match(browser,/applyCustomerChatMode\(true,conversation\)/);
+  assert.match(browser,/applyCustomerChatMode\(true\)/);
 });
 
-test("public Messenger composer is icon-only for attachment and does not render file-type helper copy",()=>{
+test("public Messenger composer is icon-only for camera photo voice and emoji without a send button",()=>{
   const html=read("website/server/index.js");
-  const start=html.indexOf('<div class="customer-chat__composer">');
+  const start=html.indexOf('<div class="customer-chat__composer" data-chat-composer hidden>');
   const end=html.indexOf('</div>',start);
   const composer=html.slice(start,end+6);
   assert.ok(start>=0);
-  assert.match(composer,/customer-chat__attach-button/);
-  assert.match(composer,/📎/);
-  assert.ok(composer.indexOf("customer-chat__attach-button")<composer.indexOf("customer-chat-message"));
-  assert.ok(composer.indexOf("customer-chat-message")<composer.indexOf("customer-chat__send-button"));
+  assert.match(composer,/data-chat-camera/);
+  assert.match(composer,/data-chat-photo-input/);
+  assert.match(composer,/data-chat-voice/);
+  assert.match(composer,/data-chat-emoji/);
+  assert.doesNotMatch(composer,/customer-chat__send-button/);
   assert.doesNotMatch(composer,/<strong>|<small>|Image, PDF|Kép, PDF|document · max/);
 });
 
 test("customer and support messages are separate Messenger bubbles",()=>{
   const browser=read("website/public/app.js"),css=read("website/public/styles.css");
-  assert.match(browser,/customer-chat__message--\$\{message\.direction === "STAFF" \? "staff" : "customer"\}/);
-  assert.match(css,/\.customer-chat__message--staff\{[^}]*justify-self:start/);
-  assert.match(css,/\.customer-chat__message--customer\{[^}]*justify-self:end/);
+  assert.match(browser,/customer-chat__message--\$\{staff\?"staff":"customer"\}/);
+  assert.match(css,/\.customer-chat__message-row--customer\{justify-content:flex-end/);
+  assert.match(css,/\.customer-chat__message--customer\{[^}]*background:linear-gradient/);
 });
 
 test("Master Data renders exactly the seven approved icon-only controls",()=>{

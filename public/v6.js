@@ -9,10 +9,10 @@ const v6Original={
   showLogin,showApp,setSession,loadBranding,renderProfile,openUserDialog,renderCms,renderIntake,openIntakeDialog,openConvertToJobDialog,r3OpenDirectExpenses
 };
 
-function v6UserThemeKey(){return state.user?.id?`kh_theme_user_${state.user.id}`:"kh_login_theme";}
+function v6UserThemeKey(){return state.user?.id?`kh_theme_user_${state.user.id}`:"kh_theme";}
 function v6ResolveTheme(){
   if(state.user?.theme_preference&&["dark","light"].includes(state.user.theme_preference))return state.user.theme_preference;
-  const local=localStorage.getItem(v6UserThemeKey());
+  const local=state.user?localStorage.getItem(v6UserThemeKey()):null;
   return local==="light"?"light":"dark";
 }
 function v6BrandAssetUrl(url){
@@ -20,29 +20,25 @@ function v6BrandAssetUrl(url){
 }
 function v6ApplyBrandLogo(){
   const branding=state.v6Branding||{},theme=document.documentElement.dataset.theme==="light"?"light":"dark";
-  const url=theme==="light"?(branding.erp_logo_light_url||branding.logo_url):(branding.erp_logo_dark_url||branding.logo_url);
-  if(!url)return;
-  for(const img of [$("#loginBrandLogo"),$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img)img.src=v6BrandAssetUrl(url);
+  const appUrl=theme==="light"?(branding.erp_logo_light_url||branding.logo_url):(branding.erp_logo_dark_url||branding.logo_url);
+  const loginUrl=branding.login_logo_url||branding.erp_logo_dark_url||branding.logo_url;
+  if(loginUrl&&$("#loginBrandLogo"))$("#loginBrandLogo").src=v6BrandAssetUrl(loginUrl);
+  if(appUrl){for(const img of [$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img)img.src=v6BrandAssetUrl(appUrl);}
 }
 function v6ApplyTheme(theme,{save=false}={}){
-  const next=theme==="light"?"light":"dark";
+  const next=state.user&&theme==="light"?"light":"dark";
   document.documentElement.dataset.theme=next;
   document.documentElement.style.colorScheme=next;
   v6ApplyBrandLogo();
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content",next==="dark"?"#0f1115":"#f6f7f9");
-  localStorage.setItem(v6UserThemeKey(),next);
-  if(!state.user)localStorage.setItem("kh_login_theme",next);
+  if(state.user)localStorage.setItem(v6UserThemeKey(),next);
   $("#themeToggle")?.setAttribute("aria-pressed",String(next==="dark"));
-  $("#loginThemeToggle")?.setAttribute("aria-pressed",String(next==="dark"));
   if(save&&state.user){
     state.user.theme_preference=next;
     void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme:next})}).catch(error=>toast(humanError(error),"error"));
   }
 }
-function v6ToggleTheme(){
-  if(!state.user)state.v6LoginThemeTouched=true;
-  v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:Boolean(state.user)});
-}
+function v6ToggleTheme(){if(state.user)v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:true});}
 function v6SidebarKey(){return state.user?.id?`kh_sidebar_collapsed_${state.user.id}`:"kh_sidebar_collapsed";}
 function v6ApplySidebar(){
   const collapsed=localStorage.getItem(v6SidebarKey())==="1";
@@ -65,39 +61,61 @@ function v6OpenMore(){
     <button class="mobile-more-card" type="button" data-nav="finance"><span>$</span><strong>${tr("Finance","Pénzügy")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>`;
+    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile","Profil")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="settings"><span>⚙</span><strong>${tr("Settings","Beállítások")}</strong></button>`;
   popover.hidden=false;$("#mobileMoreButton")?.setAttribute("aria-expanded","true");
+}
+function v6SyncAccountChrome(){
+  if(!state.user)return;
+  const image=state.user.profile_image_url||"",initial=initials(state.user.name);
+  $("#profileInitials").textContent=initial;
+  const avatar=$("#profileAvatarImage");
+  if(avatar){avatar.hidden=!image;if(image)avatar.src=image;$("#profileInitials").hidden=Boolean(image);}
+  $("#profileMenuName").textContent=state.user.name||"";
+  $("#profileMenuRole").textContent=roleLabel(state.user.role);
+  const menuAvatar=$("#profileMenuAvatar");
+  if(menuAvatar)menuAvatar.innerHTML=image?`<img src="${esc(image)}" alt="">`:esc(initial);
+  const welcome=$("#headerWelcome");if(welcome)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
+}
+function v6CloseProfileMenu(){
+  const menu=$("#profileMenu");if(menu)menu.hidden=true;$("#profileButton")?.setAttribute("aria-expanded","false");
+}
+async function v6Logout(){
+  try{await api("/api/logout",{method:"POST"});}catch(_error){}
+  clearSession();v6CloseProfileMenu();showLogin();
 }
 function v6BindShell(){
   $("#themeToggle")?.addEventListener("click",v6ToggleTheme);
-  $("#loginThemeToggle")?.addEventListener("click",v6ToggleTheme);
   $("#sidebarToggle")?.addEventListener("click",v6ToggleSidebar);
   $("#mobileMoreButton")?.addEventListener("click",event=>{event.stopPropagation();v6OpenMore();});
   $("#mobileMoreClose")?.addEventListener("click",v6CloseMore);
-  document.addEventListener("click",event=>{const popover=$("#mobileMorePopover");if(popover&&!popover.hidden&&!event.target.closest("#mobileMorePopover,#mobileMoreButton"))v6CloseMore();});
+  $("#profileButton")?.addEventListener("click",event=>{event.stopPropagation();const menu=$("#profileMenu");if(!menu)return;menu.hidden=!menu.hidden;$("#profileButton").setAttribute("aria-expanded",String(!menu.hidden));});
+  $("#profileMenu")?.addEventListener("click",event=>{const action=event.target.closest("[data-profile-menu]")?.dataset.profileMenu;if(!action)return;v6CloseProfileMenu();if(action==="logout")void v6Logout();else void navTo(action);});
+  document.addEventListener("click",event=>{
+    const popover=$("#mobileMorePopover");if(popover&&!popover.hidden&&!event.target.closest("#mobileMorePopover,#mobileMoreButton"))v6CloseMore();
+    if(!event.target.closest("#profileMenu,#profileButton"))v6CloseProfileMenu();
+  });
 }
 showLogin=function(){
   v6Original.showLogin();
   state.user=null;
-  state.v6LoginThemeTouched=false;
-  v6ApplyTheme(localStorage.getItem("kh_login_theme")==="light"?"light":"dark");
+  document.documentElement.dataset.theme="dark";
+  document.documentElement.style.colorScheme="dark";
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content","#0f1115");
+  v6ApplyBrandLogo();
 };
 setSession=function(payload){
-  const loginTheme=document.documentElement.dataset.theme==="light"?"light":"dark";
-  const loginChoiceTouched=Boolean(state.v6LoginThemeTouched);
   v6Original.setSession(payload);
   state.user=payload.user;
-  const saved=localStorage.getItem(`kh_theme_user_${state.user.id}`);
-  const theme=loginChoiceTouched?loginTheme:(state.user.theme_preference||saved||"dark");
-  state.user.theme_preference=theme;
-  v6ApplyTheme(theme);
-  state.v6LoginThemeTouched=false;
-  if(loginChoiceTouched)void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme})}).catch(()=>{});
+  const language=state.user.language_preference==="hu"?"hu":"en";
+  setLanguage(language,{save:false});
+  v6ApplyTheme(state.user.theme_preference||localStorage.getItem(v6UserThemeKey())||"dark");
 };
 showApp=function(){
   v6Original.showApp();
   v6ApplyTheme(v6ResolveTheme());
   v6ApplySidebar();
+  v6SyncAccountChrome();
 };
 loadBranding=async function(){
   try{
@@ -113,7 +131,7 @@ loadBranding=async function(){
     if(favicon)$("#appFavicon")?.setAttribute("href",v6BrandAssetUrl(favicon));
     const touch=branding.app_icon_url;
     if(touch)$("#appTouchIcon")?.setAttribute("href",v6BrandAssetUrl(touch));
-    document.title=`${branding.company_name||"Klavierhaus"} ERP`;
+    document.title=`${branding.company_name||"Klavierhaus"} System`;
   }catch(_error){}
 };
 
@@ -289,8 +307,8 @@ async function v6RenderBranding(){
   host.innerHTML=`<div class="branding-grid">
     ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Independent header logo on the public website.","A publikus weboldal önálló fejléc-logója."))}
     ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),design.favicon_url,tr("Independent browser-tab icon for the public website.","A publikus weboldal önálló böngészőfül-ikonja."))}
-    ${v6BrandAssetCard("erpLogoDark",tr("ERP logo · dark mode","ERP logó · sötét mód"),assets.erp_logo_dark_url,tr("ERP and login logo while dark mode is active.","ERP és login logó sötét módban."))}
-    ${v6BrandAssetCard("erpLogoLight",tr("ERP logo · light mode","ERP logó · világos mód"),assets.erp_logo_light_url,tr("ERP and login logo while light mode is active.","ERP és login logó világos módban."))}
+    ${v6BrandAssetCard("erpLogoDark",tr("System logo · dark mode","System logó · sötét mód"),assets.erp_logo_dark_url,tr("Klavierhaus System logo used in dark mode.","A Klavierhaus System sötét módban használt logója."))}
+    ${v6BrandAssetCard("erpLogoLight",tr("System logo · light mode","System logó · világos mód"),assets.erp_logo_light_url,tr("Klavierhaus System logo used in light mode.","A Klavierhaus System világos módban használt logója."))}\n    ${v6BrandAssetCard("loginLogo",tr("Login logo","Login logó"),assets.login_logo_url,tr("Dedicated logo for the permanently dark login screen.","Külön logó az állandóan sötét login felülethez."))}
     ${v6BrandAssetCard("appIcon",tr("PWA / app icon","PWA / alkalmazásikon"),assets.app_icon_url,tr("Independent installed-app and touch icon.","Önálló telepített alkalmazás- és touch ikon."))}
     ${v6BrandAssetCard("loginBackground",tr("Login background","Login háttérkép"),assets.login_background_url,tr("Independent responsive background behind the login card.","Önálló reszponzív háttérkép a login kártya mögött."))}
   </div>
@@ -394,7 +412,7 @@ async function renderDocuments(){
 function v6RecoveryScopeLabel(scope){const labels={pages:[tr("Pages","Oldalak"),"▤"],collections:[tr("Pianos · Services · Artists · Reviews","Zongorák · Szolgáltatások · Művészek · Vélemények"),"◫"],branding:[tr("Branding & Login","Arculat és Login"),"◉"],all:[tr("Full website","Teljes weboldal"),"⚠"]};return labels[scope]||[scope,""];}
 function v6OpenRecoveryConfirm({mode,scope="all",backup=null,refresh=v6RenderWebsiteRecovery}){
   const restore=mode==="restore",pair=v6RecoveryScopeLabel(scope),phrase=restore?"RESTORE WEBSITE":scope==="all"?"RESET WEBSITE":`RESET ${scope.toUpperCase()}`;
-  openDialog({title:restore?tr("Restore website backup","Weboldal biztonsági mentés visszaállítása"):tr("Factory reset","Gyári visszaállítás"),eyebrow:restore?tr("WEBSITE RECOVERY","WEBOLDAL HELYREÁLLÍTÁS"):tr("DESTRUCTIVE ACTION","DESTRUKTÍV MŰVELET"),body:`<form id="websiteRecoveryConfirm" class="form-grid"><div class="detail-note full"><strong>${restore?tr("The current website state will be backed up automatically before restore.","A jelenlegi weboldalállapotról a visszaállítás előtt automatikus mentés készül."):tr("A full website backup will be created automatically before reset.","A visszaállítás előtt automatikusan teljes weboldal-mentés készül.")}</strong><small>${restore?tr("ERP operational data is not replaced. Website CMS data and linked CMS references are restored from the selected backup.","Az ERP operatív adatai nem kerülnek cserére. A Website CMS adatok és a hozzájuk tartozó CMS-kapcsolatok a kiválasztott mentésből állnak vissza."):tr("Only the selected Website CMS scope is reset. Clients, ERP pianos, jobs, finance and Messenger data are not deleted.","Csak a kiválasztott Website CMS terület áll gyári alapra. Az ügyfelek, ERP-zongorák, munkák, pénzügy és Messenger adatok nem törlődnek.")}</small></div>${backup?`<div class="full recovery-target"><span>${tr("Backup","Mentés")}</span><strong>${esc(backup.label||backup.id)}</strong><small>${esc(v6ArchiveDate(backup.created_at))}</small></div>`:`<div class="full recovery-target"><span>${tr("Scope","Terület")}</span><strong>${esc(pair[0])}</strong></div>`}<label class="field full"><span>${tr("Type the confirmation phrase","Írd be a megerősítő kifejezést")}: <strong>${esc(phrase)}</strong></span><input id="websiteRecoveryPhrase" autocomplete="off" required></label><label class="field full"><span>${tr("Reason / note (optional)","Indoklás / megjegyzés (opcionális)")}</span><textarea name="reason"></textarea></label><div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="danger-button" type="submit">${restore?tr("Restore backup","Mentés visszaállítása"):tr("Run factory reset","Gyári visszaállítás indítása")}</button></div></form>`});
+  openDialog({title:restore?tr("Restore website backup","Weboldal biztonsági mentés visszaállítása"):tr("Factory reset","Gyári visszaállítás"),eyebrow:restore?tr("WEBSITE RECOVERY","WEBOLDAL HELYREÁLLÍTÁS"):tr("DESTRUCTIVE ACTION","DESTRUKTÍV MŰVELET"),body:`<form id="websiteRecoveryConfirm" class="form-grid"><div class="detail-note full"><strong>${restore?tr("The current website state will be backed up automatically before restore.","A jelenlegi weboldalállapotról a visszaállítás előtt automatikus mentés készül."):tr("A full website backup will be created automatically before reset.","A visszaállítás előtt automatikusan teljes weboldal-mentés készül.")}</strong><small>${restore?tr("System operational data is not replaced. Website CMS data and linked CMS references are restored from the selected backup.","A System operatív adatai nem kerülnek cserére. A Website CMS adatok és a hozzájuk tartozó CMS-kapcsolatok a kiválasztott mentésből állnak vissza."):tr("Only the selected Website CMS scope is reset. Clients, System pianos, jobs, finance and Messenger data are not deleted.","Csak a kiválasztott Website CMS terület áll gyári alapra. Az ügyfelek, a rendszer zongoraadatai, munkák, pénzügy és Messenger adatok nem törlődnek.")}</small></div>${backup?`<div class="full recovery-target"><span>${tr("Backup","Mentés")}</span><strong>${esc(backup.label||backup.id)}</strong><small>${esc(v6ArchiveDate(backup.created_at))}</small></div>`:`<div class="full recovery-target"><span>${tr("Scope","Terület")}</span><strong>${esc(pair[0])}</strong></div>`}<label class="field full"><span>${tr("Type the confirmation phrase","Írd be a megerősítő kifejezést")}: <strong>${esc(phrase)}</strong></span><input id="websiteRecoveryPhrase" autocomplete="off" required></label><label class="field full"><span>${tr("Reason / note (optional)","Indoklás / megjegyzés (opcionális)")}</span><textarea name="reason"></textarea></label><div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="danger-button" type="submit">${restore?tr("Restore backup","Mentés visszaállítása"):tr("Run factory reset","Gyári visszaállítás indítása")}</button></div></form>`});
   $("[data-close-dialog]")?.addEventListener("click",closeDialog);
   $("#websiteRecoveryConfirm")?.addEventListener("submit",async event=>{
     event.preventDefault();const confirmation=String($("#websiteRecoveryPhrase")?.value||"").trim(),reason=String(new FormData(event.currentTarget).get("reason")||"").trim(),button=event.currentTarget.querySelector('button[type="submit"]');
@@ -411,7 +429,7 @@ async function v6RenderWebsiteRecovery(){
   const host=$("#cmsMain");if(!host)return;host.innerHTML=loading();
   const data=await api("/api/website-recovery"),backups=data.backups||[],last=data.last_backup||null,isSuper=state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1;
   const scopes=[["pages",tr("Pages","Oldalak"),tr("Published page overrides, routes, SEO and landing section state return to bundled defaults.","A publikált oldal-felülírások, útvonalak, SEO és landing szekciók visszaállnak a beépített alapokra.")],["collections",tr("Pianos · Services · Artists · Reviews","Zongorák · Szolgáltatások · Művészek · Vélemények"),tr("Website collections return to the bundled factory sample set. Operational records remain intact.","A weboldali gyűjtemények visszaállnak a gyári mintakészletre. Az operatív rekordok megmaradnak.")],["branding",tr("Branding & Login","Arculat és Login"),tr("Website design, logos, icons and login background return to factory defaults.","A weboldal-dizájn, logók, ikonok és login háttér visszaállnak gyári alapra.")]];
-  host.innerHTML=`<div class="website-recovery"><section class="panel recovery-overview"><div class="panel-head"><div><span class="eyebrow">${tr("WEBSITE SAFETY","WEBOLDAL BIZTONSÁG")}</span><h2>${tr("Backup & factory recovery","Biztonsági mentés és gyári visszaállítás")}</h2><p>${tr("Website CMS recovery is isolated from ERP operational data.","A Website CMS helyreállítása elkülönül az ERP operatív adataitól.")}</p></div><button id="websiteBackupNow" class="primary-button" type="button">＋ ${tr("Create backup","Biztonsági mentés készítése")}</button></div><div class="recovery-last-backup"><small>${tr("Last backup","Legutóbbi biztonsági mentés")}</small><strong>${last?esc(v6ArchiveDate(last.created_at)):tr("No backup yet","Még nincs biztonsági mentés")}</strong>${last?`<span>${esc(last.trigger_type)} · ${esc(last.id)}</span>`:""}</div></section><div class="website-recovery-grid">${scopes.map(([scope,title,copy])=>`<section class="panel recovery-scope-card"><span class="eyebrow">${esc(scope.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(copy)}</p><button class="secondary-button" type="button" data-factory-reset="${scope}">${tr("Reset this area","Terület gyári visszaállítása")}</button></section>`).join("")}<section class="panel recovery-scope-card recovery-danger-card"><span class="eyebrow">${tr("FULL WEBSITE","TELJES WEBOLDAL")}</span><h3>${tr("Full website factory reset","Teljes weboldal gyári visszaállítása")}</h3><p>${tr("Creates a pre-reset backup, then resets Pages, Collections and Branding together. ERP operational data remains untouched.","Pre-reset mentést készít, majd az Oldalak, Gyűjtemények és Arculat együtt áll gyári alapra. Az ERP operatív adatai érintetlenek maradnak.")}</p>${isSuper?`<button class="danger-button" type="button" data-factory-reset="all">${tr("Reset full website","Teljes weboldal visszaállítása")}</button>`:`<small>${tr("Superadmin permission required.","Szuperadmin jogosultság szükséges.")}</small>`}</section></div><section class="panel recovery-backup-list"><div class="panel-head"><div><h3>${tr("Website backups","Weboldal biztonsági mentések")}</h3><p>${tr("Every reset and restore creates an automatic safety snapshot.","Minden reset és restore automatikus biztonsági snapshotot készít.")}</p></div><span class="badge">${backups.length}</span></div><div class="backup-list">${backups.length?backups.map(row=>`<article class="backup-row"><div><strong>${esc(row.label||row.id)}</strong><small>${esc(v6ArchiveDate(row.created_at))} · ${esc(row.trigger_type)} · ${esc(row.scope)}</small><small>${tr("Pages","Oldalak")}: ${Number(row.metadata?.counts?.website_content_pages||0)} · ${tr("Services","Szolgáltatások")}: ${Number(row.metadata?.counts?.website_services||0)} · ${tr("Pianos","Zongorák")}: ${Number(row.metadata?.counts?.website_showroom_pianos||0)}</small></div>${isSuper?`<button class="secondary-button" type="button" data-website-restore="${esc(row.id)}">${tr("Restore","Visszaállítás")}</button>`:""}</article>`).join(""):`<div class="empty-state">${tr("No website backups yet.","Még nincs weboldal-biztonsági mentés.")}</div>`}</div></section></div>`;
+  host.innerHTML=`<div class="website-recovery"><section class="panel recovery-overview"><div class="panel-head"><div><span class="eyebrow">${tr("WEBSITE SAFETY","WEBOLDAL BIZTONSÁG")}</span><h2>${tr("Backup & factory recovery","Biztonsági mentés és gyári visszaállítás")}</h2><p>${tr("Website CMS recovery is isolated from System operational data.","A Website CMS helyreállítása elkülönül az System operatív adataitól.")}</p></div><button id="websiteBackupNow" class="primary-button" type="button">＋ ${tr("Create backup","Biztonsági mentés készítése")}</button></div><div class="recovery-last-backup"><small>${tr("Last backup","Legutóbbi biztonsági mentés")}</small><strong>${last?esc(v6ArchiveDate(last.created_at)):tr("No backup yet","Még nincs biztonsági mentés")}</strong>${last?`<span>${esc(last.trigger_type)} · ${esc(last.id)}</span>`:""}</div></section><div class="website-recovery-grid">${scopes.map(([scope,title,copy])=>`<section class="panel recovery-scope-card"><span class="eyebrow">${esc(scope.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(copy)}</p><button class="secondary-button" type="button" data-factory-reset="${scope}">${tr("Reset this area","Terület gyári visszaállítása")}</button></section>`).join("")}${isSuper?`<section class="panel recovery-scope-card recovery-danger-card"><span class="eyebrow">${tr("FULL WEBSITE","TELJES WEBOLDAL")}</span><h3>${tr("Full website factory reset","Teljes weboldal gyári visszaállítása")}</h3><p>${tr("Creates a pre-reset backup, then resets Pages, Collections and Branding together. System operational data remains untouched.","Pre-reset mentést készít, majd az Oldalak, Gyűjtemények és Arculat együtt áll gyári alapra. A System operatív adatai érintetlenek maradnak.")}</p><button class="danger-button" type="button" data-factory-reset="all">${tr("Reset full website","Teljes weboldal visszaállítása")}</button></section>`:""}</div><section class="panel recovery-backup-list"><div class="panel-head"><div><h3>${tr("Website backups","Weboldal biztonsági mentések")}</h3><p>${tr("Every reset and restore creates an automatic safety snapshot.","Minden reset és restore automatikus biztonsági snapshotot készít.")}</p></div><span class="badge">${backups.length}</span></div><div class="backup-list">${backups.length?backups.map(row=>`<article class="backup-row"><div><strong>${esc(row.label||row.id)}</strong><small>${esc(v6ArchiveDate(row.created_at))} · ${esc(row.trigger_type)} · ${esc(row.scope)}</small><small>${tr("Pages","Oldalak")}: ${Number(row.metadata?.counts?.website_content_pages||0)} · ${tr("Services","Szolgáltatások")}: ${Number(row.metadata?.counts?.website_services||0)} · ${tr("Pianos","Zongorák")}: ${Number(row.metadata?.counts?.website_showroom_pianos||0)}</small></div>${isSuper?`<button class="secondary-button" type="button" data-website-restore="${esc(row.id)}">${tr("Restore","Visszaállítás")}</button>`:""}</article>`).join(""):`<div class="empty-state">${tr("No website backups yet.","Még nincs weboldal-biztonsági mentés.")}</div>`}</div></section></div>`;
   $("#websiteBackupNow")?.addEventListener("click",async()=>{const button=$("#websiteBackupNow");button.disabled=true;try{await api("/api/website-recovery/backups",{method:"POST",body:JSON.stringify({label:tr("Manual website backup","Manuális weboldal-mentés")})});toast(tr("Website backup created.","A weboldal biztonsági mentése elkészült."),"success");await v6RenderWebsiteRecovery();}catch(error){button.disabled=false;toast(humanError(error),"error");}});
   $$("[data-factory-reset]",host).forEach(button=>button.addEventListener("click",()=>v6OpenRecoveryConfirm({mode:"reset",scope:button.dataset.factoryReset})));
   $$("[data-website-restore]",host).forEach(button=>button.addEventListener("click",()=>{const backup=backups.find(row=>String(row.id)===button.dataset.websiteRestore);if(backup)v6OpenRecoveryConfirm({mode:"restore",backup});}));
@@ -636,18 +654,82 @@ openConvertToJobDialog=async function(lead){
   });
 };
 
-/* ---------- Profile / team deletion ---------- */
+/* ---------- Profile / personal settings / team administration ---------- */
 
+function v6ProfileAvatarMarkup(user,size="large"){
+  const image=user?.profile_image_url||"";
+  return image?`<img class="profile-avatar-image ${size}" src="${esc(image)}" alt="">`:`<div class="profile-avatar ${size}">${esc(initials(user?.name))}</div>`;
+}
 renderProfile=async function(){
-  const workspace=$("#workspace"),users=await loadUsers(),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
-  workspace.innerHTML=pageHead(tr("Profile & Settings","Profil és beállítások"),tr("Your account, team, theme and application language.","Saját fiók, csapat, megjelenés és alkalmazásnyelv."),admin?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
-    `<div class="profile-grid"><section class="panel profile-card"><div class="profile-avatar">${esc(initials(state.user?.name))}</div><h2>${esc(state.user?.name)}</h2><p class="muted">${esc(state.user?.email||"")}</p><span class="role-chip">${esc(roleLabel(state.user?.role))}</span><div class="profile-theme-row"><span>${tr("Theme","Megjelenés")}</span><button class="secondary-button" id="profileThemeBtn" type="button">${document.documentElement.dataset.theme==="dark"?tr("Dark","Sötét"):tr("Light","Világos")}</button></div><div class="form-actions"><button id="logoutBtn" class="danger-button" type="button">${tr("Sign out","Kijelentkezés")}</button></div></section>
-    <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span>${admin?`<div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div>`:""}</div>`).join("")}</div></section></div>`;
-  $("#profileThemeBtn").addEventListener("click",()=>{v6ToggleTheme();void renderProfile();});
-  $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}localStorage.setItem("kh_login_theme",document.documentElement.dataset.theme||"dark");clearSession();showLogin();});
-  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());$$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
-  $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{const user=users.find(row=>String(row.id)===button.dataset.deleteUser);if(!user)return;if(!confirm(tr(`Delete ${user.name}? Historical jobs and audit records will remain intact.`,`Törlöd ${user.name} felhasználót? A korábbi munkák és audit adatok megmaradnak.`)))return;try{await api(`/api/users/${encodeURIComponent(user.id)}`,{method:"DELETE"});toast(tr("User deleted.","Felhasználó törölve."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}}));
+  const workspace=$("#workspace"),user=state.user||{};
+  workspace.innerHTML=pageHead(tr("Profile","Profil"),tr("Your personal Klavierhaus System account.","Saját Klavierhaus System fiókod."))+
+    `<div class="profile-self-layout">
+      <section class="panel profile-self-card">
+        <div class="profile-photo-editor">
+          ${v6ProfileAvatarMarkup(user)}
+          <div><h2>${esc(user.name||"")}</h2><p class="muted">${esc(user.email||"")}</p><span class="role-chip">${esc(roleLabel(user.role))}</span></div>
+        </div>
+        <div class="profile-photo-actions">
+          <label class="secondary-button profile-photo-upload"><input id="profileImageFile" type="file" accept="image/*"><span>↑ ${tr("Upload profile photo","Profilkép feltöltése")}</span></label>
+          ${user.profile_image_url?`<button id="removeProfileImage" class="text-button danger-text" type="button">${tr("Remove photo","Kép eltávolítása")}</button>`:""}
+        </div>
+      </section>
+      <section class="panel profile-editor-panel">
+        <div class="panel-head"><div><span class="eyebrow">${tr("PERSONAL PROFILE","SZEMÉLYES PROFIL")}</span><h2>${tr("Contact details","Kapcsolati adatok")}</h2></div></div>
+        <form id="selfProfileForm" class="form-grid">
+          <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user.name||"")}" required></label>
+          <label class="field"><span>${tr("Login email","Belépési e-mail")}</span><input value="${esc(user.email||"")}" disabled></label>
+          <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")}</span><input name="contact_email" type="email" value="${esc(user.contact_email||"")}"></label>
+          <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user.phone||"")}"></label>
+          <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user.address||"")}"></label>
+          <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="8" autocomplete="new-password"></label>
+          <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="8" autocomplete="new-password"></label>
+          <div class="form-actions full"><button class="primary-button" type="submit">${tr("Save profile","Profil mentése")}</button></div>
+        </form>
+      </section>
+    </div>`;
+  $("#profileImageFile")?.addEventListener("change",async event=>{
+    const file=event.currentTarget.files?.[0];if(!file)return;const data=new FormData();data.append("file",file,file.name);
+    try{const result=await api("/api/me/profile-image",{method:"POST",body:data});state.user.profile_image_url=result.profile_image_url||"";sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();toast(tr("Profile photo updated.","A profilkép frissült."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}
+  });
+  $("#removeProfileImage")?.addEventListener("click",async()=>{try{await api("/api/me/profile-image",{method:"DELETE"});state.user.profile_image_url="";sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();await renderProfile();}catch(error){toast(humanError(error),"error");}});
+  $("#selfProfileForm")?.addEventListener("submit",async event=>{
+    event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget)),password=String(data.password||"");
+    if(!password){delete data.password;delete data.password_confirmation;}
+    try{
+      const saved=await api("/api/me/profile",{method:"PUT",body:JSON.stringify(data)});
+      Object.assign(state.user,{name:saved.name,contact_email:saved.contact_email||"",phone:saved.phone||"",address:saved.address||"",profile_image_url:saved.profile_image_url||state.user.profile_image_url||""});
+      sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();
+      toast(tr("Profile saved.","A profil mentve."),"success");
+      if(password){clearSession();showLogin();return;}
+      await renderProfile();
+    }catch(error){toast(humanError(error),"error");}
+  });
 };
+
+async function renderSettings(){
+  const workspace=$("#workspace"),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  const users=admin?await loadUsers():[];
+  workspace.innerHTML=pageHead(tr("Settings","Beállítások"),tr("Your language, appearance and account-level workspace preferences.","Nyelv, megjelenés és személyes munkafelület-beállítások."),admin?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
+    `<div class="settings-layout">
+      <section class="panel personal-settings-card">
+        <div class="panel-head"><div><span class="eyebrow">${tr("MY SETTINGS","SAJÁT BEÁLLÍTÁSOK")}</span><h2>${tr("Appearance & language","Megjelenés és nyelv")}</h2></div></div>
+        <div class="settings-choice-grid">
+          <div class="settings-choice"><div><strong>${tr("Theme","Megjelenés")}</strong><small>${tr("Saved for your user account.","A saját felhasználói fiókodhoz mentve.")}</small></div><div class="segmented-control settings-segments"><button type="button" data-user-theme="light" class="${document.documentElement.dataset.theme==="light"?"active":""}">${tr("Light","Világos")}</button><button type="button" data-user-theme="dark" class="${document.documentElement.dataset.theme==="dark"?"active":""}">${tr("Dark","Sötét")}</button></div></div>
+          <div class="settings-choice"><div><strong>${tr("Language","Nyelv")}</strong><small>${tr("Follows you when you sign in on another device.","Másik eszközön történő belépéskor is megmarad.")}</small></div><div class="segmented-control settings-segments"><button type="button" data-user-language="en" class="${state.language==="en"?"active":""}">English</button><button type="button" data-user-language="hu" class="${state.language==="hu"?"active":""}">Magyar</button></div></div>
+        </div>
+      </section>
+      ${admin?`<section class="panel team-settings-card"><div class="panel-head"><div><span class="eyebrow">${tr("ADMINISTRATION","ADMINISZTRÁCIÓ")}</span><h2>${tr("Team","Csapat")}</h2></div><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><div class="team-person">${v6ProfileAvatarMarkup(user,"small")}<span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span></div><span class="role-chip">${esc(roleLabel(user.role))}</span><div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div></div>`).join("")}</div></section>`:""}
+    </div>`;
+  $$("[data-user-theme]").forEach(button=>button.addEventListener("click",async()=>{v6ApplyTheme(button.dataset.userTheme,{save:true});await renderSettings();}));
+  $$("[data-user-language]").forEach(button=>button.addEventListener("click",async()=>{setLanguage(button.dataset.userLanguage,{save:true});}));
+  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
+  $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
+  $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{
+    const user=users.find(row=>String(row.id)===button.dataset.deleteUser);if(!user||!confirm(tr(`Delete ${user.name}? Historical jobs and audit records will remain intact.`,`Törlöd ${user.name} felhasználót? A korábbi munkák és audit adatok megmaradnak.`)))return;
+    try{await api(`/api/users/${encodeURIComponent(user.id)}`,{method:"DELETE"});toast(tr("User deleted.","Felhasználó törölve."),"success");await renderSettings();}catch(error){toast(humanError(error),"error");}
+  }));
+}
 
 /* ---------- Direct expense document upload ---------- */
 

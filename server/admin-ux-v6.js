@@ -4,6 +4,7 @@ const fs=require("fs");
 const path=require("path");
 const crypto=require("crypto");
 const multer=require("multer");
+const bcrypt=require("bcryptjs");
 const {inspectImageFile}=require("./upload-middleware");
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
@@ -47,21 +48,64 @@ function diskUpload(target,prefix,{extensions,mimes,max=25*1024*1024}){
 
 function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl="",inventoryService=null}){
   const staff=permit("ADMIN","MANAGER","WORKER"),admin=permit("ADMIN"),finance=permit("ADMIN","MANAGER");
-  const receiptDir=path.join(uploadDir,"receipts"),brandDir=path.join(uploadDir,"branding-v6");
+  const receiptDir=path.join(uploadDir,"receipts"),brandDir=path.join(uploadDir,"branding-v6"),profileDir=path.join(uploadDir,"profile-images");
   const receiptUpload=diskUpload(receiptDir,"receipt",{extensions:RECEIPT_EXTENSIONS,mimes:RECEIPT_MIMES,max:40*1024*1024}).single("file");
   const brandUpload=diskUpload(brandDir,"brand",{extensions:BRAND_EXTENSIONS,mimes:new Set(["image/jpeg","image/png","image/webp","image/gif","image/avif"]),max:20*1024*1024}).single("file");
+  const profileUpload=diskUpload(profileDir,"avatar",{extensions:BRAND_EXTENSIONS,mimes:new Set(["image/jpeg","image/png","image/webp","image/gif","image/avif"]),max:10*1024*1024}).single("file");
 
   app.get("/api/me/preferences",auth,(req,res)=>{
-    const row=db.prepare("SELECT theme_preference FROM users WHERE id=?").get(req.user.id);
-    res.json({theme:["light","dark"].includes(row?.theme_preference)?row.theme_preference:"dark"});
+    const row=db.prepare("SELECT theme_preference,language_preference FROM users WHERE id=?").get(req.user.id)||{};
+    res.json({
+      theme:["light","dark"].includes(row.theme_preference)?row.theme_preference:"dark",
+      language:["en","hu"].includes(row.language_preference)?row.language_preference:"en"
+    });
   });
   app.put("/api/me/preferences",auth,(req,res)=>{
-    const theme=String(req.body?.theme||"").toLowerCase();
+    const current=db.prepare("SELECT theme_preference,language_preference FROM users WHERE id=?").get(req.user.id)||{};
+    const theme=req.body?.theme===undefined?(["light","dark"].includes(current.theme_preference)?current.theme_preference:"dark"):String(req.body.theme||"").toLowerCase();
+    const language=req.body?.language===undefined?(["en","hu"].includes(current.language_preference)?current.language_preference:"en"):String(req.body.language||"").toLowerCase();
     if(!["dark","light"].includes(theme))return res.status(400).json({error:"INVALID_THEME"});
-    const before=db.prepare("SELECT theme_preference FROM users WHERE id=?").get(req.user.id);
-    db.prepare("UPDATE users SET theme_preference=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(theme,req.user.id);
-    audit(req,"UPDATE","user_preferences",req.user.id,before,{theme_preference:theme});
-    res.json({theme});
+    if(!["en","hu"].includes(language))return res.status(400).json({error:"INVALID_LANGUAGE"});
+    db.prepare("UPDATE users SET theme_preference=?,language_preference=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(theme,language,req.user.id);
+    audit(req,"UPDATE","user_preferences",req.user.id,current,{theme_preference:theme,language_preference:language});
+    res.json({theme,language});
+  });
+
+  app.put("/api/me/profile",auth,(req,res)=>{
+    const before=db.prepare("SELECT id,name,contact_email,phone,address,profile_image_url FROM users WHERE id=?").get(req.user.id);
+    if(!before)return res.status(404).json({error:"USER_NOT_FOUND"});
+    const name=text(req.body?.name??before.name,200),contactEmail=text(req.body?.contact_email??before.contact_email,320).toLowerCase(),phone=text(req.body?.phone??before.phone,100),address=text(req.body?.address??before.address,1000);
+    if(!name)return res.status(400).json({error:"USER_NAME_REQUIRED"});
+    if(contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail))return res.status(400).json({error:"INVALID_EMAIL"});
+    const password=String(req.body?.password||"");
+    if(password&&password.length<8)return res.status(400).json({error:"PASSWORD_TOO_SHORT"});
+    if(password&&password!==String(req.body?.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
+    if(password){
+      db.prepare("UPDATE users SET name=?,contact_email=?,phone=?,address=?,password_hash=?,session_version=COALESCE(session_version,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(name,contactEmail||null,phone,address,bcrypt.hashSync(password,10),req.user.id);
+    }else{
+      db.prepare("UPDATE users SET name=?,contact_email=?,phone=?,address=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(name,contactEmail||null,phone,address,req.user.id);
+    }
+    const after=db.prepare("SELECT id,name,email,contact_email,role,status,phone,address,profile_image_url,theme_preference,language_preference,session_version,is_superadmin FROM users WHERE id=?").get(req.user.id);
+    audit(req,"UPDATE","user_profile",req.user.id,before,after);
+    res.json(after);
+  });
+
+  app.post("/api/me/profile-image",auth,profileUpload,(req,res)=>{
+    if(!req.file)return res.status(400).json({error:"PROFILE_IMAGE_REQUIRED"});
+    const details=inspectImageFile(req.file.path);
+    if(!details||details.width<128||details.height<128){try{fs.unlinkSync(req.file.path);}catch(_error){}return res.status(400).json({error:"INVALID_PROFILE_IMAGE"});}
+    const before=db.prepare("SELECT profile_image_url FROM users WHERE id=?").get(req.user.id),url=`/uploads/profile-images/${path.basename(req.file.path)}`;
+    db.prepare("UPDATE users SET profile_image_url=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(url,req.user.id);
+    audit(req,"UPDATE","user_profile_image",req.user.id,before,{profile_image_url:url});
+    res.status(201).json({profile_image_url:url,...details});
+  });
+  app.delete("/api/me/profile-image",auth,(req,res)=>{
+    const before=db.prepare("SELECT profile_image_url FROM users WHERE id=?").get(req.user.id);
+    db.prepare("UPDATE users SET profile_image_url=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id);
+    audit(req,"UPDATE","user_profile_image",req.user.id,before,{profile_image_url:null});
+    res.json({ok:true,profile_image_url:""});
   });
 
   app.get("/api/intake-catalog",auth,staff,(req,res)=>{
@@ -208,6 +252,7 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
       favicon_url:setting(db,"favicon_url","/icons/icon-192.png"),
       app_icon_url:setting(db,"app_icon_url","/icons/icon-512.png"),
       login_background_url:setting(db,"login_background_url",""),
+      login_logo_url:setting(db,"login_logo_url",legacy),
       logo_url:legacy,
       erp_logo_dark_url:setting(db,"erp_logo_dark_url",legacy),
       erp_logo_light_url:setting(db,"erp_logo_light_url",legacy),
@@ -220,6 +265,7 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
     {route:"public-favicon",key:null,min:32},
     {route:"erp-logo-dark",key:"erp_logo_dark_url",min:192,legacy:true},
     {route:"erp-logo-light",key:"erp_logo_light_url",min:192},
+    {route:"login-logo",key:"login_logo_url",min:192},
     {route:"app-icon",key:"app_icon_url",min:192}
   ]){
     app.post(`/api/settings/branding/${spec.route}`,auth,admin,brandUpload,(req,res)=>{

@@ -108,7 +108,9 @@ function safeUser(row) {
     address: row.address || "",
     is_superadmin: superadmin ? 1 : 0,
     session_version: Number(row.session_version || 0),
-    theme_preference: ["light","dark"].includes(row.theme_preference) ? row.theme_preference : "dark"
+    theme_preference: ["light","dark"].includes(row.theme_preference) ? row.theme_preference : "dark",
+    language_preference: ["en","hu"].includes(row.language_preference) ? row.language_preference : "en",
+    profile_image_url: row.profile_image_url || ""
   };
 }
 function auth(req,res,next) {
@@ -159,10 +161,11 @@ function getBranding() {
   const legacyLogo=setting("logo_url","/icons/icon-512.png");
   return {
     company_name:setting("company_name","Klavierhaus"),
-    short_name:setting("short_name","KH ERP"),
+    short_name:setting("short_name","KH System"),
     logo_url:legacyLogo,
     erp_logo_dark_url:setting("erp_logo_dark_url",legacyLogo),
     erp_logo_light_url:setting("erp_logo_light_url",legacyLogo),
+    login_logo_url:setting("login_logo_url",legacyLogo),
     favicon_url:setting("favicon_url","/icons/icon-192.png"),
     app_icon_url:setting("app_icon_url","/icons/icon-512.png"),
     login_background_url:setting("login_background_url",""),
@@ -285,7 +288,7 @@ app.post("/api/auth/verify-session",auth,async(req,res)=>{
 });
 
 app.get("/api/users",auth,permit("ADMIN","MANAGER","WORKER"),(_req,res)=>{
-  res.json(db.prepare(`SELECT id,name,email,contact_email,role,status,phone,address,created_at
+  res.json(db.prepare(`SELECT id,name,email,contact_email,role,status,phone,address,profile_image_url,created_at
     FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY CASE role WHEN 'ADMIN' THEN 0 WHEN 'MANAGER' THEN 1 ELSE 2 END,lower(name)`).all());
 });
 app.post("/api/users",auth,permit("ADMIN"),async(req,res)=>{
