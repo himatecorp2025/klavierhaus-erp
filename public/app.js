@@ -607,9 +607,9 @@ async function renderMaster(){
   state.masterMigration=pianoOverview?.migration||{ok:false,status:"AWAITING_SOURCE",rows:0};
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
-  const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS",canImport=state.user&&["ADMIN","SUPERADMIN"].includes(state.user.role);
-  workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients and pianos in one editable workspace. Every imported field remains available.","Ügyfelek és zongorák egyetlen szerkeszthető munkafelületen. Minden importált adatmező megmarad."),
-    `${canImport?'<button id="masterImportBtn" class="secondary-button" type="button">↑ '+tr("Import CSV","CSV import")+'</button><input id="masterImportFile" type="file" accept=".csv,text/csv" hidden>':""}<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
+  const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS";
+  workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients and pianos in one editable workspace. Every source field remains available.","Ügyfelek és zongorák egyetlen szerkeszthető munkafelületen. Minden forrásadatmező elérhető."),
+    `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
     `<div class="master-layout" id="masterLayout">
       <section class="panel master-list-panel">
         <div class="master-toolbar">
@@ -632,16 +632,6 @@ async function renderMaster(){
       <section id="clientDetail" class="panel client-detail master-detail"></section>
     </div>`;
   $("#addClientBtn").addEventListener("click",async()=>{if(await masterConfirmDiscard())openClientDialog();});
-  $("#masterImportBtn")?.addEventListener("click",async()=>{if(await masterConfirmDiscard())$("#masterImportFile")?.click();});
-  $("#masterImportFile")?.addEventListener("change",async event=>{
-    const file=event.currentTarget.files?.[0];if(!file)return;
-    const form=new FormData();form.append("file",file,file.name);
-    try{
-      const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import verified: ${summary.sourceRowsPersisted}/339 rows · ${summary.columns||33}/33 columns · ${summary.sourceClients}/309 clients · ${summary.totalPianos}/339 pianos · ${summary.ownerlessPianos}/10 ownerless · Paul Mills ${summary.controlClientPianos}/9.`,`Import ellenőrizve: ${summary.sourceRowsPersisted}/339 sor · ${summary.columns||33}/33 oszlop · ${summary.sourceClients}/309 ügyfél · ${summary.totalPianos}/339 zongora · ${summary.ownerlessPianos}/10 gazdátlan · Paul Mills ${summary.controlClientPianos}/9.`),"success");
-      event.currentTarget.value="";state.masterDirty=false;await renderMaster();
-    }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
-  });
   $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>void handleMasterTool(button.dataset.masterTool)));
   $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
   renderMasterList();await renderMasterDetail();
