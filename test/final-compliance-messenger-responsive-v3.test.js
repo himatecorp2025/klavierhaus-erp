@@ -39,7 +39,7 @@ test("Inbox unread emphasis and after-hours Waiting are driven by backend data",
 test("People, Private and Messenger notifications are first-class list views",()=>{
   const source=read("public/messenger-responsive-v3.js");
   assert.match(source,/function messengerPeople\(/);
-  assert.match(source,/email:\+email\.toLowerCase/);
+  assert.match(source,/"email:"\+email\.toLowerCase/);
   assert.match(source,/conversation_id:row\.id/);
   assert.match(source,/function messengerRenderPrivate\(/);
   assert.match(source,/REQUESTED","PROPOSED/);
