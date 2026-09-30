@@ -54,7 +54,7 @@ jobs:
         run: |
           git fetch origin develop --depth=1
           changed="$(git diff --name-only origin/develop -- .)"
-          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(website/server/index\.js|website/server/site-content\.js|website/server/event-client\.js|website/public/app\.js|website/public/styles\.css|website/test/website-foundation\.test\.js) || true)"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(website/server/index\.js|website/server/site-content\.js|website/server/event-client\.js|website/public/app\.js|website/public/styles\.css|website/test/website-foundation\.test\.js)
           if [ -n "$unexpected" ]; then
             echo "Unexpected website changes:"
             printf '%s\n' "$unexpected"
