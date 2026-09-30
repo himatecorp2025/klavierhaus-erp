@@ -507,6 +507,28 @@ function masterValue(value,{brand=false}={}){
   return textValue||(brand?"No brand":masterPendingText());
 }
 function masterPendingClass(value){return String(value??"").trim()?"":" master-data-pending";}
+const MASTER_SOURCE_FIELD_LABELS={
+  first_name:["First name","Keresztnév"],last_name:["Last name","Vezetéknév"],company_name:["Company name","Cégnév"],contact_name:["Contact name","Kapcsolattartó"],
+  street:["Street","Utca, házszám"],city:["City","Város"],district:["District / State","Kerület / állam"],postcode:["Postcode","Irányítószám"],country:["Country","Ország"],
+  mobile_phone:["Mobile phone","Mobiltelefon"],line_phone:["Landline phone","Vezetékes telefon"],email:["Email","E-mail"],notes:["Notes","Megjegyzés"],short_memo_to_name:["Short memo to name","Rövid név-memó"]
+};
+function masterSourceFieldLabel(field){const pair=MASTER_SOURCE_FIELD_LABELS[field]||[String(field||"").replaceAll("_"," "),String(field||"").replaceAll("_"," ")];return state.language==="hu"?pair[1]:pair[0];}
+function masterSourceRowsText(source){return String(source?.source_rows||source?.source_row_number||"").trim()||masterPendingText();}
+function masterSourceInfoMarkup(sources=[],kind="client"){
+  if(!sources.length)return `<details class="master-source-panel"><summary>${tr("Source information","Forrásinformáció")}</summary><div class="empty-state">${tr("No source mapping is available for this record.","Ehhez a rekordhoz nincs forrásleképezés.")}</div></details>`;
+  return `<details class="master-source-panel"><summary>${tr("Source information","Forrásinformáció")}</summary><div class="master-source-list">${sources.map(source=>`<article><strong>${esc(source.source_name||"SOURCE")}</strong><dl>
+    <dt>${kind==="piano"?tr("Source Instrument ID","Forrás hangszer ID"):tr("Source Client ID","Forrás ügyfél ID")}</dt><dd>${esc(kind==="piano"?source.source_instrument_id:source.source_client_id)}</dd>
+    ${kind==="piano"?`<dt>${tr("Source Client ID","Forrás ügyfél ID")}</dt><dd class="${masterPendingClass(source.source_client_id)}">${esc(masterValue(source.source_client_id))}</dd>`:""}
+    <dt>${tr("Source row","Forrássor")}</dt><dd>${esc(masterSourceRowsText(source))}</dd>
+    <dt>${tr("Imported","Importálva")}</dt><dd class="${masterPendingClass(source.imported_at)}">${esc(masterValue(source.imported_at))}</dd>
+  </dl></article>`).join("")}</div></details>`;
+}
+function masterClientSourceHistoryMarkup(data={}){
+  const values=Array.isArray(data.field_values)?data.field_values:[];
+  if(!values.length)return masterSourceInfoMarkup(data.sources||[],"client");
+  const groups=new Map();for(const row of values){if(!groups.has(row.field_name))groups.set(row.field_name,[]);groups.get(row.field_name).push(row);}
+  return masterSourceInfoMarkup(data.sources||[],"client")+`<details class="master-source-panel"><summary>${tr("Imported source history","Importált forráselőzmények")}</summary><div class="master-source-history">${[...groups.entries()].map(([field,rows])=>`<article><strong>${esc(masterSourceFieldLabel(field))}</strong>${rows.map(row=>`<div><span>${esc(row.value)}</span><small>${esc(row.source_client_id)} · ${tr("rows","sorok")} ${row.first_source_row}${row.last_source_row!==row.first_source_row?"–"+row.last_source_row:""}${Number(row.occurrences||1)>1?" · ×"+row.occurrences:""}</small></div>`).join("")}</article>`).join("")}</div></details>`;
+}
 function masterReviewBadge(client){
   const count=Number(client?.piano_review_count||0);
   return count>0?`<span class="master-review-badge" title="${esc(tr("Data conflict needs review","Adatütközés ellenőrzésre vár"))}">!<small>${count}</small></span>`:"";
@@ -536,6 +558,7 @@ function clientStructuredFields(client={}){
     <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes" placeholder="${esc(masterPendingText())}">${esc(client.notes||"")}</textarea></label>
     <label class="field full"><span>${tr("Short memo to name","Rövid név-memó")}</span><textarea name="short_memo_to_name" placeholder="${esc(masterPendingText())}">${esc(client.short_memo_to_name||"")}</textarea></label>
     <label class="field"><span>${tr("Client type","Ügyféltípus")}</span><select name="client_type"><option value="INDIVIDUAL" ${String(client.client_type||"INDIVIDUAL")==="INDIVIDUAL"?"selected":""}>${tr("Individual","Magánszemély")}</option><option value="PARTNER" ${client.client_type==="PARTNER"?"selected":""}>${tr("Professional partner","Szakmai partner")}</option><option value="BUSINESS" ${client.client_type==="BUSINESS"?"selected":""}>${tr("Business","Vállalkozás")}</option><option value="INSTITUTION" ${client.client_type==="INSTITUTION"?"selected":""}>${tr("Institution","Intézmény")}</option></select></label>
+    <label class="field"><span>${tr("Last visit","Utolsó látogatás")}</span><input value="${esc(client.last_visit_at||"")}" placeholder="${esc(masterPendingText())}" readonly aria-readonly="true"></label>
     <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>`;
 }
 function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
@@ -640,10 +663,10 @@ function masterSearchMatch(values,q){
   return (tokens.length?tokens:[normalized]).every(token=>haystack.includes(token));
 }
 function masterClientSearchValues(client={}){
-  return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name];
+  return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name,client.last_visit_at,client.source_client_ids];
 }
 function masterPianoSearchValues(piano={}){
-  return [piano.category,piano.brand,piano.model,piano.serial_number,piano.finish,piano.effective_location,piano.location_notes,piano.size_display,piano.color,piano.build_year,piano.notes,piano.date_of_purchase,piano.warranty,piano.last_serviced_at,piano.last_service_title,piano.last_service_description,piano.next_service_date,piano.latest_info_frequency,piano.latest_info_humidity,piano.latest_info_temperature];
+  return [piano.category,piano.brand,piano.model,piano.serial_number,piano.finish,piano.effective_location,piano.location_notes,piano.size_display,piano.color,piano.build_year,piano.notes,piano.date_of_purchase,piano.warranty,piano.last_serviced_at,piano.last_service_title,piano.last_service_description,piano.next_service_date,piano.latest_info_frequency,piano.latest_info_humidity,piano.latest_info_temperature,piano.source_instrument_ids,piano.source_client_ids];
 }
 function filteredMasterClients(){
   const filter=state.clientMasterFilter||"ALL",q=masterQuery();
