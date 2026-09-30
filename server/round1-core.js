@@ -211,7 +211,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       if(error)return next(error);
       if(!req.file?.buffer?.length)return res.status(400).json({error:"MASTER_DATA_CSV_REQUIRED"});
       try{
-        const summary=importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:"KLAVIERHAUS_MASTER_CSV"});
+        const summary=db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:"KLAVIERHAUS_MASTER_CSV"}))();
         audit(req,"IMPORT","master_data","KLAVIERHAUS_MASTER_CSV",null,summary);res.json(summary);
       }catch(error){res.status(error.status||400).json({error:error.message||"MASTER_DATA_IMPORT_FAILED"});}
     });
