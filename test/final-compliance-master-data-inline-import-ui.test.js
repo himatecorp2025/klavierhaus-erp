@@ -105,7 +105,7 @@ test("raw source rows are retained and source IDs are visible and searchable in 
 });
 
 test("PWA cache is bumped for the full 33-column Master Data release",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v24-master-data-full-33-column/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v25-master-data-contract-status/);
 });
 
 
@@ -169,4 +169,20 @@ test("client Last visit and complete source lineage are wired end to end",()=>{
   assert.match(app,/masterClientSourceHistoryMarkup/);
   assert.match(app,/masterPianoSourceMarkup/);
   assert.match(finance,/refreshClientLastVisit/);
+});
+
+
+test("Master Data contract status is visible and successful import marks the canonical migration ready",()=>{
+  const api=read("server/round1-core.js"),app=read("public/app.js"),init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js");
+  assert.match(api,/\/api\/master-data\/import-status/);
+  assert.match(api,/auditStoredMasterImport/);
+  assert.match(api,/master_data_import_status','READY'/);
+  assert.match(api,/master_data_reconcile_version/);
+  assert.match(app,/source contract verified/);
+  assert.match(app,/forráskontraktus ellenőrizve/);
+  assert.match(app,/Paul Mills \$\{summary\.controlClientPianos\}\/9/);
+  assert.match(app,/MASTER_DATA_INTEGRITY_FAILED/);
+  assert.match(init,/MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4"/);
+  assert.match(init,/setSetting\("master_data_import_status",sourceAudit\.status\)/);
+  assert.match(reconcile,/clientTypes:Object\.freeze\(\{INDIVIDUAL:258,BUSINESS:28,INSTITUTION:17,PARTNER:6\}\)/);
 });

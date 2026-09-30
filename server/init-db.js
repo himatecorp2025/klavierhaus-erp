@@ -3,11 +3,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
-const {reconcileExistingMasterData,rehydrateStoredMasterData}=require("./master-data-reconcile");
+const {MASTER_IMPORT_CONTRACT,auditStoredMasterImport,reconcileExistingMasterData,rehydrateStoredMasterData}=require("./master-data-reconcile");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
 const canonicalSchemaSql=fs.readFileSync(path.join(__dirname,"schema.sql"),"utf8");
+const MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4";
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 fs.mkdirSync(backupDir, { recursive: true });
 
@@ -93,11 +94,12 @@ function messengerV12Backup() {
   return target;
 }
 function masterDataReconcileBackup() {
-  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-full-33-column-3") return null;
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")===MASTER_DATA_RECONCILE_VERSION || setting("master_data_reconcile_backup_version")===MASTER_DATA_RECONCILE_VERSION) return null;
   try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
   const stamp=new Date().toISOString().replace(/[:.]/g,"-");
   const target=path.join(backupDir,`master-data-reconcile-pre-${stamp}.sqlite`);
   fs.copyFileSync(dbPath,target);
+  setSetting("master_data_reconcile_backup_version",MASTER_DATA_RECONCILE_VERSION);
   console.log(`[MASTER-DATA] Safety backup created: ${target}`);
   return target;
 }
@@ -647,11 +649,13 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
-if(setting("master_data_reconcile_version")!=="2026-09-30-full-33-column-3"){
+if(setting("master_data_reconcile_version")!==MASTER_DATA_RECONCILE_VERSION){
   const replay=db.transaction(()=>rehydrateStoredMasterData(db))();
   const summary=db.transaction(()=>reconcileExistingMasterData(db))();
-  setSetting("master_data_reconcile_version","2026-09-30-full-33-column-3");
-  console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}`);
+  const sourceAudit=auditStoredMasterImport(db,MASTER_IMPORT_CONTRACT.sourceName);
+  setSetting("master_data_import_status",sourceAudit.status);
+  if(sourceAudit.ok)setSetting("master_data_reconcile_version",MASTER_DATA_RECONCILE_VERSION);
+  console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}; source_status=${sourceAudit.status}, source_rows=${sourceAudit.rows||0}, contract_ok=${sourceAudit.ok}`);
 }
 seedWorkshopUxV5();
 
