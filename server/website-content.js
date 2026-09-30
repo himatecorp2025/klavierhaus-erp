@@ -92,7 +92,7 @@ function defaultWebsiteDesignSettings() {
 
 function parseDesignSettings(raw) {
   const value = defaultWebsiteDesignSettings();
-  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for(const key of ["logo_url","favicon_url","chat_logo_url"]) if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); } catch (_error) { /* defaults */ }
+  try { const parsed = JSON.parse(raw || "{}"); for (const key of DESIGN_COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for (const key of ["display", "sans"]) if (/^[A-Za-z0-9 ,.'-]{1,100}$/.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); for(const key of ["logo_url","favicon_url"]) if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed[key] || ""))) value[key] = String(parsed[key]); if (/^(?:https?:\/\/|\/)\S{1,500}$/i.test(String(parsed.chat_logo_url || ""))) value.chat_logo_url = String(parsed.chat_logo_url); } catch (_error) { /* defaults */ }
   return value;
 }
 
