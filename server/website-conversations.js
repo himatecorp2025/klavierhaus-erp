@@ -157,7 +157,7 @@ function registerWebsiteConversationRoutes({
         })();
       }catch(error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_RESUME_FAILED"});}
       const row=byId(existing.id);
-      notifyConversationOnce(row,{titleEn:wasClosed?"Customer reopened conversation":"Customer returned to conversation",titleHu:wasClosed?"Ügyfél újranyitotta a beszélgetést":"Ügyfél visszatért a beszélgetéshez",body:`${name} · ${category.replaceAll("_"," ")}${message?` · ${message.slice(0,220)}`:""}`});
+      if(wasClosed||customerMessageId)notifyConversationOnce(row,{titleEn:wasClosed?"Customer reopened conversation":"Customer returned to conversation",titleHu:wasClosed?"Ügyfél újranyitotta a beszélgetést":"Ügyfél visszatért a beszélgetéshez",body:`${name} · ${category.replaceAll("_"," ")}${message?` · ${message.slice(0,220)}`:""}`});
       return res.status(200).json({...payload(byId(existing.id),{token}),access_token:token,resumed:true,reopened:wasClosed,outside_support_hours:!support.open});
     }
 
