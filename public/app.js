@@ -146,6 +146,15 @@ function startNewYorkClock(){
   if(state.clockTimer)clearInterval(state.clockTimer);
   state.clockTimer=setInterval(updateNewYorkClock,1000);
 }
+function syncVisualViewportHeight(){
+  const viewport=window.visualViewport,height=Math.max(320,Math.round(viewport?.height||window.innerHeight||document.documentElement.clientHeight||0));
+  document.documentElement.style.setProperty("--kh-visual-viewport-height",height+"px");
+  document.documentElement.style.setProperty("--kh-visual-viewport-top",Math.max(0,Math.round(viewport?.offsetTop||0))+"px");
+}
+syncVisualViewportHeight();
+window.visualViewport?.addEventListener("resize",syncVisualViewportHeight,{passive:true});
+window.visualViewport?.addEventListener("scroll",syncVisualViewportHeight,{passive:true});
+window.addEventListener("orientationchange",()=>setTimeout(syncVisualViewportHeight,80),{passive:true});
 function showApp(){
   $("#loginScreen").classList.add("hidden");$("#appShell").classList.remove("hidden");
   $("#profileInitials").textContent=initials(state.user?.name);
@@ -447,7 +456,9 @@ $("#appDialog").addEventListener("cancel",event=>{event.preventDefault();closeDi
 
 async function renderView(){
   consumeDeepLink();
-  const workspace=$("#workspace");workspace.innerHTML=loading();
+  document.documentElement.classList.remove("messenger-thread-open");
+  $("#appShell")?.classList.toggle("messenger-mode",state.view==="messenger");
+  const workspace=$("#workspace");workspace.classList.toggle("messenger-workspace",state.view==="messenger");workspace.innerHTML=loading();
   try{
     if(state.view==="workshop")await renderWorkshop();
     else if(state.view==="messenger")await renderMessenger();

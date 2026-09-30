@@ -266,10 +266,18 @@ function registerWebsiteConversationRoutes({
     if(q){where.push("(lower(COALESCE(c.name,'')) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ? OR lower(c.category) LIKE ?)");args.push(`%${q}%`,`%${q}%`,`%${q}%`);}
     const rows=db.prepare(`SELECT c.*,u.name AS assigned_user_name,
       (SELECT COUNT(*) FROM customer_messages m WHERE m.conversation_id=c.id AND m.direction='CUSTOMER' AND m.status='UNREAD') AS unread_count,
-      (SELECT body FROM customer_messages lm WHERE lm.conversation_id=c.id ORDER BY lm.created_at DESC,lm.id DESC LIMIT 1) AS last_message
+      (SELECT body FROM customer_messages lm WHERE lm.conversation_id=c.id ORDER BY lm.created_at DESC,lm.id DESC LIMIT 1) AS last_message,
+      (SELECT direction FROM customer_messages lm WHERE lm.conversation_id=c.id ORDER BY lm.created_at DESC,lm.id DESC LIMIT 1) AS last_message_direction,
+      (SELECT created_at FROM customer_messages lm WHERE lm.conversation_id=c.id ORDER BY lm.created_at DESC,lm.id DESC LIMIT 1) AS last_message_at,
+      (SELECT created_at FROM customer_messages cm WHERE cm.conversation_id=c.id AND cm.direction='CUSTOMER' ORDER BY cm.created_at DESC,cm.id DESC LIMIT 1) AS last_customer_message_at
       FROM customer_conversations c LEFT JOIN users u ON u.id=c.assigned_user_id
       ${where.length?"WHERE "+where.join(" AND "):""} ORDER BY CASE WHEN c.status='PENDING_STAFF' THEN 0 WHEN c.status='OPEN' THEN 1 ELSE 2 END,c.last_activity_at DESC,c.created_at DESC LIMIT 300`).all(...args);
-    res.json({support:supportState({db,env}),conversations:rows});
+    const conversations=rows.map(row=>{
+      const raw=String(row.last_customer_message_at||"").trim(),stamp=raw?(new Date(/[zZ]|[+-]\d\d:\d\d$/.test(raw)?raw:raw.replace(" ","T")+"Z")):null;
+      const outsideHours=Boolean(row.status==="PENDING_STAFF"&&stamp&&!Number.isNaN(stamp.getTime())&&!supportState({db,env,date:stamp}).open);
+      return {...row,waiting_after_hours:outsideHours?1:0};
+    });
+    res.json({support:supportState({db,env}),conversations});
   });
 
   app.get("/api/customer-conversations/:id",auth,staff,(req,res)=>{

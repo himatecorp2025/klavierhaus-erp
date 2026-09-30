@@ -464,6 +464,20 @@ let customerChatPendingFiles = [];
 let customerChatRecorder = null;
 let customerChatRecorderStream = null;
 let customerChatRecorderTimer = null;
+function customerChatMobileMode(){return Boolean(window.matchMedia&&window.matchMedia("(max-width:600px)").matches);}
+function syncCustomerChatViewport(){
+  const viewport=window.visualViewport,height=Math.max(320,Math.round(viewport?.height||window.innerHeight||document.documentElement.clientHeight||0)),top=Math.max(0,Math.round(viewport?.offsetTop||0));
+  document.documentElement.style.setProperty("--kh-chat-visual-height",height+"px");
+  document.documentElement.style.setProperty("--kh-chat-visual-top",top+"px");
+  if(customerChatPanel&&!customerChatPanel.hidden&&customerChatMobileMode()){
+    const messages=customerChatMessages;
+    if(messages&&document.activeElement===customerChatMessageInput)requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;});
+  }
+}
+syncCustomerChatViewport();
+window.visualViewport?.addEventListener("resize",syncCustomerChatViewport,{passive:true});
+window.visualViewport?.addEventListener("scroll",syncCustomerChatViewport,{passive:true});
+window.addEventListener("orientationchange",()=>setTimeout(syncCustomerChatViewport,80),{passive:true});
 
 function customerPianoAvatar(){
   const span=document.createElement("span");span.className="customer-chat__message-avatar";span.setAttribute("aria-hidden","true");
@@ -483,12 +497,19 @@ function applyCustomerChatMode(active){
   if(intake){intake.hidden=isActive;intake.querySelectorAll("input,select,button").forEach(control=>{control.disabled=isActive;});}
   if(customerChatComposer)customerChatComposer.hidden=!isActive;
   if(customerChatLookupForm)customerChatLookupForm.hidden=isActive;
-  if(isActive)window.setTimeout(()=>customerChatMessageInput?.focus({preventScroll:true}),60);
+  if(isActive&&!customerChatMobileMode())window.setTimeout(()=>customerChatMessageInput?.focus({preventScroll:true}),60);
 }
 function setCustomerChatPanel(open){
   if(!customerChatToggle||!customerChatPanel)return;
-  customerChatToggle.setAttribute("aria-expanded",String(Boolean(open)));customerChatPanel.hidden=!open;
-  if(open)customerChatWelcome?.classList.add("is-dismissed");
+  const isOpen=Boolean(open);
+  customerChatToggle.setAttribute("aria-expanded",String(isOpen));customerChatPanel.hidden=!isOpen;
+  document.documentElement.classList.toggle("customer-chat-open",isOpen&&customerChatMobileMode());
+  if(isOpen){
+    customerChatWelcome?.classList.add("is-dismissed");syncCustomerChatViewport();
+    requestAnimationFrame(()=>{if(customerChatMessages)customerChatMessages.scrollTop=customerChatMessages.scrollHeight;});
+  }else{
+    customerChatMessageInput?.blur();document.documentElement.classList.remove("customer-chat-open");
+  }
 }
 function clearCustomerConversationSession(){
   customerConversationToken="";customerConversationSnapshot="";
