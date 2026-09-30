@@ -443,9 +443,9 @@ function bindNavigation(){
 }
 function loading(){return `<div class="loading">${tr("Loading…","Betöltés…")}</div>`;}
 function pageHead(title,subtitle,actions=""){return `<header class="page-head"><div><span class="eyebrow">KLAVIERHAUS SYSTEM</span><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div><div class="page-actions">${actions}</div></header>`;}
-function openDialog({title,eyebrow="",body}){
+function openDialog({title,eyebrow="",body,variant=""}){
   $("#dialogTitle").textContent=title;$("#dialogEyebrow").textContent=eyebrow;$("#dialogBody").innerHTML=body;
-  const dialog=$("#appDialog");if(!dialog.open)dialog.showModal();return dialog;
+  const dialog=$("#appDialog");dialog.classList.toggle("app-dialog--wide",variant==="wide");if(!dialog.open)dialog.showModal();return dialog;
 }
 function closeDialog(){const dialog=$("#appDialog");if(dialog?.open)dialog.close();}
 document.addEventListener("click",event=>{
@@ -513,6 +513,14 @@ function openMasterMap(address){
   window.open(url,"_blank","noopener,noreferrer");
 }
 function masterPendingText(){return tr("Data pending","Adatpótlásra vár");}
+function masterDateInputValue(value){
+  const raw=String(value??"").trim();if(!raw)return "";
+  const iso=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  let match=raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if(match){const a=Number(match[1]),b=Number(match[2]),year=match[3],month=state.language==="hu"?b:a,day=state.language==="hu"?a:b;if(month>=1&&month<=12&&day>=1&&day<=31)return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;}
+  const parsed=new Date(raw);if(Number.isFinite(parsed.getTime()))return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth()+1).padStart(2,"0")}-${String(parsed.getUTCDate()).padStart(2,"0")}`;
+  return "";
+}
 function masterValue(value,{brand=false}={}){
   const textValue=String(value??"").trim();
   return textValue||(brand?"No brand":masterPendingText());
@@ -564,13 +572,13 @@ function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
     <label class="field"><span>${tr("Finish","Kivitel")}</span><input name="finish" value="${esc(piano.finish||"")}" placeholder="${esc(masterPendingText())}"></label>
     <label class="field full"><span>${tr("Instrument note","Hangszer-megjegyzés")}</span><textarea name="notes" placeholder="${esc(masterPendingText())}">${esc(piano.notes||"")}</textarea></label>
     <div class="master-form-section full"><strong>${tr("Purchase & warranty","Vásárlás és garancia")}</strong></div>
-    <label class="field"><span>${tr("Date of purchase","Vásárlás dátuma")}</span><input name="date_of_purchase" value="${esc(piano.date_of_purchase||"")}" placeholder="${esc(masterPendingText())}"></label>
+    <label class="field"><span>${tr("Date of purchase","Vásárlás dátuma")}</span><input name="date_of_purchase" type="date" data-calendar-date lang="${state.language==="hu"?"hu-HU":"en-US"}" value="${esc(masterDateInputValue(piano.date_of_purchase))}"></label>
     <label class="field"><span>${tr("Warranty","Garancia")}</span><input name="warranty" value="${esc(piano.warranty||"")}" placeholder="${esc(masterPendingText())}"></label>
     <div class="master-form-section full"><strong>${tr("Service information","Szervizinformáció")}</strong></div>
-    <label class="field"><span>${tr("Last service date","Utolsó szerviz dátuma")}</span><input name="last_serviced_at" value="${esc(piano.last_serviced_at||"")}" placeholder="${esc(masterPendingText())}"></label>
+    <label class="field"><span>${tr("Last service date","Utolsó szerviz dátuma")}</span><input name="last_serviced_at" type="date" data-calendar-date lang="${state.language==="hu"?"hu-HU":"en-US"}" value="${esc(masterDateInputValue(piano.last_serviced_at))}"></label>
     <label class="field"><span>${tr("Last service title","Utolsó szerviz címe")}</span><input name="last_service_title" value="${esc(piano.last_service_title||"")}" placeholder="${esc(masterPendingText())}"></label>
     <label class="field full"><span>${tr("Last service description","Utolsó szerviz leírása")}</span><textarea name="last_service_description" placeholder="${esc(masterPendingText())}">${esc(piano.last_service_description||"")}</textarea></label>
-    <label class="field"><span>${tr("Next service date","Következő szerviz dátuma")}</span><input name="next_service_date" value="${esc(piano.next_service_date||"")}" placeholder="${esc(masterPendingText())}"></label>
+    <label class="field"><span>${tr("Next service date","Következő szerviz dátuma")}</span><input name="next_service_date" type="date" data-calendar-date lang="${state.language==="hu"?"hu-HU":"en-US"}" value="${esc(masterDateInputValue(piano.next_service_date))}"></label>
     <div class="master-form-section full"><strong>${tr("Latest environment information","Legutóbbi környezeti adatok")}</strong></div>
     <label class="field"><span>${tr("Frequency","Frekvencia")}</span><input name="latest_info_frequency" value="${esc(piano.latest_info_frequency||"")}" placeholder="${esc(masterPendingText())}"></label>
     <label class="field"><span>${tr("Humidity","Páratartalom")}</span><input name="latest_info_humidity" value="${esc(piano.latest_info_humidity||"")}" placeholder="${esc(masterPendingText())}"></label>
