@@ -85,12 +85,12 @@ function contractCsv(){
   let count=countNonEmpty(rows);
   outer:for(let i=0;i<rows.length;i++){
     for(const column of optional){
-      if(count>=MASTER_IMPORT_CONTRACT.nonEmptyValues)break outer;
+      if(count>=MASTER_IMPORT_CONTRACT.sourceNonEmptyValues)break outer;
       if(String(rows[i][column]||"").trim()!=="")continue;
       rows[i][column]=valueFor(column,i);count++;
     }
   }
-  assert.equal(count,MASTER_IMPORT_CONTRACT.nonEmptyValues);
+  assert.equal(count,MASTER_IMPORT_CONTRACT.sourceNonEmptyValues);
   return sourceCsv(rows);
 }
 
