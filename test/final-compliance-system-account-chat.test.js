@@ -39,6 +39,18 @@ test("Klavierhaus System account chrome separates login, profile and settings",(
   assert.match(admin,/route:"login-logo"/);
 });
 
+test("desktop sidebar uses the approved larger SVG navigation scale",()=>{
+  const html=read("public/index.html"),css=read("public/styles.css");
+  assert.equal((html.match(/class="nav-svg"/g)||[]).length,8);
+  assert.doesNotMatch(html,/<nav class="sidebar-nav">[\s\S]*?<span class="nav-icon">[▦✓✦◷◫$▤◎]/);
+  assert.match(css,/\.app-shell\{grid-template-columns:320px minmax\(0,1fr\)\}/);
+  assert.match(css,/\.app-shell\.sidebar-collapsed\{grid-template-columns:88px minmax\(0,1fr\)\}/);
+  assert.match(css,/\.sidebar-nav \.nav-item\{[\s\S]*font-size:19\.5px/);
+  assert.match(css,/\.nav-icon\{[\s\S]*width:42px;[\s\S]*height:42px/);
+  assert.match(css,/\.nav-svg\{[\s\S]*width:30px;[\s\S]*height:30px/);
+  assert.equal((html.match(/class="profile-menu-icon"/g)||[]).length,3);
+});
+
 test("full Website factory reset is rendered only for Superadmin",()=>{
   const v6=read("public/v6.js"),backend=read("server/website-backup-reset.js");
   assert.match(v6,/recovery-danger-card/);
