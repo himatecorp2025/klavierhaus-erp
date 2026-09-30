@@ -468,6 +468,7 @@ async function renderView(){
     else if(state.view==="documents")await renderDocuments();
     else if(state.view==="cms")await renderCms();
     else if(state.view==="profile")await renderProfile();
+    else if(state.view==="settings")await renderSettings();
     else await renderIntake();
     workspace.focus({preventScroll:true});
     syncNavigationState(state.view);
