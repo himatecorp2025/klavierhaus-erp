@@ -109,7 +109,8 @@ test("VIP remains independent from Individual Partner Business Institution clien
   const schema=read("server/schema.sql"),app=read("public/app.js");
   assert.match(schema,/client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL'/);
   assert.match(schema,/is_vip INTEGER NOT NULL DEFAULT 0/);
-  assert.match(app,/INDIVIDUAL:tr\("Individual","Magánszemély"\)/);\n  assert.match(app,/PARTNER:tr\("Professional partner","Szakmai partner"\)/);
+  assert.match(app,/INDIVIDUAL:tr\("Individual","Magánszemély"\)/);
+  assert.match(app,/PARTNER:tr\("Professional partner","Szakmai partner"\)/);
   assert.match(app,/<strong>★ VIP<\/strong>/);
   assert.doesNotMatch(app,/VIP is independent from (?:the )?customer type/);
 });
