@@ -634,7 +634,7 @@ async function renderMaster(){
     const form=new FormData();form.append("file",file,file.name);
     try{
       const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import verified: ${summary.sourceRowsPersisted}/${summary.rows} rows · ${summary.columns||33}/33 columns · ${summary.sourceClients} clients · ${summary.totalPianos} pianos · Paul Mills ${summary.controlClientPianos}/9 pianos.`,`Import ellenőrizve: ${summary.sourceRowsPersisted}/${summary.rows} sor · ${summary.columns||33}/33 oszlop · ${summary.sourceClients} ügyfél · ${summary.totalPianos} zongora · Paul Mills ${summary.controlClientPianos}/9 zongora.`),"success");
+      toast(tr(`Import verified: ${summary.sourceRowsPersisted}/${summary.rows} rows · ${summary.columns||33}/33 columns · ${summary.sourceClients} clients · ${summary.totalPianos} pianos · ${summary.ownerlessPianos} ownerless · Paul Mills ${summary.controlClientPianos}/9 pianos.`,`Import ellenőrizve: ${summary.sourceRowsPersisted}/${summary.rows} sor · ${summary.columns||33}/33 oszlop · ${summary.sourceClients} ügyfél · ${summary.totalPianos} zongora · ${summary.ownerlessPianos} gazdátlan · Paul Mills ${summary.controlClientPianos}/9 zongora.`),"success");
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
