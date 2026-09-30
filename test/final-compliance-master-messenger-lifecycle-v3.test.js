@@ -91,12 +91,15 @@ test("CMS Login logo has preview upload backend persistence and login applicatio
 
 test("Master Data production reconcile is versioned to rerun the relationship repair",()=>{
   const init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js"),schema=read("server/schema.sql");
-  assert.match(init,/2026-09-30-relational-2/);
+  assert.match(init,/2026-09-30-full-33-column-3/);
   assert.match(reconcile,/function repairSourceRelationships/);
   assert.match(reconcile,/UPDATE pianos SET client_id=\?,updated_at=CURRENT_TIMESTAMP/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_source_rows/);
   assert.match(schema,/raw_sha256 TEXT NOT NULL/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_client_field_values/);
+  assert.match(schema,/last_visit TEXT/);
+  assert.match(reconcile,/MASTER_IMPORT_CONTRACT/);
+  assert.match(reconcile,/preservedNonEmptyValues/);
 });
 
 test("four client segments are canonical throughout schema API and Master Data UI",()=>{
