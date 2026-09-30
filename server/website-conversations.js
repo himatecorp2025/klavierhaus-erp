@@ -91,12 +91,13 @@ function registerWebsiteConversationRoutes({
       WHERE p.conversation_id=? ORDER BY p.created_at,p.id`).all(conversationId);
   }
   function payload(row,{token=null,staffView=false}={}){
-    const messages=db.prepare("SELECT id,direction,sender_name,sender_email,sender_user_id,body,status,created_at FROM customer_messages WHERE conversation_id=? ORDER BY created_at,id").all(row.id)
-      .map(message=>({...message,attachments:attachmentRows(message.id,{token,conversationId:row.id})}));
+    const messages=db.prepare("SELECT id,direction,sender_name,sender_email,sender_user_id,body,message_type,metadata_json,status,created_at FROM customer_messages WHERE conversation_id=? ORDER BY created_at,id").all(row.id)
+      .map(message=>{let metadata={};try{metadata=JSON.parse(message.metadata_json||"{}");}catch(_error){}return {...message,metadata,attachments:attachmentRows(message.id,{token,conversationId:row.id})};});
     const linkedAppointments=db.prepare("SELECT * FROM private_appointments WHERE conversation_id=? ORDER BY scheduled_at DESC").all(row.id);
     const linkedIntake=db.prepare("SELECT id,status,reported_issue,estimated_total,created_at FROM intake_leads WHERE source_conversation_id=? ORDER BY id DESC LIMIT 1").get(row.id)||null;
-    const linkedClient=row.client_id?db.prepare("SELECT id,name,email,phone,address,preferred_language,client_type,is_vip FROM clients WHERE id=?").get(row.client_id)||null:null;
-    return {...row,messages,appointment_proposals:proposals(row.id),private_appointments:linkedAppointments,linked_intake:linkedIntake,linked_client:linkedClient,support:supportState({db,env}),staff_view:staffView};
+    const linkedClient=row.client_id?db.prepare("SELECT id,name,email,phone,address,street,city,district,postcode,country,preferred_language,client_type,is_vip FROM clients WHERE id=?").get(row.client_id)||null:null;
+    const linkedPianos=linkedClient?db.prepare("SELECT id,brand,model,serial_number,location_address,location_notes FROM pianos WHERE client_id=? ORDER BY id").all(linkedClient.id):[];
+    return {...row,messages,appointment_proposals:proposals(row.id),private_appointments:linkedAppointments,linked_intake:linkedIntake,linked_client:linkedClient,linked_pianos:linkedPianos,support:supportState({db,env}),staff_view:staffView};
   }
   function saveFiles(files,conversationId,messageId){
     const insert=db.prepare("INSERT INTO customer_message_attachments(id,conversation_id,message_id,stored_name,original_name,mime_type,file_size,sha256) VALUES(?,?,?,?,?,?,?,?)");
@@ -193,6 +194,51 @@ function registerWebsiteConversationRoutes({
   app.get("/api/public/customer-conversations/:token",(req,res)=>{
     const row=byToken(req.params.token);if(!row)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
     res.setHeader("Cache-Control","no-store");res.json(payload(row,{token:req.params.token}));
+  });
+
+  app.post("/api/public/customer-conversations/:token/customer-profile",(req,res)=>{
+    const row=byToken(req.params.token);if(!row)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
+    if(row.status==="CLOSED")return res.status(409).json({error:"CONVERSATION_REAUTH_REQUIRED"});
+    const phone=clean(req.body?.phone,120),address=clean(req.body?.address,500),pianoId=Number(req.body?.piano_id)||null;
+    const brand=clean(req.body?.piano_brand,200),model=clean(req.body?.piano_model,200),serial=clean(req.body?.piano_serial,120),locationAddress=clean(req.body?.piano_location_address||address,500);
+    if(!phone)return res.status(400).json({error:"CUSTOMER_PROFILE_PHONE_REQUIRED"});
+    let client=row.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(row.client_id):findClientIdentity(db,{name:row.name,email:row.email,phone}).client;
+    let savedPiano=null;
+    try{
+      db.transaction(()=>{
+        if(!client){
+          client=ensureClientIdentity(db,{name:row.name,email:row.email,phone,language:row.language},{create:true}).client;
+          if(!client)throw new Error("CUSTOMER_PROFILE_IDENTITY_FAILED");
+          db.prepare("UPDATE customer_conversations SET client_id=? WHERE id=?").run(client.id,row.id);
+        }
+        db.prepare("UPDATE clients SET phone=?,address=COALESCE(NULLIF(?,''),address),updated_at=CURRENT_TIMESTAMP WHERE id=?").run(phone,address,client.id);
+        if(pianoId){
+          savedPiano=db.prepare("SELECT * FROM pianos WHERE id=? AND client_id=?").get(pianoId,client.id);
+          if(!savedPiano)throw Object.assign(new Error("CUSTOMER_PIANO_NOT_FOUND"),{status:404});
+          if(locationAddress)db.prepare("UPDATE pianos SET location_address=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(locationAddress,savedPiano.id);
+          savedPiano=db.prepare("SELECT * FROM pianos WHERE id=?").get(savedPiano.id);
+        }else if(brand||model||serial){
+          savedPiano=serial?db.prepare("SELECT * FROM pianos WHERE client_id=? AND lower(COALESCE(serial_number,''))=lower(?) ORDER BY id LIMIT 1").get(client.id,serial):null;
+          if(!savedPiano&&brand&&model)savedPiano=db.prepare("SELECT * FROM pianos WHERE client_id=? AND lower(brand)=lower(?) AND lower(COALESCE(model,''))=lower(?) ORDER BY id LIMIT 1").get(client.id,brand,model);
+          if(savedPiano){
+            db.prepare("UPDATE pianos SET brand=COALESCE(NULLIF(?,''),brand),model=COALESCE(NULLIF(?,''),model),serial_number=COALESCE(NULLIF(?,''),serial_number),location_address=COALESCE(NULLIF(?,''),location_address),updated_at=CURRENT_TIMESTAMP WHERE id=?")
+              .run(brand,model,serial,locationAddress,savedPiano.id);
+            savedPiano=db.prepare("SELECT * FROM pianos WHERE id=?").get(savedPiano.id);
+          }else{
+            const info=db.prepare("INSERT INTO pianos(client_id,brand,model,serial_number,location_address,classification_status,created_at,updated_at) VALUES(?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+              .run(client.id,brand||"No brand",model||null,serial||null,locationAddress||null);
+            savedPiano=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));
+          }
+        }
+        const messageId=id("MSG"),metadata=JSON.stringify({client_id:client.id,phone,address,piano:savedPiano?{id:savedPiano.id,brand:savedPiano.brand,model:savedPiano.model,serial_number:savedPiano.serial_number,location_address:savedPiano.location_address}:null});
+        db.prepare(`INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,message_type,metadata_json,status)
+          VALUES(?,?,?,?,?,?,'CUSTOMER_PROFILE_SUBMITTED',?,'UNREAD')`).run(messageId,row.id,"CUSTOMER",row.name||client.name,row.email||client.email||null,"Customer and piano details submitted",metadata);
+        db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',client_id=?,last_message_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(client.id,row.id);
+        event(row.id,"CUSTOMER_PROFILE_SUBMITTED",{fromStatus:row.status,toStatus:"PENDING_STAFF",details:{message_id:messageId,client_id:client.id,piano_id:savedPiano?.id||null}});
+      })();
+    }catch(error){return res.status(error.status||400).json({error:error.message||"CUSTOMER_PROFILE_FAILED"});}
+    const after=byId(row.id);notifyConversationOnce(after,{titleEn:"Customer details received",titleHu:"Ügyféladatok beérkeztek",body:`${row.name||"Website visitor"} · customer/piano details updated`});
+    res.status(201).json(payload(after,{token:req.params.token}));
   });
 
   app.post("/api/public/customer-conversations/:token/messages",upload,(req,res)=>{
@@ -309,6 +355,32 @@ function registerWebsiteConversationRoutes({
     res.status(201).json({...payload(byId(row.id),{staffView:true}),email_delivery:delivery});
   });
 
+  app.post("/api/customer-conversations/:id/interactions",auth,staff,async(req,res)=>{
+    const row=byId(req.params.id);if(!row)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
+    const type=clean(req.body?.type,60).toUpperCase();
+    if(!["CUSTOMER_PROFILE_FORM","PRIVATE_APPOINTMENT_PICKER"].includes(type))return res.status(400).json({error:"INVALID_INTERACTION_TYPE"});
+    const client=row.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(row.client_id):findClientIdentity(db,{name:row.name,email:row.email}).client;
+    const pianos=client?db.prepare("SELECT id,brand,model,serial_number,location_address,location_notes FROM pianos WHERE client_id=? ORDER BY id").all(client.id):[];
+    const metadata=type==="CUSTOMER_PROFILE_FORM"
+      ?{name:client?.name||row.name||"",email:client?.email||row.email||"",phone:client?.phone||"",address:client?.address||"",pianos}
+      :{name:client?.name||row.name||"",email:client?.email||row.email||"",phone:client?.phone||"",appointment_reason:"OTHER",duration_min:60};
+    const messageId=id("MSG"),body=type==="CUSTOMER_PROFILE_FORM"?"Please complete your customer and piano details.":"Please choose a private appointment time.";
+    db.transaction(()=>{
+      db.prepare(`INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,sender_user_id,body,message_type,metadata_json,status)
+        VALUES(?,?,?,?,?,?,?,?,?,'READ')`).run(messageId,row.id,"STAFF",req.user.name||"Klavierhaus",req.user.email||null,req.user.id,body,type,JSON.stringify(metadata));
+      db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',assigned_user_id=COALESCE(assigned_user_id,?),last_message_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id,row.id);
+      event(row.id,"INTERACTION_SENT",{actor:req.user,fromStatus:row.status,toStatus:"PENDING_CUSTOMER",details:{message_id:messageId,type}});
+    })();
+    let delivery={status:"NOT_CONFIGURED"};
+    if(validEmail(row.email)&&transactionalEmail?.configured){
+      try{
+        const sent=await transactionalEmail.sendCustomerConversationReply({to:row.email,name:row.name,message:body,conversationUrl:conversationUrl(row),language:row.language||"en",idempotencyKey:`conversation-interaction-${messageId}`});
+        delivery={status:"SENT",provider_message_id:sent.providerMessageId};
+      }catch(error){delivery={status:"FAILED",error:error.code||error.message};}
+    }
+    res.status(201).json({...payload(byId(row.id),{staffView:true}),email_delivery:delivery});
+  });
+
   app.put("/api/customer-conversations/:id/assign",auth,staff,(req,res)=>{
     const row=byId(req.params.id);if(!row)return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});
     const userId=clean(req.body?.assigned_user_id,160)||req.user.id;
@@ -342,8 +414,9 @@ function registerWebsiteConversationRoutes({
     const linked=row.client_id?db.prepare("SELECT phone FROM clients WHERE id=?").get(row.client_id):null,proposalPhone=clean(req.body?.phone,80)||clean(linked?.phone,80);if(!proposalPhone)return res.status(400).json({error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED"});
     const proposalId=id("APR"),expiry=holdExpiry();
     db.transaction(()=>{
-      db.prepare(`INSERT INTO customer_appointment_proposals(id,conversation_id,appointment_type,starts_at,ends_at,assigned_user_id,phone,note,status,created_by_user_id,expires_at)
-        VALUES(?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,row.id,type,slot.starts_at,slot.ends_at,assigned,proposalPhone,clean(req.body?.note,1000)||null,req.user.id,expiry);
+      const reason=["PIANO_VIEWING","SERVICE_REQUEST","OTHER"].includes(clean(req.body?.appointment_reason,40).toUpperCase())?clean(req.body?.appointment_reason,40).toUpperCase():(type==="PIANO_VIEWING"?"PIANO_VIEWING":type==="SERVICE_CONSULTATION"?"SERVICE_REQUEST":"OTHER");
+      db.prepare(`INSERT INTO customer_appointment_proposals(id,conversation_id,appointment_type,starts_at,ends_at,assigned_user_id,phone,appointment_reason,note,status,created_by_user_id,expires_at)
+        VALUES(?,?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,row.id,type,slot.starts_at,slot.ends_at,assigned,proposalPhone,reason,clean(req.body?.note,1000)||null,req.user.id,expiry);
       db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',assigned_user_id=COALESCE(assigned_user_id,?),last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assigned,row.id);
       event(row.id,"APPOINTMENT_PROPOSED",{actor:req.user,fromStatus:row.status,toStatus:"PENDING_CUSTOMER",details:{proposal_id:proposalId,starts_at:slot.starts_at,ends_at:slot.ends_at,duration_min:slot.duration_min,expires_at:expiry}});
     })();
