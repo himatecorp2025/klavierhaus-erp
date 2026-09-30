@@ -372,8 +372,13 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
   const sourceRowsPersisted=tableExists(db,"master_data_source_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=?").get(sourceName)?.c||0):records.length;
   const clientTypes=tableExists(db,"master_data_client_source_map")?db.prepare(`SELECT c.client_type,COUNT(DISTINCT c.id) count FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name=? AND c.deleted_at IS NULL GROUP BY c.client_type`).all(sourceName).reduce((out,row)=>(out[row.client_type]=Number(row.count),out),{}):{};
   const controlMap=tableExists(db,"master_data_client_source_map")?db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id='3084'").get(sourceName):null;
-  const controlPianos=controlMap?.client_id?Number(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(controlMap.client_id)?.c||0):0;
-  const linkedPianos=Number(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id IS NOT NULL").get()?.c||0),allPianos=Number(db.prepare("SELECT COUNT(*) c FROM pianos").get()?.c||0);
+  const controlPianos=tableExists(db,"master_data_source_rows")
+    ?Number(db.prepare("SELECT COUNT(DISTINCT piano_id) c FROM master_data_source_rows WHERE source_name=? AND source_client_id='3084' AND piano_id IS NOT NULL").get(sourceName)?.c||0)
+    :(controlMap?.client_id?Number(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(controlMap.client_id)?.c||0):0);
+  const linkedPianos=tableExists(db,"master_data_source_rows")
+    ?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=? AND client_id IS NOT NULL").get(sourceName)?.c||0)
+    :Number(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id IS NOT NULL").get()?.c||0);
+  const allPianos=tableExists(db,"master_data_source_rows")?sourceRowsPersisted:Number(db.prepare("SELECT COUNT(*) c FROM pianos").get()?.c||0);
   return {rows:records.length,columns:33,sourceClients:sourceClientIds.size,sourceNonEmptyValues,createdClients,updatedClients,matchedExistingClients,deletedClientsSkipped,createdPianos,updatedPianos,ownerlessPianos,sourceRowsPersisted,clientTypes,linkedPianos,totalPianos:allPianos,controlClientSourceId:"3084",controlClientRows:controlMap?1:0,controlClientPianos:controlPianos,integrity:{allSourceRowsPreserved:sourceRowsPersisted===records.length,onePianoPerSourceRow:records.length===sourceRowsPersisted,controlClientExactlyOne:!sourceClientIds.has("3084")||Boolean(controlMap),controlClientHasNinePianos:!sourceClientIds.has("3084")||controlPianos===9},reviewItems:0,unassigned:ownerlessPianos,sourceDuplicateGroups:0,...after};
 }
 function reconcileExistingMasterData(db){
