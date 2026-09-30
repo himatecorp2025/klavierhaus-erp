@@ -92,10 +92,11 @@ test("Canonical Messenger backend routes assignment, notifications, appointments
 
 
 test("Messenger private requests require staff approval while accepted Klavierhaus proposals auto-finalize to calendar",()=>{
-  const messenger=read("public/messenger.js"),privateApi=read("server/private-appointments.js"),conversation=read("server/website-conversations.js"),schema=read("server/schema.sql"),css=read("public/styles.css");
-  assert.match(css,/\.messenger-status-cards/);
-  assert.match(css,/\.messenger-status-card/);
-  assert.match(messenger,/Private requests/);
+  const messenger=read("public/messenger.js"),responsive=read("public/messenger-responsive-v3.js"),privateApi=read("server/private-appointments.js"),conversation=read("server/website-conversations.js"),schema=read("server/schema.sql"),css=read("public/styles.css");
+  assert.match(css,/\.messenger-nav/);
+  assert.match(css,/\.messenger-nav-button/);
+  assert.match(responsive,/Requests & proposals/);
+  assert.match(responsive,/\["inbox","people","waiting","private","notifications","closed"\]/);
   assert.doesNotMatch(messenger,/Finalize & add to calendar/);
   assert.match(messenger,/Approve & add to calendar/);
   assert.match(privateApi,/CREATE|private_appointment_requests/);
