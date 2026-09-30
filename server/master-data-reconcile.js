@@ -560,7 +560,7 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName=MASTER_IMPORT_CO
   const integrity=assertMasterImportIntegrity(db,{records,sourceName});
   const sourceNonEmptyValues=records.reduce((sum,record)=>sum+(record.raw.values||[]).filter(value=>clean(value)!=="").length,0);
   const sourceRowsPersisted=tableExists(db,"master_data_source_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=?").get(sourceName)?.c||0):records.length;
-  const clientTypes=tableExists(db,"master_data_client_source_map")?db.prepare(`SELECT c.client_type,COUNT(DISTINCT c.id) count FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name=? AND c.deleted_at IS NULL GROUP BY c.client_type`).all(sourceName).reduce((out,row)=>(out[row.client_type]=Number(row.count),out),{}):{};
+  const clientTypes=integrity.clientTypes||{};
   const controlMap=tableExists(db,"master_data_client_source_map")?db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id='3084'").get(sourceName):null;
   const controlPianos=tableExists(db,"master_data_source_rows")
     ?Number(db.prepare("SELECT COUNT(DISTINCT piano_id) c FROM master_data_source_rows WHERE source_name=? AND source_client_id='3084' AND piano_id IS NOT NULL").get(sourceName)?.c||0)
