@@ -105,7 +105,7 @@ test("raw source rows are retained and source IDs are visible and searchable in 
 });
 
 test("PWA cache is bumped for the full 33-column Master Data release",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v24-master-data-full-33-column/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v25-master-data-contract-status/);
 });
 
 
