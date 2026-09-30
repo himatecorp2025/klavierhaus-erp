@@ -57,7 +57,7 @@ function humanError(error){
   const map={
     AUTH_REQUIRED:["Your session has expired.","A munkamenet lejárt."],INVALID_TOKEN:["Your session has expired.","A munkamenet lejárt."],SESSION_REVOKED:["Your session has expired.","A munkamenet lejárt."],
     CLIENT_NAME_REQUIRED:["Client name is required.","Az ügyfél neve kötelező."],INVALID_CLIENT_EMAIL:["Invalid client email.","Érvénytelen ügyfél e-mail."],INVALID_CLIENT_TYPE:["Choose Individual, Partner, Business or Institution.","Válassz Magánszemély, Partner, Üzleti vagy Intézményi típust."],
-    PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],
+    PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],MASTER_DATA_INTEGRITY_FAILED:["The import was rolled back because the complete 33-column Master Data contract did not pass.","Az import vissza lett vonva, mert a teljes 33 oszlopos törzsadat-kontraktus ellenőrzése nem ment át."],MASTER_DATA_CSV_FORMAT_UNSUPPORTED:["Use the required Klavierhaus 33-column source CSV.","A kötelező Klavierhaus 33 oszlopos forrás-CSV-t használd."],
     REPORTED_ISSUE_REQUIRED:["Describe the requested service or issue.","A hiba vagy igény leírása kötelező."],INVALID_PIANO_ID:["The selected piano does not belong to this client.","A kiválasztott zongora nem ehhez az ügyfélhez tartozik."],
     PERMISSION_DENIED:["You do not have permission for this action.","Nincs jogosultság ehhez a művelethez."],ADMIN_REQUIRED:["Admin permission is required.","Admin jogosultság szükséges."],
     JOB_TITLE_REQUIRED:["Job title is required.","A munka megnevezése kötelező."],JOB_MUST_BE_ACTIVATED:["Activate and schedule this job first.","A munkát előbb aktiválni és ütemezni kell."],
@@ -604,6 +604,7 @@ async function renderMaster(){
   state.pianos=Array.isArray(pianoOverview?.classified)?pianoOverview.classified:[];
   state.pianoReviews=Array.isArray(pianoOverview?.review)?pianoOverview.review:[];
   state.pianoOverview=pianoOverview?.totals||{classified:state.pianos.length,review:state.pianoReviews.length,total_entities:state.pianos.length,source_rows:0,source_groups:0,owner_linked:state.pianos.filter(row=>row.client_id).length,owner_pending:state.pianos.filter(row=>!row.client_id).length};
+  state.masterMigration=pianoOverview?.migration||{ok:false,status:"AWAITING_SOURCE",rows:0};
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
   const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS",canImport=state.user&&["ADMIN","SUPERADMIN"].includes(state.user.role);
@@ -637,7 +638,7 @@ async function renderMaster(){
     const form=new FormData();form.append("file",file,file.name);
     try{
       const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import completed: ${summary.sourceRowsPersisted}/${summary.rows} source rows preserved across ${summary.columns||33} columns, ${summary.sourceClients} source clients, ${summary.createdPianos} new pianos, ${summary.ownerlessPianos} owner pending.`,`Import kész: ${summary.sourceRowsPersisted}/${summary.rows} forrássor megőrizve ${summary.columns||33} oszlopból, ${summary.sourceClients} forrás-ügyfél, ${summary.createdPianos} új zongora, ${summary.ownerlessPianos} tulajdonosra vár.`),"success");
+      toast(tr(`Import verified: ${summary.sourceRowsPersisted}/339 rows · ${summary.columns||33}/33 columns · ${summary.sourceClients}/309 clients · ${summary.totalPianos}/339 pianos · ${summary.ownerlessPianos}/10 ownerless · Paul Mills ${summary.controlClientPianos}/9.`,`Import ellenőrizve: ${summary.sourceRowsPersisted}/339 sor · ${summary.columns||33}/33 oszlop · ${summary.sourceClients}/309 ügyfél · ${summary.totalPianos}/339 zongora · ${summary.ownerlessPianos}/10 gazdátlan · Paul Mills ${summary.controlClientPianos}/9.`),"success");
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
@@ -722,13 +723,13 @@ function runClientContactAction(clientId,kind){
 }
 function renderPianoList(){
   const host=$("#masterList");if(!host)return;
-  const rows=filteredMasterPianos(),reviews=filteredMasterPianoReviews(),totals=state.pianoOverview||{};
+  const rows=filteredMasterPianos(),reviews=filteredMasterPianoReviews(),totals=state.pianoOverview||{},migration=state.masterMigration||{};
   const summary=`<div class="master-piano-summary">
     <span><strong>${Number(totals.total_entities??(state.pianos||[]).length)}</strong><small>${tr("visible instruments","látható hangszer")}</small></span>
     <span><strong>${Number(totals.owner_linked??(state.pianos||[]).filter(row=>row.client_id).length)}</strong><small>${tr("owner linked","tulajdonoshoz kapcsolva")}</small></span>
     <span class="${Number(totals.owner_pending||0)>0?"needs-review":""}"><strong>${Number(totals.owner_pending??(state.pianos||[]).filter(row=>!row.client_id).length)}</strong><small>${tr("owner data pending","tulajdonos adatpótlásra vár")}</small></span>
     ${Number(totals.review||0)>0?`<span class="needs-review"><strong>${Number(totals.review)}</strong><small>${tr("data conflicts","adatütközés")}</small></span>`:""}
-    ${Number(totals.source_rows||0)>0?`<span><strong>${Number(totals.source_rows)}</strong><small>${tr("import source rows","import forrássor")}</small></span>`:`<span class="import-missing"><strong>!</strong><small>${tr("master CSV not imported yet","a master CSV még nincs importálva")}</small></span>`}
+    ${migration.ok?`<span><strong>${Number(migration.rows||0)}/339</strong><small>${tr("source contract verified","forráskontraktus ellenőrizve")}</small></span>`:`<span class="import-missing needs-review"><strong>${Number(migration.rows||0)}/339</strong><small>${migration.status==="INCOMPLETE"?tr("source import incomplete","forrásimport hiányos"):tr("master CSV awaiting import","a master CSV importra vár")}</small></span>`}
   </div>`;
   if(!rows.length&&!reviews.length){host.innerHTML=summary+`<div class="empty-state">${tr("No pianos match this view.","Nincs a nézetnek megfelelő zongora.")}</div>`;return;}
   const visible=rows.map(piano=>`<button type="button" class="piano-list-row ${Number(piano.id)===Number(state.selectedPianoId)?"active":""}" data-master-piano-id="${piano.id}">
