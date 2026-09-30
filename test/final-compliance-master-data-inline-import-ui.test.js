@@ -87,7 +87,7 @@ test("unsaved desktop Master Data still uses Save Discard Cancel and nullable pi
   assert.match(app,/body\.client_id=body\.client_id\?Number\(body\.client_id\):null/);
 });
 
-test("raw source rows are retained for audit while source IDs stay internal",()=>{
+test("raw source rows are retained and source IDs are visible through auditable Master Data source panels",()=>{
   const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js");
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_import_rows/);
   assert.match(schema,/raw_json TEXT NOT NULL/);
@@ -95,10 +95,16 @@ test("raw source rows are retained for audit while source IDs stay internal",()=
   assert.match(reconcile,/JSON\.stringify\(record\.raw\)/);
   assert.match(reconcile,/master_data_client_source_map/);
   assert.match(reconcile,/master_data_piano_source_map/);
+  const app=read("public/app.js"),api=read("server/round1-core.js");
+  assert.match(app,/Source Client ID/);
+  assert.match(app,/Source Instrument ID/);
+  assert.match(app,/Imported source history/);
+  assert.match(api,/\/api\/clients\/:id\/source-data/);
+  assert.match(api,/\/api\/pianos\/:id\/source-data/);
 });
 
-test("PWA cache is bumped for Master Data and Messenger lifecycle",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v23-master-messenger-lifecycle/);
+test("PWA cache is bumped for the strict Master Data contract",()=>{
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v24-master-data-contract/);
 });
 
 
@@ -139,7 +145,32 @@ test("lossless import retains original cells and active records expose all struc
   const reconcile=read("server/master-data-reconcile.js");
   assert.match(reconcile,/raw:\{columns:\[\.\.\.headers\],values:row\.slice\(\)/);
   assert.match(reconcile,/sourceNonEmptyValues/);
-  assert.match(reconcile,/columns:33/);
+  assert.match(reconcile,/LEGACY_MASTER_HEADERS/);
+  assert.match(reconcile,/MASTER_DATA_INTEGRITY_FAILED/);
+  assert.match(reconcile,/assertMasterDataSourceContract/);
   assert.match(reconcile,/findExistingClient/);
   assert.match(reconcile,/deletedClientsSkipped/);
+});
+
+
+test("client Last Visit is stored, derived from piano service data and shown in Master Data",()=>{
+  const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js"),app=read("public/app.js"),api=read("server/round1-core.js");
+  assert.match(schema,/last_visit_at TEXT/);
+  assert.match(reconcile,/function refreshClientLastVisit/);
+  assert.match(reconcile,/MAX\(NULLIF\(TRIM\(last_serviced_at\),''\)\)/);
+  assert.match(app,/Last visit/);
+  assert.match(app,/Utolsó látogatás/);
+  assert.match(api,/last_visit_at/);
+});
+
+test("canonical source contract is fail closed at 339 rows 33 columns and Paul Mills 1-to-9",()=>{
+  const reconcile=read("server/master-data-reconcile.js"),init=read("server/init-db.js"),app=read("public/app.js");
+  assert.match(reconcile,/rows:339,columns:33,sourceClients:309,totalPianos:339,linkedPianos:329,ownerlessPianos:10,sourceNonEmptyValues:5025/);
+  assert.match(reconcile,/controlClientSourceId:"3084",controlClientPianos:9/);
+  assert.match(reconcile,/clientTypes:Object\.freeze\(\{INDIVIDUAL:258,BUSINESS:28,INSTITUTION:17,PARTNER:6\}\)/);
+  assert.match(reconcile,/if\(sourceName===LEGACY_MASTER_SOURCE_NAME&&!audit\.ok\)/);
+  assert.match(init,/master_data_import_status/);
+  assert.match(init,/AWAITING_SOURCE/);
+  assert.match(app,/source contract verified/);
+  assert.match(app,/forráskontraktus ellenőrizve/);
 });
