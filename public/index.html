@@ -67,14 +67,14 @@
         <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Collapse navigation">‹</button>
       </div>
       <nav class="sidebar-nav">
-        <button type="button" class="nav-item" data-nav="workshop"><span class="nav-icon">▦</span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
-        <button type="button" class="nav-item" data-nav="intake"><span class="nav-icon">✓</span><span data-i18n="nav_intake">Intake</span></button>
-        <button type="button" class="nav-item" data-nav="messenger"><span class="nav-icon">✦</span><span data-i18n="nav_messenger">Messenger</span></button>
-        <button type="button" class="nav-item" data-nav="planned"><span class="nav-icon">◷</span><span data-i18n="nav_planned">Planned Jobs</span></button>
-        <button type="button" class="nav-item" data-nav="master"><span class="nav-icon">◫</span><span data-i18n="nav_master">Master Data</span></button>
-        <button type="button" class="nav-item" data-nav="finance"><span class="nav-icon">$</span><span data-i18n="nav_finance">Finance</span></button>
-        <button type="button" class="nav-item" data-nav="documents"><span class="nav-icon">▤</span><span data-i18n="nav_documents">Documents</span></button>
-        <button type="button" class="nav-item" data-nav="cms"><span class="nav-icon">◎</span><span data-i18n="nav_cms">Website CMS</span></button>
+        <button type="button" class="nav-item" data-nav="workshop"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><path d="M6 2v3M18 2v3M3.5 8h17M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/><path d="M7 12h2M11 12h2M15 12h2M7 16h2M11 16h2M15 16h2"/></svg></span><span data-i18n="nav_workshop">Workshop &amp; Calendar</span></button>
+        <button type="button" class="nav-item" data-nav="intake"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><path d="M9 5h6M9 3h6v4H9z"/><path d="M6 5H5a2 2 0 0 0-2 2v13h18V7a2 2 0 0 0-2-2h-1"/><path d="m9 15 6-6 2 2-6 6-3 1z"/></svg></span><span data-i18n="nav_intake">Intake</span></button>
+        <button type="button" class="nav-item" data-nav="messenger"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><span data-i18n="nav_messenger">Messenger</span></button>
+        <button type="button" class="nav-item" data-nav="planned"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg></span><span data-i18n="nav_planned">Planned Jobs</span></button>
+        <button type="button" class="nav-item" data-nav="master"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.5a4.5 4.5 0 0 1 5 4.5"/></svg></span><span data-i18n="nav_master">Master Data</span></button>
+        <button type="button" class="nav-item" data-nav="finance"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15 8.5h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9M12 6v12"/></svg></span><span data-i18n="nav_finance">Finance</span></button>
+        <button type="button" class="nav-item" data-nav="documents"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></svg></span><span data-i18n="nav_documents">Documents</span></button>
+        <button type="button" class="nav-item" data-nav="cms"><span class="nav-icon" aria-hidden="true"><svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.8a1.8 1.8 0 0 1 0-3.6H15a6 6 0 0 0 6-6c0-2.7-3.6-4.8-9-4.8Z"/><circle cx="7.5" cy="9" r=".8"/><circle cx="10" cy="6.5" r=".8"/><circle cx="14" cy="6.5" r=".8"/><circle cx="17" cy="9" r=".8"/></svg></span><span data-i18n="nav_cms">Website CMS</span></button>
       </nav>
       <div class="sidebar-footer"><small>KLAVIERHAUS · NEW YORK</small></div>
     </aside>
@@ -103,10 +103,10 @@
             <button id="profileButton" class="profile-button" type="button" aria-label="Account menu" aria-haspopup="menu" aria-expanded="false"><span id="profileInitials">KH</span><img id="profileAvatarImage" alt="" hidden></button>
             <div id="profileMenu" class="profile-menu" role="menu" hidden>
               <div class="profile-menu-identity"><span id="profileMenuAvatar" class="profile-menu-avatar">KH</span><span><strong id="profileMenuName"></strong><small id="profileMenuRole"></small></span></div>
-              <button type="button" role="menuitem" data-profile-menu="profile">Profile</button>
-              <button type="button" role="menuitem" data-profile-menu="settings">Settings</button>
+              <button type="button" role="menuitem" data-profile-menu="profile"><span class="profile-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span><span>Profile</span></button>
+              <button type="button" role="menuitem" data-profile-menu="settings"><span class="profile-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2.2-.7-.8-1.9 1.1-2-2.1-2.1-2 1.1-1.9-.8L10.5 2h-3l-.7 2.2-1.9.8-2-1.1L.8 6l1.1 2-.8 1.9L-1 10.5v3l2.2.7.8 1.9-1.1 2L3 20.2l2-1.1 1.9.8.7 2.1h3l.7-2.1 1.9-.8 2 1.1 2.1-2.1-1.1-2 .8-1.9z" transform="translate(2 0) scale(.83)"/></svg></span><span>Settings</span></button>
               <div class="profile-menu-separator"></div>
-              <button type="button" role="menuitem" class="profile-menu-logout" data-profile-menu="logout">Logout</button>
+              <button type="button" role="menuitem" class="profile-menu-logout" data-profile-menu="logout"><span class="profile-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg></span><span>Logout</span></button>
             </div>
           </div>
         </div>
