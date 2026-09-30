@@ -60,6 +60,7 @@ test("Messenger interactive customer and private appointment surfaces share cano
 
 test("Messenger responsive booking keeps admin actions visible and customer forms stable",()=>{
   const appointments=read("server/private-appointments.js");
+  const admin=read("public/messenger.js");
   const adminCss=read("public/styles.css");
   const siteJs=read("website/public/app.js");
   const siteCss=read("website/public/styles.css");
