@@ -223,14 +223,14 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
   </header>
   <aside class="customer-chat" data-customer-chat data-language="${escapeHtml(language)}">
     <div class="customer-chat__welcome" data-chat-welcome role="status"><span>${escapeHtml(chatCopy.welcome)}</span><button type="button" data-chat-welcome-close aria-label="${escapeHtml(chatCopy.close)}">×</button></div>
-    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span class="customer-chat__toggle-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span></button>
+    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><img class="customer-chat__logo customer-chat__logo--toggle" data-chat-logo src="" alt="Klavierhaus" hidden><span class="customer-chat__toggle-icon customer-chat__logo-fallback" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
       <div class="customer-chat__heading">
         <div class="customer-chat__heading-actions">
           <button class="customer-chat__booking-open" type="button" data-chat-booking-open aria-label="${language === "hu" ? "Privát időpont foglalása" : "Book a private appointment"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z"/></svg></button>
           <button class="customer-chat__panel-close" type="button" data-chat-panel-close aria-label="${escapeHtml(chatCopy.close)}">×</button>
         </div>
-        <div class="customer-chat__identity"><span class="customer-chat__piano-avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg></span><div><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div></div>
+        <div class="customer-chat__identity"><span class="customer-chat__identity-mark"><img class="customer-chat__logo customer-chat__logo--identity" data-chat-logo src="" alt="Klavierhaus" hidden><span class="customer-chat__piano-avatar customer-chat__logo-fallback" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg></span></span><div><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div></div>
         <p class="customer-chat__status" data-chat-support-status aria-live="polite"></p>
       </div>
       <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
@@ -455,9 +455,10 @@ function renderLegal(section) {
   const list = Array.isArray(section.list)
     ? `<ul>${section.list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
     : "";
+  const documentText=String(section.content||"").trim();
   return `<section class="section section--legal" id="${escapeHtml(section.id)}" data-reveal>
     <h2>${escapeHtml(section.title)}</h2>
-    ${renderParagraphs(section.paragraphs, "legal-copy")}
+    ${documentText?`<div class="legal-document">${escapeHtml(documentText)}</div>`:renderParagraphs(section.paragraphs, "legal-copy")}
     ${list}
     ${section.note ? `<aside>${escapeHtml(section.note)}</aside>` : ""}
   </section>`;
@@ -490,7 +491,7 @@ function renderFooter(copy, language, activeLandingKeys = null) {
       </div>
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerExplore)}</p>
-        <a href="${escapeHtml(getRoute("story", language))}">${escapeHtml(copy.footerStory)}</a>
+        <a href="${escapeHtml(getRoute("our", language))}">${escapeHtml(copy.footerOur || (language === "hu" ? "Rólunk" : "Our"))}</a>
         ${enabled("salon_events") ? `<a href="${escapeHtml(getRoute("events", language))}">${escapeHtml(copy.nav.find((item) => item.key === "events")?.label || (language === "hu" ? "Események" : "Events"))}</a>` : ""}
         <a href="${escapeHtml(getRoute("artists", language))}">${escapeHtml(copy.nav.find((item) => item.key === "artists")?.label || (language === "hu" ? "Művészek" : "Artists"))}</a>
         ${enabled("featured_pianos") ? `<a href="${escapeHtml(getRoute("pianos", language))}">${escapeHtml(copy.nav.find((item) => item.key === "pianos")?.label || (language === "hu" ? "Zongorák" : "Pianos"))}</a>` : ""}
@@ -505,7 +506,6 @@ function renderFooter(copy, language, activeLandingKeys = null) {
       <div class="footer-column">
         <p class="footer-label">${escapeHtml(copy.footerLegal)}</p>
         <a href="${escapeHtml(getRoute("privacy", language))}">${escapeHtml(copy.footerPrivacy)}</a>
-        <a href="${escapeHtml(getRoute("ticketTerms", language))}">${escapeHtml(copy.footerTerms)}</a>
         <button class="footer-privacy-button" type="button" data-privacy-settings>${escapeHtml(language === "hu" ? "Követési beállítások" : "Tracking settings")}</button>
       </div>
     </div>
@@ -1511,6 +1511,11 @@ function createApp(options = {}) {
     } catch (_error) { /* bundled routes remain available when ERP is unreachable */ }
     next();
   });
+
+  app.get("/story",(_req,res)=>res.redirect(308,"/our"));
+  app.get("/hu/tortenetunk",(_req,res)=>res.redirect(308,"/hu/rolunk"));
+  app.get("/ticket-terms",(_req,res)=>res.redirect(308,"/privacy#terms-and-conditions"));
+  app.get("/hu/jegyvasarlasi-feltetelek",(_req,res)=>res.redirect(308,"/hu/adatkezeles#altalanos-szerzodesi-feltetelek"));
 
   // The former standalone consultation page is intentionally gone. Consultation is modal-only.
   app.all(["/private-consultation", "/hu/privat-konzultacio"], (_req, res) => {
