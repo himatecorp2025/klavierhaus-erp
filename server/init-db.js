@@ -114,14 +114,68 @@ function prepareClientSegmentationCompatibility() {
     ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],
     ["mobile_phone","TEXT"],["line_phone","TEXT"],["street","TEXT"],["city","TEXT"],["district","TEXT"],
     ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
-    ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],
+    ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL'"],
     ["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"]
   ])ensureColumn("clients",name,definition);
-  if (columns("clients").has("customer_type")) {
-    db.exec(`UPDATE clients
-      SET client_type=UPPER(customer_type)
-      WHERE UPPER(customer_type) IN ('BUSINESS','INSTITUTION')
-        AND COALESCE(NULLIF(TRIM(client_type),''),'PRIVATE')='PRIVATE'`);
+  const clientSql=String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='clients'").get()?.sql||"");
+  const requiresRebuild=!clientSql.includes("'INDIVIDUAL'")||!clientSql.includes("'PARTNER'");
+  if(requiresRebuild){
+    const existing=columns("clients"),value=(name,fallback="NULL")=>existing.has(name)?quoteName(name):fallback;
+    db.exec('DROP TABLE IF EXISTS "_clients_segment_v2"');
+    db.exec(`CREATE TABLE "_clients_segment_v2" (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      first_name TEXT,
+      last_name TEXT,
+      company_name TEXT,
+      contact_name TEXT,
+      email TEXT,
+      mobile_phone TEXT,
+      line_phone TEXT,
+      phone TEXT,
+      street TEXT,
+      city TEXT,
+      district TEXT,
+      postcode TEXT,
+      country TEXT,
+      address TEXT,
+      notes TEXT,
+      short_memo_to_name TEXT,
+      preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
+      client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
+      is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
+      vip_updated_by_user_id TEXT,
+      vip_updated_at TEXT,
+      deleted_at TEXT,
+      deleted_by_user_id TEXT,
+      archive_document_id INTEGER,
+      deletion_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    const legacyType=existing.has("client_type")?quoteName("client_type"):(existing.has("customer_type")?quoteName("customer_type"):"'INDIVIDUAL'");
+    db.exec(`INSERT INTO "_clients_segment_v2"(
+      id,name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,
+      preferred_language,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,deleted_at,deleted_by_user_id,archive_document_id,deletion_reason,created_at,updated_at)
+      SELECT
+      ${value("id")},COALESCE(NULLIF(TRIM(${value("name","''")}),''),'Data pending'),${value("first_name")},${value("last_name")},${value("company_name")},${value("contact_name")},
+      ${value("email")},${value("mobile_phone")},${value("line_phone")},${value("phone")},${value("street")},${value("city")},${value("district")},${value("postcode")},${value("country")},
+      ${value("address")},${value("notes")},${value("short_memo_to_name")},COALESCE(${value("preferred_language","'en'")},'en'),
+      CASE UPPER(COALESCE(${legacyType},'INDIVIDUAL'))
+        WHEN 'PRIVATE' THEN 'INDIVIDUAL'
+        WHEN 'INDIVIDUAL' THEN 'INDIVIDUAL'
+        WHEN 'PARTNER' THEN 'PARTNER'
+        WHEN 'BUSINESS' THEN 'BUSINESS'
+        WHEN 'INSTITUTION' THEN 'INSTITUTION'
+        ELSE 'INDIVIDUAL' END,
+      COALESCE(${value("is_vip","0")},0),${value("vip_updated_by_user_id")},${value("vip_updated_at")},${value("deleted_at")},${value("deleted_by_user_id")},
+      ${value("archive_document_id")},${value("deletion_reason")},COALESCE(${value("created_at","CURRENT_TIMESTAMP")},CURRENT_TIMESTAMP),COALESCE(${value("updated_at","CURRENT_TIMESTAMP")},CURRENT_TIMESTAMP)
+      FROM clients`);
+    db.exec('DROP TABLE "clients"');
+    db.exec('ALTER TABLE "_clients_segment_v2" RENAME TO "clients"');
+    console.log("[MASTER-DATA] Rebuilt clients with INDIVIDUAL/PARTNER/BUSINESS/INSTITUTION classification");
+  }else{
+    db.prepare("UPDATE clients SET client_type='INDIVIDUAL' WHERE UPPER(COALESCE(client_type,''))='PRIVATE'").run();
   }
   db.exec('DROP INDEX IF EXISTS "idx_clients_customer_type"');
 }
@@ -323,7 +377,7 @@ ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(pr
 for(const [name,definition] of [
   ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],["mobile_phone","TEXT"],["line_phone","TEXT"],
   ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
-  ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
+  ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
   ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
 ])ensureColumn("clients",name,definition);
 for(const [name,definition] of [
@@ -337,6 +391,8 @@ ensureColumn("users","profile_image_url","TEXT");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("customer_conversations","client_id","INTEGER");
+ensureColumn("customer_conversations","activity_cycle","INTEGER NOT NULL DEFAULT 1 CHECK(activity_cycle >= 1)");
+ensureColumn("customer_conversations","last_notified_activity_cycle","INTEGER NOT NULL DEFAULT 0 CHECK(last_notified_activity_cycle >= 0)");
 ensureColumn("private_appointments","scheduled_end_at","TEXT");
 ensureColumn("private_appointments","conversation_id","TEXT");
 ensureColumn("private_appointments","client_id","INTEGER");
