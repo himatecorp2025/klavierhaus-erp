@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
   is_superadmin INTEGER DEFAULT 0,
   session_version INTEGER NOT NULL DEFAULT 0,
   theme_preference TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light')),
+  language_preference TEXT NOT NULL DEFAULT 'en' CHECK(language_preference IN ('en','hu')),
+  profile_image_url TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
