@@ -160,8 +160,12 @@ function assertMasterImportIntegrity(db,{records,sourceName}){
     }
     if(piano){
       if(record.client.source_id){
-        const clientMap=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,record.client.source_id);
-        if(!clientMap?.client_id||Number(piano.client_id)!==Number(clientMap.client_id))failures.push({source_row:record.row_number,column:"CLIENT RELATION",source_instrument_id:record.instrument.source_id||null,source_client_id:record.client.source_id||null});
+        const clientMap=db.prepare(`SELECT m.client_id,c.deleted_at FROM master_data_client_source_map m LEFT JOIN clients c ON c.id=m.client_id
+          WHERE m.source_name=? AND m.source_client_id=?`).get(sourceName,record.client.source_id);
+        const tombstoned=Boolean(clientMap?.client_id&&clientMap.deleted_at);
+        if(!clientMap?.client_id||(!tombstoned&&Number(piano.client_id)!==Number(clientMap.client_id))||(tombstoned&&piano.client_id!==null&&piano.client_id!==undefined)){
+          failures.push({source_row:record.row_number,column:"CLIENT RELATION",source_instrument_id:record.instrument.source_id||null,source_client_id:record.client.source_id||null,tombstoned});
+        }
       }else if(piano.client_id!==null&&piano.client_id!==undefined)failures.push({source_row:record.row_number,column:"OWNERLESS RELATION",source_instrument_id:record.instrument.source_id||null,actual_client_id:piano.client_id});
     }
   }
