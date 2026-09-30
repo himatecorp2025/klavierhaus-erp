@@ -284,9 +284,12 @@ test("private appointment forms are minimal and preserve selected context",()=>{
   const privateForm=source.slice(privateStart,privateEnd);
   assert.match(privateForm,/name="name"/);
   assert.match(privateForm,/name="phone"/);
-  assert.match(privateForm,/name="scheduled_at_display" type="datetime-local" step="900"/);
-  assert.match(privateForm,/data-private-calendar/);
-  assert.match(privateForm,/Choose date and time from the calendar|Válasszon dátumot és időpontot a naptárból/);
+  assert.match(privateForm,/data-private-slot-picker/);
+  assert.match(privateForm,/name="scheduled_at" data-private-scheduled-at/);
+  assert.match(privateForm,/name="duration_min" value="60"/);
+  assert.match(privateForm,/data-private-calendar-year/);
+  assert.match(privateForm,/data-private-calendar-month/);
+  assert.match(privateForm,/Choose a date|Válasszon dátumot/);
   assert.match(privateForm,/name="note"/);
   assert.match(privateForm,/name="piano_id"/);
   assert.match(privateForm,/name="service_id"/);
@@ -295,8 +298,9 @@ test("private appointment forms are minimal and preserve selected context",()=>{
   assert.doesNotMatch(privateForm,/name="consent_contact"/);
   assert.match(source,/data-piano-id=/);
   assert.match(source,/data-service-id=/);
-  assert.match(source,/Appointment time · New York/);
+  assert.match(source,/Date and available time · New York|Dátum és szabad időpont · New York-i idő/);
   assert.match(browser,/\/api\/site\/private-appointments/);
+  assert.match(browser,/\/api\/site\/private-appointment-availability\?date=/);
   assert.match(browser,/form\.elements\.piano_id\.value=button\.dataset\.pianoId/);
   assert.match(browser,/form\.elements\.service_id\.value=button\.dataset\.serviceId/);
 });
