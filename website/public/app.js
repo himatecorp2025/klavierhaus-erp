@@ -323,7 +323,9 @@ function startHeatmapTracking() {
 
 function normalizePrivateAppointmentWallTime(value){
   const raw=String(value||"").trim();let year,month,day,hour,minute,match;
-  if(language==="hu"){match=raw.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})[.]?\s+(\d{1,2}):(\d{2})$/);if(match)[,year,month,day,hour,minute]=match;}
+  match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if(match)[,year,month,day,hour,minute]=match;
+  else if(language==="hu"){match=raw.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})[.]?\s+(\d{1,2}):(\d{2})$/);if(match)[,year,month,day,hour,minute]=match;}
   else{match=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);if(match){month=match[1];day=match[2];year=match[3];hour=match[4];minute=match[5];const meridiem=String(match[6]||"").toUpperCase();if(meridiem){let h=Number(hour);if(h<1||h>12)return "";if(meridiem==="PM"&&h!==12)h+=12;if(meridiem==="AM"&&h===12)h=0;hour=String(h);}}}
   if(!year)return "";const y=Number(year),m=Number(month),d=Number(day),h=Number(hour),min=Number(minute),probe=new Date(Date.UTC(y,m-1,d,h,min));
   if(y<2000||m<1||m>12||d<1||d>31||h<0||h>23||min<0||min>59||min%15!==0||probe.getUTCFullYear()!==y||probe.getUTCMonth()!==m-1||probe.getUTCDate()!==d)return "";
@@ -357,7 +359,7 @@ serviceDialog?.addEventListener("click",(event)=>{if(event.target===serviceDialo
 serviceDialog?.addEventListener("close",()=>serviceDialogTrigger?.focus());
 document.querySelector("[data-service-form]")?.addEventListener("submit",async(event)=>{
   event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-service-result]");let values;
-  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Érvényes New York-i időpontot adjon meg a jelzett magyar formátumban.":"Enter a valid New York appointment time in the shown US format.";return;}
+  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Válasszon érvényes New York-i dátumot és időpontot a naptárból.":"Choose a valid New York date and time from the calendar.";return;}
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
@@ -384,7 +386,7 @@ privateViewingDialog?.addEventListener("click",(event)=>{if(event.target===priva
 privateViewingDialog?.addEventListener("close",()=>privateViewingTrigger?.focus());
 privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventListener("submit",async(event)=>{
   event.preventDefault();const form=event.currentTarget,result=form.querySelector("[data-private-viewing-result]");let values;
-  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Érvényes New York-i időpontot adjon meg a jelzett magyar formátumban.":"Enter a valid New York appointment time in the shown US format.";return;}
+  try{values=privateAppointmentValues(form);}catch(_error){if(result)result.textContent=language==="hu"?"Válasszon érvényes New York-i dátumot és időpontot a naptárból.":"Choose a valid New York date and time from the calendar.";return;}
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
