@@ -654,18 +654,82 @@ openConvertToJobDialog=async function(lead){
   });
 };
 
-/* ---------- Profile / team deletion ---------- */
+/* ---------- Profile / personal settings / team administration ---------- */
 
+function v6ProfileAvatarMarkup(user,size="large"){
+  const image=user?.profile_image_url||"";
+  return image?`<img class="profile-avatar-image ${size}" src="${esc(image)}" alt="">`:`<div class="profile-avatar ${size}">${esc(initials(user?.name))}</div>`;
+}
 renderProfile=async function(){
-  const workspace=$("#workspace"),users=await loadUsers(),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
-  workspace.innerHTML=pageHead(tr("Profile & Settings","Profil és beállítások"),tr("Your account, team, theme and application language.","Saját fiók, csapat, megjelenés és alkalmazásnyelv."),admin?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
-    `<div class="profile-grid"><section class="panel profile-card"><div class="profile-avatar">${esc(initials(state.user?.name))}</div><h2>${esc(state.user?.name)}</h2><p class="muted">${esc(state.user?.email||"")}</p><span class="role-chip">${esc(roleLabel(state.user?.role))}</span><div class="profile-theme-row"><span>${tr("Theme","Megjelenés")}</span><button class="secondary-button" id="profileThemeBtn" type="button">${document.documentElement.dataset.theme==="dark"?tr("Dark","Sötét"):tr("Light","Világos")}</button></div><div class="form-actions"><button id="logoutBtn" class="danger-button" type="button">${tr("Sign out","Kijelentkezés")}</button></div></section>
-    <section class="panel"><div class="panel-head"><h2>${tr("Team","Csapat")}</h2><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span><span class="role-chip">${esc(roleLabel(user.role))}</span>${admin?`<div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div>`:""}</div>`).join("")}</div></section></div>`;
-  $("#profileThemeBtn").addEventListener("click",()=>{v6ToggleTheme();void renderProfile();});
-  $("#logoutBtn").addEventListener("click",async()=>{try{await api("/api/logout",{method:"POST"});}catch(_error){}localStorage.setItem("kh_login_theme",document.documentElement.dataset.theme||"dark");clearSession();showLogin();});
-  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());$$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
-  $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{const user=users.find(row=>String(row.id)===button.dataset.deleteUser);if(!user)return;if(!confirm(tr(`Delete ${user.name}? Historical jobs and audit records will remain intact.`,`Törlöd ${user.name} felhasználót? A korábbi munkák és audit adatok megmaradnak.`)))return;try{await api(`/api/users/${encodeURIComponent(user.id)}`,{method:"DELETE"});toast(tr("User deleted.","Felhasználó törölve."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}}));
+  const workspace=$("#workspace"),user=state.user||{};
+  workspace.innerHTML=pageHead(tr("Profile","Profil"),tr("Your personal Klavierhaus System account.","Saját Klavierhaus System fiókod."))+
+    `<div class="profile-self-layout">
+      <section class="panel profile-self-card">
+        <div class="profile-photo-editor">
+          ${v6ProfileAvatarMarkup(user)}
+          <div><h2>${esc(user.name||"")}</h2><p class="muted">${esc(user.email||"")}</p><span class="role-chip">${esc(roleLabel(user.role))}</span></div>
+        </div>
+        <div class="profile-photo-actions">
+          <label class="secondary-button profile-photo-upload"><input id="profileImageFile" type="file" accept="image/*"><span>↑ ${tr("Upload profile photo","Profilkép feltöltése")}</span></label>
+          ${user.profile_image_url?`<button id="removeProfileImage" class="text-button danger-text" type="button">${tr("Remove photo","Kép eltávolítása")}</button>`:""}
+        </div>
+      </section>
+      <section class="panel profile-editor-panel">
+        <div class="panel-head"><div><span class="eyebrow">${tr("PERSONAL PROFILE","SZEMÉLYES PROFIL")}</span><h2>${tr("Contact details","Kapcsolati adatok")}</h2></div></div>
+        <form id="selfProfileForm" class="form-grid">
+          <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user.name||"")}" required></label>
+          <label class="field"><span>${tr("Login email","Belépési e-mail")}</span><input value="${esc(user.email||"")}" disabled></label>
+          <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")}</span><input name="contact_email" type="email" value="${esc(user.contact_email||"")}"></label>
+          <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user.phone||"")}"></label>
+          <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user.address||"")}"></label>
+          <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="8" autocomplete="new-password"></label>
+          <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="8" autocomplete="new-password"></label>
+          <div class="form-actions full"><button class="primary-button" type="submit">${tr("Save profile","Profil mentése")}</button></div>
+        </form>
+      </section>
+    </div>`;
+  $("#profileImageFile")?.addEventListener("change",async event=>{
+    const file=event.currentTarget.files?.[0];if(!file)return;const data=new FormData();data.append("file",file,file.name);
+    try{const result=await api("/api/me/profile-image",{method:"POST",body:data});state.user.profile_image_url=result.profile_image_url||"";sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();toast(tr("Profile photo updated.","A profilkép frissült."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}
+  });
+  $("#removeProfileImage")?.addEventListener("click",async()=>{try{await api("/api/me/profile-image",{method:"DELETE"});state.user.profile_image_url="";sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();await renderProfile();}catch(error){toast(humanError(error),"error");}});
+  $("#selfProfileForm")?.addEventListener("submit",async event=>{
+    event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget)),password=String(data.password||"");
+    if(!password){delete data.password;delete data.password_confirmation;}
+    try{
+      const saved=await api("/api/me/profile",{method:"PUT",body:JSON.stringify(data)});
+      Object.assign(state.user,{name:saved.name,contact_email:saved.contact_email||"",phone:saved.phone||"",address:saved.address||"",profile_image_url:saved.profile_image_url||state.user.profile_image_url||""});
+      sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();
+      toast(tr("Profile saved.","A profil mentve."),"success");
+      if(password){clearSession();showLogin();return;}
+      await renderProfile();
+    }catch(error){toast(humanError(error),"error");}
+  });
 };
+
+async function renderSettings(){
+  const workspace=$("#workspace"),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  const users=admin?await loadUsers():[];
+  workspace.innerHTML=pageHead(tr("Settings","Beállítások"),tr("Your language, appearance and account-level workspace preferences.","Nyelv, megjelenés és személyes munkafelület-beállítások."),admin?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
+    `<div class="settings-layout">
+      <section class="panel personal-settings-card">
+        <div class="panel-head"><div><span class="eyebrow">${tr("MY SETTINGS","SAJÁT BEÁLLÍTÁSOK")}</span><h2>${tr("Appearance & language","Megjelenés és nyelv")}</h2></div></div>
+        <div class="settings-choice-grid">
+          <div class="settings-choice"><div><strong>${tr("Theme","Megjelenés")}</strong><small>${tr("Saved for your user account.","A saját felhasználói fiókodhoz mentve.")}</small></div><div class="segmented-control settings-segments"><button type="button" data-user-theme="light" class="${document.documentElement.dataset.theme==="light"?"active":""}">${tr("Light","Világos")}</button><button type="button" data-user-theme="dark" class="${document.documentElement.dataset.theme==="dark"?"active":""}">${tr("Dark","Sötét")}</button></div></div>
+          <div class="settings-choice"><div><strong>${tr("Language","Nyelv")}</strong><small>${tr("Follows you when you sign in on another device.","Másik eszközön történő belépéskor is megmarad.")}</small></div><div class="segmented-control settings-segments"><button type="button" data-user-language="en" class="${state.language==="en"?"active":""}">English</button><button type="button" data-user-language="hu" class="${state.language==="hu"?"active":""}">Magyar</button></div></div>
+        </div>
+      </section>
+      ${admin?`<section class="panel team-settings-card"><div class="panel-head"><div><span class="eyebrow">${tr("ADMINISTRATION","ADMINISZTRÁCIÓ")}</span><h2>${tr("Team","Csapat")}</h2></div><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><div class="team-person">${v6ProfileAvatarMarkup(user,"small")}<span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span></div><span class="role-chip">${esc(roleLabel(user.role))}</span><div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div></div>`).join("")}</div></section>`:""}
+    </div>`;
+  $$("[data-user-theme]").forEach(button=>button.addEventListener("click",async()=>{v6ApplyTheme(button.dataset.userTheme,{save:true});await renderSettings();}));
+  $$("[data-user-language]").forEach(button=>button.addEventListener("click",async()=>{setLanguage(button.dataset.userLanguage,{save:true});}));
+  $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
+  $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
+  $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{
+    const user=users.find(row=>String(row.id)===button.dataset.deleteUser);if(!user||!confirm(tr(`Delete ${user.name}? Historical jobs and audit records will remain intact.`,`Törlöd ${user.name} felhasználót? A korábbi munkák és audit adatok megmaradnak.`)))return;
+    try{await api(`/api/users/${encodeURIComponent(user.id)}`,{method:"DELETE"});toast(tr("User deleted.","Felhasználó törölve."),"success");await renderSettings();}catch(error){toast(humanError(error),"error");}
+  }));
+}
 
 /* ---------- Direct expense document upload ---------- */
 
