@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const Database=require("better-sqlite3");
-const {reconcileExistingMasterData,importLegacyInstrumentClientCsv,rehydrateStoredMasterData}=require("../server/master-data-reconcile");
+const {LEGACY_MASTER_SOURCE_NAME,LEGACY_MASTER_CONTRACT,auditMasterDataSource,reconcileExistingMasterData,importLegacyInstrumentClientCsv,rehydrateStoredMasterData,refreshClientLastVisit}=require("../server/master-data-reconcile");
 
 function makeDb(){
   const db=new Database(":memory:");
@@ -12,7 +12,7 @@ function makeDb(){
     CREATE TABLE clients(
       id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,first_name TEXT,last_name TEXT,company_name TEXT,contact_name TEXT,
       email TEXT,mobile_phone TEXT,line_phone TEXT,phone TEXT,street TEXT,city TEXT,district TEXT,postcode TEXT,country TEXT,address TEXT,
-      notes TEXT,short_memo_to_name TEXT,preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL',
+      notes TEXT,short_memo_to_name TEXT,last_visit_at TEXT,preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL',
       is_vip INTEGER NOT NULL DEFAULT 0,deleted_at TEXT,deleted_by_user_id TEXT,archive_document_id INTEGER,deletion_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -58,6 +58,54 @@ function sourceRow(values={}){
   const fields=["instrumentId","category","brand","model","size","color","serial","year","instrumentNote","purchaseDate","warranty","lastServiceDate","lastServiceTitle","lastServiceDescription","nextServiceDate","frequency","humidity","temperature","clientId","first","last","company","contact","street","city","district","postcode","country","mobile","linePhone","email","clientNote","memo"];
   fields.forEach((field,index)=>{r[index]=values[field]??"";});
   return r;
+}
+function countNonEmpty(rows){return rows.reduce((sum,row)=>sum+row.filter(value=>String(value??"").trim()!=="").length,0);}
+function canonicalContractRows(){
+  const rows=[],clients=[];
+  clients.push({id:"3084",kind:"INDIVIDUAL",first:"Paul",last:"Mills"});
+  for(let i=1;i<258;i++)clients.push({id:String(10000+i),kind:"INDIVIDUAL",first:"Individual",last:String(i)});
+  for(let i=0;i<28;i++)clients.push({id:String(20000+i),kind:"BUSINESS",company:`Business ${i} LLC`});
+  for(let i=0;i<17;i++)clients.push({id:String(30000+i),kind:"INSTITUTION",company:`Music University ${i}`});
+  for(let i=0;i<6;i++)clients.push({id:String(40000+i),kind:"PARTNER",company:`Piano Studios ${i}`});
+  assert.equal(clients.length,309);
+
+  let instrument=100000;
+  const addLinked=(client,ordinal=0)=>{
+    const row=sourceRow({
+      instrumentId:String(instrument++),category:"grand",brand:ordinal%4===0?"Fazioli":ordinal%4===1?"Steinway & Sons":ordinal%4===2?"Yamaha":"Bösendorfer",
+      model:"MODEL-"+instrument,serial:"SER-"+instrument,clientId:client.id,first:client.first||"",last:client.last||"",company:client.company||""
+    });
+    rows.push(row);return row;
+  };
+  for(const client of clients)addLinked(client);
+  const paul=clients[0];
+  for(let i=1;i<9;i++)addLinked(paul,i);
+  const multi=clients[1];
+  for(let i=0;i<12;i++)addLinked(multi,i+20);
+  for(let i=0;i<10;i++)rows.push(sourceRow({instrumentId:String(instrument++),category:i%2?"upright":"grand",brand:i%3?"No brand":"Fazioli",model:"WAREHOUSE-"+i,serial:"WH-"+i}));
+  assert.equal(rows.length,339);
+
+  const paulRows=rows.filter(row=>row[18]==="3084");
+  assert.equal(paulRows.length,9);
+  paulRows.forEach((row,index)=>{row[11]=`2026-09-${String(index+1).padStart(2,"0")}`;row[12]="Tuning";row[13]="Paul Mills service "+(index+1);});
+
+  const fillIndices=[4,5,7,8,9,10,11,12,13,14,15,16,17,22,23,24,25,26,27,28,29,30,31,32];
+  const fillValue=(row,index)=>({
+    4:"200",5:"Ebony Satin",7:"2000",8:"Instrument note "+row[0],9:"2001",10:"Expired",11:"2026-01-01",12:"Tuning",
+    13:"Service complete "+row[0],14:"2027-01-01",15:"440",16:"45",17:"70",22:"Contact "+row[18],23:"1 Main St",
+    24:"New York",25:"NY",26:"10001",27:"United States",28:"9175550000",29:"2125550000",30:`client-${row[18]}@example.test`,31:"Client note "+row[18],32:"Memo "+row[18]
+  })[index];
+  let nonEmpty=countNonEmpty(rows);
+  outer: for(const row of rows){
+    for(const index of fillIndices){
+      if(nonEmpty>=LEGACY_MASTER_CONTRACT.sourceNonEmptyValues)break outer;
+      if(index>=18&&!row[18])continue;
+      if(String(row[index]??"").trim()!=="")continue;
+      row[index]=fillValue(row,index);nonEmpty++;
+    }
+  }
+  assert.equal(nonEmpty,LEGACY_MASTER_CONTRACT.sourceNonEmptyValues);
+  return rows;
 }
 
 test("reconciliation keeps incomplete pianos visible and resolves legacy missing-data review items",()=>{
@@ -265,5 +313,70 @@ test("stored raw source replay restores normalized piano data without changing o
   assert.equal(piano.notes,"Preserve raw");
   assert.equal(db.prepare("SELECT raw_json FROM master_data_import_rows WHERE source_name='REPLAY_TEST' AND source_instrument_id='R-1'").get().raw_json,rawBefore);
   assert.equal(db.prepare("SELECT raw_sha256 FROM master_data_source_rows WHERE source_name='REPLAY_TEST'").get().raw_sha256.length,64);
+  db.close();
+});
+
+
+test("canonical 33-column contract imports 339 rows losslessly and links Paul Mills to exactly nine pianos",()=>{
+  const db=makeDb(),rows=canonicalContractRows(),csv=sourceCsv(rows);
+  const summary=db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:csv,sourceName:LEGACY_MASTER_SOURCE_NAME}))();
+  assert.equal(summary.integrity.ok,true);
+  assert.equal(summary.rows,339);
+  assert.equal(summary.columns,33);
+  assert.equal(summary.sourceClients,309);
+  assert.equal(summary.totalPianos,339);
+  assert.equal(summary.linkedPianos,329);
+  assert.equal(summary.ownerlessPianos,10);
+  assert.equal(summary.sourceNonEmptyValues,5025);
+  assert.equal(summary.controlClientRows,1);
+  assert.equal(summary.controlClientPianos,9);
+  assert.deepEqual(summary.clientTypes,{INDIVIDUAL:258,PARTNER:6,BUSINESS:28,INSTITUTION:17});
+
+  const paulMap=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id='3084'").get(LEGACY_MASTER_SOURCE_NAME);
+  assert.ok(paulMap?.client_id);
+  const paul=db.prepare("SELECT * FROM clients WHERE id=?").get(paulMap.client_id);
+  assert.equal(paul.name,"Paul Mills");
+  assert.equal(paul.last_visit_at,"2026-09-09");
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(paul.id).c,9);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=? AND source_client_id='3084' AND piano_id IS NOT NULL").get(LEGACY_MASTER_SOURCE_NAME).c,9);
+
+  const audit=auditMasterDataSource(db,{sourceName:LEGACY_MASTER_SOURCE_NAME});
+  assert.equal(audit.ok,true);
+  assert.equal(audit.normalizedMismatchCount,0);
+  assert.equal(audit.ownerLinkMismatches,0);
+  assert.equal(audit.clientFieldHistoryMissing,0);
+  db.close();
+});
+
+test("canonical import is fail-closed and rolls back when even one source value is missing from the expected contract",()=>{
+  const db=makeDb(),rows=canonicalContractRows();
+  let changed=false;
+  for(const row of rows){
+    for(const index of [4,5,8,9,10,13,14,15,16,17,22,23,24,25,26,27,28,29,30,31,32]){
+      if(String(row[index]||"").trim()){row[index]="";changed=true;break;}
+    }
+    if(changed)break;
+  }
+  assert.equal(countNonEmpty(rows),LEGACY_MASTER_CONTRACT.sourceNonEmptyValues-1);
+  assert.throws(()=>db.transaction(()=>importLegacyInstrumentClientCsv(db,{content:sourceCsv(rows),sourceName:LEGACY_MASTER_SOURCE_NAME}))(),/MASTER_DATA_INTEGRITY_FAILED/);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM clients").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos").get().c,0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows").get().c,0);
+  db.close();
+});
+
+test("Last Visit is derived from the latest linked piano service and refreshes when service data changes",()=>{
+  const db=makeDb();
+  const csv=sourceCsv([
+    sourceRow({instrumentId:"LV-1",brand:"Steinway & Sons",model:"B",clientId:"LV-C",first:"Last",last:"Visit",lastServiceDate:"2025-06-10",lastServiceTitle:"Tuning"}),
+    sourceRow({instrumentId:"LV-2",brand:"Fazioli",model:"F212",clientId:"LV-C",first:"Last",last:"Visit",lastServiceDate:"2026-04-22",lastServiceTitle:"Regulation"})
+  ]);
+  importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"LAST_VISIT_TEST"});
+  const client=db.prepare("SELECT c.* FROM clients c JOIN master_data_client_source_map m ON m.client_id=c.id WHERE m.source_name='LAST_VISIT_TEST' AND m.source_client_id='LV-C'").get();
+  assert.equal(client.last_visit_at,"2026-04-22");
+  const piano=db.prepare("SELECT p.* FROM pianos p JOIN master_data_piano_source_map m ON m.piano_id=p.id WHERE m.source_name='LAST_VISIT_TEST' AND m.source_instrument_id='LV-1'").get();
+  db.prepare("UPDATE pianos SET last_serviced_at='2026-12-31' WHERE id=?").run(piano.id);
+  refreshClientLastVisit(db,client.id);
+  assert.equal(db.prepare("SELECT last_visit_at FROM clients WHERE id=?").get(client.id).last_visit_at,"2026-12-31");
   db.close();
 });
