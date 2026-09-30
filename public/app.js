@@ -512,6 +512,12 @@ const MASTER_SOURCE_FIELD_LABELS={
   street:["Street","Utca, házszám"],city:["City","Város"],district:["District / State","Kerület / állam"],postcode:["Postcode","Irányítószám"],country:["Country","Ország"],
   mobile_phone:["Mobile phone","Mobiltelefon"],line_phone:["Landline phone","Vezetékes telefon"],email:["Email","E-mail"],notes:["Notes","Megjegyzés"],short_memo_to_name:["Short memo to name","Rövid név-memó"]
 };
+const MASTER_INSTRUMENT_SOURCE_LABELS=["ID","CATEGORY","BRAND","MODEL","SIZE","COLOR","SERIAL NUMBER","YEAR BUILT","NOTE","DATE OF PURCHASE","WARRANTY","LAST SERVICE DATE","LAST SERVICE TITLE","LAST SERVICE DESCRIPTION","NEXT SERVICE DATE","LATEST INFO FREQUENCY","LATEST INFO HUMIDITY","LATEST INFO TEMPERATURE"];
+const MASTER_CLIENT_SOURCE_LABELS=["ID","FIRST NAME","LAST NAME","COMPANY NAME","CONTACT NAME","STREET","CITY","DISTRICT","POSTCODE","COUNTRY","MOBILE PHONE","LINE PHONE","E-MAIL","NOTE","SHORT MEMO TO NAME"];
+function masterRawSourceValuesMarkup(values=[],labels=[]){
+  const items=labels.map((label,index)=>({label,value:String(values?.[index]??"")})).filter(item=>item.value.trim());
+  return items.length?`<dl class="master-raw-source-values">${items.map(item=>`<dt>${esc(item.label)}</dt><dd>${esc(item.value)}</dd>`).join("")}</dl>`:`<div class="empty-state">${tr("No values in this source block.","Ebben a forrásblokkban nincs adat.")}</div>`;
+}
 function masterSourceFieldLabel(field){const pair=MASTER_SOURCE_FIELD_LABELS[field]||[String(field||"").replaceAll("_"," "),String(field||"").replaceAll("_"," ")];return state.language==="hu"?pair[1]:pair[0];}
 function masterSourceRowsText(source){return String(source?.source_rows||source?.source_row_number||"").trim()||masterPendingText();}
 function masterSourceInfoMarkup(sources=[],kind="client"){
@@ -521,13 +527,14 @@ function masterSourceInfoMarkup(sources=[],kind="client"){
     ${kind==="piano"?`<dt>${tr("Source Client ID","Forrás ügyfél ID")}</dt><dd class="${masterPendingClass(source.source_client_id)}">${esc(masterValue(source.source_client_id))}</dd>`:""}
     <dt>${tr("Source row","Forrássor")}</dt><dd>${esc(masterSourceRowsText(source))}</dd>
     <dt>${tr("Imported","Importálva")}</dt><dd class="${masterPendingClass(source.imported_at)}">${esc(masterValue(source.imported_at))}</dd>
-  </dl></article>`).join("")}</div></details>`;
+  </dl>${kind==="piano"&&Array.isArray(source.instrument_values)?`<details class="master-raw-source-row"><summary>${tr("Original CSV instrument values","Eredeti CSV hangszeradatok")}</summary>${masterRawSourceValuesMarkup(source.instrument_values,MASTER_INSTRUMENT_SOURCE_LABELS)}</details>`:""}</article>`).join("")}</div></details>`;
 }
 function masterClientSourceHistoryMarkup(data={}){
-  const values=Array.isArray(data.field_values)?data.field_values:[];
-  if(!values.length)return masterSourceInfoMarkup(data.sources||[],"client");
+  const values=Array.isArray(data.field_values)?data.field_values:[],rawRows=Array.isArray(data.raw_rows)?data.raw_rows:[];
   const groups=new Map();for(const row of values){if(!groups.has(row.field_name))groups.set(row.field_name,[]);groups.get(row.field_name).push(row);}
-  return masterSourceInfoMarkup(data.sources||[],"client")+`<details class="master-source-panel"><summary>${tr("Imported source history","Importált forráselőzmények")}</summary><div class="master-source-history">${[...groups.entries()].map(([field,rows])=>`<article><strong>${esc(masterSourceFieldLabel(field))}</strong>${rows.map(row=>`<div><span>${esc(row.value)}</span><small>${esc(row.source_client_id)} · ${tr("rows","sorok")} ${row.first_source_row}${row.last_source_row!==row.first_source_row?"–"+row.last_source_row:""}${Number(row.occurrences||1)>1?" · ×"+row.occurrences:""}</small></div>`).join("")}</article>`).join("")}</div></details>`;
+  const history=values.length?`<details class="master-source-panel"><summary>${tr("Imported source history","Importált forráselőzmények")}</summary><div class="master-source-history">${[...groups.entries()].map(([field,rows])=>`<article><strong>${esc(masterSourceFieldLabel(field))}</strong>${rows.map(row=>`<div><span>${esc(row.value)}</span><small>${esc(row.source_client_id)} · ${tr("rows","sorok")} ${row.first_source_row}${row.last_source_row!==row.first_source_row?"–"+row.last_source_row:""}${Number(row.occurrences||1)>1?" · ×"+row.occurrences:""}</small></div>`).join("")}</article>`).join("")}</div></details>`:"";
+  const raw=rawRows.length?`<details class="master-source-panel"><summary>${tr("Original CSV client rows","Eredeti CSV ügyfélsorok")}</summary><div class="master-source-list">${rawRows.map(row=>`<article><strong>${esc(row.source_name||"SOURCE")} · ${tr("row","sor")} ${esc(row.source_row_number)}</strong>${masterRawSourceValuesMarkup(row.values,MASTER_CLIENT_SOURCE_LABELS)}</article>`).join("")}</div></details>`:"";
+  return masterSourceInfoMarkup(data.sources||[],"client")+history+raw;
 }
 function masterReviewBadge(client){
   const count=Number(client?.piano_review_count||0);
