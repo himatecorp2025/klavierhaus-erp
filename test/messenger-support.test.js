@@ -71,7 +71,7 @@ test("Intake required-work cards use compact More-like two-column mobile cards",
   assert.match(css,/New Intake work cards use the same compact card language as More/);
   assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);\n  assert.match(css,/\.assessment-option-icon/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
-  assert.match(css,/\.assessment-option>input\[type="checkbox"\]\{position:absolute/);
+  assert.match(v6,/assessment-option-head/);\n  assert.match(css,/\.assessment-option-head>input\[type="checkbox"\]/);\n  assert.match(css,/\.assessment-price input\{[\\s\\S]*border:0!important/);
 });
 
 test("Canonical Messenger backend routes assignment, notifications, appointments and manual Intake creation",()=>{
