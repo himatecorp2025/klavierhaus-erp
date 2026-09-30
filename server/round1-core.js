@@ -122,12 +122,26 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       (SELECT COUNT(*) FROM pianos p WHERE p.client_id=c.id) AS piano_count,
       (SELECT COUNT(*) FROM client_piano_review_queue r WHERE r.client_id=c.id AND r.status='PENDING') AS piano_review_count
       FROM clients c
-      WHERE ?='' OR lower(c.name) LIKE ? OR lower(COALESCE(c.first_name,'')) LIKE ? OR lower(COALESCE(c.last_name,'')) LIKE ?
-        OR lower(COALESCE(c.company_name,'')) LIKE ? OR lower(COALESCE(c.contact_name,'')) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ?
-        OR lower(COALESCE(c.phone,'')) LIKE ? OR lower(COALESCE(c.mobile_phone,'')) LIKE ? OR lower(COALESCE(c.line_phone,'')) LIKE ?
-        OR lower(COALESCE(c.address,'')) LIKE ? OR lower(COALESCE(c.street,'')) LIKE ? OR lower(COALESCE(c.city,'')) LIKE ?
-        OR lower(COALESCE(c.district,'')) LIKE ? OR lower(COALESCE(c.postcode,'')) LIKE ? OR lower(COALESCE(c.country,'')) LIKE ?
-      ORDER BY lower(c.name),c.id`).all(q,like,like,like,like,like,like,like,like,like,like,like,like,like,like,like);
+      WHERE c.deleted_at IS NULL AND (
+        @q='' OR lower(c.name) LIKE @like OR lower(COALESCE(c.first_name,'')) LIKE @like OR lower(COALESCE(c.last_name,'')) LIKE @like
+        OR lower(COALESCE(c.company_name,'')) LIKE @like OR lower(COALESCE(c.contact_name,'')) LIKE @like OR lower(COALESCE(c.email,'')) LIKE @like
+        OR lower(COALESCE(c.phone,'')) LIKE @like OR lower(COALESCE(c.mobile_phone,'')) LIKE @like OR lower(COALESCE(c.line_phone,'')) LIKE @like
+        OR lower(COALESCE(c.address,'')) LIKE @like OR lower(COALESCE(c.street,'')) LIKE @like OR lower(COALESCE(c.city,'')) LIKE @like
+        OR lower(COALESCE(c.district,'')) LIKE @like OR lower(COALESCE(c.postcode,'')) LIKE @like OR lower(COALESCE(c.country,'')) LIKE @like
+        OR lower(COALESCE(c.notes,'')) LIKE @like OR lower(COALESCE(c.short_memo_to_name,'')) LIKE @like
+        OR EXISTS(
+          SELECT 1 FROM pianos p WHERE p.client_id=c.id AND (
+            lower(COALESCE(p.category,'')) LIKE @like OR lower(COALESCE(p.brand,'')) LIKE @like OR lower(COALESCE(p.model,'')) LIKE @like
+            OR lower(COALESCE(p.serial_number,'')) LIKE @like OR lower(COALESCE(p.finish,'')) LIKE @like OR lower(COALESCE(p.location_notes,'')) LIKE @like
+            OR lower(COALESCE(p.last_serviced_at,'')) LIKE @like OR lower(COALESCE(p.last_service_title,'')) LIKE @like OR lower(COALESCE(p.last_service_description,'')) LIKE @like
+            OR lower(COALESCE(p.next_service_date,'')) LIKE @like OR lower(COALESCE(p.date_of_purchase,'')) LIKE @like OR lower(COALESCE(p.warranty,'')) LIKE @like
+            OR lower(COALESCE(p.latest_info_frequency,'')) LIKE @like OR lower(COALESCE(p.latest_info_humidity,'')) LIKE @like OR lower(COALESCE(p.latest_info_temperature,'')) LIKE @like
+            OR lower(COALESCE(CAST(p.build_year AS TEXT),'')) LIKE @like OR lower(COALESCE(p.size_display,'')) LIKE @like OR lower(COALESCE(p.color,'')) LIKE @like
+            OR lower(COALESCE(p.notes,'')) LIKE @like
+          )
+        )
+      )
+      ORDER BY lower(c.name),c.id`).all({q,like});
     res.json(rows);
   });
 
@@ -145,7 +159,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   });
 
   app.put("/api/clients/:id",auth,staff,(req,res)=>{
-    const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM clients WHERE id=?").get(id);
+    const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(id);
     if(!before)return res.status(404).json({error:"CLIENT_NOT_FOUND"});
     const next=clientBody(req.body||{},before);
     if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
@@ -158,9 +172,12 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
     audit(req,"UPDATE","clients",String(id),before,row);res.json(row);
   });
 
-  const pianoSelect=`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
+  const pianoSelect=`SELECT p.*,c.name AS client_name,c.first_name AS client_first_name,c.last_name AS client_last_name,c.company_name AS client_company_name,
+    c.contact_name AS client_contact_name,c.email AS client_email,c.phone AS client_phone,c.mobile_phone AS client_mobile_phone,c.line_phone AS client_line_phone,
+    c.address AS client_address,c.street AS client_street,c.city AS client_city,c.district AS client_district,c.postcode AS client_postcode,c.country AS client_country,
+    c.notes AS client_notes,c.short_memo_to_name AS client_short_memo,
     COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
-    FROM pianos p LEFT JOIN clients c ON c.id=p.client_id`;
+    FROM pianos p LEFT JOIN clients c ON c.id=p.client_id AND c.deleted_at IS NULL`;
   app.get("/api/pianos",auth,staff,(_req,res)=>{
     res.json(db.prepare(pianoSelect+" ORDER BY lower(COALESCE(p.brand,'No brand')),lower(COALESCE(p.model,'')),p.id").all());
   });
@@ -178,7 +195,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
 
   app.get("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const id=integerId(req.params.id);
-    if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
+    if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
     res.json(db.prepare(pianoSelect+" WHERE p.client_id=? ORDER BY lower(COALESCE(p.brand,'No brand')),lower(COALESCE(p.model,'')),p.id").all(id));
   });
 
@@ -202,7 +219,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
 
   function createPiano(req,res,forcedClientId=undefined){
     const next=pianoBody(req.body||{}, {}, forcedClientId);
-    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
+    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
     if(next.build_year!==null&&(!Number.isInteger(next.build_year)||next.build_year<1700||next.build_year>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
     const info=db.prepare(`INSERT INTO pianos(client_id,category,brand,model,serial_number,finish,location_notes,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
@@ -217,7 +234,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   app.post("/api/pianos",auth,staff,(req,res)=>createPiano(req,res));
   app.post("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const clientId=integerId(req.params.id);
-    if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
+    if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
     createPiano(req,res,clientId);
   });
 
@@ -225,7 +242,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
     const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
     if(!before)return res.status(404).json({error:"PIANO_NOT_FOUND"});
     const next=pianoBody(req.body||{},before);
-    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
+    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
     if(next.build_year!==null&&(!Number.isInteger(next.build_year)||next.build_year<1700||next.build_year>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
     db.prepare(`UPDATE pianos SET client_id=?,category=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(next.client_id,next.category||null,next.brand,next.model||null,next.serial_number||null,next.finish||null,next.location_notes||null,next.last_serviced_at||null,next.last_service_title||null,next.last_service_description||null,next.next_service_date||null,next.date_of_purchase||null,next.warranty||null,next.latest_info_frequency||null,next.latest_info_humidity||null,next.latest_info_temperature||null,next.build_year,next.size_display||null,next.color||null,next.notes||null,id);
@@ -274,7 +291,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       if(!issue)return res.status(400).json({error:"REPORTED_ISSUE_REQUIRED"});
       if(!["workshop","on_site"].includes(location))return res.status(400).json({error:"INVALID_SERVICE_LOCATION"});
       if(!["low","normal","urgent"].includes(urgency))return res.status(400).json({error:"INVALID_URGENCY"});
-      if(clientId&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(400).json({error:"INVALID_CLIENT_ID"});
+      if(clientId&&!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(clientId))return res.status(400).json({error:"INVALID_CLIENT_ID"});
       if(pianoId){
         const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);
         if(!piano||(clientId&&Number(piano.client_id)!==clientId))return res.status(400).json({error:"INVALID_PIANO_ID"});
@@ -312,7 +329,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       const location=text(req.body?.service_location??before.service_location,30);if(!["workshop","on_site"].includes(location))throw Object.assign(new Error("INVALID_SERVICE_LOCATION"),{status:400});
       const urgency=text(req.body?.estimated_urgency??before.estimated_urgency,30);if(!["low","normal","urgent"].includes(urgency))throw Object.assign(new Error("INVALID_URGENCY"),{status:400});
       let clientId=req.body?.client_id===undefined?before.client_id:integerId(req.body.client_id),pianoId=req.body?.piano_id===undefined?before.piano_id:integerId(req.body.piano_id);
-      if(clientId&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))throw Object.assign(new Error("INVALID_CLIENT_ID"),{status:400});
+      if(clientId&&!db.prepare("SELECT 1 FROM clients WHERE id=? AND deleted_at IS NULL").get(clientId))throw Object.assign(new Error("INVALID_CLIENT_ID"),{status:400});
       if(pianoId){
         const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(pianoId);if(!piano||(clientId&&Number(piano.client_id)!==Number(clientId)))throw Object.assign(new Error("INVALID_PIANO_ID"),{status:400});
         if(!clientId)clientId=Number(piano.client_id);
