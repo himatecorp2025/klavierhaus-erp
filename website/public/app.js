@@ -16,6 +16,7 @@ async function applyPublishedDesignSettings() {
     if (settings.display) root.style.setProperty("--display", settings.display);
     if (settings.sans) root.style.setProperty("--sans", settings.sans);
     if (settings.logo_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.logo_url)) document.querySelectorAll(".brand-logo").forEach(image => { image.src = settings.logo_url; });
+    if (settings.chat_logo_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.chat_logo_url)) document.querySelectorAll("[data-chat-logo]").forEach(image => { image.src = settings.chat_logo_url; image.hidden = false; image.parentElement?.querySelector(".customer-chat__logo-fallback")?.setAttribute("hidden",""); });
     if (settings.favicon_url && /^(?:https?:\/\/|\/)\S+$/i.test(settings.favicon_url)) document.querySelectorAll('link[rel~="icon"]').forEach(link => { link.href = settings.favicon_url; });
   } catch (_error) { /* design settings are optional and must not block rendering */ }
 }
