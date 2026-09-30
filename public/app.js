@@ -610,6 +610,7 @@ function masterPianoSourceMarkup(piano={}){
   </div></section>`;
 }
 async function renderMaster(){
+  if(masterQuery())state.masterSearchOpen=true;
   const workspace=$("#workspace");
   const [,pianoOverview]=await Promise.all([loadClients(),api("/api/master-data/piano-overview")]);
   state.pianos=Array.isArray(pianoOverview?.classified)?pianoOverview.classified:[];
@@ -644,19 +645,25 @@ async function renderMaster(){
     </div>`;
   $("#addClientBtn").addEventListener("click",async()=>{if(await masterConfirmDiscard())openClientDialog();});
   $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>void handleMasterTool(button.dataset.masterTool)));
-  $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
+  $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;state.masterSearchOpen=true;updateMasterToolbar();renderMasterList();});
   renderMasterList();await renderMasterDetail();
 }
 function updateMasterToolbar(){
-  const reveal=$("#masterSearchReveal");reveal?.classList.toggle("open",Boolean(state.masterSearchOpen));
+  const searchActive=Boolean(state.masterSearchOpen||masterQuery()),reveal=$("#masterSearchReveal");reveal?.classList.toggle("open",searchActive);
   const active=state.masterMode==="PIANOS"?"PIANOS":state.clientMasterFilter||"ALL";
-  $$("[data-master-tool]").forEach(button=>{const kind=button.dataset.masterTool;button.classList.toggle("active",kind==="SEARCH"?Boolean(state.masterSearchOpen):(kind==="CLIENTS"?active==="ALL":kind===active));});
+  $$("[data-master-tool]").forEach(button=>{const kind=button.dataset.masterTool;button.classList.toggle("active",kind==="SEARCH"?searchActive:(kind==="CLIENTS"?active==="ALL":kind===active));});
 }
 async function handleMasterTool(kind){
   if(kind!=="SEARCH"&&!(await masterConfirmDiscard()))return;
-  if(kind==="SEARCH"){state.masterSearchOpen=!state.masterSearchOpen;updateMasterToolbar();if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());return;}
-  state.masterSearchOpen=false;
-  if(kind==="PIANOS"){state.masterMode="PIANOS";state.masterDetailKind="PIANO";if(!state.selectedPianoId)state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;}
+  if(kind==="SEARCH"){
+    if(state.masterSearchOpen){
+      if(masterQuery()){state.masterSearch="";const input=$("#masterSearch");if(input)input.value="";renderMasterList();void renderMasterDetail();}
+      state.masterSearchOpen=false;
+    }else state.masterSearchOpen=true;
+    updateMasterToolbar();if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());return;
+  }
+  state.masterSearchOpen=Boolean(masterQuery());
+  if(kind==="PIANOS"){state.masterMode="PIANOS";state.masterDetailKind="PIANO";if(!filteredMasterPianos().some(piano=>Number(piano.id)===Number(state.selectedPianoId)))state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;}
   else{state.masterMode="CLIENTS";state.clientMasterFilter=kind==="CLIENTS"?"ALL":kind;state.masterDetailKind="CLIENT";if(!filteredMasterClients().some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=Number(filteredMasterClients()[0]?.id||0)||null;}
   updateMasterToolbar();renderMasterList();void renderMasterDetail();
 }
