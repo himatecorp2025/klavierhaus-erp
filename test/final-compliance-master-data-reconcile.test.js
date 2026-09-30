@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const Database=require("better-sqlite3");
-const {MASTER_IMPORT_CONTRACT,reconcileExistingMasterData,importLegacyInstrumentClientCsv,rehydrateStoredMasterData}=require("../server/master-data-reconcile");
+const {MASTER_IMPORT_CONTRACT,auditStoredMasterImport,reconcileExistingMasterData,importLegacyInstrumentClientCsv,rehydrateStoredMasterData}=require("../server/master-data-reconcile");
 
 function makeDb(){
   const db=new Database(":memory:");
@@ -67,13 +67,20 @@ function contractCsv(){
   for(let i=0;i<12;i++){linkedIds.push("DUP-"+i,"DUP-"+i);}
   for(let i=0;i<296;i++)linkedIds.push("C-"+i);
   assert.equal(linkedIds.length,329);
-  assert.equal(new Set(linkedIds).size,309);
+  const uniqueIds=[...new Set(linkedIds)];
+  assert.equal(uniqueIds.length,309);
+  const typeById=new Map(uniqueIds.map((id,index)=>[id,index<258?"INDIVIDUAL":index<286?"BUSINESS":index<303?"INSTITUTION":"PARTNER"]));
+  assert.deepEqual(
+    uniqueIds.reduce((out,id)=>(out[typeById.get(id)]++,out),{INDIVIDUAL:0,BUSINESS:0,INSTITUTION:0,PARTNER:0}),
+    MASTER_IMPORT_CONTRACT.clientTypes
+  );
   const rows=[];
   for(let i=0;i<339;i++){
-    const clientId=i<linkedIds.length?linkedIds[i]:"";
+    const clientId=i<linkedIds.length?linkedIds[i]:"",type=clientId?typeById.get(clientId):null;
+    const company=type==="BUSINESS"?`Business ${clientId} LLC`:type==="INSTITUTION"?`Music University ${clientId}`:type==="PARTNER"?`Piano Studios ${clientId}`:"";
     rows.push(sourceRow({
       instrumentId:String(10000+i),category:"grand",brand:i%5===0?"Fazioli":"Steinway & Sons",
-      clientId,first:clientId?(clientId==="3084"?"Paul":"First-"+clientId):"",last:clientId?(clientId==="3084"?"Mills":"Last-"+clientId):"",
+      clientId,first:clientId?(clientId==="3084"?"Paul":"First-"+clientId):"",last:clientId?(clientId==="3084"?"Mills":"Last-"+clientId):"",company,
       lastServiceDate:i===0?"2026-08-24":""
     }));
   }
@@ -317,6 +324,11 @@ test("strict Klavierhaus Master CSV contract is fail-closed and preserves all 50
   assert.equal(summary.sourceRowsPersisted,339);
   assert.equal(summary.controlClientRows,1);
   assert.equal(summary.controlClientPianos,9);
+  assert.deepEqual(summary.clientTypes,{INDIVIDUAL:258,BUSINESS:28,INSTITUTION:17,PARTNER:6});
+  const storedAudit=auditStoredMasterImport(db);
+  assert.equal(storedAudit.ok,true);
+  assert.equal(storedAudit.status,"READY");
+  assert.deepEqual(storedAudit.clientTypes,{INDIVIDUAL:258,BUSINESS:28,INSTITUTION:17,PARTNER:6});
   assert.equal(summary.integrity.allSourceRowsPreserved,true);
   assert.equal(summary.integrity.allNonEmptyValuesPreserved,true);
   assert.equal(summary.integrity.controlClientHasNinePianos,true);
@@ -336,5 +348,43 @@ test("strict Klavierhaus contract rejects an incomplete source instead of report
   const db=makeDb();
   const csv=sourceCsv([sourceRow({instrumentId:"1",category:"grand",brand:"Fazioli",clientId:"3084",first:"Paul",last:"Mills"})]);
   assert.throws(()=>importLegacyInstrumentClientCsv(db,{content:csv,sourceName:MASTER_IMPORT_CONTRACT.sourceName}),/MASTER_DATA_INTEGRITY_FAILED/);
+  db.close();
+});
+
+
+test("client canonical record deterministically combines business fields spread across repeated source rows",()=>{
+  const db=makeDb();
+  const csv=sourceCsv([
+    sourceRow({instrumentId:"SPLIT-1",brand:"Steinway & Sons",model:"B",clientId:"SPLIT-C",first:"Split",last:"Client"}),
+    sourceRow({instrumentId:"SPLIT-2",brand:"Fazioli",model:"F212",clientId:"SPLIT-C",street:"77 Later Row Ave",city:"New York",district:"NY",postcode:"10010",country:"United States",clientNote:"Door code 1942"}),
+    sourceRow({instrumentId:"SPLIT-3",brand:"Yamaha",model:"C3",clientId:"SPLIT-C",contact:"Assistant Name",mobile:"9175551234",linePhone:"2125559876",email:"split@example.test",memo:"Call assistant first"})
+  ]);
+  const summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"SPLIT_SOURCE"});
+  assert.equal(summary.sourceClients,1);
+  const client=db.prepare("SELECT c.* FROM clients c JOIN master_data_client_source_map m ON m.client_id=c.id WHERE m.source_name='SPLIT_SOURCE' AND m.source_client_id='SPLIT-C'").get();
+  assert.equal(client.first_name,"Split");
+  assert.equal(client.last_name,"Client");
+  assert.equal(client.contact_name,"Assistant Name");
+  assert.equal(client.street,"77 Later Row Ave");
+  assert.equal(client.city,"New York");
+  assert.equal(client.district,"NY");
+  assert.equal(client.postcode,"10010");
+  assert.equal(client.country,"United States");
+  assert.equal(client.mobile_phone,"9175551234");
+  assert.equal(client.line_phone,"2125559876");
+  assert.equal(client.email,"split@example.test");
+  assert.match(client.notes,/Door code 1942/);
+  assert.match(client.short_memo_to_name,/Call assistant first/);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(client.id).c,3);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_client_field_values WHERE source_name='SPLIT_SOURCE' AND source_client_id='SPLIT-C'").get().c>=12,true);
+  db.close();
+});
+
+test("stored canonical source audit stays AWAITING_SOURCE until source rows exist",()=>{
+  const db=makeDb();
+  const audit=auditStoredMasterImport(db);
+  assert.equal(audit.ok,false);
+  assert.equal(audit.status,"AWAITING_SOURCE");
+  assert.equal(audit.rows,0);
   db.close();
 });
