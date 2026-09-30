@@ -338,7 +338,7 @@ function sourceAuditRows(db,sourceName){
     :[];
 }
 function auditMasterDataSource(db,{sourceName=LEGACY_MASTER_SOURCE_NAME}={}){
-  const rows=sourceAuditRows(db,sourceName),sourceClientIds=new Set(),pianoIds=new Set(),errors=[],normalizedMismatches=[];
+  const rows=sourceAuditRows(db,sourceName),sourceClientIds=new Set(),pianoIds=new Set(),errors=[],normalizedMismatches=[],sourceClientGroups=new Map();
   let sourceNonEmptyValues=0,linkedPianos=0,ownerlessPianos=0,ownerLinkMismatches=0,clientFieldHistoryMissing=0,rawRowsWithWrongColumnCount=0;
   const pianoFields=[["category","category"],["brand","brand"],["model","model"],["size_display","size_display"],["color","color"],["serial_number","serial_number"],["build_year","build_year"],["note","notes"],["date_of_purchase","date_of_purchase"],["warranty","warranty"],["last_serviced_at","last_serviced_at"],["last_service_title","last_service_title"],["last_service_description","last_service_description"],["next_service_date","next_service_date"],["latest_info_frequency","latest_info_frequency"],["latest_info_humidity","latest_info_humidity"],["latest_info_temperature","latest_info_temperature"]];
   const clientFields=["first_name","last_name","company_name","contact_name","street","city","district","postcode","country","mobile_phone","line_phone","email","notes","short_memo_to_name"];
@@ -346,7 +346,7 @@ function auditMasterDataSource(db,{sourceName=LEGACY_MASTER_SOURCE_NAME}={}){
     const record=storedRecord(row),values=Array.isArray(record.raw?.values)?record.raw.values:[];
     if(values.length!==LEGACY_MASTER_CONTRACT.columns)rawRowsWithWrongColumnCount++;
     sourceNonEmptyValues+=values.filter(value=>clean(value)!=="").length;
-    if(record.client.source_id)sourceClientIds.add(record.client.source_id);
+    if(record.client.source_id){sourceClientIds.add(record.client.source_id);if(!sourceClientGroups.has(record.client.source_id))sourceClientGroups.set(record.client.source_id,[]);sourceClientGroups.get(record.client.source_id).push(record.client);}
     let piano=row.piano_id?db.prepare("SELECT * FROM pianos WHERE id=?").get(row.piano_id):null;
     if(!piano&&row.source_instrument_id&&tableExists(db,"master_data_piano_source_map")){
       const mapped=db.prepare("SELECT piano_id FROM master_data_piano_source_map WHERE source_name=? AND source_instrument_id=?").get(sourceName,row.source_instrument_id);
@@ -386,9 +386,8 @@ function auditMasterDataSource(db,{sourceName=LEGACY_MASTER_SOURCE_NAME}={}){
       }
     }
   }
-  const clientTypes=tableExists(db,"master_data_client_source_map")
-    ?db.prepare(`SELECT c.client_type,COUNT(DISTINCT c.id) count FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name=? AND c.deleted_at IS NULL GROUP BY c.client_type`).all(sourceName).reduce((out,row)=>(out[row.client_type]=Number(row.count),out),{})
-    :{};
+  const clientTypes={INDIVIDUAL:0,PARTNER:0,BUSINESS:0,INSTITUTION:0};
+  for(const group of sourceClientGroups.values()){const type=classifyClientRows(group);clientTypes[type]=Number(clientTypes[type]||0)+1;}
   const controlClientMaps=tableExists(db,"master_data_client_source_map")
     ?Number(db.prepare("SELECT COUNT(*) c FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,LEGACY_MASTER_CONTRACT.controlClientSourceId)?.c||0):0;
   const controlPianos=Number(rows.filter(row=>String(row.source_client_id||"")===LEGACY_MASTER_CONTRACT.controlClientSourceId&&row.piano_id).map(row=>Number(row.piano_id)).filter((id,index,array)=>array.indexOf(id)===index).length);
