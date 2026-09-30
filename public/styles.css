@@ -2245,3 +2245,27 @@ input,select,textarea,button{max-width:100%}
   .master-inline-form{grid-template-columns:1fr!important}
   .master-form-section.full,.master-inline-form .field.full{grid-column:1!important}
 }
+
+
+/* Master Data source-contract visibility */
+.master-source-panel{margin:14px 0;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--panel) 94%,transparent);overflow:hidden}
+.master-source-panel>summary{cursor:pointer;padding:12px 14px;font-weight:700;list-style:none}
+.master-source-panel>summary::-webkit-details-marker{display:none}
+.master-source-panel>summary::after{content:"+";float:right;color:var(--muted)}
+.master-source-panel[open]>summary::after{content:"−"}
+.master-source-list,.master-source-history{display:grid;gap:10px;padding:0 14px 14px}
+.master-source-list article,.master-source-history article{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.master-source-list dl{display:grid;grid-template-columns:minmax(120px,.7fr) minmax(0,1.3fr);gap:7px 12px;margin:9px 0 0}
+.master-source-list dt,.master-source-history small{color:var(--muted);font-size:12px}
+.master-source-list dd{margin:0;overflow-wrap:anywhere}
+.master-source-history article>strong{display:block;margin-bottom:8px}
+.master-source-history article>div{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-top:1px solid var(--line)}
+.master-source-history article>div:first-of-type{border-top:0}
+.master-source-history span{overflow-wrap:anywhere}
+.master-source-history small{text-align:right;flex:0 0 auto}
+.field input[readonly][aria-readonly="true"]{opacity:.86;cursor:default}
+@media(max-width:760px){
+  .master-source-list dl{grid-template-columns:1fr}
+  .master-source-history article>div{display:grid;gap:4px}
+  .master-source-history small{text-align:left}
+}
