@@ -718,7 +718,12 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   <meta property="og:description" content="${escapeHtml(pageDescription)}">
   <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
   <meta property="og:image" content="${escapeHtml(pageUrl(baseUrl, page.hero.image || shared.heroImage))}">
+  <meta property="og:image:alt" content="${escapeHtml(page.hero.imageAlt || page.hero.title || pageTitle)}">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(pageDescription)}">
+  <meta name="twitter:image" content="${escapeHtml(pageUrl(baseUrl, page.hero.image || shared.heroImage))}">
+  <meta name="twitter:image:alt" content="${escapeHtml(page.hero.imageAlt || page.hero.title || pageTitle)}">
   <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
   <link rel="alternate" hreflang="en-US" href="${escapeHtml(englishUrl)}">
   <link rel="alternate" hreflang="hu-HU" href="${escapeHtml(hungarianUrl)}">
@@ -988,7 +993,7 @@ function renderHomeEventShowcase(events, language, globalOverride = null) {
   </section>`;
 }
 
-function renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl, imageUrl, robots, nonce, structuredData = [], globalCopyOverride = null, keywords = [] }) {
+function renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl, imageUrl, imageAlt = "", robots, nonce, structuredData = [], globalCopyOverride = null, keywords = [] }) {
   const copy = globalCopyOverride || getGlobal(language);
   const brand = resolveBrand(copy);
   const englishUrl = language === "en" ? canonicalUrl : alternateUrl;
@@ -1004,7 +1009,12 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <meta property="og:description" content="${escapeHtml(description)}">
   <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
   <meta property="og:image" content="${escapeHtml(imageUrl)}">
+  <meta property="og:image:alt" content="${escapeHtml(imageAlt || title)}">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escapeHtml(title)}">
+  <meta name="twitter:description" content="${escapeHtml(description)}">
+  <meta name="twitter:image" content="${escapeHtml(imageUrl)}">
+  <meta name="twitter:image:alt" content="${escapeHtml(imageAlt || title)}">
   <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
   <link rel="alternate" hreflang="${language === "hu" ? "hu-HU" : "en-US"}" href="${escapeHtml(canonicalUrl)}">
   <link rel="alternate" hreflang="${language === "hu" ? "en-US" : "hu-HU"}" href="${escapeHtml(alternateUrl)}">
