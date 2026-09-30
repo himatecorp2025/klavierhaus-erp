@@ -100,6 +100,17 @@ function parseLegacyInstrumentClientCsv(content){
 }
 function combineNotes(...values){return [...new Set(values.flatMap(value=>String(value||"").split(/\n+/)).map(value=>value.trim()).filter(Boolean))].join("\n");}
 function tableExists(db,name){return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));}
+function columnExists(db,table,name){return tableExists(db,table)&&db.prepare(`PRAGMA table_info("${String(table).replaceAll('"','""')}")`).all().some(row=>row.name===name);}
+function refreshClientLastVisit(db,clientId=null){
+  if(!columnExists(db,"clients","last_visit_at")||!tableExists(db,"pianos"))return 0;
+  if(clientId){
+    const latest=db.prepare("SELECT MAX(NULLIF(TRIM(last_serviced_at),'')) value FROM pianos WHERE client_id=?").get(clientId)?.value||null;
+    return Number(db.prepare("UPDATE clients SET last_visit_at=? WHERE id=?").run(latest,clientId).changes||0);
+  }
+  return Number(db.prepare(`UPDATE clients SET last_visit_at=(
+    SELECT MAX(NULLIF(TRIM(p.last_serviced_at),'')) FROM pianos p WHERE p.client_id=clients.id
+  )`).run().changes||0);
+}
 function sourceClientIds(db,clientId){
   if(!tableExists(db,"master_data_client_source_map"))return [];
   return db.prepare("SELECT source_name,source_client_id FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(clientId);
@@ -406,35 +417,26 @@ function repairSourceRelationships(db){
   }
   return {relinkedPianos,auditRowsUpdated};
 }
-function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV_2026_09_29"}){
-  const records=parseLegacyInstrumentClientCsv(content),clientCache=new Map(),clientGroups=new Map();
+function importLegacyInstrumentClientCsv(db,{content,sourceName=LEGACY_MASTER_SOURCE_NAME}){
+  const records=parseLegacyInstrumentClientCsv(content),clientCache=new Map(),clientGroups=new Map(),canonicalClients=new Map();
   for(const record of records){
     const key=record.client.source_id||`ROW:${record.row_number}`;if(!clientGroups.has(key))clientGroups.set(key,[]);clientGroups.get(key).push(record.client);
   }
-  for(const record of records){const key=record.client.source_id||`ROW:${record.row_number}`;record.client.client_type=classifyClientRows(clientGroups.get(key)||[record.client]);}
+  for(const [key,rows] of clientGroups)canonicalClients.set(key,canonicalClientFromRows(rows));
+  for(const record of records){const key=record.client.source_id||`ROW:${record.row_number}`;record.client.client_type=canonicalClients.get(key)?.client_type||"INDIVIDUAL";}
   if(tableExists(db,"master_data_source_rows"))db.prepare("DELETE FROM master_data_source_rows WHERE source_name=?").run(sourceName);
   if(tableExists(db,"master_data_client_field_values"))db.prepare("DELETE FROM master_data_client_field_values WHERE source_name=?").run(sourceName);
   let createdClients=0,updatedClients=0,matchedExistingClients=0,deletedClientsSkipped=0,createdPianos=0,updatedPianos=0,ownerlessPianos=0;
   const sourceClientIds=new Set(records.map(record=>record.client.source_id).filter(Boolean));
-  for(const record of records){
-    if(!hasClientData(record.client))continue;
-    const key=record.client.source_id||JSON.stringify(record.client);
-    if(clientCache.has(key))continue;
-    const result=upsertSourceClient(db,record.client,sourceName);
+  for(const [key,source] of canonicalClients){
+    if(!hasClientData(source))continue;
+    const result=upsertSourceClient(db,source,sourceName);
     if(result?.deleted){clientCache.set(key,null);deletedClientsSkipped++;continue;}
     if(result){clientCache.set(key,result.row);if(result.created)createdClients++;else updatedClients++;if(result.matchedExisting)matchedExistingClients++;}
   }
   for(const record of records){
-    const clientKey=record.client.source_id||JSON.stringify(record.client);
-    let client=null;
-    if(hasClientData(record.client)){
-      if(clientCache.has(clientKey))client=clientCache.get(clientKey);
-      else{
-        const result=upsertSourceClient(db,record.client,sourceName);
-        client=result?.row||null;if(result?.deleted)deletedClientsSkipped++;
-        clientCache.set(clientKey,client);
-      }
-    }
+    const clientKey=record.client.source_id||`ROW:${record.row_number}`;
+    const client=hasClientData(record.client)?(clientCache.get(clientKey)||null):null;
     let piano=sourcePianoRow(db,sourceName,sourceInstrumentKey(record));
     if(piano){piano=updatePianoFromSource(db,piano,record.instrument,client?.id??null);updatedPianos++;}
     else{
@@ -453,7 +455,9 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
       VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP`).run(sourceName,sourceInstrumentKey(record),piano.id);
     persistImportRow(db,{sourceName,record,clientId:piano.client_id,pianoId:piano.id});
   }
+  refreshClientLastVisit(db);
   const after=reconcileExistingMasterData(db);
+  refreshClientLastVisit(db);
   const sourceNonEmptyValues=records.reduce((sum,record)=>sum+(record.raw.values||[]).filter(value=>clean(value)!=="").length,0);
   const sourceRowsPersisted=tableExists(db,"master_data_source_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name=?").get(sourceName)?.c||0):records.length;
   const clientTypes=tableExists(db,"master_data_client_source_map")?db.prepare(`SELECT c.client_type,COUNT(DISTINCT c.id) count FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name=? AND c.deleted_at IS NULL GROUP BY c.client_type`).all(sourceName).reduce((out,row)=>(out[row.client_type]=Number(row.count),out),{}):{};
