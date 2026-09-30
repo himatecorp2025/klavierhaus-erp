@@ -1,6 +1,6 @@
 "use strict";
 
-const {importLegacyInstrumentClientCsv}=require("./master-data-reconcile");
+const {LEGACY_MASTER_SOURCE_NAME,auditMasterDataSource,importLegacyInstrumentClientCsv,refreshClientLastVisit}=require("./master-data-reconcile");
 
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function validEmail(value){
@@ -119,6 +119,8 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   app.get("/api/clients",auth,staff,(req,res)=>{
     const q=text(req.query.q,160).toLowerCase(),like=`%${q}%`;
     const rows=db.prepare(`SELECT c.*,
+      COALESCE(c.last_visit_at,(SELECT MAX(NULLIF(TRIM(lp.last_serviced_at),'')) FROM pianos lp WHERE lp.client_id=c.id)) AS last_visit_at,
+      (SELECT GROUP_CONCAT(m.source_client_id, ', ') FROM master_data_client_source_map m WHERE m.client_id=c.id) AS source_client_ids,
       (SELECT COUNT(*) FROM pianos p WHERE p.client_id=c.id) AS piano_count,
       (SELECT COUNT(*) FROM client_piano_review_queue r WHERE r.client_id=c.id AND r.status='PENDING') AS piano_review_count
       FROM clients c
@@ -128,7 +130,12 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
         OR lower(COALESCE(c.phone,'')) LIKE @like OR lower(COALESCE(c.mobile_phone,'')) LIKE @like OR lower(COALESCE(c.line_phone,'')) LIKE @like
         OR lower(COALESCE(c.address,'')) LIKE @like OR lower(COALESCE(c.street,'')) LIKE @like OR lower(COALESCE(c.city,'')) LIKE @like
         OR lower(COALESCE(c.district,'')) LIKE @like OR lower(COALESCE(c.postcode,'')) LIKE @like OR lower(COALESCE(c.country,'')) LIKE @like
-        OR lower(COALESCE(c.notes,'')) LIKE @like OR lower(COALESCE(c.short_memo_to_name,'')) LIKE @like
+        OR lower(COALESCE(c.notes,'')) LIKE @like OR lower(COALESCE(c.short_memo_to_name,'')) LIKE @like OR lower(COALESCE(c.last_visit_at,'')) LIKE @like
+        OR EXISTS(SELECT 1 FROM master_data_client_source_map cm WHERE cm.client_id=c.id AND lower(cm.source_client_id) LIKE @like)
+        OR EXISTS(
+          SELECT 1 FROM master_data_piano_source_map pm JOIN pianos sp ON sp.id=pm.piano_id
+          WHERE sp.client_id=c.id AND lower(pm.source_instrument_id) LIKE @like
+        )
         OR EXISTS(
           SELECT 1 FROM pianos p WHERE p.client_id=c.id AND (
             lower(COALESCE(p.category,'')) LIKE @like OR lower(COALESCE(p.brand,'')) LIKE @like OR lower(COALESCE(p.model,'')) LIKE @like
@@ -175,7 +182,9 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   const pianoSelect=`SELECT p.*,c.name AS client_name,c.first_name AS client_first_name,c.last_name AS client_last_name,c.company_name AS client_company_name,
     c.contact_name AS client_contact_name,c.email AS client_email,c.phone AS client_phone,c.mobile_phone AS client_mobile_phone,c.line_phone AS client_line_phone,
     c.address AS client_address,c.street AS client_street,c.city AS client_city,c.district AS client_district,c.postcode AS client_postcode,c.country AS client_country,
-    c.notes AS client_notes,c.short_memo_to_name AS client_short_memo,
+    c.notes AS client_notes,c.short_memo_to_name AS client_short_memo,c.last_visit_at AS client_last_visit_at,
+    (SELECT GROUP_CONCAT(pm.source_instrument_id, ', ') FROM master_data_piano_source_map pm WHERE pm.piano_id=p.id) AS source_instrument_ids,
+    (SELECT GROUP_CONCAT(DISTINCT sr.source_client_id) FROM master_data_source_rows sr WHERE sr.piano_id=p.id AND sr.source_client_id IS NOT NULL AND TRIM(sr.source_client_id)<>'') AS source_client_ids,
     COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
     FROM pianos p LEFT JOIN clients c ON c.id=p.client_id AND c.deleted_at IS NULL`;
   app.get("/api/pianos",auth,staff,(_req,res)=>{
