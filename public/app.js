@@ -399,8 +399,8 @@ function consumeDeepLink(){
   state.view=view;
   if(view==="master"){
     const clientId=Number(params.get("client")||0),pianoId=Number(params.get("piano")||0);
-    if(clientId){state.selectedClientId=clientId;state.masterMode="CLIENTS";state.masterDetailKind="CLIENT";}
-    if(pianoId){state.selectedPianoId=pianoId;state.masterMode="PIANOS";state.masterDetailKind="PIANO";}
+    if(clientId){state.selectedClientId=clientId;state.clientMasterFilter="ALL";state.masterSearch="";state.masterMode="CLIENTS";state.masterDetailKind="CLIENT";}
+    if(pianoId){state.selectedPianoId=pianoId;state.masterSearch="";state.masterMode="PIANOS";state.masterDetailKind="PIANO";}
   }else if(view==="intake"){
     const intakeId=Number(params.get("intake")||0);if(intakeId)state.pendingIntakeEditId=intakeId;
   }else if(view==="documents"){
