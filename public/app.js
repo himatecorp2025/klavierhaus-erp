@@ -12,7 +12,7 @@ const state={
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
-const activeViews=new Set(["workshop","messenger","planned","intake","master","finance","documents","cms","profile"]);
+const activeViews=new Set(["workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
@@ -34,14 +34,16 @@ function applyChromeLanguage(){
     if(pair)node.textContent=state.language==="hu"?pair[1]:pair[0];
   });
   const toggle=$("#languageToggle");if(toggle)toggle.textContent=state.language==="en"?"HU":"EN";
-  const profile=$("#profileButton");if(profile)profile.setAttribute("aria-label",tr("Profile and settings","Profil és beállítások"));
+  const profile=$("#profileButton");if(profile)profile.setAttribute("aria-label",tr("Account menu","Fiókmenü"));\n  const welcome=$("#headerWelcome");if(welcome&&state.user)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
   const close=$("#appDialog [data-dialog-close]");if(close)close.setAttribute("aria-label",tr("Close","Bezárás"));
   updateNewYorkClock();
 }
-function setLanguage(language){
+function setLanguage(language,{save=true}={}){
   state.language=language==="hu"?"hu":"en";
   localStorage.setItem("kh_language",state.language);
+  if(state.user)state.user.language_preference=state.language;
   applyChromeLanguage();
+  if(save&&state.user)void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({language:state.language})}).catch(error=>toast(humanError(error),"error"));
   if(!$("#appShell")?.classList.contains("hidden"))void renderView();
 }
 function toast(message,type=""){
@@ -146,6 +148,8 @@ function startNewYorkClock(){
 function showApp(){
   $("#loginScreen").classList.add("hidden");$("#appShell").classList.remove("hidden");
   $("#profileInitials").textContent=initials(state.user?.name);
+  const avatar=$("#profileAvatarImage");if(avatar){if(state.user?.profile_image_url){avatar.src=state.user.profile_image_url;avatar.hidden=false;$("#profileInitials").hidden=true;}else{avatar.hidden=true;$("#profileInitials").hidden=false;}}
+  const welcome=$("#headerWelcome");if(welcome)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user?.name||""}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user?.name||""}.`);
   startNewYorkClock();initNotificationCenter();
 }
 function notificationText(row,field){
@@ -313,7 +317,7 @@ async function loadBranding(){
   try{
     const branding=await fetch("/api/public/branding",{cache:"no-store"}).then(response=>response.json());
     for(const img of [$("#loginBrandLogo"),$("#headerBrandLogo")])if(img&&branding.logo_url)img.src=`${branding.logo_url}${branding.logo_url.includes("?")?"&":"?"}v=${encodeURIComponent(branding.branding_version||"1")}`;
-    document.title=`${branding.company_name||"Klavierhaus"} ERP`;
+    document.title=`${branding.company_name||"Klavierhaus"} System`;
   }catch(_error){}
 }
 function syncNavigationState(view=state.view){
@@ -397,7 +401,7 @@ function bindNavigation(){
   $("#languageToggle")?.addEventListener("click",()=>setLanguage(state.language==="en"?"hu":"en"));
 }
 function loading(){return `<div class="loading">${tr("Loading…","Betöltés…")}</div>`;}
-function pageHead(title,subtitle,actions=""){return `<header class="page-head"><div><span class="eyebrow">KLAVIERHAUS ERP</span><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div><div class="page-actions">${actions}</div></header>`;}
+function pageHead(title,subtitle,actions=""){return `<header class="page-head"><div><span class="eyebrow">KLAVIERHAUS SYSTEM</span><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div><div class="page-actions">${actions}</div></header>`;}
 function openDialog({title,eyebrow="",body}){
   $("#dialogTitle").textContent=title;$("#dialogEyebrow").textContent=eyebrow;$("#dialogBody").innerHTML=body;
   const dialog=$("#appDialog");if(!dialog.open)dialog.showModal();return dialog;
