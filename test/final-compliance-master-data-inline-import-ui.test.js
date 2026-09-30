@@ -178,7 +178,8 @@ test("Master Data contract status is visible and successful import marks the can
   assert.match(api,/master_data_reconcile_version/);
   assert.match(app,/source contract verified/);
   assert.match(app,/forráskontraktus ellenőrizve/);
-  assert.doesNotMatch(app,/masterImportBtn|masterImportFile/);\n  assert.match(app,/MASTER_DATA_INTEGRITY_FAILED/);
+  assert.doesNotMatch(app,/masterImportBtn|masterImportFile/);
+  assert.match(app,/MASTER_DATA_INTEGRITY_FAILED/);
   assert.match(init,/MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4"/);
   assert.match(init,/setSetting\("master_data_import_status",sourceAudit\.status\)/);
   assert.match(reconcile,/clientTypes:Object\.freeze\(\{INDIVIDUAL:258,BUSINESS:28,INSTITUTION:17,PARTNER:6\}\)/);
