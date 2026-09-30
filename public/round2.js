@@ -779,5 +779,6 @@ async function renderWorkshop(){
     if(state.r2WorkshopMode==="calendar")await r2RenderCalendar();else await r2RenderWorkflow(data);
   }));
   if(state.r2WorkshopMode==="calendar")await r2RenderCalendar();else await r2RenderWorkflow(data);
+  if(state.pendingNotificationJobId){const jobId=Number(state.pendingNotificationJobId);state.pendingNotificationJobId=null;if(jobId)await r2OpenWorkflowHistory(jobId);}
 }
 // Finance extension starts boot() after registering closeout behavior.
