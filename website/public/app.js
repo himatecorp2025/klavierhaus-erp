@@ -331,9 +331,111 @@ function normalizePrivateAppointmentWallTime(value){
   if(y<2000||m<1||m>12||d<1||d>31||h<0||h>23||min<0||min>59||min%15!==0||probe.getUTCFullYear()!==y||probe.getUTCMonth()!==m-1||probe.getUTCDate()!==d)return "";
   return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`;
 }
+const privateSlotPickerState=new WeakMap();
+function privateNyDateKey(date=new Date()){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date).reduce((out,part)=>(out[part.type]=part.value,out),{});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function privateDateParts(dateKey){const match=String(dateKey||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);return match?{year:Number(match[1]),month:Number(match[2]),day:Number(match[3])}:null;}
+function privateDateLabel(dateKey){
+  const parts=privateDateParts(dateKey);if(!parts)return language==="hu"?"Válasszon dátumot":"Choose a date";
+  return new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{year:"numeric",month:"long",day:"numeric",timeZone:"UTC"}).format(new Date(Date.UTC(parts.year,parts.month-1,parts.day,12)));
+}
+function privateTimeLabel(iso){
+  return new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",hour12:language!=="hu"}).format(new Date(iso));
+}
+function privateMonthName(monthIndex){
+  return new Intl.DateTimeFormat(language==="hu"?"hu-HU":"en-US",{month:"long",timeZone:"UTC"}).format(new Date(Date.UTC(2026,monthIndex,1)));
+}
+function privatePickerGet(picker){
+  let state=privateSlotPickerState.get(picker);
+  if(!state){
+    const today=privateDateParts(privateNyDateKey()),month=today.month-1;
+    state={selectedDate:"",selectedStart:"",viewYear:today.year,viewMonth:month,loading:false};
+    privateSlotPickerState.set(picker,state);
+  }
+  return state;
+}
+function privatePickerRenderControls(picker){
+  const state=privatePickerGet(picker),yearSelect=picker.querySelector("[data-private-calendar-year]"),monthSelect=picker.querySelector("[data-private-calendar-month]");
+  if(!yearSelect||!monthSelect)return;
+  const today=privateDateParts(privateNyDateKey()),maxYear=today.year+2;
+  yearSelect.innerHTML="";for(let year=today.year;year<=maxYear;year++){const option=document.createElement("option");option.value=String(year);option.textContent=String(year);option.selected=year===state.viewYear;yearSelect.append(option);}
+  monthSelect.innerHTML="";for(let month=0;month<12;month++){const option=document.createElement("option");option.value=String(month);option.textContent=privateMonthName(month);option.selected=month===state.viewMonth;monthSelect.append(option);}
+}
+function privatePickerRenderCalendar(picker){
+  const state=privatePickerGet(picker),grid=picker.querySelector("[data-private-calendar-grid]"),weekdays=picker.querySelector("[data-private-weekdays]");
+  if(!grid||!weekdays)return;
+  const labels=language==="hu"?["H","K","Sze","Cs","P","Szo","V"]:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  weekdays.innerHTML=labels.map(label=>`<span>${label}</span>`).join("");
+  const first=new Date(Date.UTC(state.viewYear,state.viewMonth,1)),days=new Date(Date.UTC(state.viewYear,state.viewMonth+1,0)).getUTCDate();
+  let offset=first.getUTCDay();if(language==="hu")offset=(offset+6)%7;
+  const today=privateNyDateKey(),cells=[];
+  for(let i=0;i<offset;i++)cells.push('<span class="private-calendar-empty" aria-hidden="true"></span>');
+  for(let day=1;day<=days;day++){
+    const dateKey=`${state.viewYear}-${String(state.viewMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`,disabled=dateKey<today,selected=dateKey===state.selectedDate;
+    cells.push(`<button type="button" class="private-calendar-day${selected?" is-selected":""}" data-private-day="${dateKey}" ${disabled?"disabled":""} aria-pressed="${selected?"true":"false"}">${day}</button>`);
+  }
+  grid.innerHTML=cells.join("");
+  grid.querySelectorAll("[data-private-day]").forEach(button=>button.addEventListener("click",()=>privatePickerSelectDate(picker,button.dataset.privateDay)));
+}
+async function privatePickerLoadSlots(picker,dateKey){
+  const state=privatePickerGet(picker),slots=picker.querySelector("[data-private-slots]"),hint=picker.querySelector("[data-private-slot-hint]"),hidden=picker.querySelector("[data-private-scheduled-at]");
+  if(!slots||!hint||!hidden)return;
+  state.loading=true;state.selectedStart="";hidden.value="";
+  slots.innerHTML='<span class="private-slot-loading">'+(language==="hu"?"Szabad időpontok betöltése…":"Loading available times…")+"</span>";
+  hint.textContent=language==="hu"?"Elérhető kezdési időpontok · New York-i idő":"Available start times · New York time";
+  try{
+    const response=await fetch("/api/site/private-appointment-availability?date="+encodeURIComponent(dateKey),{cache:"no-store"});
+    if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_AVAILABILITY_FAILED");
+    const payload=await response.json(),available=Array.isArray(payload.slots)?payload.slots:[];
+    if(!available.length){slots.innerHTML='<span class="private-slot-empty">'+(language==="hu"?"Erre a napra nincs szabad időpont. Válasszon másik napot.":"No available times remain on this date. Choose another day.")+"</span>";return;}
+    slots.innerHTML=available.map(slot=>`<button type="button" class="private-slot-button" data-private-slot="${slot.starts_at}">${privateTimeLabel(slot.starts_at)}</button>`).join("");
+    slots.querySelectorAll("[data-private-slot]").forEach(button=>button.addEventListener("click",()=>{
+      slots.querySelectorAll("[data-private-slot]").forEach(item=>item.classList.remove("is-selected"));button.classList.add("is-selected");
+      state.selectedStart=button.dataset.privateSlot||"";hidden.value=state.selectedStart;
+      hint.textContent=(language==="hu"?"Kiválasztott időpont: ":"Selected time: ")+privateDateLabel(dateKey)+" · "+button.textContent;
+    }));
+  }catch(_error){
+    slots.innerHTML='<span class="private-slot-empty">'+(language==="hu"?"A szabad időpontok most nem tölthetők be. Kérjük, próbálja újra.":"Available times could not be loaded. Please try again.")+"</span>";
+  }finally{state.loading=false;}
+}
+function privatePickerSelectDate(picker,dateKey){
+  const state=privatePickerGet(picker),parts=privateDateParts(dateKey);if(!parts)return;
+  state.selectedDate=dateKey;state.viewYear=parts.year;state.viewMonth=parts.month-1;
+  const value=picker.querySelector("[data-private-date-value]"),popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");
+  if(value)value.textContent=privateDateLabel(dateKey);if(popover)popover.hidden=true;if(trigger)trigger.setAttribute("aria-expanded","false");
+  privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);privatePickerLoadSlots(picker,dateKey);
+}
+function privatePickerReset(form){
+  const picker=form?.querySelector("[data-private-slot-picker]");if(!picker)return;
+  const today=privateDateParts(privateNyDateKey()),state=privatePickerGet(picker);
+  state.selectedDate="";state.selectedStart="";state.viewYear=today.year;state.viewMonth=today.month-1;
+  const value=picker.querySelector("[data-private-date-value]"),hidden=picker.querySelector("[data-private-scheduled-at]"),slots=picker.querySelector("[data-private-slots]"),hint=picker.querySelector("[data-private-slot-hint]"),popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");
+  if(value)value.textContent=language==="hu"?"Válasszon dátumot":"Choose a date";if(hidden)hidden.value="";if(slots)slots.innerHTML="";
+  if(hint)hint.textContent=language==="hu"?"Válasszon dátumot, majd a rendszer csak a ténylegesen szabad kezdési időpontokat mutatja.":"Choose a date and we will show only genuinely available start times.";
+  if(popover)popover.hidden=true;if(trigger)trigger.setAttribute("aria-expanded","false");
+  privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);
+}
+function privatePickerInit(picker){
+  if(picker.dataset.privatePickerBound==="1")return;picker.dataset.privatePickerBound="1";
+  const trigger=picker.querySelector("[data-private-date-trigger]"),popover=picker.querySelector("[data-private-calendar]"),year=picker.querySelector("[data-private-calendar-year]"),month=picker.querySelector("[data-private-calendar-month]");
+  privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);
+  trigger?.addEventListener("click",()=>{if(!popover)return;popover.hidden=!popover.hidden;trigger.setAttribute("aria-expanded",popover.hidden?"false":"true");});
+  year?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewYear=Number(year.value);privatePickerRenderCalendar(picker);});
+  month?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewMonth=Number(month.value);privatePickerRenderCalendar(picker);});
+}
+document.querySelectorAll("[data-private-slot-picker]").forEach(privatePickerInit);
+document.addEventListener("click",event=>{
+  document.querySelectorAll("[data-private-slot-picker]").forEach(picker=>{
+    if(picker.contains(event.target))return;const popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");if(popover&&!popover.hidden){popover.hidden=true;trigger?.setAttribute("aria-expanded","false");}
+  });
+});
+
 function privateAppointmentValues(form){
-  const values=Object.fromEntries(new FormData(form).entries()),scheduled=normalizePrivateAppointmentWallTime(values.scheduled_at_display);
-  if(!scheduled)throw new Error("PRIVATE_APPOINTMENT_TIME_INVALID");delete values.scheduled_at_display;values.scheduled_at=scheduled;values.language=language;values.source_path=location.pathname;return values;
+  const values=Object.fromEntries(new FormData(form).entries()),scheduled=String(values.scheduled_at||"").trim();
+  if(!scheduled)throw new Error("PRIVATE_APPOINTMENT_TIME_INVALID");
+  values.duration_min=60;values.language=language;values.source_path=location.pathname;return values;
 }
 
 const serviceDialog = document.querySelector("[data-service-dialog]");
@@ -347,7 +449,7 @@ document.querySelectorAll("[data-service-card]").forEach((card) => {
 document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
   if (!serviceDialog) return;
   serviceDialogTrigger = button;
-  const form = serviceDialog.querySelector("[data-service-form]");form?.reset();
+  const form = serviceDialog.querySelector("[data-service-form]");form?.reset();privatePickerReset(form);
   if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
   const title=serviceDialog.querySelector("[data-service-title]");if(title)title.textContent=button.dataset.serviceTitle||"";
   const image=serviceDialog.querySelector("[data-service-image]");
@@ -363,10 +465,11 @@ document.querySelector("[data-service-form]")?.addEventListener("submit",async(e
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
+    if(response.status===409){const picker=form.querySelector("[data-private-slot-picker]"),state=picker?privatePickerGet(picker):null;if(picker&&state?.selectedDate)await privatePickerLoadSlots(picker,state.selectedDate);if(result)result.textContent=language==="hu"?"Ez az időpont időközben foglalttá vált. Válasszon a frissített szabad időpontok közül.":"That time has just become unavailable. Choose another time from the refreshed list.";return;}
     if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
     if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontkérést megkaptuk, a Klavierhaus jóváhagyása után válik véglegessé.":"Thank you. We received your appointment request. It becomes final only after Klavierhaus approval.";
     recordFirstPartyEvent("private_appointment_submit",{service_id:values.service_id||"",context:"service"});
-    form.reset();window.setTimeout(()=>{if(serviceDialog?.open)serviceDialog.close("success");},850);
+    form.reset();privatePickerReset(form);window.setTimeout(()=>{if(serviceDialog?.open)serviceDialog.close("success");},850);
   }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült. Kérjük, próbálja újra.":"We could not send the appointment request. Please try again.";}
 });
 
@@ -374,7 +477,7 @@ const privateViewingDialog=document.querySelector("[data-private-viewing-dialog]
 let privateViewingTrigger=null;
 document.querySelectorAll("[data-private-viewing-open]").forEach((button)=>button.addEventListener("click",()=>{
   if(!privateViewingDialog)return;privateViewingTrigger=button;
-  const form=privateViewingDialog.querySelector("[data-private-viewing-form]");form?.reset();
+  const form=privateViewingDialog.querySelector("[data-private-viewing-form]");form?.reset();privatePickerReset(form);
   if(form?.elements.piano_id)form.elements.piano_id.value=button.dataset.pianoId||"";
   if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
   const context=privateViewingDialog.querySelector("[data-private-viewing-context]");
@@ -390,10 +493,11 @@ privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventList
   if(result)result.textContent=language==="hu"?"Rögzítés…":"Saving…";
   try{
     const response=await fetch("/api/site/private-appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});
+    if(response.status===409){const picker=form.querySelector("[data-private-slot-picker]"),state=picker?privatePickerGet(picker):null;if(picker&&state?.selectedDate)await privatePickerLoadSlots(picker,state.selectedDate);if(result)result.textContent=language==="hu"?"Ez az időpont időközben foglalttá vált. Válasszon a frissített szabad időpontok közül.":"That time has just become unavailable. Choose another time from the refreshed list.";return;}
     if(!response.ok)throw new Error("PRIVATE_APPOINTMENT_FAILED");
     if(result)result.textContent=language==="hu"?"Köszönjük. Az időpontkérést megkaptuk, a Klavierhaus jóváhagyása után válik véglegessé.":"Thank you. We received your appointment request. It becomes final only after Klavierhaus approval.";
     recordFirstPartyEvent("private_appointment_submit",{piano_id:values.piano_id||"",service_id:values.service_id||""});
-    form.reset();window.setTimeout(()=>{if(privateViewingDialog?.open)privateViewingDialog.close("success");},850);
+    form.reset();privatePickerReset(form);window.setTimeout(()=>{if(privateViewingDialog?.open)privateViewingDialog.close("success");},850);
   }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült.":"We could not send the appointment request.";}
 });
 
