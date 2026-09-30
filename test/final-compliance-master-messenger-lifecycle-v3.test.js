@@ -89,9 +89,9 @@ test("CMS Login logo has preview upload backend persistence and login applicatio
   assert.match(server,/login_logo_url:setting\("login_logo_url",legacyLogo\)/);
 });
 
-test("Master Data production reconcile is versioned to rerun the relationship repair",()=>{
+test("Master Data production reconcile is versioned for the strict 33-column contract",()=>{
   const init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js"),schema=read("server/schema.sql");
-  assert.match(init,/2026-09-30-relational-2/);
+  assert.match(init,/2026-09-30-contract-3/);
   assert.match(reconcile,/function repairSourceRelationships/);
   assert.match(reconcile,/UPDATE pianos SET client_id=\?,updated_at=CURRENT_TIMESTAMP/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_source_rows/);
