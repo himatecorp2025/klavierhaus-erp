@@ -49,10 +49,12 @@ test("Master Data renders the eight approved icon-only controls including Partne
   assert.doesNotMatch(app,/clientVipFilter|data-client-filter=/);
 });
 
-test("search reveal stays inline and closes when another Master icon is selected",()=>{
+test("Master search stays active across subviews until the user clears or explicitly closes it",()=>{
   const app=read("public/app.js"),css=read("public/styles.css");
-  assert.match(app,/if\(kind==="SEARCH"\)[\s\S]*masterSearchOpen=!state\.masterSearchOpen/);
-  assert.match(app,/state\.masterSearchOpen=false;/);
+  assert.match(app,/state\.masterSearchOpen=Boolean\(masterQuery\(\)\)/);
+  assert.match(app,/if\(masterQuery\(\)\)\{state\.masterSearch=""/);
+  assert.match(app,/state\.masterSearch=event\.currentTarget\.value;state\.masterSearchOpen=true/);
+  assert.match(app,/searchActive=Boolean\(state\.masterSearchOpen\|\|masterQuery\(\)\)/);
   assert.match(css,/\.master-search-reveal\{max-height:0;opacity:0/);
   assert.match(css,/\.master-search-reveal\.open\{max-height:58px;opacity:1/);
 });
