@@ -9,7 +9,7 @@
  * redesigning the public website.
  */
 
-const VERSION = "1.2.4";
+const VERSION = "1.2.5";
 
 const routeDefinitions = Object.freeze({
   home: { en: "/", hu: "/hu/" },
@@ -85,7 +85,7 @@ const globalCopy = Object.freeze({
     footerLegal: "Legal",
     footerOur: "Our",
     footerContact: "Contact",
-    footerPrivacy: "Privacy",
+    footerPrivacy: "Privacy & Terms",
     rights: "All rights reserved.",
     imageCredit: "Editorial imagery is maintained by authorized Klavierhaus administrators.",
     backHome: "Return home",
@@ -215,7 +215,7 @@ const globalCopy = Object.freeze({
     footerLegal: "Jogi információk",
     footerOur: "Rólunk",
     footerContact: "Kapcsolat",
-    footerPrivacy: "Adatkezelés",
+    footerPrivacy: "Adatkezelés és ÁSZF",
     rights: "Minden jog fenntartva.",
     imageCredit: "A szerkesztőségi képeket a Klavierhaus jogosult adminisztrátorai kezelik.",
     backHome: "Vissza a főoldalra",
