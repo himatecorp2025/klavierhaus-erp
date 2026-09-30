@@ -455,6 +455,7 @@ function rehydrateStoredMasterData(db){
       .run(item.source_name,sourceInstrumentKey(record),piano.id);
     persistImportRow(db,{sourceName:item.source_name,record,clientId:piano.client_id,pianoId:piano.id});pianos++;
   }
+  for(const sourceName of new Set(parsed.map(item=>item.source_name).filter(Boolean)))refreshSourceClientLastVisits(db,sourceName);
   return {rows:parsed.length,clients,pianos,createdPianos};
 }
 
