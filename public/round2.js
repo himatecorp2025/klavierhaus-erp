@@ -172,7 +172,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages};
   if(!clients.length){toast(tr("Create a client and piano first.","Előbb hozz létre ügyfelet és zongorát."),"error");return;}
   const scheduled=Boolean(defaults.date);
-  openDialog({title:scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka"),eyebrow:scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS"),body:`<form id="jobCreateForm" class="form-grid">
+  openDialog({title:scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka"),eyebrow:scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS"),variant:"wide",body:`<form id="jobCreateForm" class="form-grid">
     <label class="field"><span>${tr("Client","Ügyfél")} *</span><select id="jobClientSelect" name="client_id" required>${clients.map(client=>`<option value="${client.id}">${esc(client.name)}</option>`).join("")}</select></label>
     <label class="field"><span>${tr("Piano","Zongora")} *</span><select id="jobPianoSelect" name="piano_id" required></select></label>
     <label class="field full"><span>${tr("Job title","Munka megnevezése")} *</span><input name="title" required autofocus></label>
