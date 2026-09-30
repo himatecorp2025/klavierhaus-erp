@@ -101,16 +101,40 @@ function fallbackPage(pageKey, language) {
   return clone(pages[normalizeLanguage(language)]?.[pageKey] || null);
 }
 
+function normalizeLegacyPageLinks(value) {
+  if(Array.isArray(value))return value.map(normalizeLegacyPageLinks);
+  if(!value||typeof value!=="object")return value;
+  const next=Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalizeLegacyPageLinks(item)]));
+  if(next.key==="story")next.key="our";
+  if(next.key==="ticketTerms")next.key="privacy";
+  return next;
+}
+
 function canonicalizeGlobalContent(content, language) {
   const fallback = fallbackPage("global", language) || {};
-  const source = content && typeof content === "object" ? content : {};
+  const source = normalizeLegacyPageLinks(content && typeof content === "object" ? content : {});
   const storedNav = Array.isArray(source.nav) ? source.nav : [];
   const byKey = new Map(storedNav.map((item) => [String(item?.key || ""), item]));
   const nav = (fallback.nav || []).map((item) => {
     const stored = byKey.get(item.key);
-    return stored && typeof stored === "object" ? { ...item, ...stored, key:item.key } : item;
+    return stored && typeof stored === "object" ? { ...stored, ...item, key:item.key } : item;
   });
-  return { ...source, nav };
+  const next={ ...source, nav, footerOur:source.footerOur||source.footerStory||fallback.footerOur };
+  delete next.footerStory;
+  delete next.footerTerms;
+  return next;
+}
+function canonicalizePageContent(pageKey,language,content){
+  let next=normalizeLegacyPageLinks(content);
+  if(pageKey==="global")return canonicalizeGlobalContent(next,language);
+  if(pageKey==="privacy"){
+    const fallback=fallbackPage("privacy",language)||{};
+    const ids=new Set(Array.isArray(next?.sections)?next.sections.map(section=>section?.id):[]);
+    if(!ids.has(language==="hu"?"adatkezeles":"privacy-policy")||!ids.has(language==="hu"?"altalanos-szerzodesi-feltetelek":"terms-and-conditions")){
+      next={...next,sections:clone(fallback.sections||[])};
+    }
+  }
+  return next;
 }
 
 function sanitizeContent(value, depth = 0) {
@@ -164,9 +188,8 @@ function registerWebsiteContentRoutes(options) {
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
-    let content = parseStoredPage(row, pageKey, language);
+    let content = canonicalizePageContent(pageKey, language, parseStoredPage(row, pageKey, language));
     if (pageKey === "global") {
-      content = canonicalizeGlobalContent(content, language);
       const active = new Set(landingSections().filter((item) => Number(item.is_active) === 1).map((item) => item.section_key));
       const sectionForNav = { pianos:"featured_pianos", services:"craftsmanship" };
       content = { ...content, nav: content.nav.filter((item) => !sectionForNav[item.key] || active.has(sectionForNav[item.key])) };
