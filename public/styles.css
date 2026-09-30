@@ -2593,3 +2593,44 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   stroke-linecap:round;
   stroke-linejoin:round;
 }
+
+
+/* Mobile/tablet navigation uses the same approved SVG language as desktop. */
+.mobile-nav-icon{
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  line-height:0;
+  color:currentColor;
+}
+.mobile-nav-svg{
+  display:block;
+  width:22px;
+  height:22px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.75;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  overflow:visible;
+}
+.mobile-more-icon{
+  display:grid;
+  place-items:center;
+  width:34px;
+  height:34px;
+  line-height:0;
+  color:currentColor;
+}
+.mobile-more-svg{
+  display:block;
+  width:28px;
+  height:28px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.75;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  overflow:visible;
+}
