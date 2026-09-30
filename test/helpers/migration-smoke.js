@@ -176,7 +176,7 @@ try{
   const prodMigrated=new Database(prodDbPath,{readonly:true});
   const prodClientColumns=prodMigrated.prepare("PRAGMA table_info(clients)").all().map(row=>row.name);
   assert.ok(prodClientColumns.includes("client_type"),"production clients.client_type must be added before schema indexes");
-  assert.equal(prodMigrated.prepare("SELECT client_type,is_vip FROM clients WHERE email='render.legacy@example.com'").get().client_type,"PRIVATE");
+  assert.equal(prodMigrated.prepare("SELECT client_type,is_vip FROM clients WHERE email='render.legacy@example.com'").get().client_type,"INDIVIDUAL");
   assert.equal(prodMigrated.prepare("SELECT client_type,is_vip FROM clients WHERE email='render.legacy@example.com'").get().is_vip,1);
   assert.ok(prodMigrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_clients_client_type'").get(),"client_type index must exist after production compatibility migration");
   assert.equal(Boolean(prodMigrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_clients_customer_type'").get()),false,"retired customer_type index must be absent");

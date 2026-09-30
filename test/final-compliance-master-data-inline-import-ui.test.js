@@ -97,8 +97,8 @@ test("raw source rows are retained for audit while source IDs stay internal",()=
   assert.match(reconcile,/master_data_piano_source_map/);
 });
 
-test("PWA cache is bumped for complete Master Data import",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v22-relational-search-notifications/);
+test("PWA cache is bumped for Master Data and Messenger lifecycle",()=>{
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v23-master-messenger-lifecycle/);
 });
 
 

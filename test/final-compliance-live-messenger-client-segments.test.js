@@ -13,16 +13,16 @@ function clientDb(){
   const db=new Database(":memory:");
   db.exec(`CREATE TABLE clients(
     id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT,phone TEXT,address TEXT,notes TEXT,
-    preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'PRIVATE',
-    is_vip INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL',
+    is_vip INTEGER NOT NULL DEFAULT 0,deleted_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );`);
   return db;
 }
 
-test("01 customer master schema defines Private Business Institution segments",()=>{
+test("01 customer master schema defines Individual Partner Business Institution segments",()=>{
   const source=read("server/schema.sql");
-  assert.match(source,/client_type TEXT NOT NULL DEFAULT 'PRIVATE'/);
-  assert.match(source,/PRIVATE','BUSINESS','INSTITUTION/);
+  assert.match(source,/client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL'/);
+  assert.match(source,/INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION/);
 });
 
 test("02 Messenger conversations and private appointments link to client records",()=>{
@@ -46,20 +46,20 @@ test("04 existing customer is recognized by normalized phone",()=>{
   db.close();
 });
 
-test("05 unknown identified customer is created once as Private",()=>{
+test("05 unknown identified customer is created once as Individual",()=>{
   const db=clientDb();
   const first=ensureClientIdentity(db,{name:"New Customer",email:"new@example.com",language:"en"});
   const second=ensureClientIdentity(db,{name:"New Customer",email:"new@example.com"});
   assert.equal(first.created,true);
-  assert.equal(first.client.client_type,"PRIVATE");
+  assert.equal(first.client.client_type,"INDIVIDUAL");
   assert.equal(second.created,false);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM clients").get().count,1);
   db.close();
 });
 
-test("06 Master Data toolbar is the approved seven icon-only controls",()=>{
+test("06 Master Data toolbar includes Individual Partner Business Institution controls",()=>{
   const app=read("public/app.js");
-  for(const token of ['masterToolButton("SEARCH"','masterToolButton("CLIENTS"','masterToolButton("VIP"','masterToolButton("PRIVATE"','masterToolButton("BUSINESS"','masterToolButton("INSTITUTION"','masterToolButton("PIANOS"'])assert.ok(app.includes(token),token);
+  for(const token of ['masterToolButton("SEARCH"','masterToolButton("CLIENTS"','masterToolButton("VIP"','masterToolButton("INDIVIDUAL"','masterToolButton("PARTNER"','masterToolButton("BUSINESS"','masterToolButton("INSTITUTION"','masterToolButton("PIANOS"'])assert.ok(app.includes(token),token);
   assert.doesNotMatch(app,/clientVipFilter|data-client-filter=/);
   assert.match(app,/master-tool-svg/);
 });

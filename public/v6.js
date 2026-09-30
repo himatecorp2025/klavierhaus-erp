@@ -335,6 +335,7 @@ async function v6RenderBranding(){
         await api("/api/website-design-settings",{method:"PUT",body:JSON.stringify({...design,favicon_url:url})});
       }else if(kind==="erpLogoDark")await uploadBranding("/api/settings/branding/erp-logo-dark",file);
       else if(kind==="erpLogoLight")await uploadBranding("/api/settings/branding/erp-logo-light",file);
+      else if(kind==="loginLogo")await uploadBranding("/api/settings/branding/login-logo",file);
       else if(kind==="appIcon")await uploadBranding("/api/settings/branding/app-icon",file);
       else if(kind==="loginBackground"){
         const form=new FormData();form.append("background",file);await api("/api/settings/branding/background",{method:"POST",body:form});
@@ -344,7 +345,7 @@ async function v6RenderBranding(){
   }));
 }
 function v6BrandAssetCard(kind,title,url,description){
-  return `<section class="panel branding-card"><div class="branding-preview ${kind==="loginBackground"?"wide":""}">${url?`<img src="${esc(url)}" alt="">`:`<div class="cms-media-empty">＋</div>`}</div><div><span class="eyebrow">${esc(kind.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(description)}</p><label class="file-picker"><input type="file" accept="image/*" data-brand-file="${kind}"><span>↑ ${tr(url?"Replace":"Upload",url?"Csere":"Feltöltés")}</span></label></div></section>`;
+  return `<section class="panel branding-card"><div class="branding-preview ${kind==="loginBackground"?"wide":""}">${url?`<img src="${esc(v6BrandAssetUrl(url))}" alt="">`:`<div class="cms-media-empty">＋</div>`}</div><div><span class="eyebrow">${esc(kind.toUpperCase())}</span><h3>${esc(title)}</h3><p>${esc(description)}</p><label class="file-picker"><input type="file" accept="image/*" data-brand-file="${kind}"><span>↑ ${tr(url?"Replace":"Upload",url?"Csere":"Feltöltés")}</span></label></div></section>`;
 }
 const V6_ARCHIVE_CATEGORIES={
   deleted_invoice:["Invalidated / deleted invoices","Érvénytelenített / törölt számlák"],

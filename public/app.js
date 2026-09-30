@@ -56,7 +56,7 @@ function humanError(error){
   const code=String(error?.message||error||"");
   const map={
     AUTH_REQUIRED:["Your session has expired.","A munkamenet lejárt."],INVALID_TOKEN:["Your session has expired.","A munkamenet lejárt."],SESSION_REVOKED:["Your session has expired.","A munkamenet lejárt."],
-    CLIENT_NAME_REQUIRED:["Client name is required.","Az ügyfél neve kötelező."],INVALID_CLIENT_EMAIL:["Invalid client email.","Érvénytelen ügyfél e-mail."],INVALID_CLIENT_TYPE:["Choose Private, Business or Institution.","Válassz Privát, Üzleti vagy Intézményi típust."],
+    CLIENT_NAME_REQUIRED:["Client name is required.","Az ügyfél neve kötelező."],INVALID_CLIENT_EMAIL:["Invalid client email.","Érvénytelen ügyfél e-mail."],INVALID_CLIENT_TYPE:["Choose Individual, Partner, Business or Institution.","Válassz Magánszemély, Partner, Üzleti vagy Intézményi típust."],
     PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],
     REPORTED_ISSUE_REQUIRED:["Describe the requested service or issue.","A hiba vagy igény leírása kötelező."],INVALID_PIANO_ID:["The selected piano does not belong to this client.","A kiválasztott zongora nem ehhez az ügyfélhez tartozik."],
     PERMISSION_DENIED:["You do not have permission for this action.","Nincs jogosultság ehhez a művelethez."],ADMIN_REQUIRED:["Admin permission is required.","Admin jogosultság szükséges."],
@@ -473,7 +473,8 @@ function masterIconSvg(kind){
     SEARCH:'<circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path>',
     CLIENTS:'<path d="M4 19v-1.5A4.5 4.5 0 0 1 8.5 13h3A4.5 4.5 0 0 1 16 17.5V19"></path><circle cx="10" cy="7" r="3"></circle><path d="M17 13a4 4 0 0 1 3 3.9V19M16 4.5a3 3 0 0 1 0 5.8"></path>',
     VIP:'<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"></path>',
-    PRIVATE:'<circle cx="12" cy="8" r="3.5"></circle><path d="M5 20a7 7 0 0 1 14 0"></path>',
+    INDIVIDUAL:'<circle cx="12" cy="8" r="3.5"></circle><path d="M5 20a7 7 0 0 1 14 0"></path>',
+    PARTNER:'<path d="M8 12l2.2 2.2L16 8.5"></path><path d="M4 11.5 8 7l4 3.5L16 7l4 4.5v7H4z"></path>',
     BUSINESS:'<path d="M4 21V7l8-4v18M12 9h8v12M7 9h2M7 13h2M7 17h2M15 12h2M15 16h2M3 21h18"></path>',
     INSTITUTION:'<path d="m3 9 9-5 9 5M5 10h14M6 10v8M10 10v8M14 10v8M18 10v8M4 18h16M3 21h18"></path>',
     PIANOS:'<path d="M3 5h18v14H3z"></path><path d="M6 5v9M10 5v9M14 5v9M18 5v9M3 14h18"></path><path d="M8 14v3M12 14v3M16 14v3"></path>'
@@ -484,7 +485,7 @@ function masterToolButton(kind,label,active=false){
   return `<button class="master-tool-button ${active?"active":""}" type="button" data-master-tool="${kind}" aria-label="${esc(label)}" title="${esc(label)}">${masterIconSvg(kind)}</button>`;
 }
 function clientTypeLabel(value){
-  return ({PRIVATE:tr("People","Emberek"),BUSINESS:tr("Business","Vállalkozások"),INSTITUTION:tr("Institution","Intézmények")})[String(value||"PRIVATE").toUpperCase()]||tr("People","Emberek");
+  return ({INDIVIDUAL:tr("Individual","Magánszemély"),PARTNER:tr("Professional partner","Szakmai partner"),BUSINESS:tr("Business","Vállalkozások"),INSTITUTION:tr("Institution","Intézmények")})[String(value||"INDIVIDUAL").toUpperCase()]||tr("Individual","Magánszemély");
 }
 function masterInlineEditable(){
   return window.innerWidth>=1024&&navigator.maxTouchPoints<=1&&!/iPad|Android|Mobile|Tablet/i.test(navigator.userAgent||"");
@@ -534,7 +535,7 @@ function clientStructuredFields(client={}){
     <div class="master-form-section full"><strong>${tr("Legacy notes","Korábbi megjegyzések")}</strong></div>
     <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes" placeholder="${esc(masterPendingText())}">${esc(client.notes||"")}</textarea></label>
     <label class="field full"><span>${tr("Short memo to name","Rövid név-memó")}</span><textarea name="short_memo_to_name" placeholder="${esc(masterPendingText())}">${esc(client.short_memo_to_name||"")}</textarea></label>
-    <label class="field"><span>${tr("Client type","Ügyféltípus")}</span><select name="client_type"><option value="PRIVATE" ${String(client.client_type||"PRIVATE")==="PRIVATE"?"selected":""}>${tr("People","Emberek")}</option><option value="BUSINESS" ${client.client_type==="BUSINESS"?"selected":""}>${tr("Business","Vállalkozás")}</option><option value="INSTITUTION" ${client.client_type==="INSTITUTION"?"selected":""}>${tr("Institution","Intézmény")}</option></select></label>
+    <label class="field"><span>${tr("Client type","Ügyféltípus")}</span><select name="client_type"><option value="INDIVIDUAL" ${String(client.client_type||"INDIVIDUAL")==="INDIVIDUAL"?"selected":""}>${tr("Individual","Magánszemély")}</option><option value="PARTNER" ${client.client_type==="PARTNER"?"selected":""}>${tr("Professional partner","Szakmai partner")}</option><option value="BUSINESS" ${client.client_type==="BUSINESS"?"selected":""}>${tr("Business","Vállalkozás")}</option><option value="INSTITUTION" ${client.client_type==="INSTITUTION"?"selected":""}>${tr("Institution","Intézmény")}</option></select></label>
     <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>`;
 }
 function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
@@ -588,7 +589,8 @@ async function renderMaster(){
             ${masterToolButton("SEARCH",tr("Search","Keresés"),state.masterSearchOpen)}
             ${masterToolButton("CLIENTS",tr("All clients","Összes ügyfél"),mode==="CLIENTS"&&filter==="ALL")}
             ${masterToolButton("VIP","VIP",mode==="CLIENTS"&&filter==="VIP")}
-            ${masterToolButton("PRIVATE",tr("People","Emberek"),mode==="CLIENTS"&&filter==="PRIVATE")}
+            ${masterToolButton("INDIVIDUAL",tr("Individuals","Magánszemélyek"),mode==="CLIENTS"&&filter==="INDIVIDUAL")}
+            ${masterToolButton("PARTNER",tr("Partners","Partnerek"),mode==="CLIENTS"&&filter==="PARTNER")}
             ${masterToolButton("BUSINESS",tr("Business","Vállalkozások"),mode==="CLIENTS"&&filter==="BUSINESS")}
             ${masterToolButton("INSTITUTION",tr("Institution","Intézmények"),mode==="CLIENTS"&&filter==="INSTITUTION")}
             ${masterToolButton("PIANOS",tr("Pianos","Zongorák"),mode==="PIANOS")}
@@ -646,7 +648,7 @@ function masterPianoSearchValues(piano={}){
 function filteredMasterClients(){
   const filter=state.clientMasterFilter||"ALL",q=masterQuery();
   return (state.clients||[]).filter(client=>{
-    const typeMatch=filter==="ALL"||(filter==="VIP"?Number(client.is_vip||0)===1:String(client.client_type||"PRIVATE").toUpperCase()===filter);
+    const typeMatch=filter==="ALL"||(filter==="VIP"?Number(client.is_vip||0)===1:String(client.client_type||"INDIVIDUAL").toUpperCase()===filter);
     if(!typeMatch)return false;
     if(!q)return true;
     if(masterSearchMatch(masterClientSearchValues(client),q))return true;

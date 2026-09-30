@@ -485,6 +485,24 @@ function applyCustomerChatMode(active){
   if(customerChatLookupForm)customerChatLookupForm.hidden=isActive;
   if(isActive)window.setTimeout(()=>customerChatMessageInput?.focus({preventScroll:true}),60);
 }
+function setCustomerChatPanel(open){
+  if(!customerChatToggle||!customerChatPanel)return;
+  customerChatToggle.setAttribute("aria-expanded",String(Boolean(open)));customerChatPanel.hidden=!open;
+  if(open)customerChatWelcome?.classList.add("is-dismissed");
+}
+function clearCustomerConversationSession(){
+  customerConversationToken="";customerConversationSnapshot="";
+  try{localStorage.removeItem(customerConversationKey);}catch(_error){}
+  customerChatPendingFiles=[];renderCustomerChatFiles();applyCustomerChatMode(false);
+}
+function showCustomerConversationClosed(conversation=null){
+  clearCustomerConversationSession();
+  if(customerChatResult){
+    customerChatResult.textContent=conversation?.closure_note==="CUSTOMER_INACTIVITY"
+      ?(language==="hu"?"A beszélgetés 5 perc inaktivitás után lezárult. A folytatáshoz adja meg újra a nevét, e-mail-címét és ugyanazt az ügyet.":"The conversation closed after 5 minutes of inactivity. To continue it, enter your name, email address, and the same topic again.")
+      :(language==="hu"?"A beszélgetés lezárult. A folytatáshoz adja meg újra a nevét, e-mail-címét és ugyanazt az ügyet.":"The conversation is closed. To continue it, enter your name, email address, and the same topic again.");
+  }
+}
 function appendCustomerAttachment(parent,attachment){
   const url=attachment.url||"#",mime=String(attachment.mime_type||"").toLowerCase(),name=attachment.original_name||attachment.stored_name||"Attachment";
   if(mime.startsWith("image/")){
@@ -558,8 +576,10 @@ async function loadCustomerConversation(token) {
     if(!response.ok)throw new Error("CONVERSATION_NOT_FOUND");
     const conversation=await response.json();customerConversationToken=token;
     const nextSnapshot=JSON.stringify([conversation.status,conversation.updated_at,conversation.messages?.length||0,(conversation.appointment_proposals||[]).map(item=>item.id+":"+item.status+":"+(item.private_appointment_id||"")).join(",")]);
-    renderSupportStatus(conversation.support||{});applyCustomerChatMode(true);renderCustomerMessages(conversation.messages||[],conversation);
-    if(nextSnapshot!==customerConversationSnapshot&&customerChatResult)customerChatResult.textContent=conversation.status==="CLOSED"?(language==="hu"?"A beszélgetés lezárult.":"The conversation is closed."):"";
+    renderSupportStatus(conversation.support||{});
+    if(conversation.status==="CLOSED"){renderCustomerMessages(conversation.messages||[],conversation);showCustomerConversationClosed(conversation);customerConversationSnapshot=nextSnapshot;return;}
+    applyCustomerChatMode(true);renderCustomerMessages(conversation.messages||[],conversation);
+    if(nextSnapshot!==customerConversationSnapshot&&customerChatResult)customerChatResult.textContent="";
     customerConversationSnapshot=nextSnapshot;
   }catch(_error){
     if(!new URLSearchParams(location.search).get("conversation"))localStorage.removeItem(customerConversationKey);
@@ -627,11 +647,17 @@ async function submitCustomerChat(){
     if(customerChatMessageInput)customerChatMessageInput.value="";
     applyCustomerChatMode(Boolean(customerConversationToken));renderCustomerMessages(conversation.messages||[],conversation);renderSupportStatus(conversation.support||{});
     if(customerChatResult)customerChatResult.textContent="";
-  }catch(error){if(customerChatResult)customerChatResult.textContent=error.message==="CONVERSATION_IDENTITY_REQUIRED"?(language==="hu"?"A beszélgetés indításához név, érvényes e-mail-cím és témakör szükséges.":"Name, a valid email address and topic are required to start the conversation."):(language==="hu"?"A küldés nem sikerült.":"We could not send your message.");}
+  }catch(error){
+    if(error.message==="CONVERSATION_REAUTH_REQUIRED"){
+      showCustomerConversationClosed({closure_note:"CUSTOMER_INACTIVITY"});return;
+    }
+    if(customerChatResult)customerChatResult.textContent=error.message==="CONVERSATION_IDENTITY_REQUIRED"?(language==="hu"?"A beszélgetés indításához név, érvényes e-mail-cím és témakör szükséges.":"Name, a valid email address and topic are required to start the conversation."):(language==="hu"?"A küldés nem sikerült.":"We could not send your message.");
+  }
 }
 
 if(customerChat&&customerChatToggle&&customerChatPanel&&customerChatForm){
-  customerChatToggle.addEventListener("click",()=>{const open=customerChatToggle.getAttribute("aria-expanded")==="true";customerChatToggle.setAttribute("aria-expanded",String(!open));customerChatPanel.hidden=open;customerChatWelcome?.classList.add("is-dismissed");});
+  customerChatToggle.addEventListener("click",()=>{const open=customerChatToggle.getAttribute("aria-expanded")==="true";setCustomerChatPanel(!open);});
+  customerChat?.querySelector("[data-chat-panel-close]")?.addEventListener("click",()=>setCustomerChatPanel(false));
   customerChat?.querySelector("[data-chat-welcome-close]")?.addEventListener("click",()=>customerChatWelcome?.classList.add("is-dismissed"));
   window.setTimeout(()=>customerChatWelcome?.classList.add("is-dismissed"),9000);
   try{customerConversationToken=localStorage.getItem(customerConversationKey)||new URLSearchParams(location.search).get("conversation")||"";}catch(_error){customerConversationToken="";}

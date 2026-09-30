@@ -40,10 +40,10 @@ test("customer and support messages are separate Messenger bubbles",()=>{
   assert.match(css,/\.customer-chat__message--customer\{[^}]*background:linear-gradient/);
 });
 
-test("Master Data renders exactly the seven approved icon-only controls",()=>{
+test("Master Data renders the eight approved icon-only controls including Partner",()=>{
   const app=read("public/app.js");
-  const calls=[...app.matchAll(/masterToolButton\("(SEARCH|CLIENTS|VIP|PRIVATE|BUSINESS|INSTITUTION|PIANOS)"/g)].map(match=>match[1]);
-  assert.deepEqual(calls,["SEARCH","CLIENTS","VIP","PRIVATE","BUSINESS","INSTITUTION","PIANOS"]);
+  const calls=[...app.matchAll(/masterToolButton\("(SEARCH|CLIENTS|VIP|INDIVIDUAL|PARTNER|BUSINESS|INSTITUTION|PIANOS)"/g)].map(match=>match[1]);
+  assert.deepEqual(calls,["SEARCH","CLIENTS","VIP","INDIVIDUAL","PARTNER","BUSINESS","INSTITUTION","PIANOS"]);
   assert.match(app,/function masterIconSvg[\s\S]*master-tool-svg/);
   assert.match(app,/function masterToolButton/);
   assert.doesNotMatch(app,/clientVipFilter|data-client-filter=/);
@@ -73,11 +73,12 @@ test("client communication actions live inside the left client row and expose ma
   assert.match(app,/No phone number for this customer/);
 });
 
-test("VIP remains independent from People Business Institution client type",()=>{
+test("VIP remains independent from Individual Partner Business Institution client type",()=>{
   const schema=read("server/schema.sql"),app=read("public/app.js");
-  assert.match(schema,/client_type TEXT NOT NULL DEFAULT 'PRIVATE'/);
+  assert.match(schema,/client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL'/);
   assert.match(schema,/is_vip INTEGER NOT NULL DEFAULT 0/);
-  assert.match(app,/PRIVATE:tr\("People","Emberek"\)/);
+  assert.match(app,/INDIVIDUAL:tr\("Individual","Magánszemély"\)/);
+  assert.match(app,/PARTNER:tr\("Professional partner","Szakmai partner"\)/);
   assert.match(app,/<strong>★ VIP<\/strong>/);
   assert.doesNotMatch(app,/VIP is independent from (?:the )?customer type/);
 });
@@ -141,9 +142,9 @@ test("ERP dark and light logos switch with theme while PWA icon remains independ
   assert.match(v6,/const touch=branding\.app_icon_url;/);
 });
 
-test("CMS exposes six independent brand asset cards",()=>{
+test("CMS exposes seven independent brand asset cards including Login logo",()=>{
   const v6=read("public/v6.js");
-  for(const key of ["websiteLogo","websiteFavicon","erpLogoDark","erpLogoLight","appIcon","loginBackground"])assert.match(v6,new RegExp('v6BrandAssetCard\\("'+key+'"'));
+  for(const key of ["websiteLogo","websiteFavicon","erpLogoDark","erpLogoLight","loginLogo","appIcon","loginBackground"])assert.match(v6,new RegExp('v6BrandAssetCard\\("'+key+'"'));
   assert.match(v6,/\/api\/settings\/branding\/public-logo/);
   assert.match(v6,/\/api\/settings\/branding\/public-favicon/);
   assert.match(v6,/\/api\/settings\/branding\/erp-logo-dark/);

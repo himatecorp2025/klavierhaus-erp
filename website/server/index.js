@@ -225,6 +225,7 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
     <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span aria-hidden="true">✦</span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
       <div class="customer-chat__heading">
+        <button class="customer-chat__panel-close" type="button" data-chat-panel-close aria-label="${escapeHtml(chatCopy.close)}">×</button>
         <div class="customer-chat__identity"><span class="customer-chat__piano-avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg></span><div><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div></div>
         <p class="customer-chat__status" data-chat-support-status aria-live="polite"></p>
       </div>
@@ -242,12 +243,10 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
           <label class="customer-chat__media-button" aria-label="${language === "hu" ? "Fotó készítése vagy csatolása" : "Take or attach a photo"}"><input data-chat-photo-input type="file" multiple accept="image/*,.heic,.heif,.avif"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg></label>
           <button class="customer-chat__media-button" type="button" data-chat-voice aria-label="${language === "hu" ? "Hangüzenet rögzítése" : "Record voice message"}"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg></button>
           <div class="customer-chat__input-shell">
-            <label class="sr-only" for="customer-chat-message">${escapeHtml(chatCopy.message)}</label>
-            <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" enterkeyhint="send" placeholder="${escapeHtml(chatCopy.message)}"></textarea>
+            <textarea id="customer-chat-message" name="message" maxlength="5000" rows="1" enterkeyhint="send" aria-label="${escapeHtml(chatCopy.message)}" placeholder="${escapeHtml(chatCopy.message)}"></textarea>
             <button class="customer-chat__emoji-button" type="button" data-chat-emoji aria-label="${language === "hu" ? "Emoji" : "Emoji"}">☺</button>
             <div class="customer-chat__emoji-picker" data-chat-emoji-picker hidden></div>
           </div>
-          <button class="sr-only" type="submit" data-chat-hidden-submit>${language === "hu" ? "Küldés" : "Send"}</button>
         </div>
         <div class="customer-chat__recording" data-chat-recording hidden></div>
         <div class="customer-chat__file-list" data-chat-file-list></div>
