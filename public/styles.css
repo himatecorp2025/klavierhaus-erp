@@ -2225,3 +2225,23 @@ input,select,textarea,button{max-width:100%}
   .profile-avatar.large,.profile-avatar-image.large{width:76px;height:76px;flex-basis:76px;border-radius:22px}
   .profile-menu{position:fixed;right:12px;top:66px}
 }
+
+
+/* Complete Master Data import/editing UX */
+.master-form-section{
+  display:grid;gap:3px;margin:6px 0 2px;padding-top:12px;border-top:1px solid var(--line);
+}
+.master-form-section:first-child{padding-top:0;border-top:0}
+.master-form-section strong{font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.master-form-section small{color:var(--muted);line-height:1.45}
+.master-data-pending{color:var(--warning,#a06f15)!important;font-style:italic}
+.master-address-route{margin:12px 0;max-width:100%;white-space:normal;text-align:left}
+.master-client-detail-grid{margin-top:4px}
+.piano-detail-grid>div.full strong{white-space:pre-wrap}
+.master-inline-form .field textarea{min-height:84px}
+.master-inline-form.piano-inline-form,.master-inline-form{align-items:start}
+.master-piano-summary{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+@media(max-width:760px){
+  .master-inline-form{grid-template-columns:1fr!important}
+  .master-form-section.full,.master-inline-form .field.full{grid-column:1!important}
+}

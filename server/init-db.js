@@ -93,7 +93,7 @@ function messengerV12Backup() {
   return target;
 }
 function masterDataReconcileBackup() {
-  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-29-1") return null;
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-complete-1") return null;
   try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
   const stamp=new Date().toISOString().replace(/[:.]/g,"-");
   const target=path.join(backupDir,`master-data-reconcile-pre-${stamp}.sqlite`);
@@ -110,8 +110,13 @@ function prepareMessengerV12Compatibility() {
 }
 function prepareClientSegmentationCompatibility() {
   if (!tableExists("clients")) return;
-  ensureColumn("clients","client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))");
-  ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
+  for(const [name,definition] of [
+    ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],
+    ["mobile_phone","TEXT"],["line_phone","TEXT"],["street","TEXT"],["city","TEXT"],["district","TEXT"],
+    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],
+    ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],
+    ["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"]
+  ])ensureColumn("clients",name,definition);
   if (columns("clients").has("customer_type")) {
     db.exec(`UPDATE clients
       SET client_type=UPPER(customer_type)
@@ -122,11 +127,58 @@ function prepareClientSegmentationCompatibility() {
 }
 function prepareMasterDataCompatibility() {
   if (!tableExists("pianos")) return;
-  ensureColumn("pianos","build_year","INTEGER");
-  ensureColumn("pianos","size_display","TEXT");
-  ensureColumn("pianos","color","TEXT");
-  ensureColumn("pianos","notes","TEXT");
-  ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
+  const info=db.prepare('PRAGMA table_info("pianos")').all(),existing=new Set(info.map(row=>row.name));
+  const clientColumn=info.find(row=>row.name==="client_id");
+  if(clientColumn&&Number(clientColumn.notnull)===1){
+    const value=(name,fallback="NULL")=>existing.has(name)?quoteName(name):fallback;
+    db.exec('DROP TABLE IF EXISTS "_master_data_pianos_v2"');
+    db.exec(`CREATE TABLE "_master_data_pianos_v2" (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER,
+      category TEXT,
+      brand TEXT NOT NULL DEFAULT 'No brand',
+      model TEXT,
+      serial_number TEXT,
+      finish TEXT,
+      location_notes TEXT,
+      last_serviced_at TEXT,
+      last_service_title TEXT,
+      last_service_description TEXT,
+      next_service_date TEXT,
+      date_of_purchase TEXT,
+      warranty TEXT,
+      latest_info_frequency TEXT,
+      latest_info_humidity TEXT,
+      latest_info_temperature TEXT,
+      build_year INTEGER,
+      size_display TEXT,
+      color TEXT,
+      notes TEXT,
+      classification_status TEXT NOT NULL DEFAULT 'CLASSIFIED',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
+    )`);
+    db.exec(`INSERT INTO "_master_data_pianos_v2"(
+      id,client_id,category,brand,model,serial_number,finish,location_notes,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,
+      latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
+      SELECT
+      ${value("id")},${value("client_id")},${value("category")},COALESCE(NULLIF(TRIM(${value("brand","''")}),''),'No brand'),${value("model")},${value("serial_number")},
+      ${value("finish")},${value("location_notes")},${value("last_serviced_at")},${value("last_service_title")},${value("last_service_description")},${value("next_service_date")},
+      ${value("date_of_purchase")},${value("warranty")},${value("latest_info_frequency")},${value("latest_info_humidity")},${value("latest_info_temperature")},
+      ${value("build_year")},${value("size_display")},${value("color")},${value("notes")},COALESCE(${value("classification_status","'CLASSIFIED'")},'CLASSIFIED'),
+      COALESCE(${value("created_at","CURRENT_TIMESTAMP")},CURRENT_TIMESTAMP),COALESCE(${value("updated_at","CURRENT_TIMESTAMP")},CURRENT_TIMESTAMP)
+      FROM pianos`);
+    db.exec('DROP TABLE "pianos"');
+    db.exec('ALTER TABLE "_master_data_pianos_v2" RENAME TO "pianos"');
+    console.log("[MASTER-DATA] Rebuilt pianos with optional owner and complete source fields");
+  }
+  for(const [name,definition] of [
+    ["category","TEXT"],["build_year","INTEGER"],["size_display","TEXT"],["color","TEXT"],["notes","TEXT"],
+    ["last_service_title","TEXT"],["last_service_description","TEXT"],["next_service_date","TEXT"],["date_of_purchase","TEXT"],["warranty","TEXT"],
+    ["latest_info_frequency","TEXT"],["latest_info_humidity","TEXT"],["latest_info_temperature","TEXT"],
+    ["classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))"]
+  ])ensureColumn("pianos",name,definition);
 }
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
@@ -267,15 +319,17 @@ if(tableExists("_documents_legacy_archive")){
 db.pragma("foreign_keys = OFF");
 
 ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
-ensureColumn("clients","client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))");
-ensureColumn("clients","is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))");
-ensureColumn("clients","vip_updated_by_user_id","TEXT");
-ensureColumn("clients","vip_updated_at","TEXT");
-ensureColumn("pianos","build_year","INTEGER");
-ensureColumn("pianos","size_display","TEXT");
-ensureColumn("pianos","color","TEXT");
-ensureColumn("pianos","notes","TEXT");
-ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
+for(const [name,definition] of [
+  ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],["mobile_phone","TEXT"],["line_phone","TEXT"],
+  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],
+  ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
+  ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
+])ensureColumn("clients",name,definition);
+for(const [name,definition] of [
+  ["category","TEXT"],["build_year","INTEGER"],["size_display","TEXT"],["color","TEXT"],["notes","TEXT"],["last_service_title","TEXT"],
+  ["last_service_description","TEXT"],["next_service_date","TEXT"],["date_of_purchase","TEXT"],["warranty","TEXT"],["latest_info_frequency","TEXT"],
+  ["latest_info_humidity","TEXT"],["latest_info_temperature","TEXT"],["classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))"]
+])ensureColumn("pianos",name,definition);
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("users","language_preference","TEXT NOT NULL DEFAULT 'en' CHECK(language_preference IN ('en','hu'))");
 ensureColumn("users","profile_image_url","TEXT");
@@ -535,9 +589,9 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
-if(setting("master_data_reconcile_version")!=="2026-09-29-1"){
+if(setting("master_data_reconcile_version")!=="2026-09-30-complete-1"){
   const summary=db.transaction(()=>reconcileExistingMasterData(db))();
-  setSetting("master_data_reconcile_version","2026-09-29-1");
+  setSetting("master_data_reconcile_version","2026-09-30-complete-1");
   console.log(`[MASTER-DATA] Reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, review_required=${summary.reviewRequired}`);
 }
 seedWorkshopUxV5();
