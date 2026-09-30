@@ -10,7 +10,7 @@ const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 test("Messenger V3 loads after canonical Messenger and before application boot",()=>{
   const html=read("public/index.html"),sw=read("public/service-worker.js");
   assert.match(html,/\/messenger\.js"[\s\S]*\/messenger-responsive-v3\.js"[\s\S]*\/v6\.js"/);
-  assert.match(sw,/klavierhaus-admin-v27-messenger-responsive-safari/);
+  assert.match(sw,/klavierhaus-admin-v28-frontend-polish/);
   assert.match(sw,/"\/messenger-responsive-v3\.js"/);
 });
 

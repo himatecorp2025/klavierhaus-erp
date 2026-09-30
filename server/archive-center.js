@@ -92,8 +92,8 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
 
   function deleteIntakeToArchive(id,actor,reason=""){
     const {lead,items}=assessmentSource(id);
-    const emailLog=db.prepare("SELECT * FROM intake_assessment_email_log WHERE intake_id=? ORDER BY created_at,id").all(id);
-    const linkedJobs=db.prepare("SELECT id,job_code,title,stage,cancelled_at,completed_at FROM jobs WHERE intake_id=? ORDER BY id").all(id);
+    const emailLog=tableExists("intake_assessment_email_log")?db.prepare("SELECT * FROM intake_assessment_email_log WHERE intake_id=? ORDER BY created_at,id").all(id):[];
+    const linkedJobs=tableExists("jobs")?db.prepare("SELECT id,job_code,title,stage,cancelled_at,completed_at FROM jobs WHERE intake_id=? ORDER BY id").all(id):[];
     const pdf=intakeAssessmentPdf({lead,items});
     const filename=`deleted-intake-${id}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`;
     const filePath=path.join(target,filename);
@@ -111,7 +111,8 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
         if(tableExists("jobs"))db.prepare("UPDATE jobs SET intake_id=NULL WHERE intake_id=?").run(id);
         if(tableExists("intake_assessment_email_log"))db.prepare("DELETE FROM intake_assessment_email_log WHERE intake_id=?").run(id);
         if(tableExists("intake_assessment_items"))db.prepare("DELETE FROM intake_assessment_items WHERE intake_id=?").run(id);
-        db.prepare("DELETE FROM intake_leads WHERE id=?").run(id);
+        const deleted=db.prepare("DELETE FROM intake_leads WHERE id=?").run(id);
+        if(Number(deleted.changes)!==1)throw problem("INTAKE_DELETE_FAILED",409);
         return db.prepare(`${select} WHERE a.id=?`).get(Number(info.lastInsertRowid));
       })();
       return {...archived,metadata:snapshot};
@@ -155,7 +156,7 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
       const before=assessmentSource(id);
       const archived=deleteIntakeToArchive(id,req.user,req.body?.reason||"");
       audit(req,"DELETE","intake",String(id),before,{archive_document_id:archived.id,category:"deleted_intake"},1,"Intake deleted and archived");
-      res.json({ok:true,archive_document:archived});
+      res.json({ok:true,deleted_intake_id:id,archive_document:archived});
     }catch(error){respond(res,error);}
   });
   app.delete("/api/clients/:id",auth,admin,(req,res)=>{

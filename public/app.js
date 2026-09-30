@@ -583,33 +583,8 @@ function masterReadonlyItem(label,value,{full=false,brand=false,extra=""}={}){
   return `<div class="${full?"full":""}"><span>${esc(label)}</span><strong class="${present?"":"master-data-pending"}">${esc(display)}</strong>${extra}</div>`;
 }
 
-function masterSourceFieldLabel(field){
-  return ({
-    first_name:tr("First name","Keresztnév"),last_name:tr("Last name","Vezetéknév"),company_name:tr("Company name","Cégnév"),contact_name:tr("Contact name","Kapcsolattartó neve"),
-    street:tr("Street","Utca, házszám"),city:tr("City","Város"),district:tr("District / State","Kerület / állam"),postcode:tr("Postcode","Irányítószám"),country:tr("Country","Ország"),
-    mobile_phone:tr("Mobile phone","Mobiltelefon"),line_phone:tr("Landline phone","Vezetékes telefon"),email:"Email",notes:tr("Notes","Megjegyzés"),short_memo_to_name:tr("Short memo to name","Rövid név-memó")
-  })[field]||field;
-}
-function masterClientSourceHistoryMarkup(history={}){
-  const sources=Array.isArray(history.sources)?history.sources:[],values=Array.isArray(history.values)?history.values:[];
-  if(!sources.length&&!values.length)return "";
-  const sourceCards=sources.map(source=>`<article class="history-row"><div><strong>${esc(source.source_name||tr("Imported source","Importforrás"))}</strong><small>${tr("Source client ID","Forrás ügyfél-ID")}: ${esc(masterValue(source.source_client_id))} · ${tr("Rows","Sorok")}: ${esc(masterValue(source.source_row_numbers))}</small></div></article>`).join("");
-  const grouped=new Map();
-  for(const row of values){if(!grouped.has(row.field_name))grouped.set(row.field_name,[]);grouped.get(row.field_name).push(row);}
-  const valueRows=[...grouped.entries()].map(([field,rows])=>`<article class="history-row master-source-values"><div><strong>${esc(masterSourceFieldLabel(field))}</strong>${rows.map(row=>`<small>${esc(row.value)} · ${tr("source row","forrássor")} ${esc(row.first_source_row)}${Number(row.last_source_row)!==Number(row.first_source_row)?`–${esc(row.last_source_row)}`:""}${Number(row.occurrences||0)>1?` · ×${Number(row.occurrences)}`:""}</small>`).join("")}</div></article>`).join("");
-  return `<section class="master-source-history"><div class="panel-head inline-panel-head"><h3>${tr("Imported source history","Importált forráselőzmények")}</h3><span class="badge">${sources.length}</span></div><div class="service-history-list">${sourceCards}${valueRows}</div></section>`;
-}
-function masterPianoSourceMarkup(piano={}){
-  if(!piano.source_instrument_id&&!piano.source_client_id&&!piano.source_row_number&&!piano.source_name)return "";
-  return `<section class="master-source-history"><div class="panel-head inline-panel-head"><h3>${tr("Source data","Forrásadatok")}</h3></div><div class="piano-detail-grid">
-    ${masterReadonlyItem(tr("Source instrument ID","Forrás hangszer-ID"),piano.source_instrument_id)}
-    ${masterReadonlyItem(tr("Source client ID","Forrás ügyfél-ID"),piano.source_client_id)}
-    ${masterReadonlyItem(tr("Source row","Forrássor"),piano.source_row_number)}
-    ${masterReadonlyItem(tr("Source","Forrás"),piano.source_name)}
-    ${masterReadonlyItem(tr("Imported","Importálva"),piano.source_imported_at,{full:true})}
-  </div></section>`;
-}
 async function renderMaster(){
+  if(masterQuery())state.masterSearchOpen=true;
   const workspace=$("#workspace");
   const [,pianoOverview]=await Promise.all([loadClients(),api("/api/master-data/piano-overview")]);
   state.pianos=Array.isArray(pianoOverview?.classified)?pianoOverview.classified:[];
@@ -644,19 +619,25 @@ async function renderMaster(){
     </div>`;
   $("#addClientBtn").addEventListener("click",async()=>{if(await masterConfirmDiscard())openClientDialog();});
   $$("[data-master-tool]").forEach(button=>button.addEventListener("click",()=>void handleMasterTool(button.dataset.masterTool)));
-  $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;renderMasterList();});
+  $("#masterSearch")?.addEventListener("input",event=>{state.masterSearch=event.currentTarget.value;state.masterSearchOpen=true;updateMasterToolbar();renderMasterList();});
   renderMasterList();await renderMasterDetail();
 }
 function updateMasterToolbar(){
-  const reveal=$("#masterSearchReveal");reveal?.classList.toggle("open",Boolean(state.masterSearchOpen));
+  const searchActive=Boolean(state.masterSearchOpen||masterQuery()),reveal=$("#masterSearchReveal");reveal?.classList.toggle("open",searchActive);
   const active=state.masterMode==="PIANOS"?"PIANOS":state.clientMasterFilter||"ALL";
-  $$("[data-master-tool]").forEach(button=>{const kind=button.dataset.masterTool;button.classList.toggle("active",kind==="SEARCH"?Boolean(state.masterSearchOpen):(kind==="CLIENTS"?active==="ALL":kind===active));});
+  $$("[data-master-tool]").forEach(button=>{const kind=button.dataset.masterTool;button.classList.toggle("active",kind==="SEARCH"?searchActive:(kind==="CLIENTS"?active==="ALL":kind===active));});
 }
 async function handleMasterTool(kind){
   if(kind!=="SEARCH"&&!(await masterConfirmDiscard()))return;
-  if(kind==="SEARCH"){state.masterSearchOpen=!state.masterSearchOpen;updateMasterToolbar();if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());return;}
-  state.masterSearchOpen=false;
-  if(kind==="PIANOS"){state.masterMode="PIANOS";state.masterDetailKind="PIANO";if(!state.selectedPianoId)state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;}
+  if(kind==="SEARCH"){
+    if(state.masterSearchOpen){
+      if(masterQuery()){state.masterSearch="";const input=$("#masterSearch");if(input)input.value="";renderMasterList();void renderMasterDetail();}
+      state.masterSearchOpen=false;
+    }else state.masterSearchOpen=true;
+    updateMasterToolbar();if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());return;
+  }
+  state.masterSearchOpen=Boolean(masterQuery());
+  if(kind==="PIANOS"){state.masterMode="PIANOS";state.masterDetailKind="PIANO";if(!filteredMasterPianos().some(piano=>Number(piano.id)===Number(state.selectedPianoId)))state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;}
   else{state.masterMode="CLIENTS";state.clientMasterFilter=kind==="CLIENTS"?"ALL":kind;state.masterDetailKind="CLIENT";if(!filteredMasterClients().some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=Number(filteredMasterClients()[0]?.id||0)||null;}
   updateMasterToolbar();renderMasterList();void renderMasterDetail();
 }
@@ -708,7 +689,7 @@ function renderClientList(){
   if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No clients match this view.","Nincs a nézetnek megfelelő ügyfél.")}</div>`;return;}
   host.innerHTML=rows.map(client=>`<article class="client-row ${Number(client.id)===Number(state.selectedClientId)&&state.masterDetailKind==="CLIENT"?"active":""}">
     <button type="button" class="client-row-select" data-client-id="${client.id}">
-      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))} · ${esc(masterValue(client.address))}</small><small>${tr("Last visit","Utolsó látogatás")}: ${esc(masterValue(client.last_visit))}${client.source_client_id?` · ${tr("Source ID","Forrás-ID")}: ${esc(client.source_client_id)}`:""}</small></span>
+      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))} · ${esc(masterValue(client.address))}</small><small>${tr("Last visit","Utolsó látogatás")}: ${esc(masterValue(client.last_visit))}</small></span>
       <span class="count">${Number(client.piano_count||0)}</span>
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
@@ -759,7 +740,7 @@ async function renderClientDetail(){
   const client=state.clients.find(row=>Number(row.id)===Number(state.selectedClientId));
   if(!client){host.innerHTML=`<div class="empty-state">${tr("Select a client.","Válassz ügyfelet.")}</div>`;return;}
   host.innerHTML=loading();
-  const [pianos,jobs,reviews,sourceHistory]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[]),api(`/api/clients/${client.id}/piano-review`).catch(()=>[]),api(`/api/clients/${client.id}/source-history`).catch(()=>({sources:[],values:[]}))]);
+  const [pianos,jobs,reviews]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[]),api(`/api/clients/${client.id}/piano-review`).catch(()=>[])]);
   const inline=masterInlineEditable(),canDeleteClient=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   const reviewMarkup=reviews.length?`<section class="master-review-panel"><div class="master-review-panel-head"><span class="master-review-alert">!</span><div><strong>${tr("Data conflict needs review","Adatütközés ellenőrzésre vár")}</strong><small>${tr("These records remain visible; the review only flags contradictory source data.","A rekordok továbbra is láthatók; az ellenőrzés csak az ellentmondó forrásadatot jelzi.")}</small></div></div>${reviews.map(item=>`<article class="master-review-item"><div><strong>${esc([item.source_brand,item.source_model].filter(Boolean).join(" ")||"No brand")}</strong><small>${esc([item.source_serial_number?tr("Serial","Gyári szám")+": "+item.source_serial_number:"",item.source_note].filter(Boolean).join(" · "))}</small></div><button class="secondary-button" type="button" data-classify-review="${item.id}">${tr("Review","Ellenőrzés")}</button></article>`).join("")}</section>`:"";
   const editable=`<form id="clientInlineForm" class="master-inline-form">${clientStructuredFields(client)}</form>`;
@@ -780,13 +761,11 @@ async function renderClientDetail(){
     ${masterReadonlyItem(tr("Notes","Megjegyzés"),client.notes,{full:true})}
     ${masterReadonlyItem(tr("Short memo to name","Rövid név-memó"),client.short_memo_to_name,{full:true})}
     ${masterReadonlyItem(tr("Last visit","Utolsó látogatás"),client.last_visit)}
-    ${masterReadonlyItem(tr("Source client ID","Forrás ügyfél-ID"),client.source_client_id)}
   </div>`;
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
     <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button>${canDeleteClient?`<button id="deleteClientBtn" class="danger-button" type="button">${tr("Delete client","Ügyfél törlése")}</button>`:""}</div></div>
     ${inline?editable:readonly}
     ${client.address?`<button class="secondary-button master-address-route" type="button" data-open-map>↗ ${tr("Open route","Útvonal megnyitása")} · ${esc(client.address)}</button>`:""}
-    ${masterClientSourceHistoryMarkup(sourceHistory)}
     ${reviewMarkup}
     <div class="panel-head inline-panel-head"><h3>${tr("Pianos","Zongorák")}</h3><span class="badge">${pianos.length}</span></div>
     <div class="piano-grid">${pianos.length?pianos.map(piano=>pianoCard(piano)).join(""):`<div class="empty-state">${tr("No piano is linked to this client yet.","Ehhez az ügyfélhez még nincs zongora kapcsolva.")}</div>`}</div>
@@ -850,11 +829,10 @@ async function renderPianoDetail(){
     ${masterReadonlyItem(tr("Location","Hely"),effective,{full:true,extra:`<small>${piano.location_notes?tr("Piano-specific location","Zongorához megadott külön hely"):client?.address?tr("Inherited from customer address","Az ügyfél címéből örökölve"):masterPendingText()}</small>`})}
     ${masterReadonlyItem(tr("Instrument note","Hangszer-megjegyzés"),piano.notes,{full:true})}
   </div>`;
-  const sourceMarkup=masterPianoSourceMarkup(piano);
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
     <div class="detail-title"><div><span class="eyebrow">${tr("PIANO","ZONGORA")} #${piano.id}</span><h2>${esc([masterValue(piano.brand,{brand:true}),piano.model].filter(Boolean).join(" "))}</h2></div><div class="page-actions">${inline?`<button id="savePianoBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editPianoBtn" class="primary-button" type="button">${tr("Edit piano","Zongora szerkesztése")}</button>`}</div></div>
     ${inline?editable:readonly}
-    ${sourceMarkup}`;
+`;
   $("[data-master-back]")?.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;if(state.masterMode==="CLIENTS"){state.masterDetailKind="CLIENT";void renderClientDetail();}else closeMasterMobileDetail();});
   $("#editPianoBtn")?.addEventListener("click",()=>openPianoDialog(client,piano));
   const form=$("#pianoInlineForm");
