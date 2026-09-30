@@ -40,14 +40,22 @@ function v6ApplyTheme(theme,{save=false}={}){
 }
 function v6ToggleTheme(){if(state.user)v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:true});}
 function v6SidebarKey(){return state.user?.id?`kh_sidebar_collapsed_${state.user.id}`:"kh_sidebar_collapsed";}
+function v6SyncSidebarButtons(collapsed){
+  for(const selector of ["#sidebarToggle","#headerSidebarToggle"]){
+    const button=$(selector);if(!button)continue;
+    button.setAttribute("aria-expanded",String(!collapsed));
+    button.setAttribute("aria-label",collapsed?tr("Show navigation","Navigáció megjelenítése"):tr("Hide navigation","Navigáció elrejtése"));
+  }
+}
 function v6ApplySidebar(){
   const collapsed=localStorage.getItem(v6SidebarKey())==="1";
   $("#appShell")?.classList.toggle("sidebar-collapsed",collapsed);
-  $("#sidebarToggle")?.setAttribute("aria-expanded",String(!collapsed));
+  v6SyncSidebarButtons(collapsed);
 }
 function v6ToggleSidebar(){
   const shell=$("#appShell"),collapsed=!shell.classList.contains("sidebar-collapsed");
   shell.classList.toggle("sidebar-collapsed",collapsed);localStorage.setItem(v6SidebarKey(),collapsed?"1":"0");
+  v6SyncSidebarButtons(collapsed);
 }
 function v6CloseMore(){
   const popover=$("#mobileMorePopover");if(!popover)return;
@@ -87,6 +95,7 @@ async function v6Logout(){
 function v6BindShell(){
   $("#themeToggle")?.addEventListener("click",v6ToggleTheme);
   $("#sidebarToggle")?.addEventListener("click",v6ToggleSidebar);
+  $("#headerSidebarToggle")?.addEventListener("click",v6ToggleSidebar);
   $("#mobileMoreButton")?.addEventListener("click",event=>{event.stopPropagation();v6OpenMore();});
   $("#mobileMoreClose")?.addEventListener("click",v6CloseMore);
   $("#profileButton")?.addEventListener("click",event=>{event.stopPropagation();const menu=$("#profileMenu");if(!menu)return;menu.hidden=!menu.hidden;$("#profileButton").setAttribute("aria-expanded",String(!menu.hidden));});

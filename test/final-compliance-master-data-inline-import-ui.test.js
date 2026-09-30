@@ -7,12 +7,10 @@ const path=require("node:path");
 const root=path.resolve(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 
-test("Master Data exposes admin CSV import and preserves source row/client counts",()=>{
+test("Master Data has no user-facing CSV import while server ingestion remains available",()=>{
   const app=read("public/app.js"),api=read("server/round1-core.js"),upload=read("server/upload-middleware.js");
-  assert.match(app,/masterImportBtn/);
-  assert.match(app,/\/api\/master-data\/import-csv/);
-  assert.match(app,/sourceClients/);
-  assert.match(app,/ownerlessPianos/);
+  assert.doesNotMatch(app,/masterImportBtn|masterImportFile/);
+  assert.doesNotMatch(app,/\/api\/master-data\/import-csv/);
   assert.match(api,/app\.post\("\/api\/master-data\/import-csv",auth,permit\("ADMIN"\)/);
   assert.match(upload,/function createMasterDataImportUpload/);
   assert.match(upload,/\.csv\$\/i/);
@@ -105,7 +103,7 @@ test("raw source rows are retained and source IDs are visible and searchable in 
 });
 
 test("PWA cache is bumped for the full 33-column Master Data release",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v25-master-data-contract-status/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v26-master-data-direct-load-sidebar-toggle/);
 });
 
 
@@ -180,7 +178,7 @@ test("Master Data contract status is visible and successful import marks the can
   assert.match(api,/master_data_reconcile_version/);
   assert.match(app,/source contract verified/);
   assert.match(app,/forráskontraktus ellenőrizve/);
-  assert.match(app,/Paul Mills \$\{summary\.controlClientPianos\}\/9/);
+  assert.doesNotMatch(app,/masterImportBtn|masterImportFile/);
   assert.match(app,/MASTER_DATA_INTEGRITY_FAILED/);
   assert.match(init,/MASTER_DATA_RECONCILE_VERSION="2026-09-30-full-33-column-4"/);
   assert.match(init,/setSetting\("master_data_import_status",sourceAudit\.status\)/);
