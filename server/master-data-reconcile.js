@@ -5,7 +5,7 @@ const crypto=require("node:crypto");
 const INSTITUTION_KEYWORDS=["University","School","Academy","Church","Synagog","Temple","Museum","Foundation","Institute","Rappresentanza","Consulate","Embassy","Society","Hospital","Library"];
 const PARTNER_KEYWORDS=["Workshop","Piano Studios","Studio One","Tuner","Technician","Restoration"];
 const MASTER_HEADERS=["ID","CATEGORY","BRAND","MODEL","SIZE","COLOR","SERIAL NUMBER","YEAR BUILT","NOTE","DATE OF PURCHASE","WARRANTY","LAST SERVICE DATE","LAST SERVICE TITLE","LAST SERVICE DESCRIPTION","NEXT SERVICE DATE","LATEST INFO FREQUENCY","LATEST INFO HUMIDITY","LATEST INFO TEMPERATURE","ID","FIRST NAME","LAST NAME","COMPANY NAME","CONTACT NAME","STREET","CITY","DISTRICT","POSTCODE","COUNTRY","MOBILE PHONE","LINE PHONE","E-MAIL","NOTE","SHORT MEMO TO NAME"];
-const MASTER_IMPORT_CONTRACT={sourceName:"KLAVIERHAUS_MASTER_CSV",rows:339,columns:33,sourceClients:309,linkedPianos:329,ownerlessPianos:10,nonEmptyValues:5025,controlClientId:"3084",controlPianos:9};
+const MASTER_IMPORT_CONTRACT={sourceName:"KLAVIERHAUS_MASTER_CSV",rows:339,columns:33,sourceClients:309,linkedPianos:329,ownerlessPianos:10,sourceNonEmptyValues:5025,controlClientId:"3084",controlPianos:9};
 const INSTRUMENT_SOURCE_FIELDS=[
   ["category","category"],["brand","brand"],["model","model"],["size_display","size_display"],["color","color"],["serial_number","serial_number"],["build_year","build_year"],
   ["note","notes"],["date_of_purchase","date_of_purchase"],["warranty","warranty"],["last_serviced_at","last_serviced_at"],["last_service_title","last_service_title"],
