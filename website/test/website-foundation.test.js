@@ -53,6 +53,22 @@ test("every English and Hungarian route renders localized canonical metadata", a
   });
 });
 
+test("private appointment assets are cache-busted and the picker is reinitialized when dialogs open", async () => {
+  await withServer({ allowIndexing: false }, async (origin) => {
+    const body = await (await fetch(`${origin}/`)).text();
+    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.5/);
+    assert.match(body, /\/assets\/app\.js\?v=1\.2\.5/);
+  });
+  const browser=fs.readFileSync(path.join(__dirname,"..","public","app.js"),"utf8");
+  const css=fs.readFileSync(path.join(__dirname,"..","public","styles.css"),"utf8");
+  assert.match(browser,/function privatePickerEnsure\(root=document\)/);
+  assert.match(browser,/privatePickerEnsure\(form\);form\?\.reset\(\);privatePickerReset\(form\)/);
+  assert.match(browser,/event\.preventDefault\(\);event\.stopPropagation\(\)/);
+  assert.match(css,/Public private appointment picker reliability \+ visual polish/);
+  assert.match(css,/\.private-calendar-popover\{[\s\S]*position:relative/);
+  assert.match(css,/\.private-date-trigger\{[\s\S]*border-radius:8px/);
+});
+
 test("home routes render exactly one visible language at a time", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
     const english = await (await fetch(`${origin}/`)).text();
