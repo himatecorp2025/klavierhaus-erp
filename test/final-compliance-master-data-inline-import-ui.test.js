@@ -87,18 +87,25 @@ test("unsaved desktop Master Data still uses Save Discard Cancel and nullable pi
   assert.match(app,/body\.client_id=body\.client_id\?Number\(body\.client_id\):null/);
 });
 
-test("raw source rows are retained for audit while source IDs stay internal",()=>{
-  const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js");
+test("raw source rows are retained and source IDs are visible and searchable in Master Data",()=>{
+  const schema=read("server/schema.sql"),reconcile=read("server/master-data-reconcile.js"),app=read("public/app.js");
   assert.match(schema,/CREATE TABLE IF NOT EXISTS master_data_import_rows/);
   assert.match(schema,/raw_json TEXT NOT NULL/);
   assert.match(reconcile,/persistImportRow/);
   assert.match(reconcile,/JSON\.stringify\(record\.raw\)/);
   assert.match(reconcile,/master_data_client_source_map/);
   assert.match(reconcile,/master_data_piano_source_map/);
+  assert.match(app,/Source client ID/);
+  assert.match(app,/Forrás ügyfél-ID/);
+  assert.match(app,/Source instrument ID/);
+  assert.match(app,/Forrás hangszer-ID/);
+  assert.match(app,/source_client_id/);
+  assert.match(app,/source_instrument_id/);
+  assert.match(app,/Imported source history/);
 });
 
-test("PWA cache is bumped for Master Data and Messenger lifecycle",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v23-master-messenger-lifecycle/);
+test("PWA cache is bumped for the full 33-column Master Data release",()=>{
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v24-master-data-full-33-column/);
 });
 
 
@@ -139,7 +146,27 @@ test("lossless import retains original cells and active records expose all struc
   const reconcile=read("server/master-data-reconcile.js");
   assert.match(reconcile,/raw:\{columns:\[\.\.\.headers\],values:row\.slice\(\)/);
   assert.match(reconcile,/sourceNonEmptyValues/);
-  assert.match(reconcile,/columns:33/);
+  assert.match(reconcile,/MASTER_HEADERS/);
+  assert.match(reconcile,/MASTER_IMPORT_CONTRACT/);
+  assert.match(reconcile,/preservedNonEmptyValues/);
+  assert.match(reconcile,/MASTER_DATA_INTEGRITY_FAILED/);
   assert.match(reconcile,/findExistingClient/);
   assert.match(reconcile,/deletedClientsSkipped/);
+});
+
+
+test("client Last visit and complete source lineage are wired end to end",()=>{
+  const schema=read("server/schema.sql"),init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js"),api=read("server/round1-core.js"),app=read("public/app.js"),finance=read("server/round3-finance.js");
+  assert.match(schema,/last_visit TEXT/);
+  assert.match(init,/\["last_visit","TEXT"\]/);
+  assert.match(reconcile,/function refreshClientLastVisit/);
+  assert.match(reconcile,/refreshSourceClientLastVisits/);
+  assert.match(api,/source_client_ids/);
+  assert.match(api,/source_instrument_id/);
+  assert.match(api,/\/api\/clients\/:id\/source-history/);
+  assert.match(app,/Last visit/);
+  assert.match(app,/Utolsó látogatás/);
+  assert.match(app,/masterClientSourceHistoryMarkup/);
+  assert.match(app,/masterPianoSourceMarkup/);
+  assert.match(finance,/refreshClientLastVisit/);
 });
