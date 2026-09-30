@@ -93,7 +93,7 @@ function messengerV12Backup() {
   return target;
 }
 function masterDataReconcileBackup() {
-  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-relational-2") return null;
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-full-33-column-3") return null;
   try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
   const stamp=new Date().toISOString().replace(/[:.]/g,"-");
   const target=path.join(backupDir,`master-data-reconcile-pre-${stamp}.sqlite`);
@@ -647,10 +647,10 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
-if(setting("master_data_reconcile_version")!=="2026-09-30-relational-2"){
+if(setting("master_data_reconcile_version")!=="2026-09-30-full-33-column-3"){
   const replay=db.transaction(()=>rehydrateStoredMasterData(db))();
   const summary=db.transaction(()=>reconcileExistingMasterData(db))();
-  setSetting("master_data_reconcile_version","2026-09-30-relational-2");
+  setSetting("master_data_reconcile_version","2026-09-30-full-33-column-3");
   console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}`);
 }
 seedWorkshopUxV5();
