@@ -226,3 +226,19 @@ test("source relationship reconciliation restores all nine pianos for source cli
   assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(clientId).c,9);
   db.close();
 });
+
+
+test("production relation repair falls back to legacy import rows when the new source audit table is still empty",()=>{
+  const db=makeDb();
+  const clientId=Number(db.prepare("INSERT INTO clients(name,email) VALUES(?,?)").run("Production Owner","prod-owner@example.test").lastInsertRowid);
+  const pianoId=Number(db.prepare("INSERT INTO pianos(client_id,brand,model,serial_number) VALUES(NULL,?,?,?)").run("Steinway & Sons","B","PROD-1").lastInsertRowid);
+  db.prepare("INSERT INTO master_data_client_source_map(source_name,source_client_id,client_id) VALUES('PROD_SOURCE','3084',?)").run(clientId);
+  db.prepare("INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id) VALUES('PROD_SOURCE','4907',?,NULL)").run(pianoId);
+  db.prepare("INSERT INTO master_data_import_rows(source_name,source_instrument_id,source_client_id,source_row_number,client_id,piano_id,raw_json) VALUES('PROD_SOURCE','4907','3084',3,NULL,?,'{}')").run(pianoId);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows").get().c,0);
+  const summary=reconcileExistingMasterData(db);
+  assert.equal(summary.relinkedPianos,1);
+  assert.equal(db.prepare("SELECT client_id FROM pianos WHERE id=?").get(pianoId).client_id,clientId);
+  assert.equal(db.prepare("SELECT client_id FROM master_data_import_rows WHERE source_name='PROD_SOURCE' AND source_instrument_id='4907'").get().client_id,clientId);
+  db.close();
+});
