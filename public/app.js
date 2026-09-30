@@ -341,7 +341,7 @@ async function masterSaveCurrentInlineForm({renderAfter=false}={}){
   }
   if(pianoForm){
     if(!pianoForm.reportValidity())return false;
-    const body=Object.fromEntries(new FormData(pianoForm));body.client_id=Number(body.client_id);if(body.build_year==="")body.build_year=null;
+    const body=Object.fromEntries(new FormData(pianoForm));body.client_id=body.client_id?Number(body.client_id):null;if(body.build_year==="")body.build_year=null;
     try{
       const saved=await api(`/api/pianos/${state.selectedPianoId}`,{method:"PUT",body:JSON.stringify(body)});
       const index=state.pianos.findIndex(row=>Number(row.id)===Number(saved.id));
@@ -506,7 +506,7 @@ function clientStructuredFields(client={}){
     <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>`;
 }
 function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
-  const selectedOwnerId=Number(ownerId??piano.client_id||0)||null;
+  const selectedOwnerId=Number((ownerId??piano.client_id)||0)||null;
   return `
     <div class="master-form-section full"><strong>${tr("Ownership & identification","Tulajdonos és azonosítás")}</strong><small>${tr("Missing values never hide the piano; they stay editable as data pending.","A hiányzó mezők miatt a zongora nem tűnik el; adatpótlásra váró, szerkeszthető mezők maradnak.")}</small></div>
     <label class="field"><span>${tr("Owner","Tulajdonos")}</span><select name="client_id"><option value="" ${selectedOwnerId?"":"selected"}>${masterPendingText()}</option>${state.clients.map(row=>`<option value="${row.id}" ${Number(row.id)===Number(selectedOwnerId)?"selected":""}>${esc(row.name)}</option>`).join("")}</select></label>
