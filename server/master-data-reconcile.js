@@ -300,6 +300,67 @@ function persistImportRow(db,{sourceName,record,clientId,pianoId}){
     }
   }
 }
+function storedRecord(row){
+  let raw={};try{raw=JSON.parse(String(row.raw_json||"{}"));}catch(_error){raw={};}
+  const values=Array.isArray(raw.values)?raw.values:[];
+  const instrument={...(raw.instrument||{})},client={...(raw.client||{})};
+  const take=(target,key,index,max=5000)=>{if(clean(target[key])===""&&values[index]!==undefined)target[key]=clean(values[index],max);};
+  take(instrument,"category",1,80);take(instrument,"brand",2,200);take(instrument,"model",3,200);take(instrument,"size_display",4,120);take(instrument,"color",5,160);
+  take(instrument,"serial_number",6,200);if(instrument.build_year===undefined||instrument.build_year===null)instrument.build_year=validYear(values[7]);
+  take(instrument,"note",8,4000);take(instrument,"date_of_purchase",9,120);take(instrument,"warranty",10,300);take(instrument,"last_serviced_at",11,120);
+  take(instrument,"last_service_title",12,300);take(instrument,"last_service_description",13,3000);take(instrument,"next_service_date",14,120);
+  take(instrument,"latest_info_frequency",15,120);take(instrument,"latest_info_humidity",16,120);take(instrument,"latest_info_temperature",17,120);
+  take(client,"first_name",19,160);take(client,"last_name",20,160);take(client,"company_name",21,240);take(client,"contact_name",22,240);take(client,"street",23,300);
+  take(client,"city",24,200);take(client,"district",25,160);take(client,"postcode",26,80);take(client,"country",27,160);take(client,"mobile_phone",28,120);
+  take(client,"line_phone",29,120);take(client,"email",30,320);take(client,"notes",31,5000);take(client,"short_memo_to_name",32,1000);
+  instrument.source_id=clean(row.source_instrument_id,80)||clean(instrument.source_id,80);
+  if(!clean(instrument.brand))instrument.brand="No brand";
+  client.source_id=clean(row.source_client_id,80)||clean(client.source_id,80);
+  client.email=normEmail(client.email);
+  return {row_number:Number(row.source_row_number||0),instrument,client,raw:{columns:Array.isArray(raw.columns)?raw.columns:[],values, instrument:{...instrument},client:{...client}}};
+}
+function rehydrateStoredMasterData(db){
+  if(!tableExists(db,"master_data_import_rows"))return {rows:0,clients:0,pianos:0,createdPianos:0};
+  const stored=db.prepare("SELECT source_name,source_instrument_id,source_client_id,source_row_number,client_id,piano_id,raw_json FROM master_data_import_rows WHERE raw_json IS NOT NULL AND TRIM(raw_json)<>'' ORDER BY source_name,source_row_number,source_instrument_id").all();
+  if(!stored.length)return {rows:0,clients:0,pianos:0,createdPianos:0};
+  const parsed=stored.map(row=>({...row,record:storedRecord(row)})),groups=new Map();
+  for(const item of parsed){
+    const key=`${item.source_name}\u0000${item.record.client.source_id||"ROW:"+item.record.row_number}`;
+    if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item.record.client);
+  }
+  for(const item of parsed){
+    const key=`${item.source_name}\u0000${item.record.client.source_id||"ROW:"+item.record.row_number}`;
+    item.record.client.client_type=classifyClientRows(groups.get(key)||[item.record.client]);
+  }
+  const clientCache=new Map();let clients=0,pianos=0,createdPianos=0;
+  for(const item of parsed){
+    const record=item.record,key=`${item.source_name}\u0000${record.client.source_id||"ROW:"+record.row_number}`;let client=null;
+    if(hasClientData(record.client)){
+      if(clientCache.has(key))client=clientCache.get(key);
+      else{const result=upsertSourceClient(db,record.client,item.source_name);client=result?.row||null;clientCache.set(key,client);if(client)clients++;}
+    }
+    let piano=item.piano_id?db.prepare("SELECT * FROM pianos WHERE id=?").get(item.piano_id):null;
+    if(!piano)piano=sourcePianoRow(db,item.source_name,sourceInstrumentKey(record));
+    if(piano)piano=updatePianoFromSource(db,piano,record.instrument,client?.id??null);
+    else{
+      const info=db.prepare(`INSERT INTO pianos(client_id,category,brand,model,serial_number,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+        client?.id||null,clean(record.instrument.category,80)||null,clean(record.instrument.brand,200)||"No brand",clean(record.instrument.model,200)||null,
+        clean(record.instrument.serial_number,200)||null,clean(record.instrument.last_serviced_at,120)||null,clean(record.instrument.last_service_title,300)||null,
+        clean(record.instrument.last_service_description,3000)||null,clean(record.instrument.next_service_date,120)||null,clean(record.instrument.date_of_purchase,120)||null,
+        clean(record.instrument.warranty,300)||null,clean(record.instrument.latest_info_frequency,120)||null,clean(record.instrument.latest_info_humidity,120)||null,
+        clean(record.instrument.latest_info_temperature,120)||null,record.instrument.build_year??null,clean(record.instrument.size_display,120)||null,clean(record.instrument.color,160)||null,clean(record.instrument.note,5000)||null
+      );
+      piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));createdPianos++;
+    }
+    if(tableExists(db,"master_data_piano_source_map"))db.prepare(`INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id,updated_at)
+      VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .run(item.source_name,sourceInstrumentKey(record),piano.id);
+    persistImportRow(db,{sourceName:item.source_name,record,clientId:piano.client_id,pianoId:piano.id});pianos++;
+  }
+  return {rows:parsed.length,clients,pianos,createdPianos};
+}
+
 function repairSourceRelationships(db){
   if(!tableExists(db,"master_data_client_source_map")||!tableExists(db,"master_data_piano_source_map"))return {relinkedPianos:0,auditRowsUpdated:0};
   const sourceRows=tableExists(db,"master_data_source_rows")
@@ -395,4 +456,4 @@ function reconcileExistingMasterData(db){
   const relationshipRepairBefore=repairSourceRelationships(db),resolvedLegacyReviews=promotePendingReviews(db),normalizedPianos=normalizeExistingPianos(db),mergedClients=mergeExistingClients(db),relationshipRepairAfter=repairSourceRelationships(db),mergedPianos=mergeExistingPianos(db);
   return {mergedClients,mergedPianos,normalizedPianos,resolvedLegacyReviews,relinkedPianos:relationshipRepairBefore.relinkedPianos+relationshipRepairAfter.relinkedPianos,reviewRequired:0};
 }
-module.exports={parseLegacyInstrumentClientCsv,importLegacyInstrumentClientCsv,reconcileExistingMasterData,repairSourceRelationships,classifyClientRows,normSerial,brandFamily,pianoClassified};
+module.exports={parseLegacyInstrumentClientCsv,importLegacyInstrumentClientCsv,reconcileExistingMasterData,repairSourceRelationships,rehydrateStoredMasterData,classifyClientRows,normSerial,brandFamily,pianoClassified};
