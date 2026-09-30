@@ -10,7 +10,7 @@ const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-driven",()=>{
   const html=read("public/index.html"),v6=read("public/v6.js"),css=read("public/styles.css"),sw=read("public/service-worker.js");
   assert.match(html,/id="appSidebar"/);
-  assert.match(html,/id="sidebarToggle"/);
+  assert.match(html,/id="sidebarToggle"/);\n  assert.match(html,/id="headerSidebarToggle"/);
   assert.match(html,/id="themeToggle"/);
   assert.doesNotMatch(html,/id="loginThemeToggle"/);
   assert.match(html,/mobile-intake-primary/);
@@ -23,13 +23,13 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(html,/src="\/v6\.js"/);
   assert.match(v6,/kh_theme_user_/);
   assert.match(v6,/\/api\/me\/preferences/);
-  assert.match(v6,/kh_sidebar_collapsed_/);
+  assert.match(v6,/kh_sidebar_collapsed_/);\n  assert.match(v6,/headerSidebarToggle/);\n  assert.match(v6,/v6SyncSidebarButtons/);\n  assert.match(css,/\\.header-sidebar-toggle/);
   assert.match(css,/:root\[data-theme="dark"\]/);
   assert.match(css,/:root\[data-theme="light"\]/);
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v25-master-data-contract-status/);
+  assert.match(sw,/klavierhaus-admin-v26-master-data-direct-load-sidebar-toggle/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -275,7 +275,7 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v25-master-data-contract-status/);
+  assert.match(sw,/klavierhaus-admin-v26-master-data-direct-load-sidebar-toggle/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
 
@@ -292,5 +292,5 @@ test("Responsive PWA layout keeps intake tiles compact and removes desktop-only 
   assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
   assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
   assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
-  assert.match(sw,/klavierhaus-admin-v25-master-data-contract-status/);
+  assert.match(sw,/klavierhaus-admin-v26-master-data-direct-load-sidebar-toggle/);
 });
