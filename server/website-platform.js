@@ -11,7 +11,7 @@ const { createIntegrationCipher, saveIntegrationProvider, getIntegrationProvider
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
 const LEAD_STATUSES = new Set(["NEW", "CONTACTED", "IN_DISCUSSION", "APPOINTMENT_SCHEDULED", "CLOSED", "REJECTED"]);
-const SEO_PAGE_KEYS = Object.freeze(["home", "story", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy", "ticketTerms"]);
+const SEO_PAGE_KEYS = Object.freeze(["home", "our", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy"]);
 const DEFAULT_SEO_SETTINGS = Object.freeze({
   enabled: true,
   global_keywords_en: ["Klavierhaus", "piano restoration", "piano tuning", "concert piano services", "piano showroom New York", "Steinway pianos New York", "Fazioli pianos New York", "intimate classical music events"],
@@ -51,13 +51,16 @@ function normalizeKeywordList(value, maxItems = 40) {
 function normalizeSeoSettings(value, includeDefaults = true) {
   const source = value && typeof value === "object" ? value : {};
   const base = includeDefaults ? DEFAULT_SEO_SETTINGS : { enabled: true, global_keywords_en: [], global_keywords_hu: [], page_keywords_en: {}, page_keywords_hu: {} };
+  const pageEn={...(source.page_keywords_en||{})},pageHu={...(source.page_keywords_hu||{})};
+  if(!pageEn.our&&pageEn.story)pageEn.our=pageEn.story;
+  if(!pageHu.our&&pageHu.story)pageHu.our=pageHu.story;
   const normalizePages = (input, fallback) => Object.fromEntries(SEO_PAGE_KEYS.map((key) => [key, normalizeKeywordList(input?.[key] ?? fallback?.[key] ?? [])]));
   return {
     enabled: source.enabled !== false,
     global_keywords_en: normalizeKeywordList(source.global_keywords_en ?? base.global_keywords_en),
     global_keywords_hu: normalizeKeywordList(source.global_keywords_hu ?? base.global_keywords_hu),
-    page_keywords_en: normalizePages(source.page_keywords_en, base.page_keywords_en),
-    page_keywords_hu: normalizePages(source.page_keywords_hu, base.page_keywords_hu)
+    page_keywords_en: normalizePages(pageEn, base.page_keywords_en),
+    page_keywords_hu: normalizePages(pageHu, base.page_keywords_hu)
   };
 }
 
