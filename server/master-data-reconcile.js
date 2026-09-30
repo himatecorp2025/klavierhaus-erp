@@ -65,7 +65,7 @@ function parseLegacyInstrumentClientCsv(content){
       postcode:clean(row[26],80),country:clean(row[27],160),mobile_phone:clean(row[28],120),line_phone:clean(row[29],120),
       email:normEmail(row[30]),notes:clean(row[31],5000),short_memo_to_name:clean(row[32],1000)
     };
-    return {row_number:index+3,instrument,client,raw:{instrument:{...instrument},client:{...client}}};
+    return {row_number:index+3,instrument,client,raw:{columns:[...headers],values:row.slice(),instrument:{...instrument},client:{...client}}};
   });
 }
 function combineNotes(...values){return [...new Set(values.flatMap(value=>String(value||"").split(/\n+/)).map(value=>value.trim()).filter(Boolean))].join("\n");}
