@@ -630,7 +630,13 @@ async function handleMasterTool(kind){
   updateMasterToolbar();renderMasterList();void renderMasterDetail();
 }
 function masterQuery(){return String(state.masterSearch||"").trim().toLowerCase();}
-function masterSearchMatch(values,q){return values.some(value=>String(value??"").toLowerCase().includes(q));}
+function masterSearchNormalize(value){return String(value??"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
+function masterSearchMatch(values,q){
+  const haystack=masterSearchNormalize(values.filter(value=>value!==null&&value!==undefined).join(" ")),normalized=masterSearchNormalize(q);
+  if(!normalized)return true;
+  const tokens=normalized.split(/\s+/).filter(token=>token.length>1||/^\d+$/.test(token));
+  return (tokens.length?tokens:[normalized]).every(token=>haystack.includes(token));
+}
 function masterClientSearchValues(client={}){
   return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name];
 }
