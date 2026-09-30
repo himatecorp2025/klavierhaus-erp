@@ -134,7 +134,7 @@ function messengerConversationRow(row){
     '<span class="messenger-avatar" aria-hidden="true">'+esc(messengerInitials(name))+'</span>'+
     '<span class="messenger-list-copy"><span class="messenger-list-top"><strong>'+esc(name)+'</strong><small>'+esc(messengerDate(row.last_message_at||row.last_activity_at||row.created_at,{timeOnly:true}))+'</small></span>'+
     '<span class="messenger-preview">'+esc(preview)+'</span>'+
-    '<span class="messenger-list-meta"><em class="status-pill">'+esc(waiting?tr("After hours","Zárvatartás után"):messengerStatusLabel(row.status))+'</em>'+(unread?'<b class="messenger-unread-dot" aria-label="'+esc(tr("Unread","Olvasatlan"))+'"></b>':"")+'</span></span>'+
+    '<span class="messenger-list-meta"><em class="status-pill">'+esc(waiting?tr("After hours","Zárvatartás után"):messengerStatusLabel(row.status))+'</em>'+(unread?'<span class="messenger-reply-waiting" aria-label="'+esc(tr("Waiting for staff reply","Munkatársi válaszra vár"))+'">'+messengerNavIcon("waiting")+'</span>':"")+'</span></span>'+
   '</button>';
 }
 function messengerRenderPeople(host){
