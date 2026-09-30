@@ -515,9 +515,10 @@ function openMasterMap(address){
 function masterPendingText(){return tr("Data pending","Adatpótlásra vár");}
 function masterDateInputValue(value){
   const raw=String(value??"").trim();if(!raw)return "";
-  const iso=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  let match=raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-  if(match){const a=Number(match[1]),b=Number(match[2]),year=match[3],month=state.language==="hu"?b:a,day=state.language==="hu"?a:b;if(month>=1&&month<=12&&day>=1&&day<=31)return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;}
+  let match=raw.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})[.]?(?:[T\s].*)?$/);
+  if(match){const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),probe=new Date(Date.UTC(year,month-1,day));if(probe.getUTCFullYear()===year&&probe.getUTCMonth()===month-1&&probe.getUTCDate()===day)return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;}
+  match=raw.match(/^(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(\d{4})[.]?$/);
+  if(match){const first=Number(match[1]),second=Number(match[2]),year=Number(match[3]),month=state.language==="hu"?second:first,day=state.language==="hu"?first:second,probe=new Date(Date.UTC(year,month-1,day));if(probe.getUTCFullYear()===year&&probe.getUTCMonth()===month-1&&probe.getUTCDate()===day)return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;}
   const parsed=new Date(raw);if(Number.isFinite(parsed.getTime()))return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth()+1).padStart(2,"0")}-${String(parsed.getUTCDate()).padStart(2,"0")}`;
   return "";
 }
