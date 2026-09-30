@@ -1098,6 +1098,7 @@ CREATE TABLE IF NOT EXISTS clients (
   address TEXT,
   notes TEXT,
   short_memo_to_name TEXT,
+  last_visit_at TEXT,
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
   client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
