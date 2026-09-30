@@ -84,7 +84,8 @@ function derivedSeoKeywords(values, language) {
 function seoKeywords({ seoConfig, key, language, page = null, title = "", description = "" }) {
   const config = normalizedSeoConfig(seoConfig);
   if (!config.enabled) return [];
-  const pageKeywords = language === "hu" ? config.page_keywords_hu?.[key] : config.page_keywords_en?.[key];
+  const seoKey=key==="our"?"story":key;
+  const pageKeywords = language === "hu" ? (config.page_keywords_hu?.[key]||config.page_keywords_hu?.[seoKey]) : (config.page_keywords_en?.[key]||config.page_keywords_en?.[seoKey]);
   const configured = [...(language === "hu" ? config.global_keywords_hu : config.global_keywords_en), ...(Array.isArray(pageKeywords) ? pageKeywords : [])];
   const sectionText = Array.isArray(page?.sections) ? page.sections.flatMap((section) => [section?.title, section?.intro, ...(Array.isArray(section?.body) ? section.body : [section?.body])]) : [];
   return normalizedSeoKeywords([...configured, ...derivedSeoKeywords([title, description, page?.hero?.title, page?.hero?.lead, ...sectionText], language)]).slice(0, 32);
