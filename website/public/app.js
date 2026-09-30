@@ -404,7 +404,7 @@ function privatePickerSelectDate(picker,dateKey){
   const state=privatePickerGet(picker),parts=privateDateParts(dateKey);if(!parts)return;
   state.selectedDate=dateKey;state.viewYear=parts.year;state.viewMonth=parts.month-1;
   const value=picker.querySelector("[data-private-date-value]"),popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");
-  if(value)value.textContent=privateDateLabel(dateKey);if(popover)popover.hidden=true;if(trigger)trigger.setAttribute("aria-expanded","false");
+  if(value)value.textContent=privateDateLabel(dateKey);if(popover)popover.hidden=true;picker.classList.remove("is-open");if(trigger)trigger.setAttribute("aria-expanded","false");
   privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);privatePickerLoadSlots(picker,dateKey);
 }
 function privatePickerReset(form){
@@ -414,21 +414,39 @@ function privatePickerReset(form){
   const value=picker.querySelector("[data-private-date-value]"),hidden=picker.querySelector("[data-private-scheduled-at]"),slots=picker.querySelector("[data-private-slots]"),hint=picker.querySelector("[data-private-slot-hint]"),popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");
   if(value)value.textContent=language==="hu"?"Válasszon dátumot":"Choose a date";if(hidden)hidden.value="";if(slots)slots.innerHTML="";
   if(hint)hint.textContent=language==="hu"?"Válasszon dátumot, majd a rendszer csak a ténylegesen szabad kezdési időpontokat mutatja.":"Choose a date and we will show only genuinely available start times.";
-  if(popover)popover.hidden=true;if(trigger)trigger.setAttribute("aria-expanded","false");
+  if(popover)popover.hidden=true;picker.classList.remove("is-open");if(trigger)trigger.setAttribute("aria-expanded","false");
   privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);
 }
 function privatePickerInit(picker){
-  if(picker.dataset.privatePickerBound==="1")return;picker.dataset.privatePickerBound="1";
-  const trigger=picker.querySelector("[data-private-date-trigger]"),popover=picker.querySelector("[data-private-calendar]"),year=picker.querySelector("[data-private-calendar-year]"),month=picker.querySelector("[data-private-calendar-month]");
+  if(!picker)return null;
+  if(picker.dataset.privatePickerBound!=="1"){
+    picker.dataset.privatePickerBound="1";
+    const trigger=picker.querySelector("[data-private-date-trigger]"),popover=picker.querySelector("[data-private-calendar]"),year=picker.querySelector("[data-private-calendar-year]"),month=picker.querySelector("[data-private-calendar-month]");
+    trigger?.addEventListener("click",event=>{
+      event.preventDefault();event.stopPropagation();
+      if(!popover)return;
+      const opening=popover.hidden;popover.hidden=!opening;picker.classList.toggle("is-open",opening);trigger.setAttribute("aria-expanded",opening?"true":"false");
+      if(opening){privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);}
+    });
+    year?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewYear=Number(year.value);privatePickerRenderCalendar(picker);});
+    month?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewMonth=Number(month.value);privatePickerRenderCalendar(picker);});
+  }
   privatePickerRenderControls(picker);privatePickerRenderCalendar(picker);
-  trigger?.addEventListener("click",()=>{if(!popover)return;popover.hidden=!popover.hidden;trigger.setAttribute("aria-expanded",popover.hidden?"false":"true");});
-  year?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewYear=Number(year.value);privatePickerRenderCalendar(picker);});
-  month?.addEventListener("change",()=>{const state=privatePickerGet(picker);state.viewMonth=Number(month.value);privatePickerRenderCalendar(picker);});
+  return picker;
 }
-document.querySelectorAll("[data-private-slot-picker]").forEach(privatePickerInit);
+function privatePickerEnsure(root=document){
+  const pickers=[];
+  if(root?.matches?.("[data-private-slot-picker]"))pickers.push(root);
+  root?.querySelectorAll?.("[data-private-slot-picker]")?.forEach(picker=>pickers.push(picker));
+  pickers.forEach(privatePickerInit);
+  return pickers[0]||null;
+}
+privatePickerEnsure(document);
 document.addEventListener("click",event=>{
   document.querySelectorAll("[data-private-slot-picker]").forEach(picker=>{
-    if(picker.contains(event.target))return;const popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");if(popover&&!popover.hidden){popover.hidden=true;trigger?.setAttribute("aria-expanded","false");}
+    if(picker.contains(event.target))return;
+    const popover=picker.querySelector("[data-private-calendar]"),trigger=picker.querySelector("[data-private-date-trigger]");
+    if(popover&&!popover.hidden){popover.hidden=true;picker.classList.remove("is-open");trigger?.setAttribute("aria-expanded","false");}
   });
 });
 
@@ -449,7 +467,7 @@ document.querySelectorAll("[data-service-card]").forEach((card) => {
 document.querySelectorAll("[data-service-request]").forEach((button) => button.addEventListener("click", () => {
   if (!serviceDialog) return;
   serviceDialogTrigger = button;
-  const form = serviceDialog.querySelector("[data-service-form]");form?.reset();privatePickerReset(form);
+  const form = serviceDialog.querySelector("[data-service-form]");privatePickerEnsure(form);form?.reset();privatePickerReset(form);
   if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
   const title=serviceDialog.querySelector("[data-service-title]");if(title)title.textContent=button.dataset.serviceTitle||"";
   const image=serviceDialog.querySelector("[data-service-image]");
@@ -477,7 +495,7 @@ const privateViewingDialog=document.querySelector("[data-private-viewing-dialog]
 let privateViewingTrigger=null;
 document.querySelectorAll("[data-private-viewing-open]").forEach((button)=>button.addEventListener("click",()=>{
   if(!privateViewingDialog)return;privateViewingTrigger=button;
-  const form=privateViewingDialog.querySelector("[data-private-viewing-form]");form?.reset();privatePickerReset(form);
+  const form=privateViewingDialog.querySelector("[data-private-viewing-form]");privatePickerEnsure(form);form?.reset();privatePickerReset(form);
   if(form?.elements.piano_id)form.elements.piano_id.value=button.dataset.pianoId||"";
   if(form?.elements.service_id)form.elements.service_id.value=button.dataset.serviceId||"";
   const context=privateViewingDialog.querySelector("[data-private-viewing-context]");
