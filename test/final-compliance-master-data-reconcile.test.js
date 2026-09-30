@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const Database=require("better-sqlite3");
-const {reconcileExistingMasterData,importLegacyInstrumentClientCsv}=require("../server/master-data-reconcile");
+const {reconcileExistingMasterData,importLegacyInstrumentClientCsv,rehydrateStoredMasterData}=require("../server/master-data-reconcile");
 
 function makeDb(){
   const db=new Database(":memory:");
@@ -240,5 +240,30 @@ test("production relation repair falls back to legacy import rows when the new s
   assert.equal(summary.relinkedPianos,1);
   assert.equal(db.prepare("SELECT client_id FROM pianos WHERE id=?").get(pianoId).client_id,clientId);
   assert.equal(db.prepare("SELECT client_id FROM master_data_import_rows WHERE source_name='PROD_SOURCE' AND source_instrument_id='4907'").get().client_id,clientId);
+  db.close();
+});
+
+
+test("stored raw source replay restores normalized piano data without changing original raw_json",()=>{
+  const db=makeDb();
+  const csv=sourceCsv([sourceRow({instrumentId:"R-1",category:"grand",brand:"Fazioli",model:"F212",size:"212",color:"Ebony High Gloss",serial:"RAW-212",year:"2020",instrumentNote:"Preserve raw",lastServiceDate:"2026-01-02",lastServiceTitle:"Tuning",clientId:"R-C1",first:"Replay",last:"Owner",street:"1 Replay Ave",city:"New York",district:"NY",postcode:"10001",country:"United States",email:"replay@example.test"})]);
+  importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"REPLAY_TEST"});
+  const mapped=db.prepare("SELECT piano_id,client_id,raw_json FROM master_data_import_rows WHERE source_name='REPLAY_TEST' AND source_instrument_id='R-1'").get(),rawBefore=mapped.raw_json;
+  db.prepare("DELETE FROM master_data_source_rows WHERE source_name='REPLAY_TEST'").run();
+  db.prepare("UPDATE pianos SET client_id=NULL,model=NULL,size_display=NULL,color=NULL,serial_number=NULL,build_year=NULL,last_serviced_at=NULL,last_service_title=NULL,notes=NULL WHERE id=?").run(mapped.piano_id);
+  const replay=rehydrateStoredMasterData(db);
+  assert.equal(replay.rows,1);
+  const piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(mapped.piano_id);
+  assert.equal(piano.client_id,mapped.client_id);
+  assert.equal(piano.model,"F212");
+  assert.equal(piano.size_display,"212");
+  assert.equal(piano.color,"Ebony High Gloss");
+  assert.equal(piano.serial_number,"RAW-212");
+  assert.equal(piano.build_year,2020);
+  assert.equal(piano.last_serviced_at,"2026-01-02");
+  assert.equal(piano.last_service_title,"Tuning");
+  assert.equal(piano.notes,"Preserve raw");
+  assert.equal(db.prepare("SELECT raw_json FROM master_data_import_rows WHERE source_name='REPLAY_TEST' AND source_instrument_id='R-1'").get().raw_json,rawBefore);
+  assert.equal(db.prepare("SELECT raw_sha256 FROM master_data_source_rows WHERE source_name='REPLAY_TEST'").get().raw_sha256.length,64);
   db.close();
 });
