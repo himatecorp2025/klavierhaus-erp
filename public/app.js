@@ -205,13 +205,13 @@ function renderNotificationDrawer(){
   const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
   $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
   $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
-  $("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
-  $("[data-notification-view]",list).forEach(button=>button.addEventListener("click",async event=>{
+  list.querySelectorAll("[data-notification-remind]").forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
+  list.querySelectorAll("[data-notification-view]").forEach(button=>button.addEventListener("click",async event=>{
     event.stopPropagation();const row=rows.find(item=>String(item.id)===String(button.dataset.notificationView));if(!row)return;
     try{await api("/api/notifications/"+encodeURIComponent(row.id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
     await notificationNavigate(row);
   }));
-  $("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
+  list.querySelectorAll("[data-notification-card]").forEach(card=>card.addEventListener("click",async event=>{
     if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
     try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
     if(row?.action_url)await notificationNavigate(row);
