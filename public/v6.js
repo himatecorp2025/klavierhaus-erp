@@ -9,10 +9,10 @@ const v6Original={
   showLogin,showApp,setSession,loadBranding,renderProfile,openUserDialog,renderCms,renderIntake,openIntakeDialog,openConvertToJobDialog,r3OpenDirectExpenses
 };
 
-function v6UserThemeKey(){return state.user?.id?`kh_theme_user_${state.user.id}`:"kh_login_theme";}
+function v6UserThemeKey(){return state.user?.id?`kh_theme_user_${state.user.id}`:"kh_theme";}
 function v6ResolveTheme(){
   if(state.user?.theme_preference&&["dark","light"].includes(state.user.theme_preference))return state.user.theme_preference;
-  const local=localStorage.getItem(v6UserThemeKey());
+  const local=state.user?localStorage.getItem(v6UserThemeKey()):null;
   return local==="light"?"light":"dark";
 }
 function v6BrandAssetUrl(url){
@@ -20,29 +20,25 @@ function v6BrandAssetUrl(url){
 }
 function v6ApplyBrandLogo(){
   const branding=state.v6Branding||{},theme=document.documentElement.dataset.theme==="light"?"light":"dark";
-  const url=theme==="light"?(branding.erp_logo_light_url||branding.logo_url):(branding.erp_logo_dark_url||branding.logo_url);
-  if(!url)return;
-  for(const img of [$("#loginBrandLogo"),$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img)img.src=v6BrandAssetUrl(url);
+  const appUrl=theme==="light"?(branding.erp_logo_light_url||branding.logo_url):(branding.erp_logo_dark_url||branding.logo_url);
+  const loginUrl=branding.login_logo_url||branding.erp_logo_dark_url||branding.logo_url;
+  if(loginUrl&&$("#loginBrandLogo"))$("#loginBrandLogo").src=v6BrandAssetUrl(loginUrl);
+  if(appUrl){for(const img of [$("#headerBrandLogo"),$("#mobileBrandLogo")])if(img)img.src=v6BrandAssetUrl(appUrl);}
 }
 function v6ApplyTheme(theme,{save=false}={}){
-  const next=theme==="light"?"light":"dark";
+  const next=state.user&&theme==="light"?"light":"dark";
   document.documentElement.dataset.theme=next;
   document.documentElement.style.colorScheme=next;
   v6ApplyBrandLogo();
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content",next==="dark"?"#0f1115":"#f6f7f9");
-  localStorage.setItem(v6UserThemeKey(),next);
-  if(!state.user)localStorage.setItem("kh_login_theme",next);
+  if(state.user)localStorage.setItem(v6UserThemeKey(),next);
   $("#themeToggle")?.setAttribute("aria-pressed",String(next==="dark"));
-  $("#loginThemeToggle")?.setAttribute("aria-pressed",String(next==="dark"));
   if(save&&state.user){
     state.user.theme_preference=next;
     void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme:next})}).catch(error=>toast(humanError(error),"error"));
   }
 }
-function v6ToggleTheme(){
-  if(!state.user)state.v6LoginThemeTouched=true;
-  v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:Boolean(state.user)});
-}
+function v6ToggleTheme(){if(state.user)v6ApplyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",{save:true});}
 function v6SidebarKey(){return state.user?.id?`kh_sidebar_collapsed_${state.user.id}`:"kh_sidebar_collapsed";}
 function v6ApplySidebar(){
   const collapsed=localStorage.getItem(v6SidebarKey())==="1";
@@ -65,39 +61,61 @@ function v6OpenMore(){
     <button class="mobile-more-card" type="button" data-nav="finance"><span>$</span><strong>${tr("Finance","Pénzügy")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="documents"><span>▤</span><strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms"><span>◎</span><strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile & Settings","Profil és beállítások")}</strong></button>`;
+    <button class="mobile-more-card" type="button" data-nav="profile"><span>◉</span><strong>${tr("Profile","Profil")}</strong></button>
+    <button class="mobile-more-card" type="button" data-nav="settings"><span>⚙</span><strong>${tr("Settings","Beállítások")}</strong></button>`;
   popover.hidden=false;$("#mobileMoreButton")?.setAttribute("aria-expanded","true");
+}
+function v6SyncAccountChrome(){
+  if(!state.user)return;
+  const image=state.user.profile_image_url||"",initial=initials(state.user.name);
+  $("#profileInitials").textContent=initial;
+  const avatar=$("#profileAvatarImage");
+  if(avatar){avatar.hidden=!image;if(image)avatar.src=image;$("#profileInitials").hidden=Boolean(image);}
+  $("#profileMenuName").textContent=state.user.name||"";
+  $("#profileMenuRole").textContent=roleLabel(state.user.role);
+  const menuAvatar=$("#profileMenuAvatar");
+  if(menuAvatar)menuAvatar.innerHTML=image?`<img src="${esc(image)}" alt="">`:esc(initial);
+  const welcome=$("#headerWelcome");if(welcome)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
+}
+function v6CloseProfileMenu(){
+  const menu=$("#profileMenu");if(menu)menu.hidden=true;$("#profileButton")?.setAttribute("aria-expanded","false");
+}
+async function v6Logout(){
+  try{await api("/api/logout",{method:"POST"});}catch(_error){}
+  clearSession();v6CloseProfileMenu();showLogin();
 }
 function v6BindShell(){
   $("#themeToggle")?.addEventListener("click",v6ToggleTheme);
-  $("#loginThemeToggle")?.addEventListener("click",v6ToggleTheme);
   $("#sidebarToggle")?.addEventListener("click",v6ToggleSidebar);
   $("#mobileMoreButton")?.addEventListener("click",event=>{event.stopPropagation();v6OpenMore();});
   $("#mobileMoreClose")?.addEventListener("click",v6CloseMore);
-  document.addEventListener("click",event=>{const popover=$("#mobileMorePopover");if(popover&&!popover.hidden&&!event.target.closest("#mobileMorePopover,#mobileMoreButton"))v6CloseMore();});
+  $("#profileButton")?.addEventListener("click",event=>{event.stopPropagation();const menu=$("#profileMenu");if(!menu)return;menu.hidden=!menu.hidden;$("#profileButton").setAttribute("aria-expanded",String(!menu.hidden));});
+  $("#profileMenu")?.addEventListener("click",event=>{const action=event.target.closest("[data-profile-menu]")?.dataset.profileMenu;if(!action)return;v6CloseProfileMenu();if(action==="logout")void v6Logout();else void navTo(action);});
+  document.addEventListener("click",event=>{
+    const popover=$("#mobileMorePopover");if(popover&&!popover.hidden&&!event.target.closest("#mobileMorePopover,#mobileMoreButton"))v6CloseMore();
+    if(!event.target.closest("#profileMenu,#profileButton"))v6CloseProfileMenu();
+  });
 }
 showLogin=function(){
   v6Original.showLogin();
   state.user=null;
-  state.v6LoginThemeTouched=false;
-  v6ApplyTheme(localStorage.getItem("kh_login_theme")==="light"?"light":"dark");
+  document.documentElement.dataset.theme="dark";
+  document.documentElement.style.colorScheme="dark";
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content","#0f1115");
+  v6ApplyBrandLogo();
 };
 setSession=function(payload){
-  const loginTheme=document.documentElement.dataset.theme==="light"?"light":"dark";
-  const loginChoiceTouched=Boolean(state.v6LoginThemeTouched);
   v6Original.setSession(payload);
   state.user=payload.user;
-  const saved=localStorage.getItem(`kh_theme_user_${state.user.id}`);
-  const theme=loginChoiceTouched?loginTheme:(state.user.theme_preference||saved||"dark");
-  state.user.theme_preference=theme;
-  v6ApplyTheme(theme);
-  state.v6LoginThemeTouched=false;
-  if(loginChoiceTouched)void api("/api/me/preferences",{method:"PUT",body:JSON.stringify({theme})}).catch(()=>{});
+  const language=state.user.language_preference==="hu"?"hu":"en";
+  setLanguage(language,{save:false});
+  v6ApplyTheme(state.user.theme_preference||localStorage.getItem(v6UserThemeKey())||"dark");
 };
 showApp=function(){
   v6Original.showApp();
   v6ApplyTheme(v6ResolveTheme());
   v6ApplySidebar();
+  v6SyncAccountChrome();
 };
 loadBranding=async function(){
   try{
@@ -113,7 +131,7 @@ loadBranding=async function(){
     if(favicon)$("#appFavicon")?.setAttribute("href",v6BrandAssetUrl(favicon));
     const touch=branding.app_icon_url;
     if(touch)$("#appTouchIcon")?.setAttribute("href",v6BrandAssetUrl(touch));
-    document.title=`${branding.company_name||"Klavierhaus"} ERP`;
+    document.title=`${branding.company_name||"Klavierhaus"} System`;
   }catch(_error){}
 };
 
