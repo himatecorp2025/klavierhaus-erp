@@ -98,5 +98,5 @@ test("raw source rows are retained for audit while source IDs stay internal",()=
 });
 
 test("PWA cache is bumped for complete Master Data import",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v21-complete-master-data/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v22-relational-search-notifications/);
 });
