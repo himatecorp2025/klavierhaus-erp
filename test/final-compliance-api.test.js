@@ -743,6 +743,43 @@ test("Intake assessment PDF is exported and retained in Documents",async()=>{
 });
 
 
+test("Admin can delete and archive an Intake while retaining linked Master Data",async()=>{
+  const token=shared.adminToken;
+  const created=await request("/api/intake",{token,method:"POST",body:{
+    client_id:shared.client.id,
+    piano_id:shared.piano.id,
+    raw_client_name:shared.client.name,
+    raw_contact:shared.client.email,
+    service_location:"workshop",
+    reported_issue:"Temporary intake created to verify delete-and-archive lifecycle",
+    estimated_urgency:"normal"
+  }});
+  assert.equal(created.status,201,JSON.stringify(created.payload));
+  const intakeId=Number(created.payload.id);
+  const clientBefore=appDb.prepare("SELECT id,name FROM clients WHERE id=?").get(shared.client.id);
+  const pianoBefore=appDb.prepare("SELECT id,brand,model FROM pianos WHERE id=?").get(shared.piano.id);
+
+  const deleted=await request("/api/intake/"+intakeId,{token,method:"DELETE",body:{reason:"Acceptance test archive"}});
+  assert.equal(deleted.status,200,JSON.stringify(deleted.payload));
+  assert.equal(deleted.payload.ok,true);
+  assert.equal(Number(deleted.payload.deleted_intake_id),intakeId);
+  assert.ok(deleted.payload.archive_document?.id);
+  assert.equal(appDb.prepare("SELECT id FROM intake_leads WHERE id=?").get(intakeId),undefined);
+
+  const clientAfter=appDb.prepare("SELECT id,name FROM clients WHERE id=?").get(shared.client.id);
+  const pianoAfter=appDb.prepare("SELECT id,brand,model FROM pianos WHERE id=?").get(shared.piano.id);
+  assert.deepEqual(clientAfter,clientBefore);
+  assert.deepEqual(pianoAfter,pianoBefore);
+
+  const archived=await request("/api/archive/documents/"+deleted.payload.archive_document.id,{token});
+  assert.equal(archived.status,200,JSON.stringify(archived.payload));
+  assert.equal(archived.payload.category,"deleted_intake");
+  assert.equal(String(archived.payload.entity_id),String(intakeId));
+  assert.equal(archived.payload.metadata.source,"deleted_intake");
+  assert.equal(archived.payload.metadata.reason,"Acceptance test archive");
+});
+
+
 test("Private appointment requests require staff approval, preserve context and do not consume workshop capacity",async()=>{
   const token=shared.adminToken;
   appDb.prepare(`INSERT OR REPLACE INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,title_en,title_hu,image_url,availability_status,published)
