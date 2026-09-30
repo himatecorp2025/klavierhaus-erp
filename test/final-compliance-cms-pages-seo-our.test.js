@@ -46,7 +46,6 @@ test("CMS exposes clear page hierarchy, Our page, unified legal content and Chat
 
 test("public website SEO is server rendered and the audit checks actual fallback content plus image ALT",()=>{
   const publicRenderer=read("website/server/index.js");
-  const seo=read("server/website-platform.js");
   const audit=read("server/business-operations.js");
   const css=read("website/public/styles.css");
 
@@ -67,9 +66,7 @@ test("public website SEO is server rendered and the audit checks actual fallback
   assert.match(publicRenderer,/Sitemap:/);
   assert.match(publicRenderer,/sitemap\.xml/);
 
-  assert.match(seo,/SEO_PAGE_KEYS = Object\.freeze\(\["home", "our"/);
-  assert.doesNotMatch(seo,/SEO_PAGE_KEYS[^\n]*"ticketTerms"/);
-  assert.match(seo,/pageEn\.story/);
+  assert.match(publicRenderer,/const seoKey=key==="our"\?"story":key/);
   assert.match(audit,/fallbackPage\(pageKey,language\)/);
   assert.match(audit,/MISSING_IMAGE_ALT/);
   assert.match(audit,/technical_seo/);
