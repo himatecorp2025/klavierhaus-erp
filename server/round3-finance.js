@@ -3,6 +3,7 @@
 const fs=require("node:fs");
 const path=require("node:path");
 const {generateBusinessInvoicePdf,generateJobCompletionReportPdf,generateMonthlyInvoiceReportPdf}=require("./document-pdf");
+const {refreshClientLastVisit}=require("./master-data-reconcile");
 
 const PAYMENT_METHODS=Object.freeze(["Cash","Credit Card / Stripe","Bank Transfer","Check"]);
 const INVOICE_STATUSES=Object.freeze(["draft","sent","paid","cancelled"]);
@@ -342,6 +343,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare(`UPDATE jobs SET stage='completed',workflow_stage_key='completed',completed_at=CURRENT_TIMESTAMP,completed_by_user_id=?,completed_by_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(actor.id,actor.name,jobId);
     db.prepare("UPDATE pianos SET last_serviced_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(nyDate(),before.piano_id);
+    if(before.client_id)refreshClientLastVisit(db,before.client_id);
     return jobForInvoice(jobId);
   }
   async function sendInvoiceNow(invoiceId,actor,languageOverride,recipientOverride){
