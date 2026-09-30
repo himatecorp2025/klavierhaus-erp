@@ -365,6 +365,9 @@ function registerWebsiteConversationRoutes({
     res.type(attachment.mime_type).download(filePath,attachment.original_name);
   });
 
+  const inactivityTimer=setInterval(()=>{try{closeStaleConversations();}catch(error){console.warn("[CUSTOMER-CONVERSATION-INACTIVITY]",error.message);}},5000);
+  inactivityTimer.unref?.();
+
   app.get("/api/support/holidays",auth,admin,(_req,res)=>res.json(db.prepare("SELECT * FROM support_holidays ORDER BY holiday_date").all()));
   app.put("/api/support/holidays/:date",auth,admin,(req,res)=>{
     const date=clean(req.params.date,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({error:"INVALID_SUPPORT_HOLIDAY_DATE"});
