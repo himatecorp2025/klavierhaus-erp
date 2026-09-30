@@ -281,7 +281,7 @@ function updatePianoFromSource(db,row,instrument,clientId){
   return db.prepare("SELECT * FROM pianos WHERE id=?").get(row.id);
 }
 function persistImportRow(db,{sourceName,record,clientId,pianoId}){
-  const sourceInstrumentId=sourceInstrumentKey(record),rawJson=JSON.stringify(record.raw),rawSha256=crypto.createHash("sha256").update(rawJson).digest("hex");
+  const sourceInstrumentId=sourceInstrumentKey(record),rawJson=record.raw_json_original!==undefined?String(record.raw_json_original):JSON.stringify(record.raw),rawSha256=crypto.createHash("sha256").update(rawJson).digest("hex");
   if(tableExists(db,"master_data_import_rows"))db.prepare(`INSERT INTO master_data_import_rows(source_name,source_instrument_id,source_client_id,source_row_number,client_id,piano_id,raw_json,imported_at,updated_at)
     VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET source_client_id=excluded.source_client_id,source_row_number=excluded.source_row_number,client_id=excluded.client_id,piano_id=excluded.piano_id,raw_json=excluded.raw_json,updated_at=CURRENT_TIMESTAMP`)
@@ -317,7 +317,7 @@ function storedRecord(row){
   if(!clean(instrument.brand))instrument.brand="No brand";
   client.source_id=clean(row.source_client_id,80)||clean(client.source_id,80);
   client.email=normEmail(client.email);
-  return {row_number:Number(row.source_row_number||0),instrument,client,raw:{columns:Array.isArray(raw.columns)?raw.columns:[],values, instrument:{...instrument},client:{...client}}};
+  return {row_number:Number(row.source_row_number||0),instrument,client,raw_json_original:String(row.raw_json||"{}"),raw:{...raw,columns:Array.isArray(raw.columns)?raw.columns:[],values:Array.isArray(raw.values)?raw.values:values,instrument:{...(raw.instrument||{}),...instrument},client:{...(raw.client||{}),...client}}};
 }
 function rehydrateStoredMasterData(db){
   if(!tableExists(db,"master_data_import_rows"))return {rows:0,clients:0,pianos:0,createdPianos:0};
