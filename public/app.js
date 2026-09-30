@@ -188,6 +188,7 @@ function notificationCard(row){
     <div class="notification-card-body"><div class="notification-card-title"><strong>${esc(title)}</strong><small>${esc(notificationDate(row.created_at))}</small></div>
       ${body?`<p>${esc(body)}</p>`:""}
       <div class="notification-card-actions">
+        ${row.action_url?`<button class="secondary-button compact-button" type="button" data-notification-view="${esc(row.id)}">↗ ${tr("View","Megnyitás")}</button>`:""}
         <button class="text-button" type="button" data-notification-remind="${esc(row.id)}">${tr("Remind later","Értesíts később")}</button>
         <button class="primary-button compact-button" type="button" data-notification-done="${esc(row.id)}">✓ ${tr("Done","Tudomásul vettem")}</button>
       </div>
@@ -204,15 +205,16 @@ function renderNotificationDrawer(){
   const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
   $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
   $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
-  $$("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
-  $$("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
+  $("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
+  $("[data-notification-view]",list).forEach(button=>button.addEventListener("click",async event=>{
+    event.stopPropagation();const row=rows.find(item=>String(item.id)===String(button.dataset.notificationView));if(!row)return;
+    try{await api("/api/notifications/"+encodeURIComponent(row.id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
+    await notificationNavigate(row);
+  }));
+  $("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
     if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
     try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
-    if(row?.action_url){
-      closeNotificationDrawer({restoreFocus:false});
-      if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}
-      else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));
-    }
+    if(row?.action_url)await notificationNavigate(row);
     card.classList.remove("is-unread");card.classList.add("is-read");
   }));
 }
@@ -389,7 +391,36 @@ async function navTo(view){
   state.view=view;history.replaceState({},"",`#${view}`);
   if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
-  void renderView();
+  return renderView();
+}
+function consumeDeepLink(){
+  const params=new URLSearchParams(location.search),view=params.get("view");
+  if(!view||!activeViews.has(view))return false;
+  state.view=view;
+  if(view==="master"){
+    const clientId=Number(params.get("client")||0),pianoId=Number(params.get("piano")||0);
+    if(clientId){state.selectedClientId=clientId;state.masterMode="CLIENTS";state.masterDetailKind="CLIENT";}
+    if(pianoId){state.selectedPianoId=pianoId;state.masterMode="PIANOS";state.masterDetailKind="PIANO";}
+  }else if(view==="intake"){
+    const intakeId=Number(params.get("intake")||0);if(intakeId)state.pendingIntakeEditId=intakeId;
+  }else if(view==="documents"){
+    const category=params.get("category"),archiveId=Number(params.get("archive")||0);
+    if(category)state.archiveCategory=category;if(archiveId)state.pendingArchiveId=archiveId;
+  }else if(view==="finance"){
+    const invoiceId=Number(params.get("invoice")||0);if(invoiceId)state.pendingNotificationInvoiceId=invoiceId;
+  }else if(view==="workshop"){
+    const jobId=Number(params.get("job")||0);if(jobId)state.pendingNotificationJobId=jobId;
+  }
+  history.replaceState({},"",`#${view}`);return true;
+}
+async function notificationNavigate(row){
+  if(!row?.action_url)return;
+  let url;try{url=new URL(row.action_url,location.origin);}catch(_error){return;}
+  const view=url.searchParams.get("view");
+  if(view&&activeViews.has(view)){
+    history.replaceState({},"",url.pathname+url.search+url.hash);consumeDeepLink();closeNotificationDrawer({restoreFocus:false});await renderView();return;
+  }
+  if(url.hash&&activeViews.has(url.hash.slice(1))){closeNotificationDrawer({restoreFocus:false});await navTo(url.hash.slice(1));}
 }
 function bindNavigation(){
   document.addEventListener("click",event=>{
@@ -415,6 +446,7 @@ $("#appDialog").addEventListener("click",event=>{if(event.target===$("#appDialog
 $("#appDialog").addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
 
 async function renderView(){
+  consumeDeepLink();
   const workspace=$("#workspace");workspace.innerHTML=loading();
   try{
     if(state.view==="workshop")await renderWorkshop();
