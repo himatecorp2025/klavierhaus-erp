@@ -559,6 +559,7 @@ CREATE TABLE IF NOT EXISTS customer_appointment_proposals (
   ends_at TEXT NOT NULL,
   assigned_user_id TEXT,
   phone TEXT,
+  appointment_reason TEXT NOT NULL DEFAULT 'OTHER' CHECK(appointment_reason IN ('PIANO_VIEWING','SERVICE_REQUEST','OTHER')),
   note TEXT,
   status TEXT NOT NULL DEFAULT 'PROPOSED' CHECK(status IN ('PROPOSED','ACCEPTED','DECLINED','CANCELLED')),
   private_appointment_id TEXT,
