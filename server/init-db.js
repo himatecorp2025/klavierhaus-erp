@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
-const {reconcileExistingMasterData,rehydrateStoredMasterData}=require("./master-data-reconcile");
+const {LEGACY_MASTER_SOURCE_NAME,auditMasterDataSource,reconcileExistingMasterData,rehydrateStoredMasterData}=require("./master-data-reconcile");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
@@ -93,7 +93,7 @@ function messengerV12Backup() {
   return target;
 }
 function masterDataReconcileBackup() {
-  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-relational-2") return null;
+  if (!fs.existsSync(dbPath) || !tableExists("app_settings") || setting("master_data_reconcile_version")==="2026-09-30-contract-3") return null;
   try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (_error) {}
   const stamp=new Date().toISOString().replace(/[:.]/g,"-");
   const target=path.join(backupDir,`master-data-reconcile-pre-${stamp}.sqlite`);
@@ -113,7 +113,7 @@ function prepareClientSegmentationCompatibility() {
   for(const [name,definition] of [
     ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],
     ["mobile_phone","TEXT"],["line_phone","TEXT"],["street","TEXT"],["city","TEXT"],["district","TEXT"],
-    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
+    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit_at","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
     ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL'"],
     ["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"]
   ])ensureColumn("clients",name,definition);
@@ -141,6 +141,7 @@ function prepareClientSegmentationCompatibility() {
       address TEXT,
       notes TEXT,
       short_memo_to_name TEXT,
+      last_visit_at TEXT,
       preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
       client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
       is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
@@ -155,12 +156,12 @@ function prepareClientSegmentationCompatibility() {
     )`);
     const legacyType=existing.has("client_type")?quoteName("client_type"):(existing.has("customer_type")?quoteName("customer_type"):"'INDIVIDUAL'");
     db.exec(`INSERT INTO "_clients_segment_v2"(
-      id,name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,
+      id,name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,last_visit_at,
       preferred_language,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,deleted_at,deleted_by_user_id,archive_document_id,deletion_reason,created_at,updated_at)
       SELECT
       ${value("id")},COALESCE(NULLIF(TRIM(${value("name","''")}),''),'Data pending'),${value("first_name")},${value("last_name")},${value("company_name")},${value("contact_name")},
       ${value("email")},${value("mobile_phone")},${value("line_phone")},${value("phone")},${value("street")},${value("city")},${value("district")},${value("postcode")},${value("country")},
-      ${value("address")},${value("notes")},${value("short_memo_to_name")},COALESCE(${value("preferred_language","'en'")},'en'),
+      ${value("address")},${value("notes")},${value("short_memo_to_name")},${value("last_visit_at")},COALESCE(${value("preferred_language","'en'")},'en'),
       CASE UPPER(COALESCE(${legacyType},'INDIVIDUAL'))
         WHEN 'PRIVATE' THEN 'INDIVIDUAL'
         WHEN 'INDIVIDUAL' THEN 'INDIVIDUAL'
@@ -376,7 +377,7 @@ db.pragma("foreign_keys = OFF");
 ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
 for(const [name,definition] of [
   ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],["mobile_phone","TEXT"],["line_phone","TEXT"],
-  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
+  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit_at","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
   ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
   ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
 ])ensureColumn("clients",name,definition);
@@ -646,11 +647,17 @@ function migrateFinalComplianceData() {
 }
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
-if(setting("master_data_reconcile_version")!=="2026-09-30-relational-2"){
+if(setting("master_data_reconcile_version")!=="2026-09-30-contract-3"){
   const replay=db.transaction(()=>rehydrateStoredMasterData(db))();
   const summary=db.transaction(()=>reconcileExistingMasterData(db))();
-  setSetting("master_data_reconcile_version","2026-09-30-relational-2");
-  console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}`);
+  const audit=auditMasterDataSource(db,{sourceName:LEGACY_MASTER_SOURCE_NAME});
+  if(audit.ok){
+    setSetting("master_data_reconcile_version","2026-09-30-contract-3");
+    setSetting("master_data_import_status","READY");
+  }else{
+    setSetting("master_data_import_status",audit.rows?"INCOMPLETE":"AWAITING_SOURCE");
+  }
+  console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}; contract_ok=${audit.ok}, contract_rows=${audit.rows}, contract_errors=${audit.errors.length}`);
 }
 seedWorkshopUxV5();
 
