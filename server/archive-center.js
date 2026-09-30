@@ -16,8 +16,6 @@ const MIMES=new Set([
 ]);
 function text(value,max=5000){return String(value??"").replace(/\u0000/g,"").trim().slice(0,max);}
 function integerId(value){const n=Number(value);return Number.isSafeInteger(n)&&n>0?n:null;}
-function tableExists(name){return Boolean(dbRef?.prepare?.("SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?").get(name));}
-let dbRef=null;
 function json(value){try{return JSON.parse(String(value||"{}"));}catch(_error){return {};}}
 function problem(code,status=400){const e=new Error(code);e.status=status;return e;}
 function respond(res,error){res.status(Number(error?.status||400)).json({error:error?.message||"ARCHIVE_REQUEST_FAILED"});}
@@ -48,7 +46,7 @@ function intakeAssessmentPdf({lead,items=[]}){
 }
 
 function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transactionalEmail,notifications=null}){
-  dbRef=db;
+  const tableExists=name=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?").get(name));
   const admin=permit("ADMIN");
   const staff=permit("ADMIN","MANAGER","WORKER");
   const target=path.join(uploadDir,"archive");
