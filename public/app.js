@@ -57,7 +57,7 @@ function humanError(error){
   const map={
     AUTH_REQUIRED:["Your session has expired.","A munkamenet lejárt."],INVALID_TOKEN:["Your session has expired.","A munkamenet lejárt."],SESSION_REVOKED:["Your session has expired.","A munkamenet lejárt."],
     CLIENT_NAME_REQUIRED:["Client name is required.","Az ügyfél neve kötelező."],INVALID_CLIENT_EMAIL:["Invalid client email.","Érvénytelen ügyfél e-mail."],INVALID_CLIENT_TYPE:["Choose Individual, Partner, Business or Institution.","Válassz Magánszemély, Partner, Üzleti vagy Intézményi típust."],
-    PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],
+    PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],MASTER_DATA_INTEGRITY_FAILED:["The CSV import was rolled back because the 33-column source contract did not pass.","A CSV-import vissza lett vonva, mert a 33 oszlopos forráskontraktus ellenőrzése nem ment át."],MASTER_DATA_CSV_FORMAT_UNSUPPORTED:["This is not the required 33-column Klavierhaus source CSV.","Ez nem a kötelező 33 oszlopos Klavierhaus forrás-CSV."],
     REPORTED_ISSUE_REQUIRED:["Describe the requested service or issue.","A hiba vagy igény leírása kötelező."],INVALID_PIANO_ID:["The selected piano does not belong to this client.","A kiválasztott zongora nem ehhez az ügyfélhez tartozik."],
     PERMISSION_DENIED:["You do not have permission for this action.","Nincs jogosultság ehhez a művelethez."],ADMIN_REQUIRED:["Admin permission is required.","Admin jogosultság szükséges."],
     JOB_TITLE_REQUIRED:["Job title is required.","A munka megnevezése kötelező."],JOB_MUST_BE_ACTIVATED:["Activate and schedule this job first.","A munkát előbb aktiválni és ütemezni kell."],
@@ -812,7 +812,9 @@ function pianoCard(piano){
   return `<button class="piano-card" type="button" data-piano-card="${piano.id}"><h3>${esc([masterValue(piano.brand,{brand:true}),piano.model].filter(Boolean).join(" "))}</h3><dl>
     <dt>${tr("Category","Kategória")}</dt><dd class="${masterPendingClass(piano.category)}">${esc(masterValue(piano.category))}</dd>
     <dt>${tr("Serial","Gyári szám")}</dt><dd class="${masterPendingClass(piano.serial_number)}">${esc(masterValue(piano.serial_number))}</dd>
+    <dt>${tr("Size","Méret")}</dt><dd class="${masterPendingClass(piano.size_display)}">${esc(masterValue(piano.size_display))}</dd>
     <dt>${tr("Color","Szín")}</dt><dd class="${masterPendingClass(piano.color)}">${esc(masterValue(piano.color))}</dd>
+    <dt>${tr("Year built","Gyártási év")}</dt><dd class="${masterPendingClass(piano.build_year)}">${esc(masterValue(piano.build_year))}</dd>
     <dt>${tr("Owner","Tulajdonos")}</dt><dd class="${masterPendingClass(piano.client_name)}">${esc(masterValue(piano.client_name))}</dd>
   </dl><div class="service-history"><strong>${tr("Last service","Utolsó szerviz")}</strong><br><span class="${masterPendingClass(piano.last_serviced_at)}">${esc(masterValue(piano.last_serviced_at))}</span>${piano.last_service_title?` · ${esc(piano.last_service_title)}`:""}</div></button>`;
 }
