@@ -87,8 +87,8 @@ function clientScore(row){return ["name","email","phone","address","notes","firs
 function repointClient(db,fromId,toId){
   for(const table of ["customer_conversations","private_appointments","private_appointment_requests","pianos","intake_leads","jobs","invoices","customer_communication_log"]){
     if(!tableExists(db,table))continue;
-    const columns=new Set(db.prepare(\`PRAGMA table_info("\${table}")\`).all().map(row=>row.name));if(!columns.has("client_id"))continue;
-    db.prepare(\`UPDATE "\${table}" SET client_id=? WHERE client_id=?\`).run(toId,fromId);
+    const columns=new Set(db.prepare(`PRAGMA table_info("${table}")`).all().map(row=>row.name));if(!columns.has("client_id"))continue;
+    db.prepare(`UPDATE "${table}" SET client_id=? WHERE client_id=?`).run(toId,fromId);
   }
   if(tableExists(db,"master_data_client_source_map"))db.prepare("UPDATE OR IGNORE master_data_client_source_map SET client_id=? WHERE client_id=?").run(toId,fromId);
   if(tableExists(db,"client_piano_review_queue"))db.prepare("UPDATE client_piano_review_queue SET client_id=? WHERE client_id=?").run(toId,fromId);
@@ -119,7 +119,7 @@ function mergeExistingClients(db){
     };
     const name=all.map(row=>clean(row.name)).filter(Boolean).sort((a,b)=>b.length-a.length)[0]||composeClientName(structured);
     const phone=composePhone(structured)||pick("phone"),address=composeAddress(structured)||pick("address");
-    db.prepare(\`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?\`)
+    db.prepare(`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(name,structured.first_name,structured.last_name,structured.company_name,structured.contact_name,structured.email,structured.mobile_phone,structured.line_phone,phone||null,structured.street,structured.city,structured.district,structured.postcode,structured.country,address||null,combineNotes(...all.map(row=>row.notes)),structured.short_memo_to_name,keeper.id);
     for(const duplicate of group.slice(1)){repointClient(db,duplicate.id,keeper.id);db.prepare("DELETE FROM clients WHERE id=?").run(duplicate.id);merged++;}
   }
@@ -134,7 +134,7 @@ function pianoScore(db,row){
   return score;
 }
 function repointPiano(db,fromId,toId){
-  for(const table of ["jobs","intake_leads"]){if(tableExists(db,table))db.prepare(\`UPDATE \${table} SET piano_id=? WHERE piano_id=?\`).run(toId,fromId);}
+  for(const table of ["jobs","intake_leads"]){if(tableExists(db,table))db.prepare(`UPDATE ${table} SET piano_id=? WHERE piano_id=?`).run(toId,fromId);}
   if(tableExists(db,"master_data_piano_source_map"))db.prepare("UPDATE OR IGNORE master_data_piano_source_map SET piano_id=?,review_id=NULL WHERE piano_id=?").run(toId,fromId);
   if(tableExists(db,"client_piano_review_queue"))db.prepare("UPDATE client_piano_review_queue SET piano_id=CASE WHEN piano_id=? THEN ? ELSE piano_id END,resolved_piano_id=CASE WHEN resolved_piano_id=? THEN ? ELSE resolved_piano_id END WHERE piano_id=? OR resolved_piano_id=?").run(fromId,toId,fromId,toId,fromId,fromId);
   if(tableExists(db,"master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET piano_id=? WHERE piano_id=?").run(toId,fromId);
@@ -156,7 +156,7 @@ function mergeExistingPianos(db){
     group.sort((a,b)=>pianoScore(db,b)-pianoScore(db,a)||a.id-b.id);const keeper=group[0],all=group,pick=field=>all.map(row=>row[field]).find(value=>value!==null&&value!==undefined&&clean(value)!=="")??null;
     const fields=["category","brand","model","serial_number","finish","location_notes","last_serviced_at","last_service_title","last_service_description","next_service_date","date_of_purchase","warranty","latest_info_frequency","latest_info_humidity","latest_info_temperature","build_year","size_display","color"];
     const values=Object.fromEntries(fields.map(field=>[field,pick(field)]));
-    db.prepare(\`UPDATE pianos SET category=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?\`)
+    db.prepare(`UPDATE pianos SET category=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(values.category,clean(values.brand)||"No brand",values.model,values.serial_number,values.finish,values.location_notes,values.last_serviced_at,values.last_service_title,values.last_service_description,values.next_service_date,values.date_of_purchase,values.warranty,values.latest_info_frequency,values.latest_info_humidity,values.latest_info_temperature,values.build_year,values.size_display,values.color,combineNotes(...all.map(row=>row.notes)),keeper.id);
     for(const duplicate of group.slice(1)){repointPiano(db,duplicate.id,keeper.id);db.prepare("DELETE FROM pianos WHERE id=?").run(duplicate.id);merged++;}
   }
@@ -177,14 +177,14 @@ function promotePendingReviews(db){
       if(map?.piano_id)piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(map.piano_id);
     }
     if(!piano){
-      const info=db.prepare(\`INSERT INTO pianos(client_id,brand,model,serial_number,build_year,notes,classification_status,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)\`).run(review.client_id||null,clean(review.source_brand,200)||"No brand",clean(review.source_model,200)||null,clean(review.source_serial_number,200)||null,review.source_build_year||null,clean(review.source_note,5000)||null);
+      const info=db.prepare(`INSERT INTO pianos(client_id,brand,model,serial_number,build_year,notes,classification_status,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(review.client_id||null,clean(review.source_brand,200)||"No brand",clean(review.source_model,200)||null,clean(review.source_serial_number,200)||null,review.source_build_year||null,clean(review.source_note,5000)||null);
       piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));
     }else{
       db.prepare("UPDATE pianos SET brand=CASE WHEN TRIM(COALESCE(brand,''))='' THEN ? ELSE brand END,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(clean(review.source_brand,200)||"No brand",piano.id);
     }
-    if(review.source_instrument_id&&tableExists(db,"master_data_piano_source_map"))db.prepare(\`INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id,updated_at)
-      VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP\`).run(review.source_name,review.source_instrument_id,piano.id);
+    if(review.source_instrument_id&&tableExists(db,"master_data_piano_source_map"))db.prepare(`INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id,updated_at)
+      VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP`).run(review.source_name,review.source_instrument_id,piano.id);
     db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(piano.id,review.id);
     resolved++;
   }
@@ -207,7 +207,7 @@ function updateClientFromSource(db,row,source){
   };
   const name=(clean(source.company_name)||clean(source.first_name)||clean(source.last_name)||clean(source.contact_name))?composeClientName(next):(clean(row.name)||composeClientName(next));
   const phone=composePhone(next)||clean(row.phone,120),address=composeAddress(next)||clean(row.address,1000);
-  db.prepare(\`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,client_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?\`)
+  db.prepare(`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,client_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,phone||null,next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,address||null,next.notes||null,next.short_memo_to_name||null,next.company_name?"BUSINESS":(row.client_type||"PRIVATE"),row.id);
   return db.prepare("SELECT * FROM clients WHERE id=?").get(row.id);
 }
@@ -216,8 +216,8 @@ function upsertSourceClient(db,source,sourceName){
   let row=clientSourceRow(db,sourceName,source.source_id),created=false;
   if(!row){
     const name=composeClientName(source),phone=composePhone(source),address=composeAddress(source);
-    const info=db.prepare(\`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,client_type,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)\`).run(
+    const info=db.prepare(`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,client_type,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
         name,clean(source.first_name,160)||null,clean(source.last_name,160)||null,clean(source.company_name,240)||null,clean(source.contact_name,240)||null,
         normEmail(source.email)||null,clean(source.mobile_phone,120)||null,clean(source.line_phone,120)||null,phone||null,clean(source.street,300)||null,
         clean(source.city,200)||null,clean(source.district,160)||null,clean(source.postcode,80)||null,clean(source.country,160)||null,address||null,
@@ -225,8 +225,8 @@ function upsertSourceClient(db,source,sourceName){
       );
     row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));created=true;
   }else row=updateClientFromSource(db,row,source);
-  if(source.source_id&&tableExists(db,"master_data_client_source_map"))db.prepare(\`INSERT INTO master_data_client_source_map(source_name,source_client_id,client_id,updated_at)
-    VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_client_id) DO UPDATE SET client_id=excluded.client_id,updated_at=CURRENT_TIMESTAMP\`).run(sourceName,source.source_id,row.id);
+  if(source.source_id&&tableExists(db,"master_data_client_source_map"))db.prepare(`INSERT INTO master_data_client_source_map(source_name,source_client_id,client_id,updated_at)
+    VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_client_id) DO UPDATE SET client_id=excluded.client_id,updated_at=CURRENT_TIMESTAMP`).run(sourceName,source.source_id,row.id);
   return {row,created};
 }
 function sourcePianoRow(db,sourceName,sourceId){
@@ -246,15 +246,15 @@ function updatePianoFromSource(db,row,instrument,clientId){
     next_service_date:value(instrument.next_service_date,row.next_service_date),latest_info_frequency:value(instrument.latest_info_frequency,row.latest_info_frequency),
     latest_info_humidity:value(instrument.latest_info_humidity,row.latest_info_humidity),latest_info_temperature:value(instrument.latest_info_temperature,row.latest_info_temperature)
   };
-  db.prepare(\`UPDATE pianos SET client_id=?,category=?,brand=?,model=?,serial_number=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?\`)
+  db.prepare(`UPDATE pianos SET client_id=?,category=?,brand=?,model=?,serial_number=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(next.client_id,next.category||null,next.brand,next.model||null,next.serial_number||null,next.last_serviced_at||null,next.last_service_title||null,next.last_service_description||null,next.next_service_date||null,next.date_of_purchase||null,next.warranty||null,next.latest_info_frequency||null,next.latest_info_humidity||null,next.latest_info_temperature||null,buildYear,next.size_display||null,next.color||null,next.notes||null,row.id);
   return db.prepare("SELECT * FROM pianos WHERE id=?").get(row.id);
 }
 function persistImportRow(db,{sourceName,record,clientId,pianoId}){
   if(!tableExists(db,"master_data_import_rows"))return;
-  db.prepare(\`INSERT INTO master_data_import_rows(source_name,source_instrument_id,source_client_id,source_row_number,client_id,piano_id,raw_json,imported_at,updated_at)
+  db.prepare(`INSERT INTO master_data_import_rows(source_name,source_instrument_id,source_client_id,source_row_number,client_id,piano_id,raw_json,imported_at,updated_at)
     VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET source_client_id=excluded.source_client_id,source_row_number=excluded.source_row_number,client_id=excluded.client_id,piano_id=excluded.piano_id,raw_json=excluded.raw_json,updated_at=CURRENT_TIMESTAMP\`)
+    ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET source_client_id=excluded.source_client_id,source_row_number=excluded.source_row_number,client_id=excluded.client_id,piano_id=excluded.piano_id,raw_json=excluded.raw_json,updated_at=CURRENT_TIMESTAMP`)
     .run(sourceName,record.instrument.source_id,record.client.source_id||null,record.row_number,clientId||null,pianoId||null,JSON.stringify(record.raw));
 }
 function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV_2026_09_29"}){
@@ -273,8 +273,8 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
     let piano=sourcePianoRow(db,sourceName,record.instrument.source_id);
     if(piano){piano=updatePianoFromSource(db,piano,record.instrument,client?.id??null);updatedPianos++;}
     else{
-      const info=db.prepare(\`INSERT INTO pianos(client_id,category,brand,model,serial_number,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)\`).run(
+      const info=db.prepare(`INSERT INTO pianos(client_id,category,brand,model,serial_number,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
           client?.id||null,clean(record.instrument.category,80)||null,clean(record.instrument.brand,200)||"No brand",clean(record.instrument.model,200)||null,
           clean(record.instrument.serial_number,200)||null,clean(record.instrument.last_serviced_at,120)||null,clean(record.instrument.last_service_title,300)||null,
           clean(record.instrument.last_service_description,3000)||null,clean(record.instrument.next_service_date,120)||null,clean(record.instrument.date_of_purchase,120)||null,
@@ -284,8 +284,8 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
       piano=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));createdPianos++;
     }
     if(!piano.client_id)ownerlessPianos++;
-    if(tableExists(db,"master_data_piano_source_map"))db.prepare(\`INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id,updated_at)
-      VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP\`).run(sourceName,record.instrument.source_id,piano.id);
+    if(tableExists(db,"master_data_piano_source_map"))db.prepare(`INSERT INTO master_data_piano_source_map(source_name,source_instrument_id,piano_id,review_id,updated_at)
+      VALUES(?,?,?,NULL,CURRENT_TIMESTAMP) ON CONFLICT(source_name,source_instrument_id) DO UPDATE SET piano_id=excluded.piano_id,review_id=NULL,updated_at=CURRENT_TIMESTAMP`).run(sourceName,record.instrument.source_id,piano.id);
     persistImportRow(db,{sourceName,record,clientId:piano.client_id,pianoId:piano.id});
   }
   const after=reconcileExistingMasterData(db);
