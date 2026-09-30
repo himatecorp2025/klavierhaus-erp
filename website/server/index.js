@@ -7,6 +7,7 @@ const compression = require("compression");
 const multer = require("multer");
 const { createEventClient } = require("./event-client");
 const { PAYMENT_METHODS } = require("../../server/payment-methods");
+const PRIVATE_PICKER_ASSET_REV = "private-picker-20260930-1";
 const {
   VERSION,
   findRoute,
@@ -706,8 +707,8 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
   <link rel="icon" type="image/png" href="${escapeHtml(resolveBrand(copy).logoImage)}">
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
-  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <script src="/assets/app.js?v=${VERSION}" defer></script>
+  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
+  <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(webPageStructuredData({ title: pageTitle, description: pageDescription, canonicalUrl, keywords }))}</script>
   <title>${escapeHtml(pageTitle)}</title>
@@ -991,8 +992,8 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="alternate" hreflang="${language === "hu" ? "en-US" : "hu-HU"}" href="${escapeHtml(alternateUrl)}">
   <link rel="alternate" hreflang="x-default" href="${escapeHtml(englishUrl)}">
   <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
-  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <script src="/assets/app.js?v=${VERSION}" defer></script>
+  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
+  <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
   ${[...structuredData, ...(keywords.length ? [webPageStructuredData({ title, description, canonicalUrl, keywords })] : [])].map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
   <title>${escapeHtml(title)}</title>
   <!-- ${escapeHtml(copy.languageName)} -->`;
@@ -1267,8 +1268,8 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#080807">
   <meta name="robots" content="${robots}">
-  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}">
-  <script src="/assets/app.js?v=${VERSION}" defer></script>
+  <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
+  <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
   <title>${escapeHtml(copy.notFoundTitle)} | Klavierhaus</title>
 </head>
 <body class="template-not-found" data-language="${escapeHtml(language)}">
