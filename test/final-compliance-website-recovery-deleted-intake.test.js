@@ -93,6 +93,23 @@ test("Deleted intake UI and archive category are explicit system lifecycle contr
   assert.match(archive,/source:"deleted_intake"/);
   assert.match(archive,/linked_jobs:linkedJobs/);
   assert.match(archive,/email_log:emailLog/);
+  assert.match(archive,/UPDATE jobs SET intake_id=NULL WHERE intake_id=\?/);
+  assert.match(archive,/DELETE FROM intake_assessment_items WHERE intake_id=\?/);
   assert.match(archive,/DELETE FROM intake_leads WHERE id=\?/);
   assert.match(schema,/category TEXT NOT NULL CHECK\(category IN \('deleted_invoice','deleted_intake'/);
+});
+
+
+test("Deleted clients are removed from active Master Data and retained as archive snapshots",()=>{
+  const v6=read("public/v6.js"),archive=read("server/archive-center.js"),schema=read("server/schema.sql"),core=read("server/round1-core.js");
+  assert.match(v6,/deleted_client:\["Deleted clients","Törölt ügyfelek"\]/);
+  assert.match(archive,/app\.delete\("\/api\/clients\/:id",auth,admin/);
+  assert.match(archive,/function clientArchiveSource/);
+  assert.match(archive,/pianos,jobs,invoices,intakes,source_refs/);
+  assert.match(archive,/UPDATE clients SET deleted_at=CURRENT_TIMESTAMP/);
+  assert.match(archive,/UPDATE pianos SET client_id=NULL/);
+  assert.match(schema,/deleted_client/);
+  assert.match(schema,/deleted_by_user_id TEXT/);
+  assert.match(schema,/archive_document_id INTEGER/);
+  assert.match(core,/c\.deleted_at IS NULL/);
 });

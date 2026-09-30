@@ -1100,6 +1100,10 @@ CREATE TABLE IF NOT EXISTS clients (
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
   vip_updated_by_user_id TEXT,
   vip_updated_at TEXT,
+  deleted_at TEXT,
+  deleted_by_user_id TEXT,
+  archive_document_id INTEGER,
+  deletion_reason TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -1733,7 +1737,7 @@ CREATE INDEX IF NOT EXISTS idx_website_tracking_round1 ON website_tracking_event
 -- as immutable snapshots while active modules only show live records.
 CREATE TABLE IF NOT EXISTS document_archive (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','deleted_intake','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
+  category TEXT NOT NULL CHECK(category IN ('deleted_invoice','deleted_intake','deleted_client','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
   title TEXT NOT NULL,
   description TEXT,
   entity_type TEXT,

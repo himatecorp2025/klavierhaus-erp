@@ -98,5 +98,48 @@ test("raw source rows are retained for audit while source IDs stay internal",()=
 });
 
 test("PWA cache is bumped for complete Master Data import",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v21-complete-master-data/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v22-relational-search-notifications/);
+});
+
+
+test("Master Data search is bidirectional across clients and their linked pianos",()=>{
+  const app=read("public/app.js"),api=read("server/round1-core.js");
+  assert.match(app,/function masterClientSearchValues/);
+  assert.match(app,/function masterPianoSearchValues/);
+  assert.match(app,/Number\(piano\.client_id\)===Number\(client\.id\)/);
+  assert.match(app,/owner&&masterSearchMatch\(masterClientSearchValues\(owner\),q\)/);
+  assert.match(api,/OR EXISTS\(/);
+  assert.match(api,/p\.brand/);
+  assert.match(api,/p\.model/);
+  assert.match(api,/p\.serial_number/);
+  assert.match(api,/p\.size_display/);
+  assert.match(api,/p\.color/);
+  assert.match(api,/p\.last_service_title/);
+  assert.match(api,/c\.deleted_at IS NULL/);
+  assert.match(api,/client_first_name/);
+  assert.match(api,/client_company_name/);
+  assert.match(api,/client_postcode/);
+});
+
+test("Admin can delete a client from active Master Data into Deleted clients archive",()=>{
+  const app=read("public/app.js"),archive=read("server/archive-center.js"),schema=read("server/schema.sql"),v6=read("public/v6.js");
+  assert.match(app,/id="deleteClientBtn"/);
+  assert.match(app,/\/api\/clients\/\$\{client\.id\}/);
+  assert.match(app,/Permanently remove/);
+  assert.match(archive,/app\.delete\("\/api\/clients\/:id",auth,admin/);
+  assert.match(archive,/category,title,description,entity_type,entity_id,metadata_json/);
+  assert.match(archive,/deleted_client/);
+  assert.match(archive,/UPDATE pianos SET client_id=NULL/);
+  assert.match(schema,/deleted_at TEXT/);
+  assert.match(schema,/archive_document_id INTEGER/);
+  assert.match(v6,/deleted_client:\["Deleted clients","Törölt ügyfelek"\]/);
+});
+
+test("lossless import retains original cells and active records expose all structured fields",()=>{
+  const reconcile=read("server/master-data-reconcile.js");
+  assert.match(reconcile,/raw:\{columns:\[\.\.\.headers\],values:row\.slice\(\)/);
+  assert.match(reconcile,/sourceNonEmptyValues/);
+  assert.match(reconcile,/columns:33/);
+  assert.match(reconcile,/findExistingClient/);
+  assert.match(reconcile,/deletedClientsSkipped/);
 });

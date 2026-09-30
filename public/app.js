@@ -188,6 +188,7 @@ function notificationCard(row){
     <div class="notification-card-body"><div class="notification-card-title"><strong>${esc(title)}</strong><small>${esc(notificationDate(row.created_at))}</small></div>
       ${body?`<p>${esc(body)}</p>`:""}
       <div class="notification-card-actions">
+        ${row.action_url?`<button class="secondary-button compact-button" type="button" data-notification-view="${esc(row.id)}">↗ ${tr("View","Megnyitás")}</button>`:""}
         <button class="text-button" type="button" data-notification-remind="${esc(row.id)}">${tr("Remind later","Értesíts később")}</button>
         <button class="primary-button compact-button" type="button" data-notification-done="${esc(row.id)}">✓ ${tr("Done","Tudomásul vettem")}</button>
       </div>
@@ -204,15 +205,16 @@ function renderNotificationDrawer(){
   const sound=$("#notificationSoundToggle");if(sound)sound.checked=Boolean(state.notificationPreferences?.sound_enabled);
   $$("[data-notification-snooze]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await snoozeNotification(button.dataset.notificationSnooze,3);}));
   $$("[data-notification-done]",list).forEach(button=>button.addEventListener("click",async event=>{event.stopPropagation();await acknowledgeNotification(button.dataset.notificationDone);}));
-  $$("[data-notification-remind]",list).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
-  $$("[data-notification-card]",list).forEach(card=>card.addEventListener("click",async event=>{
+  list.querySelectorAll("[data-notification-remind]").forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openNotificationReminder(button.dataset.notificationRemind);}));
+  list.querySelectorAll("[data-notification-view]").forEach(button=>button.addEventListener("click",async event=>{
+    event.stopPropagation();const row=rows.find(item=>String(item.id)===String(button.dataset.notificationView));if(!row)return;
+    try{await api("/api/notifications/"+encodeURIComponent(row.id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
+    await notificationNavigate(row);
+  }));
+  list.querySelectorAll("[data-notification-card]").forEach(card=>card.addEventListener("click",async event=>{
     if(event.target.closest("button,input"))return;const id=card.dataset.notificationCard,row=rows.find(item=>String(item.id)===String(id));
     try{await api("/api/notifications/"+encodeURIComponent(id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
-    if(row?.action_url){
-      closeNotificationDrawer({restoreFocus:false});
-      if(row.action_url.includes("private=1")){state.view="workshop";state.r2WorkshopMode="workflow";void renderView().then(()=>r2LoadPrivateAppointments?.());}
-      else if(row.action_url.startsWith("#"))navTo(row.action_url.slice(1));
-    }
+    if(row?.action_url)await notificationNavigate(row);
     card.classList.remove("is-unread");card.classList.add("is-read");
   }));
 }
@@ -389,7 +391,36 @@ async function navTo(view){
   state.view=view;history.replaceState({},"",`#${view}`);
   if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
-  void renderView();
+  return renderView();
+}
+function consumeDeepLink(){
+  const params=new URLSearchParams(location.search),view=params.get("view");
+  if(!view||!activeViews.has(view))return false;
+  state.view=view;
+  if(view==="master"){
+    const clientId=Number(params.get("client")||0),pianoId=Number(params.get("piano")||0);
+    if(clientId){state.selectedClientId=clientId;state.clientMasterFilter="ALL";state.masterSearch="";state.masterMode="CLIENTS";state.masterDetailKind="CLIENT";}
+    if(pianoId){state.selectedPianoId=pianoId;state.masterSearch="";state.masterMode="PIANOS";state.masterDetailKind="PIANO";}
+  }else if(view==="intake"){
+    const intakeId=Number(params.get("intake")||0);if(intakeId)state.pendingIntakeEditId=intakeId;
+  }else if(view==="documents"){
+    const category=params.get("category"),archiveId=Number(params.get("archive")||0);
+    if(category)state.archiveCategory=category;if(archiveId)state.pendingArchiveId=archiveId;
+  }else if(view==="finance"){
+    const invoiceId=Number(params.get("invoice")||0);if(invoiceId)state.pendingNotificationInvoiceId=invoiceId;
+  }else if(view==="workshop"){
+    const jobId=Number(params.get("job")||0);if(jobId)state.pendingNotificationJobId=jobId;
+  }
+  history.replaceState({},"",`#${view}`);return true;
+}
+async function notificationNavigate(row){
+  if(!row?.action_url)return;
+  let url;try{url=new URL(row.action_url,location.origin);}catch(_error){return;}
+  const view=url.searchParams.get("view");
+  if(view&&activeViews.has(view)){
+    history.replaceState({},"",url.pathname+url.search+url.hash);consumeDeepLink();closeNotificationDrawer({restoreFocus:false});await renderView();return;
+  }
+  if(url.hash&&activeViews.has(url.hash.slice(1))){closeNotificationDrawer({restoreFocus:false});await navTo(url.hash.slice(1));}
 }
 function bindNavigation(){
   document.addEventListener("click",event=>{
@@ -415,6 +446,7 @@ $("#appDialog").addEventListener("click",event=>{if(event.target===$("#appDialog
 $("#appDialog").addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
 
 async function renderView(){
+  consumeDeepLink();
   const workspace=$("#workspace");workspace.innerHTML=loading();
   try{
     if(state.view==="workshop")await renderWorkshop();
@@ -576,7 +608,7 @@ async function renderMaster(){
     const form=new FormData();form.append("file",file,file.name);
     try{
       const summary=await api("/api/master-data/import-csv",{method:"POST",body:form});
-      toast(tr(`Import completed: ${summary.rows} source rows, ${summary.sourceClients} source clients, ${summary.createdPianos} new pianos, ${summary.ownerlessPianos} owner pending.`,`Import kész: ${summary.rows} forrássor, ${summary.sourceClients} forrás-ügyfél, ${summary.createdPianos} új zongora, ${summary.ownerlessPianos} tulajdonosra vár.`),"success");
+      toast(tr(`Import completed: ${summary.sourceRowsPersisted}/${summary.rows} source rows preserved across ${summary.columns||33} columns, ${summary.sourceClients} source clients, ${summary.createdPianos} new pianos, ${summary.ownerlessPianos} owner pending.`,`Import kész: ${summary.sourceRowsPersisted}/${summary.rows} forrássor megőrizve ${summary.columns||33} oszlopból, ${summary.sourceClients} forrás-ügyfél, ${summary.createdPianos} új zongora, ${summary.ownerlessPianos} tulajdonosra vár.`),"success");
       event.currentTarget.value="";state.masterDirty=false;await renderMaster();
     }catch(error){toast(humanError(error),"error");event.currentTarget.value="";}
   });
@@ -598,17 +630,38 @@ async function handleMasterTool(kind){
   updateMasterToolbar();renderMasterList();void renderMasterDetail();
 }
 function masterQuery(){return String(state.masterSearch||"").trim().toLowerCase();}
+function masterSearchNormalize(value){return String(value??"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
+function masterSearchMatch(values,q){
+  const haystack=masterSearchNormalize(values.filter(value=>value!==null&&value!==undefined).join(" ")),normalized=masterSearchNormalize(q);
+  if(!normalized)return true;
+  const tokens=normalized.split(/\s+/).filter(token=>token.length>1||/^\d+$/.test(token));
+  return (tokens.length?tokens:[normalized]).every(token=>haystack.includes(token));
+}
+function masterClientSearchValues(client={}){
+  return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name];
+}
+function masterPianoSearchValues(piano={}){
+  return [piano.category,piano.brand,piano.model,piano.serial_number,piano.finish,piano.effective_location,piano.location_notes,piano.size_display,piano.color,piano.build_year,piano.notes,piano.date_of_purchase,piano.warranty,piano.last_serviced_at,piano.last_service_title,piano.last_service_description,piano.next_service_date,piano.latest_info_frequency,piano.latest_info_humidity,piano.latest_info_temperature];
+}
 function filteredMasterClients(){
   const filter=state.clientMasterFilter||"ALL",q=masterQuery();
   return (state.clients||[]).filter(client=>{
     const typeMatch=filter==="ALL"||(filter==="VIP"?Number(client.is_vip||0)===1:String(client.client_type||"PRIVATE").toUpperCase()===filter);
-    const searchMatch=!q||[client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name].some(value=>String(value||"").toLowerCase().includes(q));
-    return typeMatch&&searchMatch;
+    if(!typeMatch)return false;
+    if(!q)return true;
+    if(masterSearchMatch(masterClientSearchValues(client),q))return true;
+    return (state.pianos||[]).some(piano=>Number(piano.client_id)===Number(client.id)&&masterSearchMatch(masterPianoSearchValues(piano),q));
   });
 }
 function filteredMasterPianos(){
   const q=masterQuery();
-  return (state.pianos||[]).filter(piano=>!q||[piano.category,piano.brand,piano.model,piano.serial_number,piano.client_name,piano.effective_location,piano.finish,piano.size_display,piano.color,piano.notes,piano.date_of_purchase,piano.warranty,piano.last_serviced_at,piano.last_service_title,piano.last_service_description,piano.next_service_date,piano.latest_info_frequency,piano.latest_info_humidity,piano.latest_info_temperature].some(value=>String(value||"").toLowerCase().includes(q)));
+  return (state.pianos||[]).filter(piano=>{
+    if(!q)return true;
+    if(masterSearchMatch(masterPianoSearchValues(piano),q))return true;
+    const owner=(state.clients||[]).find(client=>Number(client.id)===Number(piano.client_id));
+    if(owner&&masterSearchMatch(masterClientSearchValues(owner),q))return true;
+    return masterSearchMatch([piano.client_name,piano.client_first_name,piano.client_last_name,piano.client_company_name,piano.client_contact_name,piano.client_email,piano.client_phone,piano.client_mobile_phone,piano.client_line_phone,piano.client_address,piano.client_street,piano.client_city,piano.client_district,piano.client_postcode,piano.client_country,piano.client_notes,piano.client_short_memo],q);
+  });
 }
 function filteredMasterPianoReviews(){
   const q=masterQuery();return (state.pianoReviews||[]).filter(item=>!q||[item.source_brand,item.source_model,item.source_serial_number,item.source_build_year,item.client_name,item.client_address,item.source_note].some(value=>String(value||"").toLowerCase().includes(q)));
@@ -674,7 +727,7 @@ async function renderClientDetail(){
   if(!client){host.innerHTML=`<div class="empty-state">${tr("Select a client.","Válassz ügyfelet.")}</div>`;return;}
   host.innerHTML=loading();
   const [pianos,jobs,reviews]=await Promise.all([api(`/api/clients/${client.id}/pianos`),api(`/api/clients/${client.id}/jobs`).catch(()=>[]),api(`/api/clients/${client.id}/piano-review`).catch(()=>[])]);
-  const inline=masterInlineEditable();
+  const inline=masterInlineEditable(),canDeleteClient=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   const reviewMarkup=reviews.length?`<section class="master-review-panel"><div class="master-review-panel-head"><span class="master-review-alert">!</span><div><strong>${tr("Data conflict needs review","Adatütközés ellenőrzésre vár")}</strong><small>${tr("These records remain visible; the review only flags contradictory source data.","A rekordok továbbra is láthatók; az ellenőrzés csak az ellentmondó forrásadatot jelzi.")}</small></div></div>${reviews.map(item=>`<article class="master-review-item"><div><strong>${esc([item.source_brand,item.source_model].filter(Boolean).join(" ")||"No brand")}</strong><small>${esc([item.source_serial_number?tr("Serial","Gyári szám")+": "+item.source_serial_number:"",item.source_note].filter(Boolean).join(" · "))}</small></div><button class="secondary-button" type="button" data-classify-review="${item.id}">${tr("Review","Ellenőrzés")}</button></article>`).join("")}</section>`:"";
   const editable=`<form id="clientInlineForm" class="master-inline-form">${clientStructuredFields(client)}</form>`;
   const readonly=`<div class="piano-detail-grid master-client-detail-grid">
@@ -695,7 +748,7 @@ async function renderClientDetail(){
     ${masterReadonlyItem(tr("Short memo to name","Rövid név-memó"),client.short_memo_to_name,{full:true})}
   </div>`;
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
-    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button></div></div>
+    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button>${canDeleteClient?`<button id="deleteClientBtn" class="danger-button" type="button">${tr("Delete client","Ügyfél törlése")}</button>`:""}</div></div>
     ${inline?editable:readonly}
     ${client.address?`<button class="secondary-button master-address-route" type="button" data-open-map>↗ ${tr("Open route","Útvonal megnyitása")} · ${esc(client.address)}</button>`:""}
     ${reviewMarkup}
@@ -706,6 +759,19 @@ async function renderClientDetail(){
   $("[data-master-back]")?.addEventListener("click",async()=>{if(await masterConfirmDiscard())closeMasterMobileDetail();});
   $("#editClientBtn")?.addEventListener("click",()=>openClientDialog(client));
   $("#addPianoBtn")?.addEventListener("click",async()=>{if(await masterConfirmDiscard())openPianoDialog(client);});
+  $("#deleteClientBtn")?.addEventListener("click",async()=>{
+    if(!(await masterConfirmDiscard()))return;
+    const confirmed=window.confirm(tr(
+      `Permanently remove ${client.name} from active Master Data? The full client snapshot will be stored under Documents → Deleted clients.`,
+      `Véglegesen törlöd ${client.name} ügyfelet az aktív törzsadatokból? A teljes ügyfél-snapshot a Dokumentumok → Törölt ügyfelek közé kerül.`
+    ));
+    if(!confirmed)return;
+    try{
+      await api(`/api/clients/${client.id}`,{method:"DELETE",body:JSON.stringify({})});
+      state.selectedClientId=null;state.masterDetailKind="CLIENT";state.archiveCategory="deleted_client";closeMasterMobileDetail();
+      toast(tr("Client deleted and archived.","Az ügyfél törölve és archiválva."),"success");await renderMaster();
+    }catch(error){toast(humanError(error),"error");}
+  });
   $$("[data-open-map]",host).forEach(button=>button.addEventListener("click",()=>openMasterMap(inline?masterClientFormAddress($("#clientInlineForm")):client.address)));
   $$("[data-classify-review]",host).forEach(button=>button.addEventListener("click",async()=>{const item=reviews.find(row=>Number(row.id)===Number(button.dataset.classifyReview));if(await masterConfirmDiscard())openPianoDialog(client,null,item);}));
   $$("[data-piano-card]",host).forEach(button=>button.addEventListener("click",async()=>{if(!(await masterConfirmDiscard()))return;state.selectedPianoId=Number(button.dataset.pianoCard);state.masterDetailKind="PIANO";await renderPianoDetail();openMasterMobileDetail();}));

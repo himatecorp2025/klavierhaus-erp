@@ -6,8 +6,8 @@ const crypto=require("node:crypto");
 const multer=require("multer");
 const {LETTER,createPdf,textCommand,safeText}=require("./document-pdf");
 
-const CATEGORIES=new Set(["deleted_invoice","deleted_intake","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
-const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","deleted_intake","intake_assessment"]);
+const CATEGORIES=new Set(["deleted_invoice","deleted_intake","deleted_client","financial_document","contract","intake_assessment","exported_report","internal_correspondence","company_message","company_document"]);
+const SYSTEM_ONLY_CATEGORIES=new Set(["deleted_invoice","deleted_intake","deleted_client","intake_assessment"]);
 const EXTENSIONS=new Set([".pdf",".doc",".docx",".xls",".xlsx",".csv",".txt",".jpg",".jpeg",".png",".webp",".gif"]);
 const MIMES=new Set([
   "application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -46,6 +46,7 @@ function intakeAssessmentPdf({lead,items=[]}){
 }
 
 function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transactionalEmail,notifications=null}){
+  const tableExists=name=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?").get(name));
   const admin=permit("ADMIN");
   const staff=permit("ADMIN","MANAGER","WORKER");
   const target=path.join(uploadDir,"archive");
@@ -106,11 +107,46 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
           `Deleted Intake #${id} · ${lead.client_name||lead.raw_client_name||"Prospect"}`,
           text(reason,3000)||lead.reported_issue||null,"intake",String(id),`deleted-intake-${id}.pdf`,filename,"application/pdf",pdf.length,publicPath,JSON.stringify(snapshot),actor?.id||null
         );
+        // Detach converted jobs explicitly so deletion works against legacy production schemas too.
+        if(tableExists("jobs"))db.prepare("UPDATE jobs SET intake_id=NULL WHERE intake_id=?").run(id);
+        if(tableExists("intake_assessment_email_log"))db.prepare("DELETE FROM intake_assessment_email_log WHERE intake_id=?").run(id);
+        if(tableExists("intake_assessment_items"))db.prepare("DELETE FROM intake_assessment_items WHERE intake_id=?").run(id);
         db.prepare("DELETE FROM intake_leads WHERE id=?").run(id);
         return db.prepare(`${select} WHERE a.id=?`).get(Number(info.lastInsertRowid));
       })();
       return {...archived,metadata:snapshot};
     }catch(error){try{fs.unlinkSync(filePath);}catch(_error){}throw error;}
+  }
+
+  function clientArchiveSource(id){
+    const client=db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(id);
+    if(!client)throw problem("CLIENT_NOT_FOUND",404);
+    const pianos=tableExists("pianos")?db.prepare("SELECT * FROM pianos WHERE client_id=? ORDER BY id").all(id):[];
+    const jobs=tableExists("jobs")?db.prepare("SELECT id,job_code,title,stage,scheduled_at,completed_at,cancelled_at,piano_id,created_at FROM jobs WHERE client_id=? ORDER BY id").all(id):[];
+    const invoices=tableExists("invoices")?db.prepare("SELECT id,invoice_number,status,total_amount,issue_date,due_date,paid_at,job_id FROM invoices WHERE client_id=? ORDER BY id").all(id):[];
+    const intakes=tableExists("intake_leads")?db.prepare("SELECT id,piano_id,raw_client_name,raw_contact,reported_issue,status,created_at,converted_at FROM intake_leads WHERE client_id=? ORDER BY id").all(id):[];
+    const source_refs=tableExists("master_data_client_source_map")?db.prepare("SELECT source_name,source_client_id,updated_at FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(id):[];
+    return {client,pianos,jobs,invoices,intakes,source_refs};
+  }
+  function deleteClientToArchive(id,actor,reason=""){
+    const source=clientArchiveSource(id),deletedAt=new Date().toISOString();
+    const snapshot={source:"deleted_client",deleted_at:deletedAt,deleted_by_user_id:actor?.id||null,reason:text(reason,3000),...source};
+    const archived=db.transaction(()=>{
+      const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,metadata_json,archived_by_user_id)
+        VALUES('deleted_client',?,?,?,?,?,?)`).run(
+        `Deleted Client #${id} · ${source.client.name||"Client"}`,
+        text(reason,3000)||`Removed from active Master Data · ${source.pianos.length} piano(s)`,
+        "client",String(id),JSON.stringify(snapshot),actor?.id||null
+      );
+      const archiveId=Number(info.lastInsertRowid);
+      // Keep financial/job history referentially intact, but remove the client from active Master Data ownership.
+      if(tableExists("pianos"))db.prepare("UPDATE pianos SET client_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(id);
+      if(tableExists("client_piano_review_queue"))db.prepare("UPDATE client_piano_review_queue SET client_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(id);
+      db.prepare("UPDATE clients SET deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=?,archive_document_id=?,deletion_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(actor?.id||null,archiveId,text(reason,3000)||null,id);
+      return db.prepare(`${select} WHERE a.id=?`).get(archiveId);
+    })();
+    return {...archived,metadata:snapshot};
   }
 
   app.delete("/api/intake/:id",auth,admin,(req,res)=>{
@@ -120,6 +156,15 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
       const archived=deleteIntakeToArchive(id,req.user,req.body?.reason||"");
       audit(req,"DELETE","intake",String(id),before,{archive_document_id:archived.id,category:"deleted_intake"},1,"Intake deleted and archived");
       res.json({ok:true,archive_document:archived});
+    }catch(error){respond(res,error);}
+  });
+  app.delete("/api/clients/:id",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id);if(!id)throw problem("CLIENT_NOT_FOUND",404);
+      const before=clientArchiveSource(id);
+      const archived=deleteClientToArchive(id,req.user,req.body?.reason||"");
+      audit(req,"DELETE","clients",String(id),before.client,{name:before.client.name,archive_document_id:archived.id,category:"deleted_client"},1,"Client removed from active Master Data and archived");
+      res.json({ok:true,archive_document:archived,deleted_client_id:id});
     }catch(error){respond(res,error);}
   });
   app.get("/api/archive/documents",auth,admin,(req,res)=>{
