@@ -302,9 +302,12 @@ function persistImportRow(db,{sourceName,record,clientId,pianoId}){
 }
 function repairSourceRelationships(db){
   if(!tableExists(db,"master_data_client_source_map")||!tableExists(db,"master_data_piano_source_map"))return {relinkedPianos:0,auditRowsUpdated:0};
-  const rows=tableExists(db,"master_data_source_rows")
+  const sourceRows=tableExists(db,"master_data_source_rows")
     ?db.prepare("SELECT source_name,source_row_number,source_instrument_id,source_client_id,client_id,piano_id FROM master_data_source_rows WHERE source_client_id IS NOT NULL AND TRIM(source_client_id)<>'' ORDER BY source_name,source_row_number").all()
-    :(tableExists(db,"master_data_import_rows")?db.prepare("SELECT source_name,source_row_number,source_instrument_id,source_client_id,client_id,piano_id FROM master_data_import_rows WHERE source_client_id IS NOT NULL AND TRIM(source_client_id)<>'' ORDER BY source_name,source_row_number").all():[]);
+    :[];
+  const rows=sourceRows.length?sourceRows:(tableExists(db,"master_data_import_rows")
+    ?db.prepare("SELECT source_name,source_row_number,source_instrument_id,source_client_id,client_id,piano_id FROM master_data_import_rows WHERE source_client_id IS NOT NULL AND TRIM(source_client_id)<>'' ORDER BY source_name,source_row_number").all()
+    :[]);
   let relinkedPianos=0,auditRowsUpdated=0;
   for(const row of rows){
     const clientMap=db.prepare(`SELECT m.client_id FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id
