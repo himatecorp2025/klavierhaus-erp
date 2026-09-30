@@ -144,7 +144,7 @@ function registerWebsiteConversationRoutes({
         event(row.id,"CUSTOMER_MESSAGE",{fromStatus:before,toStatus:"PENDING_STAFF",details:{message_id:messageId}});
       })();
     }catch(error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_MESSAGE_FAILED"});}
-    const after=byId(row.id);notifyConversation(after,{titleEn:"New customer reply",titleHu:"Új ügyfélválasz",body:`${row.name||"Website visitor"} · ${body.slice(0,220)}`});
+    const after=byId(row.id);notifyConversation(after,{titleEn:"New customer reply",titleHu:"Új ügyfélválasz",body:`${row.name||"Website visitor"} · ${(body||((req.files||[]).length+" media attachment(s)")).slice(0,220)}`});
     res.status(201).json(payload(after,{token:req.params.token}));
   });
 
@@ -192,7 +192,7 @@ function registerWebsiteConversationRoutes({
     const attachment=db.prepare("SELECT * FROM customer_message_attachments WHERE id=? AND conversation_id=?").get(req.params.attachmentId,row.id);
     if(!attachment)return res.status(404).json({error:"CUSTOMER_ATTACHMENT_NOT_FOUND"});
     const filePath=path.join(uploadDir,"customer-conversations",path.basename(attachment.stored_name));if(!fs.existsSync(filePath))return res.status(404).json({error:"CUSTOMER_ATTACHMENT_NOT_FOUND"});
-    res.type(attachment.mime_type).download(filePath,attachment.original_name);
+    res.type(attachment.mime_type);res.setHeader("Content-Disposition",`inline; filename="${String(attachment.original_name||"attachment").replace(/[\r\n"]/g,"_")}"`);res.sendFile(filePath);
   });
 
   app.get("/api/customer-conversations",auth,staff,(req,res)=>{
