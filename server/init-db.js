@@ -277,6 +277,8 @@ ensureColumn("pianos","color","TEXT");
 ensureColumn("pianos","notes","TEXT");
 ensureColumn("pianos","classification_status","TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED'))");
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
+ensureColumn("users","language_preference","TEXT NOT NULL DEFAULT 'en' CHECK(language_preference IN ('en','hu'))");
+ensureColumn("users","profile_image_url","TEXT");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("customer_conversations","client_id","INTEGER");
