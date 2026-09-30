@@ -531,7 +531,7 @@ function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
     <label class="field"><span>${tr("Frequency","Frekvencia")}</span><input name="latest_info_frequency" value="${esc(piano.latest_info_frequency||"")}" placeholder="${esc(masterPendingText())}"></label>
     <label class="field"><span>${tr("Humidity","Páratartalom")}</span><input name="latest_info_humidity" value="${esc(piano.latest_info_humidity||"")}" placeholder="${esc(masterPendingText())}"></label>
     <label class="field"><span>${tr("Temperature","Hőmérséklet")}</span><input name="latest_info_temperature" value="${esc(piano.latest_info_temperature||"")}" placeholder="${esc(masterPendingText())}"></label>
-    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(piano.location_notes||"")}</textarea></label>
+    <label class="field full"><span>${tr("Piano-specific location","Zongora külön helye")}</span><textarea name="location_notes" placeholder="${esc(tr("Leave blank to use the customer's address.","Hagyd üresen az ügyfél címének használatához."))}">${esc(piano.location_notes||"")}</textarea><small>${tr("Blank = customer address automatically.","Üresen hagyva automatikusan az ügyfél címe jelenik meg.")}</small></label>
     ${includeReview&&piano.review_id?`<input type="hidden" name="review_id" value="${piano.review_id}">`:""}`;
 }
 function masterReadonlyItem(label,value,{full=false,brand=false,extra=""}={}){
