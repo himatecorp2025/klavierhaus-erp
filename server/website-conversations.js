@@ -99,22 +99,25 @@ function registerWebsiteConversationRoutes({
   app.get("/api/public/support-status",(_req,res)=>{res.setHeader("Cache-Control","no-store");res.json(supportState({db,env}));});
 
   app.post("/api/public/customer-conversations",upload,async(req,res)=>{
-    const category=clean(req.body?.category||"OTHER",40).toUpperCase(),name=clean(req.body?.name,200),mail=email(req.body?.email),message=clean(req.body?.message,5000);
+    const category=clean(req.body?.category||"OTHER",40).toUpperCase(),name=clean(req.body?.name,200),mail=email(req.body?.email),message=clean(req.body?.message,5000),language=req.body?.language==="hu"?"hu":"en";
     const consent=req.body?.consent_contact===true||["true","1","on"].includes(String(req.body?.consent_contact||"").toLowerCase());
-    if(!message||!PUBLIC_CATEGORIES.has(category)||!consent){removeFiles(req.files);return res.status(400).json({error:"VALID_CONVERSATION_FIELDS_REQUIRED"});}
-    if(mail&&!validEmail(mail)){removeFiles(req.files);return res.status(400).json({error:"INVALID_CONVERSATION_EMAIL"});}
-    if(IDENTITY_REQUIRED.has(category)&&(!name||!validEmail(mail))){removeFiles(req.files);return res.status(400).json({error:"CONVERSATION_IDENTITY_REQUIRED",required_fields:["name","email"]});}
-    const token=crypto.randomBytes(32).toString("base64url"),conversationId=id("CONV"),messageId=id("MSG"),support=supportState({db,env});
+    if(!name||!validEmail(mail)||!PUBLIC_CATEGORIES.has(category)||!consent){removeFiles(req.files);return res.status(400).json({error:"CONVERSATION_IDENTITY_REQUIRED",required_fields:["name","email","category"]});}
+    const token=crypto.randomBytes(32).toString("base64url"),conversationId=id("CONV"),customerMessageId=message||req.files?.length?id("MSG"):null,welcomeMessageId=id("MSG"),support=supportState({db,env});
     try{
       db.transaction(()=>{
-        const linked=ensureClientIdentity(db,{name,email:mail,language:req.body?.language},{create:Boolean(name&&validEmail(mail))}).client;
+        const linked=ensureClientIdentity(db,{name,email:mail,language},{create:true}).client;
         db.prepare(`INSERT INTO customer_conversations(id,public_token_hash,public_token_encrypted,name,email,client_id,language,category,status,consent_contact,source_path,metadata_json,last_message_at,last_activity_at)
-          VALUES(?,?,?,?,?,?,?,?,'PENDING_STAFF',1,?,'{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(conversationId,hash(token),encryptToken(token,tokenKey),linked?.name||name||null,linked?.email||mail||null,linked?.id||null,req.body?.language==="hu"?"hu":"en",category,clean(req.body?.source_path,1000)||null);
-        db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(messageId,conversationId,"CUSTOMER",name||"Guest",mail||null,message);
-        saveFiles(req.files,conversationId,messageId);event(conversationId,"CREATED",{toStatus:"PENDING_STAFF",details:{message_id:messageId,support_open:support.open}});
+          VALUES(?,?,?,?,?,?,?,?,'PENDING_STAFF',1,?,'{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(conversationId,hash(token),encryptToken(token,tokenKey),linked?.name||name,linked?.email||mail,linked?.id||null,language,category,clean(req.body?.source_path,1000)||null);
+        const welcome=language==="hu"?"Üdvözöljük a Klavierhaus ügyfélszolgálatán! Hogyan segíthetünk Önnek?":"Welcome to Klavierhaus Customer Service. How may we assist you?";
+        db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,body,status) VALUES(?,?,?,?,?,'READ')").run(welcomeMessageId,conversationId,"STAFF","Klavierhaus Customer Service",welcome);
+        if(customerMessageId){
+          db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(customerMessageId,conversationId,"CUSTOMER",name,mail,message||"");
+          saveFiles(req.files,conversationId,customerMessageId);
+        }
+        event(conversationId,"CREATED",{toStatus:"PENDING_STAFF",details:{message_id:customerMessageId,support_open:support.open}});
       })();
     }catch(error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_CREATE_FAILED"});}
-    const row=byId(conversationId);notifyConversation(row,{body:`${name||"Website visitor"} · ${category.replaceAll("_"," ")} · ${message.slice(0,220)}`});
+    const row=byId(conversationId);notifyConversation(row,{body:`${name} · ${category.replaceAll("_"," ")}${message?` · ${message.slice(0,220)}`:""}`});
     const autoReply=!support.open?await sendOfflineAutoReply(row):{status:"NOT_REQUIRED"};
     res.status(201).json({...payload(row,{token}),access_token:token,outside_support_hours:!support.open,auto_reply_delivery:autoReply});
   });
@@ -131,7 +134,7 @@ function registerWebsiteConversationRoutes({
 
   app.post("/api/public/customer-conversations/:token/messages",upload,(req,res)=>{
     const row=byToken(req.params.token);if(!row){removeFiles(req.files);return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});}
-    const body=clean(req.body?.message,5000);if(!body){removeFiles(req.files);return res.status(400).json({error:"MESSAGE_REQUIRED"});}
+    const body=clean(req.body?.message,5000);if(!body&&!(req.files||[]).length){removeFiles(req.files);return res.status(400).json({error:"MESSAGE_REQUIRED"});}
     const messageId=id("MSG"),before=row.status;
     try{
       db.transaction(()=>{
