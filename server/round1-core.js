@@ -8,6 +8,9 @@ function validEmail(value){
   return !email||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 function integerId(value){const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:null;}
+function sourceValues(rawJson,start=0,end=33){
+  try{const parsed=JSON.parse(String(rawJson||"{}")),values=Array.isArray(parsed?.values)?parsed.values:[];return values.slice(start,end).map(value=>String(value??""));}catch(_error){return [];}
+}
 const CLIENT_TYPES=new Set(["INDIVIDUAL","PARTNER","BUSINESS","INSTITUTION"]);
 function structuredClientAddress(row){return [row.street,row.city,row.district,row.postcode,row.country].map(value=>text(value,300)).filter(Boolean).join(", ");}
 function structuredClientName(row){const person=[text(row.first_name,160),text(row.last_name,160)].filter(Boolean).join(" ");return text(row.company_name,240)||person||text(row.contact_name,240)||text(row.name,240)||"Data pending";}
@@ -221,7 +224,11 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       WHERE m.client_id=? ORDER BY fv.field_name,fv.first_source_row,fv.value`).all(id);
     const lastVisit=db.prepare(`SELECT id,brand,model,serial_number,last_serviced_at,last_service_title,last_service_description
       FROM pianos WHERE client_id=? AND NULLIF(TRIM(last_serviced_at),'') IS NOT NULL ORDER BY last_serviced_at DESC,id DESC LIMIT 1`).get(id)||null;
-    res.json({sources,field_values:fieldValues,last_visit:lastVisit});
+    const rawRows=db.prepare(`SELECT sr.source_name,sr.source_client_id,sr.source_row_number,sr.raw_json
+      FROM master_data_source_rows sr JOIN master_data_client_source_map m ON m.source_name=sr.source_name AND m.source_client_id=sr.source_client_id
+      WHERE m.client_id=? ORDER BY sr.source_name,sr.source_row_number`).all(id)
+      .map(row=>({source_name:row.source_name,source_client_id:row.source_client_id,source_row_number:row.source_row_number,values:sourceValues(row.raw_json,18,33)}));
+    res.json({sources,field_values:fieldValues,raw_rows:rawRows,last_visit:lastVisit});
   });
 
   app.get("/api/pianos/:id/source-data",auth,staff,(req,res)=>{
@@ -229,12 +236,12 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
     if(!piano)return res.status(404).json({error:"PIANO_NOT_FOUND"});
     const mappings=db.prepare("SELECT source_name,source_instrument_id,updated_at FROM master_data_piano_source_map WHERE piano_id=? ORDER BY source_name,source_instrument_id").all(id);
     const sources=mappings.map(mapping=>{
-      const row=db.prepare(`SELECT source_client_id,source_row_number,imported_at,updated_at FROM master_data_source_rows
+      const row=db.prepare(`SELECT source_client_id,source_row_number,imported_at,updated_at,raw_json FROM master_data_source_rows
         WHERE source_name=? AND source_instrument_id=? AND piano_id=? ORDER BY source_row_number LIMIT 1`).get(mapping.source_name,mapping.source_instrument_id,id)
-        ||db.prepare(`SELECT source_client_id,source_row_number,imported_at,updated_at FROM master_data_import_rows
+        ||db.prepare(`SELECT source_client_id,source_row_number,imported_at,updated_at,raw_json FROM master_data_import_rows
         WHERE source_name=? AND source_instrument_id=? AND piano_id=? ORDER BY source_row_number LIMIT 1`).get(mapping.source_name,mapping.source_instrument_id,id)
         ||{};
-      return {...mapping,...row};
+      return {...mapping,source_client_id:row.source_client_id||null,source_row_number:row.source_row_number||null,imported_at:row.imported_at||null,updated_at:row.updated_at||mapping.updated_at||null,instrument_values:sourceValues(row.raw_json,0,18),client_values:sourceValues(row.raw_json,18,33)};
     });
     res.json({sources});
   });
