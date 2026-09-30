@@ -7,6 +7,14 @@ const {ensureClientIdentity}=require("./client-identity");
 const clean=(value,max=2000)=>String(value??"").replace(/\u0000/g,"").trim().slice(0,max);
 const rid=(prefix="PA")=>`${prefix}-${crypto.randomUUID()}`;
 const validEmail=value=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(value,320).toLowerCase());
+const APPOINTMENT_REASONS=new Set(["PIANO_VIEWING","SERVICE_REQUEST","OTHER"]);
+function appointmentReason(value,contextType="PRIVATE_VISIT"){
+  const explicit=clean(value,40).toUpperCase();
+  if(APPOINTMENT_REASONS.has(explicit))return explicit;
+  if(contextType==="PIANO_VIEWING")return "PIANO_VIEWING";
+  if(contextType==="SERVICE_CONSULTATION")return "SERVICE_REQUEST";
+  return "OTHER";
+}
 const tokenHash=token=>crypto.createHash("sha256").update(String(token)).digest("hex");
 function encryptionKey(env=process.env){const secret=String(env.CONVERSATION_TOKEN_ENCRYPTION_KEY||env.JWT_SECRET||"").trim();return crypto.createHash("sha256").update(secret||"klavierhaus-conversation-key-not-for-production").digest();}
 function encryptToken(token,key){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key,iv),ciphertext=Buffer.concat([cipher.update(String(token),"utf8"),cipher.final()]);return [iv,cipher.getAuthTag(),ciphertext].map(part=>part.toString("base64url")).join(".");}
@@ -75,7 +83,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   const notifyRequest=(row,{kind="requested",actor=null}={})=>{
     if(!row||!notifications)return;
     const labels={
-      requested:["New private appointment request","Új privát időpontkérés","INFO"],
+      requested:["New Private Appointment – Customer call required","Új privát időpont – ügyfél felhívása kötelező","URGENT"],
       proposed:["Alternative appointment proposed","Másik privát időpont javasolva","INFO"],
       approved:["Private appointment request approved","Privát időpontkérés jóváhagyva","SUCCESS"],
       declined:["Private appointment request declined","Privát időpontkérés elutasítva","WARNING"]
@@ -83,7 +91,13 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     if(["approved","declined"].includes(kind))notifications.resolveEntity("PRIVATE_APPOINTMENT_REQUEST",row.id);
     notifications.emit({
       category:"PRIVATE_APPOINTMENT",entityType:"PRIVATE_APPOINTMENT_REQUEST",entityId:row.id,
-      titleEn:labels[0],titleHu:labels[1],bodyEn:`${row.name} · ${formatNy(new Date(row.requested_at))}`,bodyHu:`${row.name} · ${formatNy(new Date(row.requested_at))}`,
+      titleEn:labels[0],titleHu:labels[1],
+      bodyEn:kind==="requested"
+        ?`${row.name} · ${row.email} · ${row.phone} · ${row.appointment_reason||"OTHER"} · ${formatNy(new Date(row.requested_at))}`
+        :`${row.name} · ${formatNy(new Date(row.requested_at))}`,
+      bodyHu:kind==="requested"
+        ?`${row.name} · ${row.email} · ${row.phone} · ${row.appointment_reason||"OTHER"} · ${formatNy(new Date(row.requested_at))}`
+        :`${row.name} · ${formatNy(new Date(row.requested_at))}`,
       actionUrl:"#messenger",severity:labels[2],actorUserId:actor?.id||null,recipients:supportRecipients(row.assigned_user_id)
     });
   };
@@ -103,17 +117,18 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     if(!scheduledAt)return {error:"PRIVATE_APPOINTMENT_TIME_REQUIRED",status:400};
     let context;try{context=validateContext(body);}catch(error){return {error:error.message,status:error.status||400};}
     const explicitType=clean(body?.appointment_type,40).toUpperCase();if(!context.pianoId&&!context.serviceId&&["PRIVATE_VISIT","PIANO_VIEWING","SERVICE_CONSULTATION"].includes(explicitType))context.type=explicitType;
+    const reason=appointmentReason(body?.appointment_reason,context.type);
     const assigned=clean(body?.assigned_user_id,160)||null;if(assigned&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assigned))return {error:"INVALID_APPOINTMENT_ASSIGNEE",status:400};
     let clientId=Number(body?.client_id)||null;if(!clientId&&conversationId)clientId=Number(db.prepare("SELECT client_id FROM customer_conversations WHERE id=?").get(conversationId)?.client_id)||null;if(!clientId)clientId=ensureClientIdentity(db,{name,email:email??body?.email,phone,language:body?.language},{create:true}).client?.id||null;
     let slot;try{slot=assertAvailable(db,{startsAt:scheduledAt,endsAt:body?.scheduled_end_at,duration:body?.duration_min||DEFAULT_DURATION_MIN,excludeAppointmentId,excludeProposalId,excludeRequestId});}catch(error){return {error:error.message,status:error.status||409,details:error.details};}
     const appointmentId=excludeAppointmentId||rid();
     if(excludeAppointmentId){
-      db.prepare(`UPDATE private_appointments SET name=?,email=?,phone=?,scheduled_at=?,scheduled_end_at=?,duration_min=?,note=?,client_id=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(name,clean(email??body?.email,320)||null,phone,slot.starts_at,slot.ends_at,slot.duration_min,note||null,clientId,assigned,appointmentId);
+      db.prepare(`UPDATE private_appointments SET name=?,email=?,phone=?,appointment_reason=?,scheduled_at=?,scheduled_end_at=?,duration_min=?,note=?,client_id=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(name,clean(email??body?.email,320)||null,phone,reason,slot.starts_at,slot.ends_at,slot.duration_min,note||null,clientId,assigned,appointmentId);
     }else{
-      db.prepare(`INSERT INTO private_appointments(id,appointment_type,name,email,phone,scheduled_at,scheduled_end_at,duration_min,note,conversation_id,client_id,piano_id,service_id,status,assigned_user_id,language,source_path,created_source,created_by_user_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?, 'SCHEDULED',?,?,?,?,?)`).run(
-        appointmentId,context.type,name,clean(email??body?.email,320)||null,phone,slot.starts_at,slot.ends_at,slot.duration_min,note||null,conversationId||clean(body?.conversation_id,160)||null,clientId,context.pianoId,context.serviceId,assigned,
+      db.prepare(`INSERT INTO private_appointments(id,appointment_type,name,email,phone,appointment_reason,scheduled_at,scheduled_end_at,duration_min,note,conversation_id,client_id,piano_id,service_id,status,assigned_user_id,language,source_path,created_source,created_by_user_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'SCHEDULED',?,?,?,?,?)`).run(
+        appointmentId,context.type,name,clean(email??body?.email,320)||null,phone,reason,slot.starts_at,slot.ends_at,slot.duration_min,note||null,conversationId||clean(body?.conversation_id,160)||null,clientId,context.pianoId,context.serviceId,assigned,
         body?.language==="hu"?"hu":"en",clean(body?.source_path,1000)||null,source,actor?.id||null
       );
     }
@@ -175,18 +190,31 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
 
   app.post("/api/public/private-appointments",(req,res)=>{
     const ip=clean(req.ip||req.socket?.remoteAddress,120);if(limited(ip))return res.status(429).json({error:"TOO_MANY_REQUESTS"});
-    const name=clean(req.body?.name,200),email=clean(req.body?.email,320).toLowerCase(),phone=clean(req.body?.phone,80),requestedAt=validTime(req.body?.scheduled_at||req.body?.preferred_time,req.body?.language==="hu"?"hu":"en"),note=clean(req.body?.note??req.body?.message,1000);
+    let name=clean(req.body?.name,200),email=clean(req.body?.email,320).toLowerCase(),phone=clean(req.body?.phone,80);
+    const conversationToken=clean(req.body?.conversation_token,500);
+    const conversation=conversationToken?db.prepare("SELECT * FROM customer_conversations WHERE public_token_hash=?").get(tokenHash(conversationToken)):null;
+    if(conversation){name=conversation.name||name;email=String(conversation.email||email).toLowerCase();const linked=conversation.client_id?db.prepare("SELECT phone FROM clients WHERE id=?").get(conversation.client_id):null;phone=phone||clean(linked?.phone,80);}
+    const requestedAt=validTime(req.body?.scheduled_at||req.body?.preferred_time,req.body?.language==="hu"?"hu":"en"),note=clean(req.body?.note??req.body?.message,1000);
     if(!name)return res.status(400).json({error:"PRIVATE_APPOINTMENT_NAME_REQUIRED"});
     if(!validEmail(email))return res.status(400).json({error:"PRIVATE_APPOINTMENT_EMAIL_REQUIRED"});
     if(!phone)return res.status(400).json({error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED"});
     if(!requestedAt)return res.status(400).json({error:"PRIVATE_APPOINTMENT_TIME_REQUIRED"});
     let context;try{context=validateContext(req.body);}catch(error){return res.status(error.status||400).json({error:error.message});}
     let duration;try{duration=interval({startsAt:requestedAt,duration:req.body?.duration_min||DEFAULT_DURATION_MIN}).duration_min;assertAvailable(db,{startsAt:requestedAt,duration});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
-    const requestId=rid("PAR"),client=ensureClientIdentity(db,{name,email,phone,language:req.body?.language},{create:true}).client;
-    db.prepare(`INSERT INTO private_appointment_requests(id,appointment_type,name,email,phone,requested_at,requested_duration_min,note,piano_id,service_id,status,language,source_path,client_id)
-      VALUES(?,?,?,?,?,?,?,?,?,?,'REQUESTED',?,?,?)`).run(
-      requestId,context.type,name,email,phone,requestedAt,duration,note||null,context.pianoId,context.serviceId,req.body?.language==="hu"?"hu":"en",clean(req.body?.source_path,1000)||null,client?.id||null
-    );
+    const reason=appointmentReason(req.body?.appointment_reason,context.type);
+    const requestId=rid("PAR"),client=conversation?.client_id?db.prepare("SELECT * FROM clients WHERE id=?").get(conversation.client_id):ensureClientIdentity(db,{name,email,phone,language:req.body?.language},{create:true}).client;
+    db.transaction(()=>{
+      db.prepare(`INSERT INTO private_appointment_requests(id,appointment_type,name,email,phone,appointment_reason,requested_at,requested_duration_min,note,piano_id,service_id,status,language,source_path,client_id,conversation_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,'REQUESTED',?,?,?,?)`).run(
+        requestId,context.type,name,email,phone,reason,requestedAt,duration,note||null,context.pianoId,context.serviceId,req.body?.language==="hu"?"hu":"en",clean(req.body?.source_path,1000)||null,client?.id||null,conversation?.id||null
+      );
+      if(conversation){
+        const messageId=rid("MSG"),meta=JSON.stringify({request_id:requestId,appointment_reason:reason,scheduled_at:requestedAt,duration_min:duration,phone,note:note||"",status:"REQUESTED"});
+        db.prepare(`INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,message_type,metadata_json,status)
+          VALUES(?,?,?,?,?,?,'PRIVATE_APPOINTMENT_REQUEST',?,'UNREAD')`).run(messageId,conversation.id,"CUSTOMER",name,email,"Private appointment request",meta);
+        db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',last_message_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(conversation.id);
+      }
+    })();
     const row=requestById(requestId);notifyRequest(row,{kind:"requested"});res.status(201).json({ok:true,id:requestId,request:row,pending_approval:true});
   });
 
@@ -205,7 +233,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   app.post("/api/private-appointment-requests/:id/approve",auth,staff,async(req,res)=>{
     const before=requestById(req.params.id);if(!before)return res.status(404).json({error:"PRIVATE_APPOINTMENT_REQUEST_NOT_FOUND"});
     if(!["REQUESTED","PROPOSED"].includes(before.status))return res.status(409).json({error:"PRIVATE_APPOINTMENT_REQUEST_ALREADY_RESOLVED"});
-    const body={...before,...req.body,name:before.name,email:before.email,phone:before.phone,piano_id:before.piano_id,service_id:before.service_id,scheduled_at:req.body?.scheduled_at||before.requested_at,duration_min:req.body?.duration_min||before.requested_duration_min,language:before.language,source_path:before.source_path};
+    const body={...before,...req.body,name:before.name,email:before.email,phone:before.phone,appointment_reason:before.appointment_reason,piano_id:before.piano_id,service_id:before.service_id,scheduled_at:req.body?.scheduled_at||before.requested_at,duration_min:req.body?.duration_min||before.requested_duration_min,language:before.language,source_path:before.source_path};
     const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",email:before.email,excludeProposalId:before.proposal_id||null,excludeRequestId:before.id}))();
     if(result.error)return res.status(result.status).json({error:result.error,details:result.details});
     db.prepare(`UPDATE private_appointment_requests SET status='APPROVED',private_appointment_id=?,assigned_user_id=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
@@ -231,8 +259,8 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const {conversation,token}=ensureConversationForRequest(before,req.user),proposalId=rid("APR");
     const expiry=holdExpiry();
     db.transaction(()=>{
-      db.prepare(`INSERT INTO customer_appointment_proposals(id,conversation_id,appointment_type,starts_at,ends_at,assigned_user_id,phone,note,status,created_by_user_id,expires_at)
-        VALUES(?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,conversation.id,before.appointment_type,slot.starts_at,slot.ends_at,assigned,before.phone,clean(req.body?.note,1000)||before.note||null,req.user.id,expiry);
+      db.prepare(`INSERT INTO customer_appointment_proposals(id,conversation_id,appointment_type,starts_at,ends_at,assigned_user_id,phone,appointment_reason,note,status,created_by_user_id,expires_at)
+        VALUES(?,?,?,?,?,?,?,?,?, 'PROPOSED',?,?)`).run(proposalId,conversation.id,before.appointment_type,slot.starts_at,slot.ends_at,assigned,before.phone,before.appointment_reason||appointmentReason(null,before.appointment_type),clean(req.body?.note,1000)||before.note||null,req.user.id,expiry);
       db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',assigned_user_id=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assigned,conversation.id);
       db.prepare("UPDATE private_appointment_requests SET status='PROPOSED',conversation_id=?,proposal_id=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(conversation.id,proposalId,assigned,before.id);
     })();
@@ -259,7 +287,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const request=db.prepare("SELECT * FROM private_appointment_requests WHERE proposal_id=?").get(proposal.id);
     const duration=Math.round((new Date(proposal.ends_at)-new Date(proposal.starts_at))/60000);
     const body={
-      appointment_type:proposal.appointment_type,name:conversation.name||request?.name||"Guest",email:conversation.email||request?.email||null,phone:proposal.phone||request?.phone||"",client_id:conversation.client_id||request?.client_id||null,
+      appointment_type:proposal.appointment_type,name:conversation.name||request?.name||"Guest",email:conversation.email||request?.email||null,phone:proposal.phone||request?.phone||"",appointment_reason:proposal.appointment_reason||request?.appointment_reason||appointmentReason(null,proposal.appointment_type),client_id:conversation.client_id||request?.client_id||null,
       scheduled_at:proposal.starts_at,scheduled_end_at:proposal.ends_at,duration_min:duration,note:proposal.note||request?.note||null,
       assigned_user_id:proposal.assigned_user_id||conversation.assigned_user_id||req.user.id,language:conversation.language||request?.language||"en",
       source_path:conversation.source_path||request?.source_path||null,piano_id:request?.piano_id||null,service_id:request?.service_id||null
