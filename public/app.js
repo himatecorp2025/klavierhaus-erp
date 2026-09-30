@@ -583,32 +583,6 @@ function masterReadonlyItem(label,value,{full=false,brand=false,extra=""}={}){
   return `<div class="${full?"full":""}"><span>${esc(label)}</span><strong class="${present?"":"master-data-pending"}">${esc(display)}</strong>${extra}</div>`;
 }
 
-function masterSourceFieldLabel(field){
-  return ({
-    first_name:tr("First name","Keresztnév"),last_name:tr("Last name","Vezetéknév"),company_name:tr("Company name","Cégnév"),contact_name:tr("Contact name","Kapcsolattartó neve"),
-    street:tr("Street","Utca, házszám"),city:tr("City","Város"),district:tr("District / State","Kerület / állam"),postcode:tr("Postcode","Irányítószám"),country:tr("Country","Ország"),
-    mobile_phone:tr("Mobile phone","Mobiltelefon"),line_phone:tr("Landline phone","Vezetékes telefon"),email:"Email",notes:tr("Notes","Megjegyzés"),short_memo_to_name:tr("Short memo to name","Rövid név-memó")
-  })[field]||field;
-}
-function masterClientSourceHistoryMarkup(history={}){
-  const sources=Array.isArray(history.sources)?history.sources:[],values=Array.isArray(history.values)?history.values:[];
-  if(!sources.length&&!values.length)return "";
-  const sourceCards=sources.map(source=>`<article class="history-row"><div><strong>${esc(source.source_name||tr("Imported source","Importforrás"))}</strong><small>${tr("Source client ID","Forrás ügyfél-ID")}: ${esc(masterValue(source.source_client_id))} · ${tr("Rows","Sorok")}: ${esc(masterValue(source.source_row_numbers))}</small></div></article>`).join("");
-  const grouped=new Map();
-  for(const row of values){if(!grouped.has(row.field_name))grouped.set(row.field_name,[]);grouped.get(row.field_name).push(row);}
-  const valueRows=[...grouped.entries()].map(([field,rows])=>`<article class="history-row master-source-values"><div><strong>${esc(masterSourceFieldLabel(field))}</strong>${rows.map(row=>`<small>${esc(row.value)} · ${tr("source row","forrássor")} ${esc(row.first_source_row)}${Number(row.last_source_row)!==Number(row.first_source_row)?`–${esc(row.last_source_row)}`:""}${Number(row.occurrences||0)>1?` · ×${Number(row.occurrences)}`:""}</small>`).join("")}</div></article>`).join("");
-  return `<section class="master-source-history"><div class="panel-head inline-panel-head"><h3>${tr("Imported source history","Importált forráselőzmények")}</h3><span class="badge">${sources.length}</span></div><div class="service-history-list">${sourceCards}${valueRows}</div></section>`;
-}
-function masterPianoSourceMarkup(piano={}){
-  if(!piano.source_instrument_id&&!piano.source_client_id&&!piano.source_row_number&&!piano.source_name)return "";
-  return `<section class="master-source-history"><div class="panel-head inline-panel-head"><h3>${tr("Source data","Forrásadatok")}</h3></div><div class="piano-detail-grid">
-    ${masterReadonlyItem(tr("Source instrument ID","Forrás hangszer-ID"),piano.source_instrument_id)}
-    ${masterReadonlyItem(tr("Source client ID","Forrás ügyfél-ID"),piano.source_client_id)}
-    ${masterReadonlyItem(tr("Source row","Forrássor"),piano.source_row_number)}
-    ${masterReadonlyItem(tr("Source","Forrás"),piano.source_name)}
-    ${masterReadonlyItem(tr("Imported","Importálva"),piano.source_imported_at,{full:true})}
-  </div></section>`;
-}
 async function renderMaster(){
   if(masterQuery())state.masterSearchOpen=true;
   const workspace=$("#workspace");
@@ -787,7 +761,6 @@ async function renderClientDetail(){
     ${masterReadonlyItem(tr("Notes","Megjegyzés"),client.notes,{full:true})}
     ${masterReadonlyItem(tr("Short memo to name","Rövid név-memó"),client.short_memo_to_name,{full:true})}
     ${masterReadonlyItem(tr("Last visit","Utolsó látogatás"),client.last_visit)}
-    ${masterReadonlyItem(tr("Source client ID","Forrás ügyfél-ID"),client.source_client_id)}
   </div>`;
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
     <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button>${canDeleteClient?`<button id="deleteClientBtn" class="danger-button" type="button">${tr("Delete client","Ügyfél törlése")}</button>`:""}</div></div>
