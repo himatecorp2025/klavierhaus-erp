@@ -146,9 +146,10 @@ test("16 localized private date parser accepts US wall time",()=>{
 
 test("17 public appointment UI is explicit about HU US formats and New York timezone",()=>{
   const html=read("website/server/index.js"),browser=read("website/public/app.js"),backend=read("server/private-appointments.js");
-  assert.match(html,/2026\. 10\. 15\. 14:30/);
-  assert.match(html,/10\/15\/2026 2:30 PM/);
+  assert.match(html,/name="scheduled_at_display" type="datetime-local" step="900"/);
+  assert.match(html,/data-private-calendar/);
   assert.match(browser,/scheduled_at_display/);
+  assert.ok(browser.includes('match=raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/)'));
   assert.match(backend,/America\/New_York/);
 });
 

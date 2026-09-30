@@ -2509,3 +2509,37 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   .assessment-grid{grid-template-columns:1fr!important}
   .assessment-option{min-height:118px!important}
 }
+
+
+/* Calendar/date UX + wide Planned Job dialog */
+.field input[type="date"],
+.field input[type="datetime-local"],
+.stack-form input[type="date"],
+.stack-form input[type="datetime-local"]{
+  cursor:pointer;
+  font-variant-numeric:tabular-nums;
+}
+:root[data-theme="dark"] .field input[type="date"],
+:root[data-theme="dark"] .field input[type="datetime-local"],
+:root[data-theme="dark"] .stack-form input[type="date"],
+:root[data-theme="dark"] .stack-form input[type="datetime-local"]{color-scheme:dark}
+:root[data-theme="light"] .field input[type="date"],
+:root[data-theme="light"] .field input[type="datetime-local"],
+:root[data-theme="light"] .stack-form input[type="date"],
+:root[data-theme="light"] .stack-form input[type="datetime-local"]{color-scheme:light}
+.field input[type="date"]::-webkit-calendar-picker-indicator,
+.field input[type="datetime-local"]::-webkit-calendar-picker-indicator{
+  cursor:pointer;opacity:.88
+}
+@media(min-width:901px){
+  .app-dialog.app-dialog--wide{width:min(1040px,calc(100% - 48px))}
+  .app-dialog.app-dialog--wide .dialog-body{padding:22px 24px 26px}
+  .app-dialog.app-dialog--wide .workflow-plan-row{gap:10px}
+  .app-dialog.app-dialog--wide .workflow-plan-row .field>span{font-size:10px}
+}
+@media(max-width:900px){
+  .app-dialog.app-dialog--wide{width:calc(100% - 20px)}
+}
+@media(max-width:640px){
+  .app-dialog.app-dialog--wide{width:calc(100% - 16px)}
+}

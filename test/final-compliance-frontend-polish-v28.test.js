@@ -53,6 +53,6 @@ test("Master Data search persists across subfilters while technical import-histo
   assert.doesNotMatch(app,/masterClientSourceHistoryMarkup|masterPianoSourceMarkup/);
 });
 
-test("PWA cache is bumped for frontend polish v28",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v28-frontend-polish/);
+test("PWA cache advances beyond frontend polish for calendar/date UX",()=>{
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v29-calendar-date-ux/);
 });
