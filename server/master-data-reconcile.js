@@ -314,7 +314,7 @@ function importLegacyInstrumentClientCsv(db,{content,sourceName="KLAVIERHAUS_CSV
     persistImportRow(db,{sourceName,record,clientId:piano.client_id,pianoId:piano.id});
   }
   const after=reconcileExistingMasterData(db);
-  const sourceNonEmptyValues=records.reduce((sum,record)=>sum+Object.values(record.raw.instrument).filter(value=>clean(value)!=="").length+Object.values(record.raw.client).filter(value=>clean(value)!=="").length,0);
+  const sourceNonEmptyValues=records.reduce((sum,record)=>sum+(record.raw.values||[]).filter(value=>clean(value)!=="").length,0);
   return {rows:records.length,columns:33,sourceClients:sourceClientIds.size,sourceNonEmptyValues,createdClients,updatedClients,matchedExistingClients,deletedClientsSkipped,createdPianos,updatedPianos,ownerlessPianos,sourceRowsPersisted:tableExists(db,"master_data_import_rows")?Number(db.prepare("SELECT COUNT(*) c FROM master_data_import_rows WHERE source_name=?").get(sourceName)?.c||0):records.length,reviewItems:0,unassigned:ownerlessPianos,sourceDuplicateGroups:0,...after};
 }
 function reconcileExistingMasterData(db){
