@@ -751,8 +751,9 @@ function customerConversationSignature(conversation){
 }
 function customerChatInteractionLocked(){
   const dirty=customerChatMessages?.querySelector('[data-customer-profile-form][data-dirty="true"]');
+  const focused=customerChatMessages?.contains(document.activeElement)&&document.activeElement?.closest?.("[data-customer-profile-form]");
   const booking=customerChat?.querySelector("[data-chat-booking-dialog][open]");
-  return Boolean(dirty||booking);
+  return Boolean(dirty||focused||booking);
 }
 function renderCustomerMessages(messages = [], conversation = null, {scrollToEnd=false,preserveScroll=true} = {}) {
   if (!customerChatMessages) return;
