@@ -113,7 +113,7 @@ function prepareClientSegmentationCompatibility() {
   for(const [name,definition] of [
     ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],
     ["mobile_phone","TEXT"],["line_phone","TEXT"],["street","TEXT"],["city","TEXT"],["district","TEXT"],
-    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],
+    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
     ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],
     ["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"]
   ])ensureColumn("clients",name,definition);
@@ -292,7 +292,8 @@ if(inventoryCatalogNeedsMigration){
   db.exec('ALTER TABLE "inventory_items" RENAME TO "_inventory_legacy_items"');
   console.log("[INVENTORY] Legacy inventory_items table isolated before canonical inventory schema creation");
 }
-const archiveCategoryNeedsMigration=tableExists("document_archive")&&!String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||"").includes("deleted_intake");
+const archiveSql=tableExists("document_archive")?String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='document_archive'").get()?.sql||""):"";
+const archiveCategoryNeedsMigration=tableExists("document_archive")&&(!archiveSql.includes("deleted_intake")||!archiveSql.includes("deleted_client"));
 if(archiveCategoryNeedsMigration){
   if(tableExists("_documents_legacy_archive"))db.exec('DROP TABLE "_documents_legacy_archive"');
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
@@ -321,7 +322,7 @@ db.pragma("foreign_keys = OFF");
 ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
 for(const [name,definition] of [
   ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],["mobile_phone","TEXT"],["line_phone","TEXT"],
-  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],
+  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
   ["client_type","TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
   ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
 ])ensureColumn("clients",name,definition);
