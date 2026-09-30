@@ -205,6 +205,7 @@ function repointClient(db,fromId,toId){
   if(tableExists(db,"master_data_client_source_map"))db.prepare("UPDATE OR IGNORE master_data_client_source_map SET client_id=? WHERE client_id=?").run(toId,fromId);
   if(tableExists(db,"client_piano_review_queue"))db.prepare("UPDATE client_piano_review_queue SET client_id=? WHERE client_id=?").run(toId,fromId);
   if(tableExists(db,"master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET client_id=? WHERE client_id=?").run(toId,fromId);
+  if(tableExists(db,"master_data_source_rows"))db.prepare("UPDATE master_data_source_rows SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(toId,fromId);
 }
 function mergeExistingClients(db){
   const rows=db.prepare("SELECT * FROM clients WHERE deleted_at IS NULL ORDER BY id").all(),parent=new Map(rows.map(row=>[row.id,row.id])),sourceMap=new Map(rows.map(row=>[row.id,sourceClientIds(db,row.id)]));
@@ -250,6 +251,7 @@ function repointPiano(db,fromId,toId){
   if(tableExists(db,"master_data_piano_source_map"))db.prepare("UPDATE OR IGNORE master_data_piano_source_map SET piano_id=?,review_id=NULL WHERE piano_id=?").run(toId,fromId);
   if(tableExists(db,"client_piano_review_queue"))db.prepare("UPDATE client_piano_review_queue SET piano_id=CASE WHEN piano_id=? THEN ? ELSE piano_id END,resolved_piano_id=CASE WHEN resolved_piano_id=? THEN ? ELSE resolved_piano_id END WHERE piano_id=? OR resolved_piano_id=?").run(fromId,toId,fromId,toId,fromId,fromId);
   if(tableExists(db,"master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET piano_id=? WHERE piano_id=?").run(toId,fromId);
+  if(tableExists(db,"master_data_source_rows"))db.prepare("UPDATE master_data_source_rows SET piano_id=?,updated_at=CURRENT_TIMESTAMP WHERE piano_id=?").run(toId,fromId);
 }
 function pianoDuplicateKey(row){
   const serial=normSerial(row.serial_number),brand=brandFamily(row.brand),owner=row.client_id===null||row.client_id===undefined?"UNASSIGNED":String(row.client_id);
