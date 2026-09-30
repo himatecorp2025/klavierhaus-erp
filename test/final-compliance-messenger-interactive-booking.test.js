@@ -67,6 +67,7 @@ test("Messenger responsive booking keeps admin actions visible and customer form
   assert.match(adminCss,/\.messenger-shell\{[^\n]*grid-template-columns:minmax\(200px,240px\) minmax\(360px,1fr\) minmax\(210px,250px\)/);
   assert.match(adminCss,/\.messenger-reply\{[^\n]*grid-template-columns:minmax\(0,1fr\) 94px/);
   assert.match(adminCss,/\.messenger-action-grid\{[^\n]*width:94px;min-width:94px/);
+  assert.match(admin,/\$\$\("\[data-slot\]",slots\)\.forEach/);
 
   assert.match(siteCss,/\.customer-chat__booking-open\{display:grid\}/);
   assert.match(siteCss,/\.customer-chat__heading-actions\{[^\n]*right:1\.05rem;top:1rem/);
