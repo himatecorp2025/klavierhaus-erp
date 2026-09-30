@@ -211,22 +211,93 @@ function createNotificationCenter({db,env=process.env}={}){
   function resolveEntity(entityType,entityId){
     db.prepare("UPDATE notification_events SET resolved_at=COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE entity_type=? AND entity_id=?").run(clean(entityType,80),clean(entityId,240));
   }
+  function auditQuery(sql,...params){try{return db.prepare(sql).get(...params)||null;}catch(_error){return null;}}
+  function auditChangedFields(before={},after={}){
+    if(!before||!after||typeof before!=="object"||typeof after!=="object")return [];
+    const ignored=new Set(["id","created_at","updated_at","session_version","vip_updated_at","vip_updated_by_user_id","deleted_at","deleted_by_user_id","archive_document_id"]);
+    return [...new Set(Object.keys(after).filter(key=>!ignored.has(key)&&Object.prototype.hasOwnProperty.call(before,key)&&JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null)))].slice(0,5);
+  }
+  function auditFieldLabel(key,language="en"){
+    const labels={
+      name:["name","név"],first_name:["first name","keresztnév"],last_name:["last name","vezetéknév"],company_name:["company name","cégnév"],contact_name:["contact name","kapcsolattartó"],
+      email:["email","e-mail"],phone:["phone","telefon"],mobile_phone:["mobile phone","mobiltelefon"],line_phone:["landline phone","vezetékes telefon"],address:["address","cím"],street:["street","utca"],city:["city","város"],district:["district / state","kerület / állam"],postcode:["postcode","irányítószám"],country:["country","ország"],
+      client_type:["client type","ügyféltípus"],is_vip:["VIP status","VIP státusz"],brand:["brand","márka"],model:["model","modell"],serial_number:["serial number","gyári szám"],color:["color","szín"],size_display:["size","méret"],build_year:["year built","gyártási év"],category:["category","kategória"],
+      last_serviced_at:["last service date","utolsó szerviz dátuma"],last_service_title:["last service","utolsó szerviz"],last_service_description:["service description","szervizleírás"],next_service_date:["next service date","következő szerviz"],date_of_purchase:["purchase date","vásárlás dátuma"],warranty:["warranty","garancia"],
+      title:["title","megnevezés"],description:["description","leírás"],status:["status","státusz"],stage:["workflow stage","munkafázis"],scheduled_at:["scheduled time","időpont"],assigned_technician_id:["assigned technician","kijelölt technikus"],
+      total_amount:["total amount","végösszeg"],payment_method:["payment method","fizetési mód"],paid_at:["payment date","fizetés időpontja"],due_date:["due date","fizetési határidő"],reported_issue:["request / issue","igény / probléma"],estimated_urgency:["urgency","sürgősség"]
+    };
+    const pair=labels[key]||[key.replaceAll("_"," "),key.replaceAll("_"," ")];return language==="hu"?pair[1]:pair[0];
+  }
+  function auditContext(mod,recordId,oldValue,newValue){
+    const after=newValue&&typeof newValue==="object"?newValue:{},before=oldValue&&typeof oldValue==="object"?oldValue:{};
+    if(mod.startsWith("clients")){
+      const row=auditQuery("SELECT * FROM clients WHERE id=?",recordId)||after||before;
+      return {kind:"client",label:clean(row?.name||after?.name||before?.name||("Client #"+recordId),240),row,before,after,actionUrl:after?.archive_document_id?`/?view=documents&category=deleted_client&archive=${after.archive_document_id}`:`/?view=master&client=${recordId}`};
+    }
+    if(mod.startsWith("pianos")){
+      const row=auditQuery(`SELECT p.*,c.name AS client_name FROM pianos p LEFT JOIN clients c ON c.id=p.client_id WHERE p.id=?`,recordId)||after||before;
+      const label=[row?.brand||after?.brand||before?.brand||"No brand",row?.model||after?.model||before?.model].filter(Boolean).join(" ");
+      return {kind:"piano",label:clean(label||("Piano #"+recordId),240),clientName:clean(row?.client_name||"",240),row,before,after,actionUrl:`/?view=master&piano=${recordId}`};
+    }
+    if(mod.startsWith("intake")){
+      const oldLead=before?.lead&&typeof before.lead==="object"?before.lead:before;
+      const row=auditQuery(`SELECT i.*,c.name AS client_name,p.brand AS piano_brand,p.model AS piano_model FROM intake_leads i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN pianos p ON p.id=i.piano_id WHERE i.id=?`,recordId)||after?.lead||oldLead||{};
+      return {kind:"intake",label:`Intake #${recordId}`,clientName:clean(row?.client_name||row?.raw_client_name||"",240),pianoLabel:clean([row?.piano_brand,row?.piano_model].filter(Boolean).join(" "),240),issue:clean(row?.reported_issue||"",180),row,before:oldLead,after:after?.lead||after,actionUrl:after?.archive_document_id?`/?view=documents&category=deleted_intake&archive=${after.archive_document_id}`:`/?view=intake&intake=${recordId}`};
+    }
+    if(mod.startsWith("invoices")){
+      const row=auditQuery(`SELECT i.*,c.name AS client_name FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=?`,recordId)||after||before;
+      return {kind:"invoice",label:clean(row?.invoice_number||after?.invoice_number||before?.invoice_number||("Invoice #"+recordId),240),clientName:clean(row?.client_name||row?.counterparty_name||after?.counterparty_name||before?.counterparty_name||"",240),row,before,after,actionUrl:`/?view=finance&invoice=${recordId}`};
+    }
+    if(mod.startsWith("jobs")){
+      const row=auditQuery(`SELECT j.*,c.name AS client_name,p.brand AS piano_brand,p.model AS piano_model FROM jobs j LEFT JOIN clients c ON c.id=j.client_id LEFT JOIN pianos p ON p.id=j.piano_id WHERE j.id=?`,recordId)||after||before;
+      return {kind:"job",label:clean(row?.job_code||after?.job_code||before?.job_code||("Job #"+recordId),240),clientName:clean(row?.client_name||"",240),pianoLabel:clean([row?.piano_brand,row?.piano_model].filter(Boolean).join(" "),240),row,before,after,actionUrl:`/?view=workshop&job=${recordId}`};
+    }
+    const label=mod.replaceAll("_"," ").replace(/\b\w/g,m=>m.toUpperCase());
+    return {kind:"record",label,row:after,before,after,actionUrl:""};
+  }
   function fromAudit({action,module,recordId,oldValue,newValue,user,success=true}={}){
     if(!success)return null;
-    const mod=clean(module,80),act=clean(action,60).toUpperCase();
+    const mod=clean(module,80),act=clean(action,60).toUpperCase(),actor=clean(user?.name||"System",160);
     if(!mod||["notifications","auth","session","branding"].includes(mod))return null;
     const allowedPrefixes=["clients","pianos","intake","jobs","invoices","document","website_leads","events"];
     if(!allowedPrefixes.some(prefix=>mod.startsWith(prefix)))return null;
-    const label=mod.replaceAll("_"," ").replace(/\b\w/g,m=>m.toUpperCase());
     const terminal=/COMPLETE|CLOSE|CANCEL|DELETE|ARCHIVE/.test(act);
     if(terminal&&recordId!==undefined&&recordId!==null)resolveEntity(mod.toUpperCase(),String(recordId));
     const severity=/CANCEL|DELETE|FAIL|OVERDUE/.test(act)?"WARNING":/COMPLETE|PAID|CLOSE/.test(act)?"SUCCESS":"INFO";
-    const bodyEn=`${user?.name||"System"} · ${act.replaceAll("_"," ")}`;
-    const bodyHu=`${user?.name||"Rendszer"} · ${act.replaceAll("_"," ")}`;
+    const ctx=auditContext(mod,String(recordId||""),oldValue,newValue),changes=auditChangedFields(ctx.before,ctx.after);
+    const changesEn=changes.map(key=>auditFieldLabel(key,"en")).join(", "),changesHu=changes.map(key=>auditFieldLabel(key,"hu")).join(", ");
+    let titleEn=`${actor} · ${act.replaceAll("_"," ")} · ${ctx.label}`,titleHu=titleEn,bodyEn=changesEn?`Updated: ${changesEn}.`:"",bodyHu=changesHu?`Módosult: ${changesHu}.`:"";
+
+    if(ctx.kind==="client"){
+      if(act==="CREATE"){titleEn=`${actor} created client ${ctx.label}`;titleHu=`${actor} létrehozta az ügyfelet: ${ctx.label}`;bodyEn="New client added to Master Data.";bodyHu="Új ügyfél került a törzsadatok közé.";}
+      else if(act==="UPDATE"){titleEn=`${actor} updated client ${ctx.label}`;titleHu=`${actor} frissítette az ügyfelet: ${ctx.label}`;}
+      else if(act==="DELETE"){titleEn=`${actor} deleted client ${ctx.label}`;titleHu=`${actor} törölte az ügyfelet: ${ctx.label}`;bodyEn="Removed from active Master Data and moved to Deleted clients archive.";bodyHu="Eltávolítva az aktív törzsadatokból, és áthelyezve a Törölt ügyfelek archívumba.";}
+    }else if(ctx.kind==="piano"){
+      const owner=ctx.clientName?` · ${ctx.clientName}`:"";
+      if(act==="CREATE"){titleEn=`${actor} added piano ${ctx.label}`;titleHu=`${actor} zongorát adott hozzá: ${ctx.label}`;bodyEn=`Piano added to Master Data${owner}.`;bodyHu=`Zongora hozzáadva a törzsadatokhoz${owner}.`;}
+      else if(act==="UPDATE"){titleEn=`${actor} updated piano ${ctx.label}`;titleHu=`${actor} frissítette a zongorát: ${ctx.label}`;if(ctx.clientName&&changesEn)bodyEn=`${ctx.clientName} · Updated: ${changesEn}.`;if(ctx.clientName&&changesHu)bodyHu=`${ctx.clientName} · Módosult: ${changesHu}.`;}
+    }else if(ctx.kind==="intake"){
+      if(act==="DELETE"){titleEn=`${actor} deleted an intake request`;titleHu=`${actor} törölt egy igényfelmérést`;const parts=[ctx.clientName,ctx.pianoLabel,ctx.issue].filter(Boolean).join(" · ");bodyEn=`${parts?parts+" · ":""}Moved to Deleted intake requests.`;bodyHu=`${parts?parts+" · ":""}Áthelyezve a Törölt igények archívumba.`;}
+      else if(act==="CREATE"){titleEn=`${actor} created ${ctx.label}`;titleHu=`${actor} létrehozta: ${ctx.label}`;bodyEn=[ctx.clientName,ctx.pianoLabel,ctx.issue].filter(Boolean).join(" · ");bodyHu=bodyEn;}
+      else if(act==="UPDATE"){titleEn=`${actor} updated ${ctx.label}`;titleHu=`${actor} frissítette: ${ctx.label}`;if(ctx.clientName&&changesEn)bodyEn=`${ctx.clientName} · Updated: ${changesEn}.`;if(ctx.clientName&&changesHu)bodyHu=`${ctx.clientName} · Módosult: ${changesHu}.`;}
+    }else if(ctx.kind==="invoice"){
+      if(/PAID|PAYMENT/.test(act)){
+        const amount=Number(ctx.row?.total_amount||ctx.after?.total_amount||ctx.before?.total_amount||0),money=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(amount);
+        titleEn="Invoice payment recorded";titleHu="Számlafizetés rögzítve";
+        bodyEn=`${actor} recorded ${money} payment for ${ctx.label}${ctx.clientName?" · "+ctx.clientName:""}.`;
+        bodyHu=`${actor} ${money} összegű fizetést rögzített: ${ctx.label}${ctx.clientName?" · "+ctx.clientName:""}.`;
+      }else{titleEn=`${actor} ${act==="CREATE"?"created":"updated"} ${ctx.label}`;titleHu=`${actor} ${act==="CREATE"?"létrehozta":"frissítette"}: ${ctx.label}`;if(ctx.clientName&&changesEn)bodyEn=`${ctx.clientName} · Updated: ${changesEn}.`;if(ctx.clientName&&changesHu)bodyHu=`${ctx.clientName} · Módosult: ${changesHu}.`;}
+    }else if(ctx.kind==="job"){
+      if(/COMPLETE|CLOSE/.test(act)){titleEn=`${actor} completed ${ctx.label}`;titleHu=`${actor} lezárta: ${ctx.label}`;bodyEn=[ctx.pianoLabel,ctx.clientName].filter(Boolean).join(" · ");bodyHu=bodyEn;}
+      else{titleEn=`${actor} ${act==="CREATE"?"created":"updated"} ${ctx.label}`;titleHu=`${actor} ${act==="CREATE"?"létrehozta":"frissítette"}: ${ctx.label}`;const context=[ctx.pianoLabel,ctx.clientName,changesEn?`Updated: ${changesEn}`:""].filter(Boolean).join(" · ");bodyEn=context;bodyHu=[ctx.pianoLabel,ctx.clientName,changesHu?`Módosult: ${changesHu}`:""].filter(Boolean).join(" · ");}
+    }
+
+    if(!bodyEn)bodyEn=`${actor} performed ${act.replaceAll("_"," ").toLowerCase()} on ${ctx.label}.`;
+    if(!bodyHu)bodyHu=`${actor} műveletet végzett: ${ctx.label} · ${act.replaceAll("_"," ").toLowerCase()}.`;
     const source=newValue&&typeof newValue==="object"?newValue:{};
     const recipientKeys=["assigned_user_id","responsible_user_id","technician_id","main_responsible_user_id","owner_user_id"];
     const recipients=[...new Set(recipientKeys.map(key=>source?.[key]).filter(Boolean))];
-    return emit({category:"OPERATIONAL",entityType:mod.toUpperCase(),entityId:String(recordId||""),titleEn:label,titleHu:label,bodyEn,bodyHu,severity,actorUserId:user?.id||null,recipients:recipients.length?recipients:null});
+    return emit({category:"OPERATIONAL",entityType:mod.toUpperCase(),entityId:String(recordId||""),titleEn,titleHu,bodyEn,bodyHu,actionUrl:ctx.actionUrl,severity,actorUserId:user?.id||null,recipients:recipients.length?recipients:null});
   }
   function subscribe(userId,subscription,userAgent=""){
     if(!subscription?.endpoint||!subscription?.keys?.p256dh||!subscription?.keys?.auth)throw Object.assign(new Error("INVALID_PUSH_SUBSCRIPTION"),{status:400});
