@@ -50,15 +50,15 @@ function exactClientCandidates(db,{email,phone}={}){
   const ids=new Set();
   const normalizedEmail=text(email,320).toLowerCase();
   if(normalizedEmail){
-    for(const row of db.prepare("SELECT id FROM clients WHERE lower(COALESCE(email,''))=?").all(normalizedEmail))ids.add(Number(row.id));
+    for(const row of db.prepare("SELECT id FROM clients WHERE deleted_at IS NULL AND lower(COALESCE(email,''))=?").all(normalizedEmail))ids.add(Number(row.id));
   }
   const normalizedPhone=normalizePhone(phone);
   if(normalizedPhone){
-    for(const row of db.prepare("SELECT id,phone FROM clients WHERE phone IS NOT NULL AND trim(phone)<>''").all()){
+    for(const row of db.prepare("SELECT id,phone FROM clients WHERE deleted_at IS NULL AND phone IS NOT NULL AND trim(phone)<>''").all()){
       if(normalizePhone(row.phone)===normalizedPhone)ids.add(Number(row.id));
     }
   }
-  return [...ids].map(id=>db.prepare("SELECT * FROM clients WHERE id=?").get(id)).filter(Boolean);
+  return [...ids].map(id=>db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(id)).filter(Boolean);
 }
 function mediaList(value){
   if(Array.isArray(value))return value;
