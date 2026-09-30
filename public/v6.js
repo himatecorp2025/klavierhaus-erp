@@ -471,6 +471,24 @@ async function v6RenderWebsiteRecovery(){
   $$("[data-website-restore]",host).forEach(button=>button.addEventListener("click",()=>{const backup=backups.find(row=>String(row.id)===button.dataset.websiteRestore);if(backup)v6OpenRecoveryConfirm({mode:"restore",backup});}));
 }
 
+
+function v6CmsSidebarMarkup(){
+  const groups=new Map();
+  for(const page of state.cmsPages||[]){
+    const key=page.admin_group||"other";
+    if(!groups.has(key))groups.set(key,{order:Number(page.admin_group_order??99),label:state.language==="hu"?(page.admin_group_label_hu||page.admin_group_label_en||key):(page.admin_group_label_en||key),pages:[]});
+    groups.get(key).pages.push(page);
+  }
+  return [...groups.values()].sort((a,b)=>a.order-b.order).map(group=>{
+    const pages=group.pages.sort((a,b)=>Number(a.admin_page_order??99)-Number(b.admin_page_order??99));
+    return `<section class="cms-sidebar-group"><div class="cms-sidebar-group-title">${esc(group.label)}</div><div class="cms-sidebar-group-pages">${pages.map(page=>{
+      const title=state.language==="hu"?(page.title_hu||page.title_en||page.page_key):(page.title_en||page.page_key);
+      const route=page.routes?.[state.cmsLanguage]||page.routes?.en||"";
+      return `<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button"><strong>${esc(title)}</strong><small>${esc(route)}</small></button>`;
+    }).join("")}</div></section>`;
+  }).join("");
+}
+
 renderCms=async function(){
   const workspace=$("#workspace");
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role)){workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Admin access required.","Admin jogosultság szükséges."));return;}
@@ -483,7 +501,7 @@ renderCms=async function(){
   if(state.cmsMode==="collections")return v6RenderCollections();
   if(state.cmsMode==="branding")return v6RenderBranding();
   if(state.cmsMode==="recovery")return v6RenderWebsiteRecovery();
-  main.innerHTML=`<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${state.cmsPages.map(page=>`<button class="cms-page-button ${page.page_key===state.cmsPage?"active":""}" data-cms-page="${esc(page.page_key)}" type="button">${esc(state.language==="hu"?(page.title_hu||page.title_en||page.page_key):(page.title_en||page.page_key))}</button>`).join("")}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
+  main.innerHTML=`<div class="cms-layout"><aside class="panel cms-sidebar" id="cmsPageList">${v6CmsSidebarMarkup()}</aside><section class="panel cms-editor" id="cmsEditor">${loading()}</section></div>`;
   $$("[data-cms-page]").forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
   await v6LoadCmsPage();
 };
