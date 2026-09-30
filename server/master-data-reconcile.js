@@ -195,11 +195,17 @@ function clientSourceRow(db,sourceName,sourceId){
   const map=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name=? AND source_client_id=?").get(sourceName,sourceId);
   return map?db.prepare("SELECT * FROM clients WHERE id=?").get(map.client_id):null;
 }
-function findExistingClient(db,source){
+function findExistingClient(db,source,sourceName,sourceId){
   const probe={name:composeClientName(source),email:normEmail(source.email),phone:composePhone(source),address:composeAddress(source)};
   const wanted=new Set(clientKeys(probe));if(!wanted.size)return null;
   const rows=db.prepare("SELECT * FROM clients WHERE deleted_at IS NULL ORDER BY id").all();
-  for(const row of rows)if(clientKeys(row).some(key=>wanted.has(key)))return row;
+  for(const row of rows){
+    if(tableExists(db,"master_data_client_source_map")&&sourceName){
+      const mapped=db.prepare("SELECT source_client_id FROM master_data_client_source_map WHERE source_name=? AND client_id=? LIMIT 1").get(sourceName,row.id);
+      if(mapped&&String(mapped.source_client_id)!==String(sourceId||""))continue;
+    }
+    if(clientKeys(row).some(key=>wanted.has(key)))return row;
+  }
   return null;
 }
 function updateClientFromSource(db,row,source){
@@ -222,7 +228,7 @@ function upsertSourceClient(db,source,sourceName){
   if(!hasClientData(source))return null;
   let row=clientSourceRow(db,sourceName,source.source_id),created=false,matchedExisting=false;
   if(row?.deleted_at)return {row:null,created:false,deleted:true};
-  if(!row){row=findExistingClient(db,source);matchedExisting=Boolean(row);}
+  if(!row){row=findExistingClient(db,source,sourceName,source.source_id);matchedExisting=Boolean(row);}
   if(!row){
     const name=composeClientName(source),phone=composePhone(source),address=composeAddress(source);
     const info=db.prepare(`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,client_type,created_at,updated_at)
