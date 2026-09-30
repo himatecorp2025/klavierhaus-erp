@@ -8,7 +8,7 @@ function validEmail(value){
   return !email||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 function integerId(value){const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:null;}
-const CLIENT_TYPES=new Set(["PRIVATE","BUSINESS","INSTITUTION"]);
+const CLIENT_TYPES=new Set(["INDIVIDUAL","PARTNER","BUSINESS","INSTITUTION"]);
 function structuredClientAddress(row){return [row.street,row.city,row.district,row.postcode,row.country].map(value=>text(value,300)).filter(Boolean).join(", ");}
 function structuredClientName(row){const person=[text(row.first_name,160),text(row.last_name,160)].filter(Boolean).join(" ");return text(row.company_name,240)||person||text(row.contact_name,240)||text(row.name,240)||"Data pending";}
 function structuredClientPhone(row){return text(row.mobile_phone,120)||text(row.line_phone,120)||text(row.phone,120);}
@@ -20,7 +20,7 @@ function clientBody(body={},before={}){
   fields.name=text(body.name??"",240)||structuredClientName({...before,...fields});
   fields.phone=text(body.phone??"",120)||structuredClientPhone({...before,...fields});
   fields.address=text(body.address??"",1000)||structuredClientAddress({...before,...fields});
-  fields.client_type=text(body.client_type??before.client_type??"PRIVATE",40).toUpperCase();
+  fields.client_type=text(body.client_type??before.client_type??"INDIVIDUAL",40).toUpperCase();
   fields.is_vip=body.is_vip===undefined?Number(before.is_vip||0):(body.is_vip===true||body.is_vip===1||String(body.is_vip||"").toLowerCase()==="true"?1:0);
   return fields;
 }
