@@ -4,6 +4,9 @@ const crypto=require("node:crypto");
 
 const INSTITUTION_KEYWORDS=["University","School","Academy","Church","Synagog","Temple","Museum","Foundation","Institute","Rappresentanza","Consulate","Embassy","Society","Hospital","Library"];
 const PARTNER_KEYWORDS=["Workshop","Piano Studios","Studio One","Tuner","Technician","Restoration"];
+const LEGACY_MASTER_SOURCE_NAME="KLAVIERHAUS_MASTER_CSV";
+const LEGACY_MASTER_HEADERS=["ID","CATEGORY","BRAND","MODEL","SIZE","COLOR","SERIAL NUMBER","YEAR BUILT","NOTE","DATE OF PURCHASE","WARRANTY","LAST SERVICE DATE","LAST SERVICE TITLE","LAST SERVICE DESCRIPTION","NEXT SERVICE DATE","LATEST INFO FREQUENCY","LATEST INFO HUMIDITY","LATEST INFO TEMPERATURE","ID","FIRST NAME","LAST NAME","COMPANY NAME","CONTACT NAME","STREET","CITY","DISTRICT","POSTCODE","COUNTRY","MOBILE PHONE","LINE PHONE","E-MAIL","NOTE","SHORT MEMO TO NAME"];
+const LEGACY_MASTER_CONTRACT=Object.freeze({rows:339,columns:33,sourceClients:309,totalPianos:339,linkedPianos:329,ownerlessPianos:10,sourceNonEmptyValues:5025,controlClientSourceId:"3084",controlClientPianos:9});
 
 const clean=(value,max=10000)=>String(value??"").replace(/\u0000/g,"").trim().slice(0,max);
 function norm(value){return clean(value).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"");}
@@ -58,13 +61,25 @@ function classifyClientRows(rows=[]){
   if(values.some(row=>clean(row?.company_name)))return "BUSINESS";
   return "INDIVIDUAL";
 }
+function canonicalClientFromRows(rows=[]){
+  const values=rows.filter(Boolean),pick=field=>values.map(row=>clean(row?.[field],5000)).find(Boolean)||"";
+  const source_id=pick("source_id"),client_type=classifyClientRows(values);
+  return {
+    source_id,first_name:pick("first_name"),last_name:pick("last_name"),company_name:pick("company_name"),contact_name:pick("contact_name"),
+    street:pick("street"),city:pick("city"),district:pick("district"),postcode:pick("postcode"),country:pick("country"),
+    mobile_phone:pick("mobile_phone"),line_phone:pick("line_phone"),email:values.map(row=>normEmail(row?.email)).find(Boolean)||"",
+    notes:combineNotes(...values.map(row=>row?.notes)),short_memo_to_name:combineNotes(...values.map(row=>row?.short_memo_to_name)),client_type
+  };
+}
 function sourceInstrumentKey(record){return clean(record?.instrument?.source_id,80)||`ROW:${Number(record?.row_number||0)}`;}
 function parseLegacyInstrumentClientCsv(content){
   const rows=csvRows(content);
   if(rows.length<3)throw Object.assign(new Error("MASTER_DATA_CSV_EMPTY"),{status:400});
   const headers=(rows[1]||[]).map(value=>clean(value).toUpperCase());
-  const required=new Map([[0,"ID"],[1,"CATEGORY"],[2,"BRAND"],[3,"MODEL"],[4,"SIZE"],[5,"COLOR"],[6,"SERIAL NUMBER"],[7,"YEAR BUILT"],[18,"ID"],[19,"FIRST NAME"],[20,"LAST NAME"],[21,"COMPANY NAME"],[22,"CONTACT NAME"],[23,"STREET"],[24,"CITY"],[25,"DISTRICT"],[26,"POSTCODE"],[27,"COUNTRY"],[28,"MOBILE PHONE"],[29,"LINE PHONE"],[30,"E-MAIL"]]);
-  for(const [index,label] of required)if(headers[index]!==label)throw Object.assign(new Error("MASTER_DATA_CSV_FORMAT_UNSUPPORTED"),{status:400});
+  if(headers.length!==LEGACY_MASTER_HEADERS.length||LEGACY_MASTER_HEADERS.some((label,index)=>headers[index]!==label)){
+    const error=Object.assign(new Error("MASTER_DATA_CSV_FORMAT_UNSUPPORTED"),{status:400});
+    error.details={expected:LEGACY_MASTER_HEADERS,received:headers};throw error;
+  }
   return rows.slice(2).map((values,index)=>{
     const row=[...values];while(row.length<33)row.push("");
     const instrument={
