@@ -482,7 +482,19 @@ function v6AssessmentIcon(item){
 }
 function v6AssessmentRows(catalog,selectedItems=[]){
   const selected=new Map((selectedItems||[]).map(item=>[Number(item.catalog_item_id),item]));
-  return `<div class="assessment-grid assessment-grid--continuous">${(catalog||[]).map(item=>{const chosen=selected.get(Number(item.id)),checked=Boolean(chosen),price=Number(chosen?.price??item.default_price??0);return `<label class="assessment-option ${checked?"selected":""}"><span class="assessment-option-category">${esc(item.category||"")}</span><input type="checkbox" data-assessment-check="${item.id}" ${checked?"checked":""}><span class="assessment-option-icon">${v6AssessmentIcon(item)}</span><strong>${esc(v6CatalogLabel(item))}</strong><small>${esc(v6CatalogDescription(item)||"")}</small><span class="assessment-price"><span>$</span><input data-assessment-price="${item.id}" type="number" min="0" step="0.01" value="${price.toFixed(2)}" ${checked?"":"disabled"}></span></label>`;}).join("")}</div>`;
+  return `<div class="assessment-grid assessment-grid--continuous">${(catalog||[]).map(item=>{
+    const chosen=selected.get(Number(item.id)),checked=Boolean(chosen),price=Number(chosen?.price??item.default_price??0);
+    return `<label class="assessment-option ${checked?"selected":""}">
+      <span class="assessment-option-head">
+        <span class="assessment-option-category">${esc(item.category||"")}</span>
+        <input type="checkbox" data-assessment-check="${item.id}" ${checked?"checked":""}>
+      </span>
+      <span class="assessment-option-icon" aria-hidden="true">${v6AssessmentIcon(item)}</span>
+      <strong>${esc(v6CatalogLabel(item))}</strong>
+      <small>${esc(v6CatalogDescription(item)||"")}</small>
+      <span class="assessment-price"><span class="assessment-price-currency">$</span><input data-assessment-price="${item.id}" type="number" min="0" step="0.01" value="${price.toFixed(2)}" ${checked?"":"disabled"} aria-label="${esc(tr("Price","Ár"))}"></span>
+    </label>`;
+  }).join("")}</div>`;
 }
 function v6AssessmentCollect(){
   return $$("[data-assessment-check]:checked").map(box=>({catalog_item_id:Number(box.dataset.assessmentCheck),price:Number($(`[data-assessment-price="${box.dataset.assessmentCheck}"]`)?.value||0)}));
