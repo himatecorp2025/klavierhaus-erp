@@ -1079,10 +1079,22 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
+  first_name TEXT,
+  last_name TEXT,
+  company_name TEXT,
+  contact_name TEXT,
   email TEXT,
+  mobile_phone TEXT,
+  line_phone TEXT,
   phone TEXT,
+  street TEXT,
+  city TEXT,
+  district TEXT,
+  postcode TEXT,
+  country TEXT,
   address TEXT,
   notes TEXT,
+  short_memo_to_name TEXT,
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
   client_type TEXT NOT NULL DEFAULT 'PRIVATE' CHECK(client_type IN ('PRIVATE','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
@@ -1094,13 +1106,22 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE TABLE IF NOT EXISTS pianos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id INTEGER NOT NULL,
-  brand TEXT NOT NULL,
+  client_id INTEGER,
+  category TEXT,
+  brand TEXT NOT NULL DEFAULT 'No brand',
   model TEXT,
   serial_number TEXT,
   finish TEXT,
   location_notes TEXT,
   last_serviced_at TEXT,
+  last_service_title TEXT,
+  last_service_description TEXT,
+  next_service_date TEXT,
+  date_of_purchase TEXT,
+  warranty TEXT,
+  latest_info_frequency TEXT,
+  latest_info_humidity TEXT,
+  latest_info_temperature TEXT,
   build_year INTEGER CHECK(build_year IS NULL OR build_year BETWEEN 1700 AND 2100),
   size_display TEXT,
   color TEXT,
@@ -1108,7 +1129,7 @@ CREATE TABLE IF NOT EXISTS pianos (
   classification_status TEXT NOT NULL DEFAULT 'CLASSIFIED' CHECK(classification_status IN ('CLASSIFIED','REVIEW_REQUIRED')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_pianos_client_classification ON pianos(client_id,classification_status);
@@ -1158,6 +1179,23 @@ CREATE TABLE IF NOT EXISTS master_data_piano_source_map (
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,
   FOREIGN KEY(review_id) REFERENCES client_piano_review_queue(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS master_data_import_rows (
+  source_name TEXT NOT NULL,
+  source_instrument_id TEXT NOT NULL,
+  source_client_id TEXT,
+  source_row_number INTEGER NOT NULL,
+  client_id INTEGER,
+  piano_id INTEGER,
+  raw_json TEXT NOT NULL,
+  imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_name,source_instrument_id),
+  FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
+  FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_data_import_client ON master_data_import_rows(client_id,source_name);
+CREATE INDEX IF NOT EXISTS idx_master_data_import_piano ON master_data_import_rows(piano_id,source_name);
 
 CREATE TABLE IF NOT EXISTS intake_leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
