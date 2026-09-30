@@ -305,7 +305,9 @@ test("stored raw source replay restores normalized piano data without changing o
 
 test("strict Klavierhaus Master CSV contract is fail-closed and preserves all 5025 non-empty values",()=>{
   const db=makeDb(),csv=contractCsv();
-  const summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:MASTER_IMPORT_CONTRACT.sourceName});
+  let summary;
+  try{summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:MASTER_IMPORT_CONTRACT.sourceName});}
+  catch(error){assert.fail((error?.message||"MASTER_DATA_IMPORT_FAILED")+" :: "+JSON.stringify(error?.details||{}));}
   assert.equal(summary.rows,339);
   assert.equal(summary.columns,33);
   assert.equal(summary.sourceClients,309);
