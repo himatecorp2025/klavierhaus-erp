@@ -178,7 +178,7 @@ function assertMasterImportIntegrity(db,{records,sourceName}){
     for(const key of ["rows","columns","sourceClients","linkedPianos","ownerlessPianos","sourceNonEmptyValues"])if(metrics[key]!==MASTER_IMPORT_CONTRACT[key])contractFailures.push({metric:key,expected:MASTER_IMPORT_CONTRACT[key],actual:metrics[key]});
     if(sourceRows!==MASTER_IMPORT_CONTRACT.rows)contractFailures.push({metric:"persistedSourceRows",expected:MASTER_IMPORT_CONTRACT.rows,actual:sourceRows});
     if(mappedPianos!==MASTER_IMPORT_CONTRACT.rows)contractFailures.push({metric:"mappedPianos",expected:MASTER_IMPORT_CONTRACT.rows,actual:mappedPianos});
-    if(controlMap?1:0!==1)contractFailures.push({metric:"controlClientRows",expected:1,actual:controlMap?1:0});
+    if((controlMap?1:0)!==1)contractFailures.push({metric:"controlClientRows",expected:1,actual:controlMap?1:0});
     if(controlPianos!==MASTER_IMPORT_CONTRACT.controlPianos)contractFailures.push({metric:"controlClientPianos",expected:MASTER_IMPORT_CONTRACT.controlPianos,actual:controlPianos});
     if(checkedNonEmptyValues!==sourceNonEmptyValues||preservedNonEmptyValues!==sourceNonEmptyValues)contractFailures.push({metric:"preservedNonEmptyValues",expected:sourceNonEmptyValues,actual:preservedNonEmptyValues});
     if(failures.length)contractFailures.push({metric:"fieldOrRelationFailures",expected:0,actual:failures.length,sample:failures.slice(0,10)});
