@@ -226,17 +226,35 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
     <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span class="customer-chat__toggle-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
       <div class="customer-chat__heading">
-        <button class="customer-chat__panel-close" type="button" data-chat-panel-close aria-label="${escapeHtml(chatCopy.close)}">×</button>
+        <div class="customer-chat__heading-actions">
+          <button class="customer-chat__booking-open" type="button" data-chat-booking-open aria-label="${language === "hu" ? "Privát időpont foglalása" : "Book a private appointment"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z"/></svg></button>
+          <button class="customer-chat__panel-close" type="button" data-chat-panel-close aria-label="${escapeHtml(chatCopy.close)}">×</button>
+        </div>
         <div class="customer-chat__identity"><span class="customer-chat__piano-avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M13 28c10-14 27-17 39-10-3 7-10 12-21 15v13M31 33H18l-6 11h35M18 44v8M43 44v8M33 20l-5 10"/></svg></span><div><p class="eyebrow">Klavierhaus</p><h2>${escapeHtml(chatCopy.title)}</h2><p>${escapeHtml(chatCopy.lead)}</p></div></div>
         <p class="customer-chat__status" data-chat-support-status aria-live="polite"></p>
       </div>
       <div class="customer-chat__messages" data-chat-messages aria-live="polite"></div>
+      <dialog class="customer-chat__booking-dialog" data-chat-booking-dialog>
+        <form class="customer-chat__booking-form" data-chat-booking-form>
+          <div class="customer-chat__booking-head"><div><p class="eyebrow">Klavierhaus</p><h3>${language === "hu" ? "Privát időpont" : "Private appointment"}</h3></div><button type="button" data-chat-booking-close aria-label="${escapeHtml(chatCopy.close)}">×</button></div>
+          <div class="customer-chat__booking-grid">
+            <label>${chatCopy.name}<input name="name" maxlength="200" autocomplete="name" required></label>
+            <label>${chatCopy.email}<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
+            <label>${language === "hu" ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label>
+            <label>${language === "hu" ? "Privát időpont oka" : "Appointment purpose"}<select name="appointment_reason" required><option value="PIANO_VIEWING">${language === "hu" ? "Zongora megtekintés" : "Piano viewing"}</option><option value="SERVICE_REQUEST">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service request"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
+            ${renderPrivateAppointmentPicker(language)}
+            <label class="service-field-wide">${language === "hu" ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3"></textarea></label>
+          </div>
+          <button class="button button--primary" type="submit">${language === "hu" ? "Időpont kérése" : "Request appointment"}</button>
+          <p class="form-result" data-chat-booking-result aria-live="polite"></p>
+        </form>
+      </dialog>
       <form class="customer-chat__form" data-chat-form>
         <div class="customer-chat__intake" data-chat-intake-fields>
           <label>${escapeHtml(chatCopy.name)}<input name="name" maxlength="200" autocomplete="name" required></label>
           <label>${escapeHtml(chatCopy.email)}<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
           <label>${escapeHtml(chatCopy.topic)}<select name="category" required><option value="SERVICE">${language === "hu" ? "Szolgáltatás igénybevétele" : "Service enquiry"}</option><option value="TECHNICAL">${language === "hu" ? "Technikai probléma" : "Technical problem"}</option><option value="PIANO">${language === "hu" ? "Zongora és bemutatóterem" : "Piano & showroom"}</option><option value="REPAIR">${language === "hu" ? "Javítás és szerviz" : "Repair & service"}</option><option value="PRIVATE_CONSULTATION">${language === "hu" ? "Privát látogatás / időpont" : "Private visit / appointment"}</option><option value="BILLING">${language === "hu" ? "Számlázás" : "Billing"}</option><option value="OTHER">${language === "hu" ? "Egyéb ügy" : "Other"}</option></select></label>
-          <label class="checkbox-row"><input name="consent_contact" type="checkbox" required> ${escapeHtml(chatCopy.consent)}</label>
+          <label class="checkbox-row customer-chat__consent"><input name="consent_contact" type="checkbox" required><span>${escapeHtml(chatCopy.consent)}</span></label>
           <button class="button button--primary customer-chat__start" type="submit">${escapeHtml(chatCopy.send)}</button>
         </div>
         <div class="customer-chat__composer" data-chat-composer hidden>
