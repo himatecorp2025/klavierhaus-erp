@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
-const {reconcileExistingMasterData}=require("./master-data-reconcile");
+const {reconcileExistingMasterData,rehydrateStoredMasterData}=require("./master-data-reconcile");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const backupDir = process.env.BACKUP_DIR || path.join(__dirname, "backups");
@@ -647,9 +647,10 @@ function migrateFinalComplianceData() {
 db.transaction(migrateLegacyMasterData)();
 db.transaction(migrateFinalComplianceData)();
 if(setting("master_data_reconcile_version")!=="2026-09-30-relational-2"){
+  const replay=db.transaction(()=>rehydrateStoredMasterData(db))();
   const summary=db.transaction(()=>reconcileExistingMasterData(db))();
   setSetting("master_data_reconcile_version","2026-09-30-relational-2");
-  console.log(`[MASTER-DATA] Reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}`);
+  console.log(`[MASTER-DATA] Rehydrated source_rows=${replay.rows}, pianos=${replay.pianos}, created_pianos=${replay.createdPianos}; reconciled clients=${summary.mergedClients}, pianos=${summary.mergedPianos}, relinked_pianos=${summary.relinkedPianos||0}, review_required=${summary.reviewRequired}`);
 }
 seedWorkshopUxV5();
 
