@@ -12,7 +12,7 @@ function makeDb(){
     CREATE TABLE clients(
       id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,first_name TEXT,last_name TEXT,company_name TEXT,contact_name TEXT,
       email TEXT,mobile_phone TEXT,line_phone TEXT,phone TEXT,street TEXT,city TEXT,district TEXT,postcode TEXT,country TEXT,address TEXT,
-      notes TEXT,short_memo_to_name TEXT,preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'PRIVATE',
+      notes TEXT,short_memo_to_name TEXT,preferred_language TEXT NOT NULL DEFAULT 'en',client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL',
       is_vip INTEGER NOT NULL DEFAULT 0,deleted_at TEXT,deleted_by_user_id TEXT,archive_document_id INTEGER,deletion_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -34,6 +34,15 @@ function makeDb(){
     CREATE TABLE master_data_client_source_map(source_name TEXT NOT NULL,source_client_id TEXT NOT NULL,client_id INTEGER NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(source_name,source_client_id));
     CREATE TABLE master_data_piano_source_map(source_name TEXT NOT NULL,source_instrument_id TEXT NOT NULL,piano_id INTEGER,review_id INTEGER,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(source_name,source_instrument_id));
     CREATE TABLE master_data_import_rows(source_name TEXT NOT NULL,source_instrument_id TEXT NOT NULL,source_client_id TEXT,source_row_number INTEGER NOT NULL,client_id INTEGER,piano_id INTEGER,raw_json TEXT NOT NULL,imported_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(source_name,source_instrument_id));
+    CREATE TABLE master_data_source_rows(
+      source_name TEXT NOT NULL,source_row_number INTEGER NOT NULL,source_instrument_id TEXT,source_client_id TEXT,client_id INTEGER,piano_id INTEGER,
+      raw_json TEXT NOT NULL,raw_sha256 TEXT NOT NULL,nonempty_cell_count INTEGER NOT NULL DEFAULT 0,imported_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(source_name,source_row_number)
+    );
+    CREATE TABLE master_data_client_field_values(
+      source_name TEXT NOT NULL,source_client_id TEXT NOT NULL,field_name TEXT NOT NULL,value TEXT NOT NULL,first_source_row INTEGER NOT NULL,last_source_row INTEGER NOT NULL,
+      occurrences INTEGER NOT NULL DEFAULT 1,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(source_name,source_client_id,field_name,value)
+    );
   `);
   return db;
 }
@@ -90,6 +99,11 @@ test("complete CSV import preserves every non-ID field, source clients stay dist
   assert.equal(raw.values[2],"Steinway & Sons");
   assert.equal(raw.values[4],"170");
   assert.equal(raw.values[30],"same@example.test");
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_source_rows WHERE source_name='TEST_CSV'").get().c,3);
+  const sourceAudit=db.prepare("SELECT raw_sha256,nonempty_cell_count FROM master_data_source_rows WHERE source_name='TEST_CSV' AND source_row_number=3").get();
+  assert.equal(sourceAudit.raw_sha256.length,64);
+  assert.ok(sourceAudit.nonempty_cell_count>0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM master_data_client_field_values WHERE source_name='TEST_CSV' AND source_client_id='500' AND field_name='email' AND value='same@example.test'").get().c,1);
 
   const firstClient=db.prepare("SELECT * FROM clients WHERE id=(SELECT client_id FROM master_data_client_source_map WHERE source_name='TEST_CSV' AND source_client_id='500')").get();
   assert.equal(firstClient.first_name,"Joan");
@@ -105,6 +119,7 @@ test("complete CSV import preserves every non-ID field, source clients stay dist
   assert.equal(firstClient.email,"same@example.test");
   assert.equal(firstClient.notes,"Client note");
   assert.equal(firstClient.short_memo_to_name,"Remember Joan");
+  assert.equal(firstClient.client_type,"INDIVIDUAL");
 
   const piano=db.prepare("SELECT * FROM pianos WHERE id=(SELECT piano_id FROM master_data_piano_source_map WHERE source_name='TEST_CSV' AND source_instrument_id='100')").get();
   assert.equal(piano.category,"grand");
@@ -174,5 +189,40 @@ test("archived client source mapping is a tombstone and reimport does not resurr
   assert.equal(db.prepare("SELECT deleted_at FROM clients WHERE id=?").get(id).deleted_at!==null,true);
   const piano=db.prepare("SELECT * FROM pianos WHERE id=(SELECT piano_id FROM master_data_piano_source_map WHERE source_name='TOMBSTONE' AND source_instrument_id='300')").get();
   assert.equal(piano.client_id,null);
+  db.close();
+});
+
+
+test("client categorization follows Institution Partner Business Individual precedence",()=>{
+  const db=makeDb();
+  const csv=sourceCsv([
+    sourceRow({instrumentId:"401",brand:"Yamaha",clientId:"C-INST",company:"Metropolitan Music University",contact:"Dean"}),
+    sourceRow({instrumentId:"402",brand:"Kawai",clientId:"C-PARTNER",company:"Downtown Piano Studios",clientNote:"Technician partner"}),
+    sourceRow({instrumentId:"403",brand:"Fazioli",clientId:"C-BIZ",company:"Acme Productions LLC"}),
+    sourceRow({instrumentId:"404",brand:"Steinway & Sons",clientId:"C-IND",first:"Jane",last:"Doe"})
+  ]);
+  const summary=importLegacyInstrumentClientCsv(db,{content:csv,sourceName:"TYPE_TEST"});
+  assert.equal(summary.clientTypes.INSTITUTION,1);
+  assert.equal(summary.clientTypes.PARTNER,1);
+  assert.equal(summary.clientTypes.BUSINESS,1);
+  assert.equal(summary.clientTypes.INDIVIDUAL,1);
+  const types=db.prepare("SELECT m.source_client_id,c.client_type FROM master_data_client_source_map m JOIN clients c ON c.id=m.client_id WHERE m.source_name='TYPE_TEST' ORDER BY m.source_client_id").all();
+  assert.deepEqual(Object.fromEntries(types.map(row=>[row.source_client_id,row.client_type])),{"C-BIZ":"BUSINESS","C-IND":"INDIVIDUAL","C-INST":"INSTITUTION","C-PARTNER":"PARTNER"});
+  db.close();
+});
+
+test("source relationship reconciliation restores all nine pianos for source client 3084",()=>{
+  const db=makeDb(),rows=[];
+  for(let i=0;i<9;i++)rows.push(sourceRow({instrumentId:String(4907+i),category:"grand",brand:i%2?"Steinway & Sons":"Bösendorfer",model:"MODEL-"+i,serial:"SER-"+i,clientId:"3084",first:"Control",last:"Owner",email:"control@example.test"}));
+  const first=importLegacyInstrumentClientCsv(db,{content:sourceCsv(rows),sourceName:"CONTROL_3084"});
+  assert.equal(first.controlClientRows,1);
+  assert.equal(first.controlClientPianos,9);
+  const clientId=db.prepare("SELECT client_id FROM master_data_client_source_map WHERE source_name='CONTROL_3084' AND source_client_id='3084'").get().client_id;
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(clientId).c,9);
+  db.prepare("UPDATE pianos SET client_id=NULL WHERE id IN (SELECT piano_id FROM master_data_piano_source_map WHERE source_name='CONTROL_3084')").run();
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(clientId).c,0);
+  const repaired=reconcileExistingMasterData(db);
+  assert.equal(repaired.relinkedPianos,9);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM pianos WHERE client_id=?").get(clientId).c,9);
   db.close();
 });
