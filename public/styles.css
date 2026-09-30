@@ -2269,3 +2269,10 @@ input,select,textarea,button{max-width:100%}
   .master-source-history article>div{display:grid;gap:4px}
   .master-source-history small{text-align:left}
 }
+
+.master-raw-source-row{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+.master-raw-source-row>summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}
+.master-raw-source-values{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(0,1.3fr);gap:6px 12px;margin:10px 0 0}
+.master-raw-source-values dt{color:var(--muted);font-size:12px}
+.master-raw-source-values dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:760px){.master-raw-source-values{grid-template-columns:1fr}}
