@@ -152,7 +152,7 @@ test("lossless import retains original cells and active records expose all struc
 });
 
 
-test("client Last visit and complete source lineage are wired end to end",()=>{
+test("client Last visit and source lineage remain wired while technical lineage UI stays hidden",()=>{
   const schema=read("server/schema.sql"),init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js"),api=read("server/round1-core.js"),app=read("public/app.js"),finance=read("server/round3-finance.js");
   assert.match(schema,/last_visit TEXT/);
   assert.match(init,/\["last_visit","TEXT"\]/);
@@ -163,11 +163,11 @@ test("client Last visit and complete source lineage are wired end to end",()=>{
   assert.match(api,/\/api\/clients\/:id\/source-history/);
   assert.match(app,/Last visit/);
   assert.match(app,/Utolsó látogatás/);
-  assert.match(app,/masterClientSourceHistoryMarkup/);
-  assert.match(app,/masterPianoSourceMarkup/);
+  assert.doesNotMatch(app,/masterClientSourceHistoryMarkup/);
+  assert.doesNotMatch(app,/masterPianoSourceMarkup/);
+  assert.doesNotMatch(app,/Imported source history|Source data/);
   assert.match(finance,/refreshClientLastVisit/);
 });
-
 
 test("Master Data contract status is visible and successful import marks the canonical migration ready",()=>{
   const api=read("server/round1-core.js"),app=read("public/app.js"),init=read("server/init-db.js"),reconcile=read("server/master-data-reconcile.js");
