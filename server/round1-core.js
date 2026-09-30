@@ -9,6 +9,36 @@ function validEmail(value){
 }
 function integerId(value){const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:null;}
 const CLIENT_TYPES=new Set(["PRIVATE","BUSINESS","INSTITUTION"]);
+function structuredClientAddress(row){return [row.street,row.city,row.district,row.postcode,row.country].map(value=>text(value,300)).filter(Boolean).join(", ");}
+function structuredClientName(row){const person=[text(row.first_name,160),text(row.last_name,160)].filter(Boolean).join(" ");return text(row.company_name,240)||person||text(row.contact_name,240)||text(row.name,240)||"Data pending";}
+function structuredClientPhone(row){return text(row.mobile_phone,120)||text(row.line_phone,120)||text(row.phone,120);}
+function clientBody(body={},before={}){
+  const fields={};
+  for(const [key,max] of [["first_name",160],["last_name",160],["company_name",240],["contact_name",240],["mobile_phone",120],["line_phone",120],["street",300],["city",200],["district",160],["postcode",80],["country",160],["short_memo_to_name",1000]])fields[key]=text(body[key]??before[key],max);
+  fields.email=text(body.email??before.email,320).toLowerCase();
+  fields.notes=text(body.notes??before.notes,5000);
+  fields.name=text(body.name??"",240)||structuredClientName({...before,...fields});
+  fields.phone=text(body.phone??"",120)||structuredClientPhone({...before,...fields});
+  fields.address=text(body.address??"",1000)||structuredClientAddress({...before,...fields});
+  fields.client_type=text(body.client_type??before.client_type??"PRIVATE",40).toUpperCase();
+  fields.is_vip=body.is_vip===undefined?Number(before.is_vip||0):(body.is_vip===true||body.is_vip===1||String(body.is_vip||"").toLowerCase()==="true"?1:0);
+  return fields;
+}
+function pianoBody(body={},before={},forcedClientId=undefined){
+  const rawClient=forcedClientId!==undefined?forcedClientId:(body.client_id===undefined?before.client_id:body.client_id);
+  const client_id=rawClient===null||rawClient===""||rawClient===undefined?null:integerId(rawClient);
+  const build_year=body.build_year===undefined?(before.build_year??null):(body.build_year===""||body.build_year===null?null:Number(body.build_year));
+  return {
+    client_id,category:text(body.category??before.category,80),brand:text(body.brand??before.brand,200)||"No brand",model:text(body.model??before.model,200),
+    serial_number:text(body.serial_number??before.serial_number,200),finish:text(body.finish??before.finish,160),location_notes:text(body.location_notes??before.location_notes,1200),
+    last_serviced_at:text(body.last_serviced_at??before.last_serviced_at,120),last_service_title:text(body.last_service_title??before.last_service_title,300),
+    last_service_description:text(body.last_service_description??before.last_service_description,3000),next_service_date:text(body.next_service_date??before.next_service_date,120),
+    date_of_purchase:text(body.date_of_purchase??before.date_of_purchase,120),warranty:text(body.warranty??before.warranty,300),
+    latest_info_frequency:text(body.latest_info_frequency??before.latest_info_frequency,120),latest_info_humidity:text(body.latest_info_humidity??before.latest_info_humidity,120),
+    latest_info_temperature:text(body.latest_info_temperature??before.latest_info_temperature,120),build_year,size_display:text(body.size_display??before.size_display,120),
+    color:text(body.color??before.color,160),notes:text(body.notes??before.notes,5000)
+  };
+}
 function parseContact(raw){
   const value=text(raw,500);
   if(!value)return {email:null,phone:null};
@@ -89,22 +119,27 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   app.get("/api/clients",auth,staff,(req,res)=>{
     const q=text(req.query.q,160).toLowerCase(),like=`%${q}%`;
     const rows=db.prepare(`SELECT c.*,
-      (SELECT COUNT(*) FROM pianos p WHERE p.client_id=c.id AND COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED') AS piano_count,
+      (SELECT COUNT(*) FROM pianos p WHERE p.client_id=c.id) AS piano_count,
       (SELECT COUNT(*) FROM client_piano_review_queue r WHERE r.client_id=c.id AND r.status='PENDING') AS piano_review_count
       FROM clients c
-      WHERE ?='' OR lower(c.name) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ? OR lower(COALESCE(c.phone,'')) LIKE ? OR lower(COALESCE(c.address,'')) LIKE ?
-      ORDER BY lower(c.name),c.id`).all(q,like,like,like,like);
+      WHERE ?='' OR lower(c.name) LIKE ? OR lower(COALESCE(c.first_name,'')) LIKE ? OR lower(COALESCE(c.last_name,'')) LIKE ?
+        OR lower(COALESCE(c.company_name,'')) LIKE ? OR lower(COALESCE(c.contact_name,'')) LIKE ? OR lower(COALESCE(c.email,'')) LIKE ?
+        OR lower(COALESCE(c.phone,'')) LIKE ? OR lower(COALESCE(c.mobile_phone,'')) LIKE ? OR lower(COALESCE(c.line_phone,'')) LIKE ?
+        OR lower(COALESCE(c.address,'')) LIKE ? OR lower(COALESCE(c.street,'')) LIKE ? OR lower(COALESCE(c.city,'')) LIKE ?
+        OR lower(COALESCE(c.district,'')) LIKE ? OR lower(COALESCE(c.postcode,'')) LIKE ? OR lower(COALESCE(c.country,'')) LIKE ?
+      ORDER BY lower(c.name),c.id`).all(q,like,like,like,like,like,like,like,like,like,like,like,like,like,like,like);
     res.json(rows);
   });
 
   app.post("/api/clients",auth,staff,(req,res)=>{
-    const name=text(req.body?.name,240),email=text(req.body?.email,320).toLowerCase();
-    if(!name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
-    if(!validEmail(email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
-    const isVip=req.body?.is_vip===true||req.body?.is_vip===1||String(req.body?.is_vip||"").toLowerCase()==="true"?1:0,requestedType=text(req.body?.client_type||"PRIVATE",40).toUpperCase();
-    if(!CLIENT_TYPES.has(requestedType))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
-    const info=db.prepare("INSERT INTO clients(name,email,phone,address,notes,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-      .run(name,email||null,text(req.body?.phone,120)||null,text(req.body?.address,1000)||null,text(req.body?.notes,5000)||null,requestedType,isVip,isVip?req.user.id:null,isVip?new Date().toISOString():null);
+    const next=clientBody(req.body||{});
+    if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
+    if(!CLIENT_TYPES.has(next.client_type))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
+    const info=db.prepare(`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+      next.name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,next.phone||null,
+      next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.client_type,next.is_vip,next.is_vip?req.user.id:null,next.is_vip?new Date().toISOString():null
+    );
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));
     audit(req,"CREATE","clients",String(row.id),null,row);res.status(201).json(row);
   });
@@ -112,56 +147,39 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
   app.put("/api/clients/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM clients WHERE id=?").get(id);
     if(!before)return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    const requestedVip=req.body?.is_vip===undefined?Number(before.is_vip||0):(req.body.is_vip===true||req.body.is_vip===1||String(req.body.is_vip||"").toLowerCase()==="true"?1:0),requestedType=text(req.body?.client_type??before.client_type??"PRIVATE",40).toUpperCase();
-    if(!CLIENT_TYPES.has(requestedType))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
-    const next={
-      name:text(req.body?.name??before.name,240),email:text(req.body?.email??before.email,320).toLowerCase(),
-      phone:text(req.body?.phone??before.phone,120),address:text(req.body?.address??before.address,1000),notes:text(req.body?.notes??before.notes,5000),client_type:requestedType,is_vip:requestedVip
-    };
-    if(!next.name)return res.status(400).json({error:"CLIENT_NAME_REQUIRED"});
+    const next=clientBody(req.body||{},before);
     if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
+    if(!CLIENT_TYPES.has(next.client_type))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
     const vipChanged=Number(before.is_vip||0)!==next.is_vip;
-    db.prepare("UPDATE clients SET name=?,email=?,phone=?,address=?,notes=?,client_type=?,is_vip=?,vip_updated_by_user_id=CASE WHEN ?=1 THEN ? ELSE vip_updated_by_user_id END,vip_updated_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE vip_updated_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(next.name,next.email||null,next.phone||null,next.address||null,next.notes||null,next.client_type,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
+    db.prepare(`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,client_type=?,is_vip=?,
+      vip_updated_by_user_id=CASE WHEN ?=1 THEN ? ELSE vip_updated_by_user_id END,vip_updated_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE vip_updated_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(next.name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,next.phone||null,next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.client_type,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(id);
     audit(req,"UPDATE","clients",String(id),before,row);res.json(row);
   });
 
+  const pianoSelect=`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
+    COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
+    FROM pianos p LEFT JOIN clients c ON c.id=p.client_id`;
   app.get("/api/pianos",auth,staff,(_req,res)=>{
-    res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
-      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
-      FROM pianos p JOIN clients c ON c.id=p.client_id
-      WHERE COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
-      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all());
+    res.json(db.prepare(pianoSelect+" ORDER BY lower(COALESCE(p.brand,'No brand')),lower(COALESCE(p.model,'')),p.id").all());
   });
 
   app.get("/api/master-data/piano-overview",auth,staff,(_req,res)=>{
-    const classified=db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
-      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
-      FROM pianos p JOIN clients c ON c.id=p.client_id
-      WHERE COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
-      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all();
+    const pianos=db.prepare(pianoSelect+" ORDER BY lower(COALESCE(p.brand,'No brand')),lower(COALESCE(p.model,'')),p.id").all();
     const review=db.prepare(`SELECT r.*,c.name AS client_name,c.address AS client_address,
-      COALESCE(NULLIF(TRIM(r.source_brand),''),'Unknown') AS display_brand,
-      NULLIF(TRIM(r.source_model),'') AS display_model,
-      NULLIF(TRIM(r.source_serial_number),'') AS display_serial_number
-      FROM client_piano_review_queue r
-      LEFT JOIN clients c ON c.id=r.client_id
-      WHERE r.status='PENDING'
-      ORDER BY lower(COALESCE(r.source_brand,'')),lower(COALESCE(r.source_model,'')),r.id`).all();
+      COALESCE(NULLIF(TRIM(r.source_brand),''),'No brand') AS display_brand,
+      NULLIF(TRIM(r.source_model),'') AS display_model,NULLIF(TRIM(r.source_serial_number),'') AS display_serial_number
+      FROM client_piano_review_queue r LEFT JOIN clients c ON c.id=r.client_id WHERE r.status='PENDING' ORDER BY r.id`).all();
     const sourceRows=db.prepare("SELECT COUNT(*) AS count FROM master_data_piano_source_map").get()?.count||0;
-    const sourceGroups=db.prepare("SELECT COUNT(DISTINCT COALESCE(CAST(piano_id AS TEXT),'R:'||CAST(review_id AS TEXT))) AS count FROM master_data_piano_source_map WHERE piano_id IS NOT NULL OR review_id IS NOT NULL").get()?.count||0;
-    res.json({classified,review,totals:{classified:classified.length,review:review.length,total_entities:classified.length+review.length,source_rows:Number(sourceRows),source_groups:Number(sourceGroups)}});
+    const ownerLinked=pianos.filter(row=>row.client_id!==null&&row.client_id!==undefined).length,ownerPending=pianos.length-ownerLinked;
+    res.json({classified:pianos,review,totals:{classified:pianos.length,review:review.length,total_entities:pianos.length,source_rows:Number(sourceRows),source_groups:Number(sourceRows),owner_linked:ownerLinked,owner_pending:ownerPending}});
   });
 
   app.get("/api/clients/:id/pianos",auth,staff,(req,res)=>{
     const id=integerId(req.params.id);
     if(!id||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(id))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    res.json(db.prepare(`SELECT p.*,c.name AS client_name,c.email AS client_email,c.phone AS client_phone,c.address AS client_address,
-      COALESCE(NULLIF(TRIM(p.location_notes),''),NULLIF(TRIM(c.address),'')) AS effective_location
-      FROM pianos p JOIN clients c ON c.id=p.client_id
-      WHERE p.client_id=? AND COALESCE(p.classification_status,'CLASSIFIED')='CLASSIFIED'
-      ORDER BY lower(p.brand),lower(COALESCE(p.model,'')),p.id`).all(id));
+    res.json(db.prepare(pianoSelect+" WHERE p.client_id=? ORDER BY lower(COALESCE(p.brand,'No brand')),lower(COALESCE(p.model,'')),p.id").all(id));
   });
 
   app.get("/api/clients/:id/piano-review",auth,staff,(req,res)=>{
@@ -177,46 +195,40 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
       if(!req.file?.buffer?.length)return res.status(400).json({error:"MASTER_DATA_CSV_REQUIRED"});
       try{
         const summary=importLegacyInstrumentClientCsv(db,{content:req.file.buffer.toString("utf8"),sourceName:"KLAVIERHAUS_MASTER_CSV"});
-        audit(req,"IMPORT","master_data","KLAVIERHAUS_MASTER_CSV",null,summary);
-        res.json(summary);
+        audit(req,"IMPORT","master_data","KLAVIERHAUS_MASTER_CSV",null,summary);res.json(summary);
       }catch(error){res.status(error.status||400).json({error:error.message||"MASTER_DATA_IMPORT_FAILED"});}
     });
   });
 
-  app.post("/api/clients/:id/pianos",auth,staff,(req,res)=>{
-    const clientId=integerId(req.params.id);
-    if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
-    const brand=text(req.body?.brand,200);if(!brand)return res.status(400).json({error:"PIANO_BRAND_REQUIRED"});
-    const buildYear=req.body?.build_year===undefined||req.body?.build_year===""?null:Number(req.body.build_year);
-    if(buildYear!==null&&(!Number.isInteger(buildYear)||buildYear<1700||buildYear>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
-    const info=db.prepare(`INSERT INTO pianos(client_id,brand,model,serial_number,finish,location_notes,last_serviced_at,build_year,size_display,color,notes,classification_status,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
-      clientId,brand,text(req.body?.model,200)||null,text(req.body?.serial_number,160)||null,text(req.body?.finish,160)||null,
-      text(req.body?.location_notes,1200)||null,text(req.body?.last_serviced_at,40)||null,buildYear,text(req.body?.size_display,120)||null,
-      text(req.body?.color,160)||null,text(req.body?.notes,5000)||null
+  function createPiano(req,res,forcedClientId=undefined){
+    const next=pianoBody(req.body||{}, {}, forcedClientId);
+    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
+    if(next.build_year!==null&&(!Number.isInteger(next.build_year)||next.build_year<1700||next.build_year>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
+    const info=db.prepare(`INSERT INTO pianos(client_id,category,brand,model,serial_number,finish,location_notes,last_serviced_at,last_service_title,last_service_description,next_service_date,date_of_purchase,warranty,latest_info_frequency,latest_info_humidity,latest_info_temperature,build_year,size_display,color,notes,classification_status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'CLASSIFIED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+      next.client_id,next.category||null,next.brand,next.model||null,next.serial_number||null,next.finish||null,next.location_notes||null,next.last_serviced_at||null,next.last_service_title||null,next.last_service_description||null,
+      next.next_service_date||null,next.date_of_purchase||null,next.warranty||null,next.latest_info_frequency||null,next.latest_info_humidity||null,next.latest_info_temperature||null,next.build_year,next.size_display||null,next.color||null,next.notes||null
     );
     const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(Number(info.lastInsertRowid));
     const reviewId=integerId(req.body?.review_id);
-    if(reviewId){
-      const review=db.prepare("SELECT * FROM client_piano_review_queue WHERE id=? AND client_id=? AND status='PENDING'").get(reviewId,clientId);
-      if(review)db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id,reviewId);
-    }
+    if(reviewId)db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'").run(row.id,reviewId);
     audit(req,"CREATE","pianos",String(row.id),null,row);res.status(201).json(row);
+  }
+  app.post("/api/pianos",auth,staff,(req,res)=>createPiano(req,res));
+  app.post("/api/clients/:id/pianos",auth,staff,(req,res)=>{
+    const clientId=integerId(req.params.id);
+    if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(404).json({error:"CLIENT_NOT_FOUND"});
+    createPiano(req,res,clientId);
   });
 
   app.put("/api/pianos/:id",auth,staff,(req,res)=>{
     const id=integerId(req.params.id),before=id&&db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
     if(!before)return res.status(404).json({error:"PIANO_NOT_FOUND"});
-    const clientId=integerId(req.body?.client_id??before.client_id),brand=text(req.body?.brand??before.brand,200);
-    if(!clientId||!db.prepare("SELECT 1 FROM clients WHERE id=?").get(clientId))return res.status(400).json({error:"INVALID_CLIENT_ID"});
-    if(!brand)return res.status(400).json({error:"PIANO_BRAND_REQUIRED"});
-    const buildYear=req.body?.build_year===undefined?before.build_year:(req.body.build_year===""?null:Number(req.body.build_year));
-    if(buildYear!==null&&(!Number.isInteger(Number(buildYear))||Number(buildYear)<1700||Number(buildYear)>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
-    db.prepare("UPDATE pianos SET client_id=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .run(clientId,brand,text(req.body?.model??before.model,200)||null,text(req.body?.serial_number??before.serial_number,160)||null,
-        text(req.body?.finish??before.finish,160)||null,text(req.body?.location_notes??before.location_notes,1200)||null,
-        text(req.body?.last_serviced_at??before.last_serviced_at,40)||null,buildYear,text(req.body?.size_display??before.size_display,120)||null,
-        text(req.body?.color??before.color,160)||null,text(req.body?.notes??before.notes,5000)||null,id);
+    const next=pianoBody(req.body||{},before);
+    if(next.client_id&&!db.prepare("SELECT 1 FROM clients WHERE id=?").get(next.client_id))return res.status(400).json({error:"INVALID_CLIENT_ID"});
+    if(next.build_year!==null&&(!Number.isInteger(next.build_year)||next.build_year<1700||next.build_year>2100))return res.status(400).json({error:"PIANO_YEAR_INVALID"});
+    db.prepare(`UPDATE pianos SET client_id=?,category=?,brand=?,model=?,serial_number=?,finish=?,location_notes=?,last_serviced_at=?,last_service_title=?,last_service_description=?,next_service_date=?,date_of_purchase=?,warranty=?,latest_info_frequency=?,latest_info_humidity=?,latest_info_temperature=?,build_year=?,size_display=?,color=?,notes=?,classification_status='CLASSIFIED',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(next.client_id,next.category||null,next.brand,next.model||null,next.serial_number||null,next.finish||null,next.location_notes||null,next.last_serviced_at||null,next.last_service_title||null,next.last_service_description||null,next.next_service_date||null,next.date_of_purchase||null,next.warranty||null,next.latest_info_frequency||null,next.latest_info_humidity||null,next.latest_info_temperature||null,next.build_year,next.size_display||null,next.color||null,next.notes||null,id);
     db.prepare("UPDATE client_piano_review_queue SET status='RESOLVED',resolved_piano_id=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE piano_id=? AND status='PENDING'").run(id,id);
     const row=db.prepare("SELECT * FROM pianos WHERE id=?").get(id);
     audit(req,"UPDATE","pianos",String(id),before,row);res.json(row);
