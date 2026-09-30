@@ -851,6 +851,38 @@ test("Private appointment requests require staff approval, preserve context and 
 });
 
 
+test("Public consultation availability exposes only conflict-safe 15-minute slots and rejects duplicate requests",async()=>{
+  const date="2035-08-24";
+  const before=await request("/api/public/private-appointment-availability?date="+date);
+  assert.equal(before.status,200,JSON.stringify(before.payload));
+  assert.equal(before.payload.timezone,"America/New_York");
+  assert.equal(Number(before.payload.duration_min),60);
+  assert.equal(Number(before.payload.buffer_min),15);
+  assert.equal(Number(before.payload.step_min),15);
+  assert.ok(before.payload.slots.some(slot=>slot.wall_time===date+"T11:00"));
+
+  const first=await request("/api/public/private-appointments",{method:"POST",body:{
+    name:"Availability Guest One",email:"availability-one@example.com",phone:"+1 212 555 0191",
+    scheduled_at:date+"T11:00",duration_min:60,language:"en",source_path:"/"
+  }});
+  assert.equal(first.status,201,JSON.stringify(first.payload));
+  assert.equal(first.payload.pending_approval,true);
+
+  const duplicate=await request("/api/public/private-appointments",{method:"POST",body:{
+    name:"Availability Guest Two",email:"availability-two@example.com",phone:"+1 212 555 0192",
+    scheduled_at:date+"T11:00",duration_min:60,language:"en",source_path:"/"
+  }});
+  assert.equal(duplicate.status,409,JSON.stringify(duplicate.payload));
+  assert.equal(duplicate.payload.error,"PRIVATE_APPOINTMENT_REQUEST_HOLD_CONFLICT");
+
+  const after=await request("/api/public/private-appointment-availability?date="+date);
+  assert.equal(after.status,200,JSON.stringify(after.payload));
+  const walls=new Set(after.payload.slots.map(slot=>slot.wall_time));
+  for(const blocked of ["T10:00","T10:15","T10:30","T10:45","T11:00","T11:15","T11:30","T11:45","T12:00"])assert.equal(walls.has(date+blocked),false,blocked+" must respect the one-hour appointment plus 15-minute separation");
+  assert.equal(walls.has(date+"T09:45"),true,"09:45-10:45 leaves a 15-minute gap before the 11:00 request");
+  assert.equal(walls.has(date+"T12:15"),true,"12:15 is the first valid start after an 11:00-12:00 request");
+});
+
 test("VIP client status is durable, filterable data and can be switched both directions",async()=>{
   const token=shared.adminToken,id=shared.client.id;
   const before=await request("/api/clients/"+id,{token});
