@@ -2173,3 +2173,40 @@ body[data-page="mission"] .section--statement .statement-copy{text-align:center;
  .customer-chat__message{max-width:84%!important}
  .customer-chat__identity h2{font-size:1.05rem!important}
 }
+
+
+/* Messenger lifecycle/responsive acceptance: never escape the viewport and never trigger iOS input zoom. */
+.customer-chat{
+  box-sizing:border-box;
+  width:min(32rem,calc(100dvw - 2rem));
+  max-width:calc(100dvw - 2rem);
+}
+.customer-chat__panel{
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  overflow-x:hidden!important;
+}
+.customer-chat__heading{position:relative;padding-right:3.65rem!important}
+.customer-chat__panel-close{
+  position:absolute;z-index:6;top:.8rem;right:.8rem;
+  display:grid;place-items:center;width:2.25rem;height:2.25rem;min-height:2.25rem;padding:0;
+  border:1px solid rgba(208,182,127,.6);border-radius:50%;background:#11110f;color:#e0c27f;
+  font:400 1.4rem/1 var(--sans);cursor:pointer;
+}
+.customer-chat__panel-close:hover{background:rgba(208,182,127,.14)}
+.customer-chat__panel-close:focus-visible{outline:2px solid #e0c27f;outline-offset:2px}
+.customer-chat__composer,.customer-chat__input-shell,.customer-chat__intake,.customer-chat__form{box-sizing:border-box;max-width:100%;min-width:0}
+.customer-chat__input-shell textarea{box-sizing:border-box}
+@media(max-width:1024px),(pointer:coarse){
+  .customer-chat__panel input,
+  .customer-chat__panel select,
+  .customer-chat__panel textarea{font-size:16px!important}
+}
+@media(max-width:600px){
+  .customer-chat{right:0!important;left:0!important;bottom:0!important;width:100dvw!important;max-width:100dvw!important}
+  .customer-chat__panel{width:100dvw!important;max-width:100dvw!important;height:100dvh!important;max-height:100dvh!important}
+  .customer-chat__heading{padding-right:max(3.8rem,calc(env(safe-area-inset-right) + 3.2rem))!important}
+  .customer-chat__panel-close{right:max(.8rem,env(safe-area-inset-right));top:max(.8rem,env(safe-area-inset-top))}
+}
