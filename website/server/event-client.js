@@ -154,6 +154,9 @@ function createEventClient(options = {}) {
     createLead(lead) {
       return request("/api/public/contact-leads", { method: "POST", body: JSON.stringify(lead) });
     },
+    privateAppointmentAvailability(date) {
+      return request(`/api/public/private-appointment-availability?date=${encodeURIComponent(date)}`);
+    },
     createPrivateAppointment(appointment) {
       return request("/api/public/private-appointments", { method: "POST", body: JSON.stringify(appointment) });
     },

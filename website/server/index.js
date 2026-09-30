@@ -400,20 +400,17 @@ function renderEvent(section, language) {
 function renderContactMap(copy, language) {
   const brand=resolveBrand(copy),address=[brand.schemaStreetAddress,brand.schemaLocality,brand.schemaRegion,brand.schemaPostalCode].filter(Boolean).join(", ");
   const query=encodeURIComponent(address),hu=language==="hu";
-  return `<section class="contact-map-section" data-reveal>
-    <div class="contact-map-shell">
-      <iframe class="contact-map-frame" title="${escapeHtml(hu?"Klavierhaus New York térkép":"Klavierhaus New York map")}" src="https://www.google.com/maps?q=${query}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
-      <div class="contact-map-card">
-        <p class="eyebrow">Klavierhaus · New York</p>
-        <strong>${escapeHtml(brand.addressLine1)}</strong>
-        <span>${escapeHtml(brand.addressLine2)}</span>
-        <a href="https://www.google.com/maps/search/?api=1&query=${query}" target="_blank" rel="noopener noreferrer">${escapeHtml(hu?"Megnyitás térképen":"Open in Maps")}</a>
-      </div>
+  return `<div class="contact-map-shell">
+    <iframe class="contact-map-frame" title="${escapeHtml(hu?"Klavierhaus New York térkép":"Klavierhaus New York map")}" src="https://www.google.com/maps?q=${query}&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+    <div class="contact-map-card">
+      <strong>${escapeHtml(brand.addressLine1)}</strong>
+      <span>${escapeHtml(brand.addressLine2)}</span>
+      <a href="https://www.google.com/maps/search/?api=1&query=${query}" target="_blank" rel="noopener noreferrer">${escapeHtml(hu?"Megnyitás térképen":"Open in Maps")}</a>
     </div>
-  </section>`;
+  </div>`;
 }
 
-function renderContact(section) {
+function renderContact(section, mapHtml = "") {
   const details = section.details.map((detail) => {
     const value = escapeHtml(detail.value).replaceAll("\n", "<br>");
     const content = detail.href
@@ -422,11 +419,14 @@ function renderContact(section) {
     return `<div class="contact-detail"><dt>${escapeHtml(detail.label)}</dt><dd>${content}</dd></div>`;
   }).join("");
 
-  return `<section class="section section--contact" id="${escapeHtml(section.id)}" data-reveal>
-    <div>
-      <p class="eyebrow">${escapeHtml(section.eyebrow)}</p>
-      <h2>${escapeHtml(section.title)}</h2>
-      <p>${escapeHtml(section.body)}</p>
+  return `<section class="section section--contact${mapHtml?" section--contact-with-map":""}" id="${escapeHtml(section.id)}" data-reveal>
+    <div class="contact-visit-column">
+      ${mapHtml}
+      <div class="contact-copy">
+        <p class="eyebrow">${escapeHtml(section.eyebrow)}</p>
+        <h2>${escapeHtml(section.title)}</h2>
+        <p>${escapeHtml(section.body)}</p>
+      </div>
     </div>
     <dl>${details}</dl>
   </section>`;
@@ -599,6 +599,34 @@ function renderShowroomCollection(items, language, options = {}) {
   return `<section class="section catalog-showcase${compact ? " catalog-showcase--home" : ""}" id="showroom-pianos"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.showroomEyebrow || (language === "hu" ? "Bemutatótermi zongorák" : "The showroom"))}</p><h2>${escapeHtml(labels.showroomTitle || (language === "hu" ? "Kivételes hangszerek, személyes találkozásra." : "Exceptional instruments, encountered in person."))}</h2><p>${escapeHtml(labels.showroomLead || (language === "hu" ? "Egy zongora valódi karaktere csak a hangján és az érintésén keresztül ismerhető meg." : "A piano's true character is known only through tone, touch, and time in the room."))}</p></div><div class="catalog-grid">${cards}</div></section>`;
 }
 
+function renderPrivateAppointmentPicker(language) {
+  const hu=language==="hu";
+  return `<div class="service-field-wide private-booking-picker" data-private-slot-picker data-language="${hu?"hu":"en"}">
+    <span class="private-booking-label">${hu?"Dátum és szabad időpont · New York-i idő":"Date and available time · New York"}</span>
+    <div class="private-date-control">
+      <button class="private-date-trigger" type="button" data-private-date-trigger aria-expanded="false">
+        <span data-private-date-value>${hu?"Válasszon dátumot":"Choose a date"}</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z"/></svg>
+      </button>
+      <div class="private-calendar-popover" data-private-calendar hidden>
+        <div class="private-calendar-controls ${hu?"is-hu":"is-en"}">
+          <select data-private-calendar-year aria-label="${hu?"Év":"Year"}"></select>
+          <select data-private-calendar-month aria-label="${hu?"Hónap":"Month"}"></select>
+        </div>
+        <div class="private-calendar-weekdays" data-private-weekdays aria-hidden="true"></div>
+        <div class="private-calendar-grid" data-private-calendar-grid></div>
+      </div>
+    </div>
+    <div class="private-slot-panel">
+      <small data-private-slot-hint>${hu?"Válasszon dátumot, majd a rendszer csak a ténylegesen szabad kezdési időpontokat mutatja.":"Choose a date and we will show only genuinely available start times."}</small>
+      <div class="private-slot-grid" data-private-slots aria-live="polite"></div>
+    </div>
+    <input type="hidden" name="scheduled_at" data-private-scheduled-at>
+    <input type="hidden" name="duration_min" value="60">
+    <small class="private-date-hint">${hu?"60 perces privát konzultáció · 15 perces puffer minden foglalás előtt és után":"60-minute private consultation · 15-minute buffer before and after every booking"}</small>
+  </div>`;
+}
+
 function renderServiceCollection(items, language, options = {}) {
   if (!items.length) return "";
   const labels = (options.copy || getGlobal(language)).collectionLabels || {};
@@ -607,12 +635,12 @@ function renderServiceCollection(items, language, options = {}) {
     <div class="catalog-card__body"><p class="eyebrow">${escapeHtml(labels.serviceCardEyebrow || "Klavierhaus atelier")}</p><h3 class="word-safe-title">${escapeHtml(item.title)}</h3>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<button class="button button--ghost" type="button" data-service-request data-service-id="${escapeHtml(item.id)}" data-service-title="${escapeHtml(item.title)}" data-service-image="${escapeHtml(item.image_url || "")}"><span>${escapeHtml(labels.serviceAssessment || (language === "hu" ? "Személyes felmérés egyeztetése" : "Arrange a private assessment"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div>
   </article>`).join("");
   const hu = language === "hu";
-  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.servicesEyebrow || (hu ? "Személyre szabott gondoskodás" : "Bespoke care"))}</p><h2>${escapeHtml(labels.servicesTitle || (hu ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention."))}</h2><p>${escapeHtml(labels.servicesLead || (hu ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument."))}</p></div><div class="catalog-grid">${cards}</div></section><dialog class="service-dialog private-appointment-dialog" data-service-dialog aria-labelledby="service-dialog-title"><form method="dialog" data-service-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><img class="service-dialog__image" data-service-image alt=""><p class="eyebrow">Klavierhaus</p><h2 id="service-dialog-title">${hu ? "Privát szolgáltatási időpont" : "Private service appointment"}</h2><p data-service-title></p><input type="hidden" name="service_id"><div class="service-form-grid private-appointment-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label class="service-field-wide">${hu ? "Időpont · New York-i idő" : "Appointment time · New York"}<input name="scheduled_at_display" type="datetime-local" step="900" lang="${hu ? "hu-HU" : "en-US"}" autocomplete="off" data-private-calendar required><small class="private-date-hint">${hu ? "Válasszon dátumot és időpontot a naptárból · New York-i idő · 15 perces lépések" : "Choose date and time from the calendar · New York time · 15-minute steps"}</small></label><label class="service-field-wide">${hu ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3" placeholder="${hu ? "Röviden, miben segíthetünk?" : "Briefly, how can we help?"}"></textarea></label></div><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request appointment"}</button><p class="form-result" data-service-result aria-live="polite"></p></form></dialog>`;
+  return `<section class="section catalog-showcase${options.compact ? " catalog-showcase--home" : ""}" id="bespoke-services"><div class="collection-heading"><p class="eyebrow">${escapeHtml(labels.servicesEyebrow || (hu ? "Személyre szabott gondoskodás" : "Bespoke care"))}</p><h2>${escapeHtml(labels.servicesTitle || (hu ? "Minden hangszerhez külön figyelem tartozik." : "Every instrument deserves individual attention."))}</h2><p>${escapeHtml(labels.servicesLead || (hu ? "Díjmentes első felmérés, személyes konzultáció és a hangszerhez igazított egyedi ajánlat." : "A private initial assessment, considered consultation, and a proposal shaped around the individual instrument."))}</p></div><div class="catalog-grid">${cards}</div></section><dialog class="service-dialog private-appointment-dialog" data-service-dialog aria-labelledby="service-dialog-title"><form method="dialog" data-service-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><img class="service-dialog__image" data-service-image alt=""><p class="eyebrow">Klavierhaus</p><h2 id="service-dialog-title">${hu ? "Privát szolgáltatási időpont" : "Private service appointment"}</h2><p data-service-title></p><input type="hidden" name="service_id"><div class="service-form-grid private-appointment-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label>${renderPrivateAppointmentPicker(language)}<label class="service-field-wide">${hu ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3" placeholder="${hu ? "Röviden, miben segíthetünk?" : "Briefly, how can we help?"}"></textarea></label></div><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request appointment"}</button><p class="form-result" data-service-result aria-live="polite"></p></form></dialog>`;
 }
 
 function renderPrivateViewingDialog(language) {
   const hu = language === "hu";
-  return `<dialog class="service-dialog private-appointment-dialog" data-private-viewing-dialog aria-labelledby="private-viewing-title"><form method="dialog" data-private-viewing-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">Klavierhaus</p><h2 id="private-viewing-title">${hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"}</h2><p data-private-viewing-context></p><input type="hidden" name="piano_id"><input type="hidden" name="service_id"><div class="service-form-grid private-appointment-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label class="service-field-wide">${hu ? "Időpont · New York-i idő" : "Appointment time · New York"}<input name="scheduled_at_display" type="datetime-local" step="900" lang="${hu ? "hu-HU" : "en-US"}" autocomplete="off" data-private-calendar required><small class="private-date-hint">${hu ? "Válasszon dátumot és időpontot a naptárból · New York-i idő · 15 perces lépések" : "Choose date and time from the calendar · New York time · 15-minute steps"}</small></label><label class="service-field-wide">${hu ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3" placeholder="${hu ? "Röviden, mit szeretne megnézni vagy megbeszélni?" : "Briefly, what would you like to view or discuss?"}"></textarea></label></div><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request appointment"}</button><p class="form-result" data-private-viewing-result aria-live="polite"></p></form></dialog>`;
+  return `<dialog class="service-dialog private-appointment-dialog" data-private-viewing-dialog aria-labelledby="private-viewing-title"><form method="dialog" data-private-viewing-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">Klavierhaus</p><h2 id="private-viewing-title">${hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"}</h2><p data-private-viewing-context></p><input type="hidden" name="piano_id"><input type="hidden" name="service_id"><div class="service-form-grid private-appointment-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label>${renderPrivateAppointmentPicker(language)}<label class="service-field-wide">${hu ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3" placeholder="${hu ? "Röviden, mit szeretne megnézni vagy megbeszélni?" : "Briefly, what would you like to view or discuss?"}"></textarea></label></div><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request appointment"}</button><p class="form-result" data-private-viewing-result aria-live="polite"></p></form></dialog>`;
 }
 
 function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [], reviews = [], showroomPianos = [], websiteServices = [], artists = [], landingSections = null, pageOverride = null, globalOverride = null, seoConfig = null }) {
@@ -648,12 +676,12 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, homeEvents = [],
     sections = landing.filter((row) => Number(row.is_active) === 1).sort((a,b)=>Number(a.order_index)-Number(b.order_index)).map((row) => row.section_key === "hero" ? homeBlocks.hero() : `<div class="content-shell">${homeBlocks[row.section_key]?.() || ""}</div>`).join("");
   } else {
     const contactMap = key === "contact" ? renderContactMap(copy, language) : "";
-    sections = contactMap + page.sections.filter((section) => {
+    sections = page.sections.filter((section) => {
       if (key === "pianos" && showroomPianos.length && ["selection", "inventory"].includes(section.id)) return false;
       if (key === "services" && websiteServices.length && section.id === "services") return false;
       if (key === "artists" && artists.length && section.id === "artist-directory") return false;
       return true;
-    }).map((section) => renderSection(section, language)).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
+    }).map((section) => key==="contact"&&section.type==="contact" ? renderContact(section,contactMap) : renderSection(section, language)).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
   }
 
   return `<!doctype html>
@@ -1397,6 +1425,10 @@ function createApp(options = {}) {
   app.post("/api/site/contact-leads", async (req, res) => {
     try { const result = await eventClient.createLead(req.body || {}); res.status(201).json(result); }
     catch (error) { res.status(error.status || 400).json({ error: error.code || "CONTACT_REQUEST_FAILED" }); }
+  });
+  app.get("/api/site/private-appointment-availability", async (req, res) => {
+    try { res.setHeader("Cache-Control","no-store"); res.json(await eventClient.privateAppointmentAvailability(req.query.date || "")); }
+    catch (error) { res.status(error.status || 400).json({ error: error.code || "PRIVATE_APPOINTMENT_AVAILABILITY_FAILED" }); }
   });
   app.post("/api/site/private-appointments", async (req, res) => {
     try { const result = await eventClient.createPrivateAppointment(req.body || {}); res.status(201).json(result); }

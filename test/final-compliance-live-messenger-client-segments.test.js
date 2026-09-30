@@ -144,12 +144,17 @@ test("16 localized private date parser accepts US wall time",()=>{
   assert.equal(new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(iso)),"14:30");
 });
 
-test("17 public appointment UI is explicit about HU US formats and New York timezone",()=>{
+test("17 public appointment UI localizes calendar order and only exposes free New York slots",()=>{
   const html=read("website/server/index.js"),browser=read("website/public/app.js"),backend=read("server/private-appointments.js");
-  assert.match(html,/name="scheduled_at_display" type="datetime-local" step="900"/);
-  assert.match(html,/data-private-calendar/);
-  assert.match(browser,/scheduled_at_display/);
-  assert.ok(browser.includes('match=raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/)'));
+  assert.match(html,/data-private-slot-picker/);
+  assert.match(html,/data-private-calendar-year/);
+  assert.match(html,/data-private-calendar-month/);
+  assert.match(html,/name="scheduled_at" data-private-scheduled-at/);
+  assert.match(html,/name="duration_min" value="60"/);
+  assert.match(browser,/language==="hu"\?\["H","K","Sze","Cs","P","Szo","V"\]:\["Sun","Mon","Tue","Wed","Thu","Fri","Sat"\]/);
+  assert.match(browser,/language==="hu"\?"hu-HU":"en-US"/);
+  assert.match(browser,/private-appointment-availability\?date=/);
+  assert.match(backend,/\/api\/public\/private-appointment-availability/);
   assert.match(backend,/America\/New_York/);
 });
 

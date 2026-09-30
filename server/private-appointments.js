@@ -1,7 +1,7 @@
 "use strict";
 
 const crypto=require("node:crypto");
-const {assertAvailable,interval,holdExpiry,DEFAULT_DURATION_MIN}=require("./private-appointment-scheduling");
+const {availability,assertAvailable,interval,holdExpiry,DEFAULT_DURATION_MIN,BUFFER_MIN}=require("./private-appointment-scheduling");
 const {ensureClientIdentity}=require("./client-identity");
 
 const clean=(value,max=2000)=>String(value??"").replace(/\u0000/g,"").trim().slice(0,max);
@@ -96,7 +96,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
       throw Object.assign(new Error("WEBSITE_SERVICE_NOT_AVAILABLE"),{status:400});
     return {pianoId,serviceId,type:pianoId?"PIANO_VIEWING":serviceId?"SERVICE_CONSULTATION":"PRIVATE_VISIT"};
   }
-  function makeScheduled(body,{actor=null,source="ERP",conversationId=null,email=null,excludeAppointmentId=null,excludeProposalId=null}={}){
+  function makeScheduled(body,{actor=null,source="ERP",conversationId=null,email=null,excludeAppointmentId=null,excludeProposalId=null,excludeRequestId=null}={}){
     const name=clean(body?.name,200),phone=clean(body?.phone,80),scheduledAt=validTime(body?.scheduled_at||body?.appointment_at||body?.preferred_time),note=clean(body?.note??body?.message,1000);
     if(!name)return {error:"PRIVATE_APPOINTMENT_NAME_REQUIRED",status:400};
     if(!phone)return {error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED",status:400};
@@ -105,7 +105,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const explicitType=clean(body?.appointment_type,40).toUpperCase();if(!context.pianoId&&!context.serviceId&&["PRIVATE_VISIT","PIANO_VIEWING","SERVICE_CONSULTATION"].includes(explicitType))context.type=explicitType;
     const assigned=clean(body?.assigned_user_id,160)||null;if(assigned&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assigned))return {error:"INVALID_APPOINTMENT_ASSIGNEE",status:400};
     let clientId=Number(body?.client_id)||null;if(!clientId&&conversationId)clientId=Number(db.prepare("SELECT client_id FROM customer_conversations WHERE id=?").get(conversationId)?.client_id)||null;if(!clientId)clientId=ensureClientIdentity(db,{name,email:email??body?.email,phone,language:body?.language},{create:true}).client?.id||null;
-    let slot;try{slot=assertAvailable(db,{startsAt:scheduledAt,endsAt:body?.scheduled_end_at,duration:body?.duration_min||DEFAULT_DURATION_MIN,excludeAppointmentId,excludeProposalId});}catch(error){return {error:error.message,status:error.status||409,details:error.details};}
+    let slot;try{slot=assertAvailable(db,{startsAt:scheduledAt,endsAt:body?.scheduled_end_at,duration:body?.duration_min||DEFAULT_DURATION_MIN,excludeAppointmentId,excludeProposalId,excludeRequestId});}catch(error){return {error:error.message,status:error.status||409,details:error.details};}
     const appointmentId=excludeAppointmentId||rid();
     if(excludeAppointmentId){
       db.prepare(`UPDATE private_appointments SET name=?,email=?,phone=?,scheduled_at=?,scheduled_end_at=?,duration_min=?,note=?,client_id=?,assigned_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
@@ -148,6 +148,31 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   }
   function publicConversationUrl(token){return token?`${String(websiteBaseUrl||"").replace(/\/$/,"")}/?conversation=${encodeURIComponent(token)}`:"";}
 
+  function publicAppointmentWindow(){
+    const readSetting=(key,fallback)=>{try{return clean(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(key)?.setting_value,20)||fallback;}catch(_error){return fallback;}};
+    const parse=(value,fallback)=>{const match=String(value||"").match(/^(\d{1,2}):(\d{2})$/);if(!match)return fallback;const minutes=Number(match[1])*60+Number(match[2]);return minutes>=0&&minutes<=24*60?minutes:fallback;};
+    const start=parse(readSetting("private_appointment_public_start","07:00"),7*60);
+    const end=parse(readSetting("private_appointment_public_end","21:00"),21*60);
+    return end>start?{start,end}:{start:7*60,end:21*60};
+  }
+  function publicAvailabilityForDate(dateValue,duration=DEFAULT_DURATION_MIN){
+    const date=clean(dateValue,20);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Object.assign(new Error("PRIVATE_APPOINTMENT_DATE_REQUIRED"),{status:400});
+    const noon=validTime(date+"T12:00");if(!noon)throw Object.assign(new Error("INVALID_PRIVATE_APPOINTMENT_DATE"),{status:400});
+    const durationMin=Number(duration||DEFAULT_DURATION_MIN),window=publicAppointmentWindow(),slots=[];
+    for(let minutes=window.start;minutes+durationMin<=window.end;minutes+=15){
+      const hh=String(Math.floor(minutes/60)).padStart(2,"0"),mm=String(minutes%60).padStart(2,"0"),wallTime=`${date}T${hh}:${mm}`,startsAt=validTime(wallTime);
+      if(!startsAt||new Date(startsAt).getTime()<=Date.now())continue;
+      const result=availability(db,{startsAt,duration:durationMin});if(!result.ok)continue;
+      slots.push({wall_time:wallTime,starts_at:result.starts_at,ends_at:result.ends_at,duration_min:result.duration_min});
+    }
+    return {date,timezone:"America/New_York",duration_min:durationMin,buffer_min:BUFFER_MIN,step_min:15,window_start:`${String(Math.floor(window.start/60)).padStart(2,"0")}:${String(window.start%60).padStart(2,"0")}`,window_end:`${String(Math.floor(window.end/60)).padStart(2,"0")}:${String(window.end%60).padStart(2,"0")}`,slots};
+  }
+
+  app.get("/api/public/private-appointment-availability",(req,res)=>{
+    try{res.setHeader("Cache-Control","no-store");res.json(publicAvailabilityForDate(req.query?.date,DEFAULT_DURATION_MIN));}
+    catch(error){res.status(error.status||400).json({error:error.message||"PRIVATE_APPOINTMENT_AVAILABILITY_FAILED"});}
+  });
+
   app.post("/api/public/private-appointments",(req,res)=>{
     const ip=clean(req.ip||req.socket?.remoteAddress,120);if(limited(ip))return res.status(429).json({error:"TOO_MANY_REQUESTS"});
     const name=clean(req.body?.name,200),email=clean(req.body?.email,320).toLowerCase(),phone=clean(req.body?.phone,80),requestedAt=validTime(req.body?.scheduled_at||req.body?.preferred_time,req.body?.language==="hu"?"hu":"en"),note=clean(req.body?.note??req.body?.message,1000);
@@ -156,7 +181,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     if(!phone)return res.status(400).json({error:"PRIVATE_APPOINTMENT_PHONE_REQUIRED"});
     if(!requestedAt)return res.status(400).json({error:"PRIVATE_APPOINTMENT_TIME_REQUIRED"});
     let context;try{context=validateContext(req.body);}catch(error){return res.status(error.status||400).json({error:error.message});}
-    let duration;try{duration=interval({startsAt:requestedAt,duration:req.body?.duration_min||DEFAULT_DURATION_MIN}).duration_min;}catch(error){return res.status(error.status||400).json({error:error.message});}
+    let duration;try{duration=interval({startsAt:requestedAt,duration:req.body?.duration_min||DEFAULT_DURATION_MIN}).duration_min;assertAvailable(db,{startsAt:requestedAt,duration});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
     const requestId=rid("PAR"),client=ensureClientIdentity(db,{name,email,phone,language:req.body?.language},{create:true}).client;
     db.prepare(`INSERT INTO private_appointment_requests(id,appointment_type,name,email,phone,requested_at,requested_duration_min,note,piano_id,service_id,status,language,source_path,client_id)
       VALUES(?,?,?,?,?,?,?,?,?,?,'REQUESTED',?,?,?)`).run(
@@ -181,7 +206,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const before=requestById(req.params.id);if(!before)return res.status(404).json({error:"PRIVATE_APPOINTMENT_REQUEST_NOT_FOUND"});
     if(!["REQUESTED","PROPOSED"].includes(before.status))return res.status(409).json({error:"PRIVATE_APPOINTMENT_REQUEST_ALREADY_RESOLVED"});
     const body={...before,...req.body,name:before.name,email:before.email,phone:before.phone,piano_id:before.piano_id,service_id:before.service_id,scheduled_at:req.body?.scheduled_at||before.requested_at,duration_min:req.body?.duration_min||before.requested_duration_min,language:before.language,source_path:before.source_path};
-    const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",email:before.email,excludeProposalId:before.proposal_id||null}))();
+    const result=db.transaction(()=>makeScheduled(body,{actor:req.user,source:"ERP",email:before.email,excludeProposalId:before.proposal_id||null,excludeRequestId:before.id}))();
     if(result.error)return res.status(result.status).json({error:result.error,details:result.details});
     db.prepare(`UPDATE private_appointment_requests SET status='APPROVED',private_appointment_id=?,assigned_user_id=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(result.row.id,result.row.assigned_user_id||null,req.user.id,before.id);
@@ -201,7 +226,7 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     const before=requestById(req.params.id);if(!before)return res.status(404).json({error:"PRIVATE_APPOINTMENT_REQUEST_NOT_FOUND"});
     if(["APPROVED","DECLINED","CANCELLED"].includes(before.status))return res.status(409).json({error:"PRIVATE_APPOINTMENT_REQUEST_ALREADY_RESOLVED"});
     const startsAt=validTime(req.body?.starts_at);if(!startsAt)return res.status(400).json({error:"INVALID_APPOINTMENT_TIME"});
-    let slot;try{slot=assertAvailable(db,{startsAt,duration:req.body?.duration_min||before.requested_duration_min});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
+    let slot;try{slot=assertAvailable(db,{startsAt,duration:req.body?.duration_min||before.requested_duration_min,excludeRequestId:before.id});}catch(error){return res.status(error.status||409).json({error:error.message,details:error.details});}
     const assigned=clean(req.body?.assigned_user_id,160)||before.assigned_user_id||req.user.id;if(assigned&&!db.prepare("SELECT 1 FROM users WHERE id=? AND status='Active'").get(assigned))return res.status(400).json({error:"INVALID_APPOINTMENT_ASSIGNEE"});
     const {conversation,token}=ensureConversationForRequest(before,req.user),proposalId=rid("APR");
     const expiry=holdExpiry();

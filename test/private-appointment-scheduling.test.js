@@ -24,6 +24,13 @@ function fixture(){
       expires_at TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE private_appointment_requests(
+      id TEXT PRIMARY KEY,
+      requested_at TEXT NOT NULL,
+      requested_duration_min INTEGER NOT NULL DEFAULT 60,
+      status TEXT NOT NULL DEFAULT 'REQUESTED',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   return db;
 }
@@ -57,4 +64,17 @@ test("active appointment proposals are soft holds and expired proposals release 
   const released=availability(db,{startsAt:"2035-08-20T18:30:00.000Z",duration:60});
   assert.equal(released.ok,true);
   assert.equal(db.prepare("SELECT status FROM customer_appointment_proposals WHERE id='APR-1'").get().status,"CANCELLED");
+});
+
+
+test("recent public requests temporarily hold the selected slot and approval can exclude its own hold",()=>{
+  const db=fixture();
+  db.prepare("INSERT INTO private_appointment_requests(id,requested_at,requested_duration_min,status) VALUES('PAR-1',?,?, 'REQUESTED')")
+    .run("2035-08-20T16:00:00.000Z",60);
+  const held=availability(db,{startsAt:"2035-08-20T16:00:00.000Z",duration:60});
+  assert.equal(held.ok,false);assert.equal(held.conflict_type,"REQUEST");
+  assert.equal(held.code,"PRIVATE_APPOINTMENT_REQUEST_HOLD_CONFLICT");
+  assert.equal(availability(db,{startsAt:"2035-08-20T16:00:00.000Z",duration:60,excludeRequestId:"PAR-1"}).ok,true);
+  db.prepare("UPDATE private_appointment_requests SET created_at=datetime('now','-3 days') WHERE id='PAR-1'").run();
+  assert.equal(availability(db,{startsAt:"2035-08-20T16:00:00.000Z",duration:60}).ok,true);
 });
