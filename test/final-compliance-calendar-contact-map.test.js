@@ -30,7 +30,7 @@ test("Public private consultation and viewing use calendar date-time controls",(
   const server=read("website/server/index.js"),browser=read("website/public/app.js"),css=read("website/public/styles.css");
   assert.equal((server.match(/name="scheduled_at_display" type="datetime-local" step="900"/g)||[]).length,2);
   assert.equal((server.match(/data-private-calendar/g)||[]).length,2);
-  assert.match(browser,/match=raw\.match\(\/\^\(\\d\{4\}\)-\(\\d\{2\}\)-\(\\d\{2\}\)T\(\\d\{2\}\):\(\\d\{2\}\)\$\//);
+  assert.ok(browser.includes('match=raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/)'));
   assert.match(css,/\.private-appointment-dialog input\[type="datetime-local"\]/);
 });
 
