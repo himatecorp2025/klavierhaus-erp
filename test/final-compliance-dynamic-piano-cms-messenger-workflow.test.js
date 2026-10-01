@@ -150,5 +150,7 @@ test("CMS piano brand grids include a per-brand add-piano card and seeded brand 
   assert.match(ui,/Add piano to this brand/);
   assert.match(ui,/row\?\.brand\|\|seed\?\.brand/);
   assert.match(ui,/piano_brand_slug/);
+  assert.match(ui,/async function v6RefreshCmsSidebarMeta/);
+  assert.match(ui,/if\(config\.type==="piano"\)await v6RefreshCmsSidebarMeta\(\)/);
   assert.match(css,/\.cms-add-collection-card/);
 });
