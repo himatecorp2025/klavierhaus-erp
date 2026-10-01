@@ -42,6 +42,7 @@ const { createWorkshopPayments } = require("./workshop-payments");
 const { createCustomerAutomation } = require("./customer-automation");
 const { createInventoryService,registerInventoryRoutes } = require("./inventory");
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
+const { createServiceSuspension } = require("./service-suspension");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -70,6 +71,7 @@ db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 db.pragma("optimize");
 
+const serviceSuspension = createServiceSuspension({ db });
 const transactionalEmail = createTransactionalEmail(process.env);
 const accountActivation = createAccountActivationService({ db, emailService: transactionalEmail });
 const ticketService = createTicketService({ db });
@@ -132,6 +134,7 @@ function auth(req,res,next) {
     const row = db.prepare("SELECT * FROM users WHERE id=? AND status='Active'").get(decoded.id);
     if (!row || Number(decoded.session_version||0)!==Number(row.session_version||0)) return res.status(401).json({error:"SESSION_REVOKED"});
     req.user = safeUser(row);
+    if (serviceSuspension.isSuspended() && !isSuperadmin(req.user)) return res.status(423).json({error:"SERVICE_SUSPENDED"});
     next();
   } catch (_error) {
     res.status(401).json({error:"INVALID_TOKEN"});
@@ -199,7 +202,7 @@ function htmlAttribute(value){
 }
 function htmlText(value){return htmlAttribute(value);}
 function renderAdminIndex(){
-  const branding=getBranding(),version=branding.branding_version||"1";
+  const branding=getBranding(),service=serviceSuspension.status(),version=branding.branding_version||"1";
   const loginLogo=brandingAssetUrl(branding.login_logo_url||branding.erp_logo_dark_url||branding.logo_url,version);
   const darkLogo=brandingAssetUrl(branding.erp_logo_dark_url||branding.logo_url,version);
   const favicon=brandingAssetUrl(branding.favicon_url,version);
@@ -220,8 +223,12 @@ function renderAdminIndex(){
     loginLogo?`<link rel="preload" as="image" href="${htmlAttribute(loginLogo)}" fetchpriority="high">`:"",
     background?`<link rel="preload" as="image" href="${htmlAttribute(background)}" fetchpriority="high">`:""
   ].filter(Boolean).join("\n  ");
+  if(service.suspended){
+    html=html.replace('id="serviceSuspensionNotice" class="service-suspension-notice hidden"','id="serviceSuspensionNotice" class="service-suspension-notice"');
+  }
   const bootstrap=JSON.stringify(branding).replaceAll("<","\\u003c");
-  html=html.replace("</head>",`  ${preload}\n  <script id="khBrandingBootstrap" type="application/json">${bootstrap}</script>\n</head>`);
+  const serviceBootstrap=JSON.stringify({suspended:service.suspended,status:service.status,updated_at:service.changed_at,version:service.version}).replaceAll("<","\\u003c");
+  html=html.replace("</head>",`  ${preload}\n  <script id="khBrandingBootstrap" type="application/json">${bootstrap}</script>\n  <script id="khServiceBootstrap" type="application/json">${serviceBootstrap}</script>\n</head>`);
   return html;
 }
 
@@ -249,6 +256,16 @@ app.use(express.json({limit:"10mb"}));
 
 app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"six-module-final-compliance"}));
 app.get("/api/health",(_req,res)=>res.status(200).json({status:"ok"}));
+app.get("/api/public/service-status",(_req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  res.json(serviceSuspension.publicStatus());
+});
+app.use("/api/public",(req,res,next)=>{
+  if(!serviceSuspension.isSuspended())return next();
+  if(["/service-status","/branding"].includes(req.path))return next();
+  res.setHeader("Cache-Control","no-store");res.setHeader("Retry-After","3600");
+  return res.status(503).json({error:"SITE_TEMPORARILY_UNAVAILABLE"});
+});
 app.get("/api/public/branding",(req,res)=>{
   const branding=getBranding(),etag=`"branding-${String(branding.branding_version||"1").replace(/[^A-Za-z0-9._-]/g,"")}"`;
   res.setHeader("Cache-Control","public, max-age=0, must-revalidate, stale-while-revalidate=300");
@@ -295,7 +312,7 @@ function blocked(key,limit){
 function recordFailure(req,email){for(const [key,limit] of [[rateKey(req,email)[0],LOGIN_IP_LIMIT],[rateKey(req,email)[1],LOGIN_ACCOUNT_LIMIT]]){const row=loginBuckets.get(key)||{started:Date.now(),count:0};if(Date.now()-row.started>=LOGIN_WINDOW_MS){row.started=Date.now();row.count=0;}row.count+=1;loginBuckets.set(key,row);}}
 function sessionFor(row){
   const user=safeUser(row);
-  return {user,token:jwt.sign({id:user.id,role:user.role,is_superadmin:user.is_superadmin,session_version:user.session_version},JWT_SECRET,{expiresIn:"30d"})};
+  return {user,service_suspended:serviceSuspension.isSuspended(),token:jwt.sign({id:user.id,role:user.role,is_superadmin:user.is_superadmin,session_version:user.session_version},JWT_SECRET,{expiresIn:"30d"})};
 }
 function activationToken(row){
   const state=accountActivation.state(row.id);
@@ -319,6 +336,10 @@ app.post("/api/login",async(req,res)=>{
   const valid=await new Promise(resolve=>bcrypt.compare(password,row?.password_hash||dummyHash,(_e,ok)=>resolve(Boolean(ok))));
   if(!row||!valid){recordFailure(req,email);audit({user:row?safeUser(row):null},"LOGIN_FAILED","authentication",row?.id||"",null,{email},0);return res.status(401).json({error:"INVALID_LOGIN"});}
   loginBuckets.delete(accountKey);
+  if(serviceSuspension.isSuspended()&&!isSuperadmin(row)){
+    audit({user:safeUser(row)},"LOGIN_BLOCKED","authentication",row.id,null,{reason:"SERVICE_SUSPENDED"},0);
+    return res.status(423).json({error:"SERVICE_SUSPENDED"});
+  }
   const activation=accountActivation.state(row.id);
   if(activation?.status==="PENDING"){
     if(!validContactEmail(row.contact_email))return res.status(409).json({error:"ACTIVATION_CONTACT_EMAIL_MISSING"});
@@ -329,7 +350,9 @@ app.post("/api/login",async(req,res)=>{
 
 app.post("/api/account-activation/verify",(req,res)=>{
   try{
-    const user=activationUser(req.body?.activation_token),result=accountActivation.verify(user.id,req.body?.activation_code);
+    const user=activationUser(req.body?.activation_token);
+    if(serviceSuspension.isSuspended()&&!isSuperadmin(user))return res.status(423).json({error:"SERVICE_SUSPENDED"});
+    const result=accountActivation.verify(user.id,req.body?.activation_code);
     if(!result.ok)return res.status(result.error==="ACTIVATION_TEMPORARILY_LOCKED"?429:400).json({error:result.error,retry_after_seconds:result.retryAfterSeconds});
     res.json(sessionFor(user));
   }catch(_error){res.status(401).json({error:"INVALID_ACTIVATION_SESSION"});}
@@ -348,6 +371,21 @@ app.post("/api/logout",auth,(req,res)=>{
   res.json({ok:true});
 });
 app.get("/api/me",auth,(req,res)=>res.json(req.user));
+app.get("/api/superadmin/service-suspension",auth,requireSuperadmin,(_req,res)=>{
+  res.setHeader("Cache-Control","no-store");res.json(serviceSuspension.status());
+});
+app.put("/api/superadmin/service-suspension",auth,requireSuperadmin,(req,res)=>{
+  const suspended=req.body?.suspended;
+  if(typeof suspended!=="boolean")return res.status(400).json({error:"SERVICE_SUSPENSION_STATE_REQUIRED"});
+  const confirmation=String(req.body?.confirmation||"").trim().toUpperCase(),expected=suspended?"SUSPEND":"RESTORE";
+  if(confirmation!==expected)return res.status(400).json({error:"SERVICE_SUSPENSION_CONFIRMATION_REQUIRED"});
+  const result=serviceSuspension.setState({
+    suspended,actorId:req.user.id,actorName:req.user.name,
+    invoiceReference:req.body?.invoice_reference||"",note:req.body?.note||""
+  });
+  if(result.changed)audit(req,suspended?"SUSPEND_SERVICE":"RESTORE_SERVICE","service_access","GLOBAL",result.before,result.after,1,suspended?"Service suspended for payment delinquency":"Service restored by Super Admin");
+  res.setHeader("Cache-Control","no-store");res.json(result.after);
+});
 app.post("/api/auth/verify-session",auth,async(req,res)=>{
   const row=db.prepare("SELECT password_hash FROM users WHERE id=?").get(req.user.id);
   const valid=row?.password_hash&&await new Promise(resolve=>bcrypt.compare(String(req.body?.password||""),row.password_hash,(_e,ok)=>resolve(Boolean(ok))));
@@ -377,7 +415,7 @@ app.put("/api/users/:id",auth,async(req,res)=>{
   const before=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);if(!before)return res.status(404).json({error:"USER_NOT_FOUND"});
   const self=req.user.id===before.id,admin=isSuperadmin(req.user)||req.user.role==="ADMIN";
   if(!self&&!admin)return res.status(403).json({error:"PERMISSION_DENIED"});
-  if(Number(before.hidden_user||0)===1&&!isSuperadmin(req.user))return res.status(403).json({error:"PERMISSION_DENIED"});
+  if(Number(before.hidden_user||0)===1||Number(before.is_superadmin||0)===1)return res.status(403).json({error:"HIDDEN_OWNER_SELF_SERVICE_ONLY"});
   const name=String(req.body?.name??before.name).trim(),email=normalizeEmail(req.body?.email??before.email),contactEmail=normalizeEmail(req.body?.contact_email??before.contact_email);
   const role=admin?String(req.body?.role??before.role).toUpperCase():before.role,status=admin?String(req.body?.status??before.status):before.status;
   if(!name||!validUserEmail(email)||(contactEmail&&!validContactEmail(contactEmail)))return res.status(400).json({error:"INVALID_USER_DATA"});
