@@ -54,5 +54,5 @@ test("Master Data search persists across subfilters while technical import-histo
 });
 
 test("PWA cache advances beyond frontend polish for calendar/date UX",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v32-workflow-canonical-sync/);
 });
