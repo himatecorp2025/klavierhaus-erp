@@ -149,7 +149,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const supplied=Array.isArray(input)?input:null;
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
     const plan=stageDefinitions().map(stage=>{
-      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):!stage.removable);
+      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       return {stage_key:stage.key,position:stage.position,enabled,
