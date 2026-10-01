@@ -350,7 +350,7 @@ async function v6RefreshCmsSidebarMeta(){
   const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];
   const sidebar=$("#cmsPageList");if(!sidebar)return;
   sidebar.innerHTML=v6CmsSidebarMarkup();
-  $("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
+  $$("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
 }
 async function v6LoadCmsConnectedCollection(config){
   const host=$("#cmsConnectedCollection");if(!host||!config)return;
@@ -360,8 +360,8 @@ async function v6LoadCmsConnectedCollection(config){
     host.innerHTML=`<section class="panel cms-page-connected-panel"><div class="panel-head"><div><span class="eyebrow">${tr("CONNECTED CONTENT","KAPCSOLT TARTALOM")}</span><h3>${esc(config.title)}</h3><p>${esc(config.subtitle)}</p></div><button class="primary-button" id="addCmsConnectedItem" type="button">＋ ${config.brand?tr("Add piano","Új zongora"):tr("Add","Hozzáadás")}</button></div>${v6CmsConnectedGrid(config,rows)}</section>`;
     const refreshConnected=async()=>{if(config.type==="piano")await v6RefreshCmsSidebarMeta();await v6LoadCmsConnectedCollection(config);};
     $("#addCmsConnectedItem")?.addEventListener("click",()=>v6OpenCollectionEditor(config.type,null,refreshConnected,config.brand?{brand:config.brand}:{}));
-    $("[data-add-page-collection]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCollectionEditor(button.dataset.addPageCollection,null,refreshConnected,button.dataset.addPianoBrand?{brand:button.dataset.addPianoBrand}:{})));
-    $("[data-edit-page-collection]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.id));if(row)v6OpenCollectionEditor(config.type,row,refreshConnected);}));
+    $$("[data-add-page-collection]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCollectionEditor(button.dataset.addPageCollection,null,refreshConnected,button.dataset.addPianoBrand?{brand:button.dataset.addPianoBrand}:{})));
+    $$("[data-edit-page-collection]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.id));if(row)v6OpenCollectionEditor(config.type,row,refreshConnected);}));
   }catch(error){host.innerHTML=`<div class="empty-state">${esc(humanError(error))}</div>`;}
 }
 async function v6LoadCmsPage(){
