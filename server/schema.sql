@@ -536,6 +536,9 @@ CREATE TABLE IF NOT EXISTS customer_message_attachments (
   FOREIGN KEY(message_id) REFERENCES customer_messages(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_customer_message_attachments_message ON customer_message_attachments(message_id,created_at,id);
+CREATE INDEX IF NOT EXISTS idx_customer_message_attachments_conversation ON customer_message_attachments(conversation_id,created_at,id);
+
 CREATE TABLE IF NOT EXISTS customer_conversation_events (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL,
@@ -577,6 +580,7 @@ CREATE TABLE IF NOT EXISTS customer_appointment_proposals (
   FOREIGN KEY(finalized_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_customer_appointment_proposals_conversation ON customer_appointment_proposals(conversation_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_private_appointments_conversation ON private_appointments(conversation_id,scheduled_at DESC);
 
 CREATE TABLE IF NOT EXISTS support_holidays (
   holiday_date TEXT PRIMARY KEY,
@@ -1073,6 +1077,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   audit_type TEXT DEFAULT 'TECHNICAL'
 );
 
+CREATE INDEX IF NOT EXISTS idx_audit_module_record_time ON audit_log(module,record_id,event_time,id);
+
 CREATE TABLE IF NOT EXISTS role_permissions (
   role TEXT NOT NULL,
   permission TEXT NOT NULL,
@@ -1118,6 +1124,9 @@ CREATE TABLE IF NOT EXISTS clients (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX IF NOT EXISTS idx_clients_active_name ON clients(deleted_at,lower(name),id);
+CREATE INDEX IF NOT EXISTS idx_clients_active_type_vip ON clients(deleted_at,client_type,is_vip,id);
+
 CREATE TABLE IF NOT EXISTS pianos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER,
@@ -1149,6 +1158,7 @@ CREATE TABLE IF NOT EXISTS pianos (
 
 CREATE INDEX IF NOT EXISTS idx_pianos_client_classification ON pianos(client_id,classification_status);
 CREATE INDEX IF NOT EXISTS idx_pianos_serial ON pianos(serial_number);
+CREATE INDEX IF NOT EXISTS idx_pianos_brand_model ON pianos(lower(COALESCE(brand,'No brand')),lower(COALESCE(model,'')),id);
 
 CREATE TABLE IF NOT EXISTS client_piano_review_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1184,6 +1194,8 @@ CREATE TABLE IF NOT EXISTS master_data_client_source_map (
   FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_master_data_client_source_map_client ON master_data_client_source_map(client_id,source_name,source_client_id);
+
 CREATE TABLE IF NOT EXISTS master_data_piano_source_map (
   source_name TEXT NOT NULL,
   source_instrument_id TEXT NOT NULL,
@@ -1194,6 +1206,8 @@ CREATE TABLE IF NOT EXISTS master_data_piano_source_map (
   FOREIGN KEY(piano_id) REFERENCES pianos(id) ON DELETE CASCADE,
   FOREIGN KEY(review_id) REFERENCES client_piano_review_queue(id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_master_data_piano_source_map_piano ON master_data_piano_source_map(piano_id,source_name,source_instrument_id);
 
 CREATE TABLE IF NOT EXISTS master_data_import_rows (
   source_name TEXT NOT NULL,
@@ -1230,6 +1244,7 @@ CREATE TABLE IF NOT EXISTS master_data_source_rows (
 );
 CREATE INDEX IF NOT EXISTS idx_master_data_source_rows_client ON master_data_source_rows(source_name,source_client_id,source_row_number);
 CREATE INDEX IF NOT EXISTS idx_master_data_source_rows_instrument ON master_data_source_rows(source_name,source_instrument_id,source_row_number);
+CREATE INDEX IF NOT EXISTS idx_master_data_source_rows_client_id ON master_data_source_rows(client_id,source_row_number,imported_at);
 
 CREATE TABLE IF NOT EXISTS master_data_client_field_values (
   source_name TEXT NOT NULL,
@@ -1265,6 +1280,9 @@ CREATE TABLE IF NOT EXISTS intake_leads (
   FOREIGN KEY (piano_id) REFERENCES pianos(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_intake_status_created ON intake_leads(status,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_intake_source_conversation ON intake_leads(source_conversation_id,id DESC);
 
 CREATE TABLE IF NOT EXISTS intake_catalog_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1404,6 +1422,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_jobs_active_stage_schedule ON jobs(cancelled_at,stage,scheduled_at,updated_at,id);
+CREATE INDEX IF NOT EXISTS idx_jobs_client_created ON jobs(client_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC,id DESC);
+
 CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
   stage_key TEXT PRIMARY KEY,
   position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
@@ -1458,6 +1480,8 @@ CREATE TABLE IF NOT EXISTS job_handoffs (
   FOREIGN KEY (performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_job_handoffs_job_created ON job_handoffs(job_id,created_at,id);
 
 CREATE TABLE IF NOT EXISTS job_material_usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
