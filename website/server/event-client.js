@@ -69,8 +69,16 @@ function createEventClient(options = {}) {
 
   return Object.freeze({
     configured: Boolean(baseUrl),
-    serviceStatus() {
-      return request("/api/public/service-status");
+    async serviceStatus() {
+      try {
+        return await request("/api/public/service-status");
+      } catch (error) {
+        // Backward-compatible rollout: preserved website fixtures and an older ERP
+        // may not expose the status endpoint yet. A real network/API failure still
+        // propagates and the website middleware fails closed.
+        if (Number(error?.status) === 404) return { available: true, status: "AVAILABLE", legacy_endpoint_missing: true };
+        throw error;
+      }
     },
     list(language) {
       return request(`/api/public/events?lang=${language === "hu" ? "hu" : "en"}`);
