@@ -98,6 +98,13 @@ test("legacy archive foreign keys to removed documents table are rebuilt against
     assert.ok(!targets.includes("documents"),`${table} still points at removed documents table`);
     assert.ok(targets.includes("document_archive"),`${table} must point at document_archive`);
   }
+  migrated.pragma("foreign_keys=ON");
+  const intakeId=Number(migrated.prepare("INSERT INTO intake_leads(raw_client_name,reported_issue) VALUES('Legacy delete test','Delete must not touch main.documents')").run().lastInsertRowid);
+  const archiveId=Number(migrated.prepare("INSERT INTO document_archive(category,title,entity_type,entity_id) VALUES('intake_assessment','Legacy assessment','intake',?)").run(String(intakeId)).lastInsertRowid);
+  migrated.prepare("INSERT INTO intake_assessment_email_log(intake_id,archive_document_id,recipient,language,status) VALUES(?,?,?,'en','sent')").run(intakeId,archiveId,"legacy@example.test");
+  assert.doesNotThrow(()=>migrated.prepare("DELETE FROM intake_leads WHERE id=?").run(intakeId));
+  assert.equal(migrated.prepare("SELECT COUNT(*) count FROM intake_assessment_email_log WHERE intake_id=?").get(intakeId).count,0);
+  assert.equal(migrated.prepare("PRAGMA foreign_key_check").all().length,0);
   migrated.close();fs.rmSync(dir,{recursive:true,force:true});
 });
 
