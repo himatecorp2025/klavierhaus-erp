@@ -85,7 +85,8 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
       if(duplicate)return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
     }
     const password=String(req.body?.password||"");
-    if(password&&password.length<12)return res.status(400).json({error:"PASSWORD_TOO_SHORT"});
+    const minimumPasswordLength=superadmin?12:8;
+    if(password&&password.length<minimumPasswordLength)return res.status(400).json({error:"PASSWORD_TOO_SHORT"});
     if(password&&password!==String(req.body?.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
     const emailChanged=superadmin&&loginEmail!==String(before.email||"").trim().toLowerCase(),credentialChanged=emailChanged||Boolean(password);
     const passwordHash=password?bcrypt.hashSync(password,12):before.password_hash;
