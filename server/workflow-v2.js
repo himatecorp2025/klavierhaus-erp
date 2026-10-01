@@ -66,11 +66,11 @@ function createWorkflowV2({ db, invoiceEngine }) {
     return row;
   };
   const activeUser = key => {
-    const row = one("SELECT id,name,role,is_superadmin,status FROM users WHERE id=? AND status='Active'", key);
+    const row = one("SELECT id,name,role,is_superadmin,status FROM users WHERE id=? AND status='Active' AND COALESCE(hidden_user,0)=0", key);
     if (!row) throw fault("WORKFLOW_ACTIVE_USER_REQUIRED");
     return row;
   };
-  const person = key => one("SELECT id,name FROM users WHERE id=?", key);
+  const person = key => one("SELECT id,name FROM users WHERE id=? AND COALESCE(hidden_user,0)=0", key);
   const workflowStatus = w => w.deleted_at ? "DELETED" : w.aborted_at ? "ABORTED" : w.status;
   const active = w => workflowStatus(w) === "ACTIVE";
   const owns = (u, w) => admin(u) || u.id === w.main_responsible_user_id;
@@ -796,7 +796,7 @@ function createWorkflowV2({ db, invoiceEngine }) {
     })();
   }
   function options() {
-    return { users: all("SELECT id,name,role FROM users WHERE status='Active' ORDER BY name"), clients: all("SELECT id,name,email,phone,address FROM contacts ORDER BY name"),
+    return { users: all("SELECT id,name,role FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 ORDER BY name"), clients: all("SELECT id,name,email,phone,address FROM contacts ORDER BY name"),
       pianos: all("SELECT p.id,p.owner_contact_id,p.brand,p.model,p.serial_no,p.display_name,p.location,cp.location_name,cp.piano_location_address FROM pianos p LEFT JOIN client_pianos cp ON cp.piano_id=p.id AND cp.client_id=p.owner_contact_id ORDER BY p.brand,p.model,p.id"),
       client_pianos: all("SELECT client_id,piano_id FROM client_pianos"), partners: all("SELECT id,company_name FROM partners WHERE status='active' ORDER BY company_name"), stages: definitions(), task_catalog: taskCatalog, interval_minutes: 30, time_zone: "America/New_York", ui_contract: "UI12" };
   }
