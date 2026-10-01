@@ -359,7 +359,9 @@ app.post("/api/account-activation/verify",(req,res)=>{
 });
 app.post("/api/account-activation/resend",async(req,res)=>{
   try{
-    const user=activationUser(req.body?.activation_token),state=accountActivation.state(user.id);
+    const user=activationUser(req.body?.activation_token);
+    if(serviceSuspension.isSuspended()&&!isSuperadmin(user))return res.status(423).json({error:"SERVICE_SUSPENDED"});
+    const state=accountActivation.state(user.id);
     if(!state||state.status!=="PENDING")return res.status(409).json({error:"ACTIVATION_ALREADY_COMPLETED"});
     const issuance=accountActivation.issue(user.id),delivery=await accountActivation.deliver(user,issuance,"USER_RESEND");
     if(delivery.status!=="ACCEPTED")return res.status(502).json({error:delivery.error||"EMAIL_DELIVERY_FAILED"});
