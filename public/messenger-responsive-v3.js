@@ -19,24 +19,60 @@ function messengerSearchMatch(){
 function messengerInitials(name){
   return String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase()||"KH";
 }
+function messengerCustomerKey(row,{fallbackPrefix="customer"}={}){
+  const clientId=String(row?.client_id||"").trim();
+  const email=String(row?.email||"").trim().toLowerCase();
+  const conversationId=String(row?.conversation_id||row?.id||"").trim();
+  const name=String(row?.name||"").trim().toLowerCase();
+  if(clientId)return "client:"+clientId;
+  if(email)return "email:"+email;
+  if(conversationId)return "conversation:"+conversationId;
+  return fallbackPrefix+":"+(name||String(row?.id||"unknown"));
+}
 function messengerPeople(){
   const map=new Map();
-  for(const row of state.messengerConversations||[]){
+  for(const row of (state.messengerConversations||[]).filter(item=>item.status!=="CLOSED")){
     const name=String(row.name||row.email||tr("Website visitor","Weboldali látogató"));
     const email=String(row.email||"").trim();
-    const key=(email?"email:"+email.toLowerCase():"name:"+name.toLowerCase());
+    const key=messengerCustomerKey(row,{fallbackPrefix:"person"});
     if(!map.has(key))map.set(key,{key:key,name:name,email:email,last_activity_at:row.last_activity_at||row.created_at,conversation_id:row.id,count:1});
-    else map.get(key).count+=1;
+    else{
+      const current=map.get(key);current.count+=1;
+      const currentStamp=new Date(current.last_activity_at||0).getTime(),nextStamp=new Date(row.last_activity_at||row.created_at||0).getTime();
+      if(nextStamp>=currentStamp){current.last_activity_at=row.last_activity_at||row.created_at;current.conversation_id=row.id;}
+    }
+  }
+  return Array.from(map.values());
+}
+function messengerUnreadConversations(){
+  return (state.messengerConversations||[]).filter(row=>
+    row.status!=="CLOSED"&&
+    Number(row.unread_count||0)>0&&
+    String(row.last_message_direction||"").toUpperCase()==="CUSTOMER"
+  );
+}
+function messengerPendingPrivateCustomers(){
+  const map=new Map();
+  for(const row of (state.messengerRequests||[]).filter(item=>["REQUESTED","PROPOSED"].includes(item.status))){
+    const key=messengerCustomerKey(row,{fallbackPrefix:"private"});
+    if(!map.has(key))map.set(key,row);
   }
   return Array.from(map.values());
 }
 function messengerNotifications(){
-  return (state.notifications||[]).filter(row=>{
-    const entity=String(row.entity_type||row.entityType||"").toUpperCase();
-    const category=String(row.category||row.notification_type||"").toUpperCase();
-    const action=String(row.action_url||"").toLowerCase();
-    return entity.includes("CUSTOMER_CONVERSATION")||entity.includes("PRIVATE_APPOINTMENT")||category.includes("PRIVATE_APPOINTMENT")||category.includes("DIRECT_MESSAGE")||action.includes("messenger");
-  });
+  return messengerUnreadConversations().map(row=>({
+    id:"conversation:"+row.id,
+    entity_type:"CUSTOMER_CONVERSATION",
+    entity_id:row.id,
+    title_en:row.name||row.email||"Website visitor",
+    title_hu:row.name||row.email||"Weboldali látogató",
+    body_en:row.last_message||"Unread customer message",
+    body_hu:row.last_message||"Olvasatlan ügyfélüzenet",
+    created_at:row.last_message_at||row.last_activity_at||row.created_at,
+    severity:"INFO",
+    read_at:null,
+    _conversation_unread:true
+  }));
 }
 function messengerSectionLabel(section){
   return ({
@@ -65,7 +101,7 @@ function messengerNavCounts(){
     inbox:rows.filter(row=>row.status!=="CLOSED").length,
     people:messengerPeople().length,
     waiting:rows.filter(row=>row.status==="PENDING_STAFF"&&Number(row.waiting_after_hours||0)===1).length,
-    private:(state.messengerRequests||[]).filter(row=>["REQUESTED","PROPOSED"].includes(row.status)).length+(state.messengerAppointments||[]).length,
+    private:messengerPendingPrivateCustomers().length,
     notifications:messengerNotifications().length,
     closed:rows.filter(row=>row.status==="CLOSED").length
   };
@@ -164,8 +200,11 @@ function messengerRenderNotifications(host){
       '<span class="messenger-avatar messenger-avatar-notification" aria-hidden="true">'+esc(notificationSeverityIcon(row.severity))+'</span>'+
       '<span class="messenger-list-copy"><span class="messenger-list-top"><strong>'+esc(title)+'</strong><small>'+esc(notificationDate(row.created_at))+'</small></span><span class="messenger-preview">'+esc(body)+'</span></span></button>';
   }).join("")||'<div class="empty-state">'+esc(tr("No Messenger notifications need attention.","Nincs figyelmet igénylő Messenger-értesítés."))+'</div>';
-  $$("[data-messenger-notification]",host).forEach(button=>button.addEventListener("click",async()=>{
+  $("[data-messenger-notification]",host).forEach(button=>button.addEventListener("click",async()=>{
     const row=rows.find(item=>String(item.id)===String(button.dataset.messengerNotification));if(!row)return;
+    if(row._conversation_unread&&row.entity_id){
+      state.messengerSection="inbox";await openMessengerConversation(row.entity_id);return;
+    }
     try{await api("/api/notifications/"+encodeURIComponent(row.id)+"/read",{method:"POST",body:"{}"});}catch(_error){}
     if(String(row.entity_type||"").toUpperCase()==="CUSTOMER_CONVERSATION"&&row.entity_id){
       state.messengerSection="inbox";await openMessengerConversation(row.entity_id);return;
@@ -251,6 +290,12 @@ refreshMessengerInboxSilently=async function(){
 };
 openMessengerConversation=async function(id,options){
   await messengerLegacyOpenConversation(id,options||{});
+  const row=(state.messengerConversations||[]).find(item=>String(item.id)===String(id));
+  if(row)row.unread_count=0;
+  const section=state.messengerSection||"inbox";
+  renderMessengerList(section);
+  const nav=document.querySelector(".messenger-status-cards");
+  if(nav){nav.innerHTML=messengerStatusCards();messengerBindNavButtons();}
   messengerDecorateActivePane();messengerShowThread();
 };
 openMessengerRequest=function(id){
