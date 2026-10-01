@@ -42,6 +42,38 @@ const CMS_GROUP_LABELS = Object.freeze({
   privacy:{en:"Privacy / Legal",hu:"Privacy / Jogi tartalom"}
 });
 
+function pianoBrandSlug(value){
+  const source=String(value||"").trim();
+  if(/^steinway/i.test(source))return "steinway";
+  if(/^fazioli/i.test(source))return "fazioli";
+  if(/^(bösendorfer|bosendorfer)/i.test(source))return "bosendorfer";
+  return source.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80);
+}
+function pianoBrandPageKey(slug){return slug==="steinway"?"steinway":`piano-brand--${slug}`;}
+function pianoBrandSlugFromPageKey(pageKey){return pageKey==="steinway"?"steinway":String(pageKey||"").startsWith("piano-brand--")?String(pageKey).slice("piano-brand--".length):"";}
+function dynamicPianoBrandFallback(brand,language){
+  const hu=language==="hu",label=String(brand?.label||brand?.brand||"Piano").trim()||"Piano";
+  return {
+    template:"piano-brand",
+    seo:{
+      title:hu?`${label} zongorák | Klavierhaus`:`${label} Pianos | Klavierhaus`,
+      description:hu?`${label} zongorák a Klavierhaus New York-i bemutatótermében, személyes meghallgatásra és privát kiválasztásra.`:`${label} pianos in the Klavierhaus New York showroom, available for private listening and personal selection.`
+    },
+    hero:{
+      eyebrow:label,
+      title:label,
+      lead:hu?"A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás.":"Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter.",
+      image:"",
+      imageAlt:hu?`${label} zongora`:`${label} piano`
+    },
+    cta:{
+      eyebrow:hu?"Személyes kiválasztás":"Private selection",
+      title:hu?"Találkozzon a hangszerrel, mielőtt döntést hoz.":"Meet the instrument before making a decision.",
+      buttonLabel:hu?"Privát időpont egyeztetése":"Arrange a private appointment"
+    }
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -172,6 +204,37 @@ function registerWebsiteContentRoutes(options) {
   function pageRow(pageKey, language) {
     return db.prepare("SELECT * FROM website_content_pages WHERE page_key=? AND language=?").get(pageKey, language) || null;
   }
+  function pianoBrands(){
+    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='website_showroom_pianos'").get())return [];
+    const rows=db.prepare("SELECT DISTINCT brand FROM website_showroom_pianos WHERE trim(COALESCE(brand,''))<>'' ORDER BY lower(brand)").all();
+    const bySlug=new Map();
+    for(const row of rows){
+      const label=String(row.brand||"").trim(),slug=pianoBrandSlug(label);if(!slug)continue;
+      if(!bySlug.has(slug))bySlug.set(slug,{slug,label,page_key:pianoBrandPageKey(slug),routes:{en:`/pianos/${slug}`,hu:`/hu/zongorak/${slug}`}});
+    }
+    return [...bySlug.values()];
+  }
+  function dynamicBrandPage(pageKey){const slug=pianoBrandSlugFromPageKey(pageKey);return slug?pianoBrands().find(row=>row.slug===slug)||null:null;}
+  function pageFallback(pageKey,language){
+    const bundled=fallbackPage(pageKey,language);if(bundled)return bundled;
+    const brand=dynamicBrandPage(pageKey);return brand?dynamicPianoBrandFallback(brand,language):null;
+  }
+  function pageExists(pageKey,language){return Boolean((PAGE_KEYS.has(pageKey)||dynamicBrandPage(pageKey))&&pageFallback(pageKey,language));}
+  function parsePage(row,pageKey,language){
+    const fallback=pageFallback(pageKey,language);
+    if(!row)return clone(fallback);
+    try{const parsed=JSON.parse(row.content_json);return parsed&&typeof parsed==="object"?mergeContentDefaults(fallback,parsed):clone(fallback);}
+    catch(_error){return clone(fallback);}
+  }
+  function validatePageDocument(pageKey,language,candidate){
+    if(!LANGUAGES.has(language)||!pageExists(pageKey,language))throw new Error("WEBSITE_PAGE_NOT_FOUND");
+    const content=sanitizeContent(candidate);
+    if(!content||typeof content!=="object"||Array.isArray(content))throw new Error("INVALID_WEBSITE_CONTENT");
+    if(pageKey==="global"){if(!Array.isArray(content.nav)||!content.footerStatement)throw new Error("WEBSITE_REQUIRED_CONTENT");}
+    else if(!content.seo?.title||!content.seo?.description||!content.hero?.title)throw new Error("WEBSITE_REQUIRED_CONTENT");
+    const serialized=JSON.stringify(content);if(Buffer.byteLength(serialized,"utf8")>MAX_DOCUMENT_BYTES)throw new Error("WEBSITE_CONTENT_TOO_LARGE");
+    return {content,serialized};
+  }
 
   function pageRoutes() {
     return parsePageRoutes(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(PAGE_ROUTE_SETTINGS_KEY)?.setting_value);
@@ -188,7 +251,7 @@ function registerWebsiteContentRoutes(options) {
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
-    let content = canonicalizePageContent(pageKey, language, parseStoredPage(row, pageKey, language));
+    let content = canonicalizePageContent(pageKey, language, parsePage(row, pageKey, language));
     if (pageKey === "global") {
       const active = new Set(landingSections().filter((item) => Number(item.is_active) === 1).map((item) => item.section_key));
       const sectionForNav = { pianos:"featured_pianos", services:"craftsmanship" };
@@ -240,7 +303,7 @@ function registerWebsiteContentRoutes(options) {
   app.get("/api/public/website-content/:pageKey", (req, res) => {
     const pageKey = String(req.params.pageKey || "");
     const language = normalizeLanguage(req.query.lang);
-    if (!PAGE_KEYS.has(pageKey) || !fallbackPage(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
+    if (!pageExists(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
     res.setHeader("Cache-Control", "public, max-age=0, must-revalidate, stale-while-revalidate=60");
     res.json(pageResponse(pageKey, language));
   });
@@ -258,20 +321,28 @@ function registerWebsiteContentRoutes(options) {
   app.get("/api/website-content/pages", auth, admin, (_req, res) => {
     res.json({
       website_base_url: websiteBaseUrl,
-      pages: [...PAGE_KEYS].filter((pageKey) => fallbackPage(pageKey, "en") || fallbackPage(pageKey, "hu")).map((pageKey) => {
-        const adminMeta=CMS_PAGE_ADMIN[pageKey]||{group:"other",group_order:99,page_order:99,label_en:pageKey,label_hu:pageKey};
-        return {
-          page_key: pageKey,
-          routes: pageRoutes()[pageKey] || routeDefinitions[pageKey] || { en: "/", hu: "/hu/" },
-          title_en: adminMeta.label_en,
-          title_hu: adminMeta.label_hu,
-          admin_group: adminMeta.group,
-          admin_group_order: adminMeta.group_order,
-          admin_page_order: adminMeta.page_order,
-          admin_group_label_en: CMS_GROUP_LABELS[adminMeta.group]?.en || adminMeta.group,
-          admin_group_label_hu: CMS_GROUP_LABELS[adminMeta.group]?.hu || adminMeta.group
-        };
-      }).sort((a,b)=>a.admin_group_order-b.admin_group_order||a.admin_page_order-b.admin_page_order||a.page_key.localeCompare(b.page_key))
+      pages: [
+        ...[...PAGE_KEYS].filter((pageKey)=>fallbackPage(pageKey,"en")||fallbackPage(pageKey,"hu")).map((pageKey)=>{
+          const adminMeta=CMS_PAGE_ADMIN[pageKey]||{group:"other",group_order:99,page_order:99,label_en:pageKey,label_hu:pageKey};
+          const brand=dynamicBrandPage(pageKey);
+          return {
+            page_key:pageKey,
+            routes:brand?.routes||pageRoutes()[pageKey]||routeDefinitions[pageKey]||{en:"/",hu:"/hu/"},
+            title_en:brand?`Piano · ${brand.label}`:adminMeta.label_en,
+            title_hu:brand?`Piano · ${brand.label}`:adminMeta.label_hu,
+            admin_group:adminMeta.group,admin_group_order:adminMeta.group_order,admin_page_order:adminMeta.page_order,
+            admin_group_label_en:CMS_GROUP_LABELS[adminMeta.group]?.en||adminMeta.group,
+            admin_group_label_hu:CMS_GROUP_LABELS[adminMeta.group]?.hu||adminMeta.group,
+            piano_brand:brand?.label||null,piano_brand_slug:brand?.slug||null
+          };
+        }),
+        ...pianoBrands().filter(brand=>!PAGE_KEYS.has(brand.page_key)).map((brand,index)=>({
+          page_key:brand.page_key,routes:brand.routes,title_en:`Piano · ${brand.label}`,title_hu:`Piano · ${brand.label}`,
+          admin_group:"pianos",admin_group_order:4,admin_page_order:2+index,
+          admin_group_label_en:CMS_GROUP_LABELS.pianos.en,admin_group_label_hu:CMS_GROUP_LABELS.pianos.hu,
+          piano_brand:brand.label,piano_brand_slug:brand.slug
+        }))
+      ].sort((a,b)=>a.admin_group_order-b.admin_group_order||a.admin_page_order-b.admin_page_order||a.page_key.localeCompare(b.page_key))
     });
   });
 
@@ -328,7 +399,7 @@ function registerWebsiteContentRoutes(options) {
   app.get("/api/website-content/:pageKey/versions", auth, admin, (req, res) => {
     const pageKey = String(req.params.pageKey || "");
     const language = normalizeLanguage(req.query.lang);
-    if (!PAGE_KEYS.has(pageKey)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
+    if (!pageExists(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
     res.json(db.prepare(`SELECT id,page_key,language,version,status,created_by_user_id,published_by_user_id,created_at,published_at
       FROM website_content_versions WHERE page_key=? AND language=? ORDER BY version DESC`).all(pageKey, language));
   });
@@ -337,7 +408,7 @@ function registerWebsiteContentRoutes(options) {
     const pageKey = String(req.params.pageKey || "");
     const language = String(req.body?.language || "");
     try {
-      const validated = validateDocument(pageKey, language, req.body?.content);
+      const validated = validatePageDocument(pageKey, language, req.body?.content);
       const row = createVersion(pageKey, language, validated.serialized, req.user.id, "DRAFT");
       audit(req, "SAVE_DRAFT", "website", `${pageKey}:${language}:${row.version}`, null, { version: row.version }, 1, "Website content draft saved");
       res.status(201).json({ ...row, content: validated.content, content_json: undefined });
@@ -376,10 +447,10 @@ function registerWebsiteContentRoutes(options) {
   app.put("/api/website-content/:pageKey", auth, admin, (req, res) => {
     const pageKey = String(req.params.pageKey || "");
     const language = String(req.body?.language || "");
-    if (!PAGE_KEYS.has(pageKey) || !LANGUAGES.has(language) || !fallbackPage(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
+    if (!pageExists(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
     let content;
     try {
-      const validated = validateDocument(pageKey, language, req.body?.content);
+      const validated = validatePageDocument(pageKey, language, req.body?.content);
       content = validated.content;
       const serialized = validated.serialized;
       const before = pageResponse(pageKey, language);
