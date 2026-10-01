@@ -215,3 +215,30 @@ test("CMS public favicon upload is also rendered as the Klavierhaus System favic
   assert.equal(htmlResponse.status,200);
   assert.ok(html.includes('id="appFavicon" rel="icon" href="'+uploaded.payload.url+'?v='),html.slice(0,800));
 });
+
+
+test("existing public website favicon is the canonical System favicon without requiring a re-upload",async()=>{
+  const getSetting=db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?");
+  const previousDesign=getSetting.get("website_design_settings")?.setting_value;
+  const previousSystemFavicon=getSetting.get("favicon_url")?.setting_value;
+  const upsert=db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`);
+  try{
+    upsert.run("website_design_settings",JSON.stringify({favicon_url:"/uploads/branding-v6/existing-public-favicon.png"}),"TEST");
+    upsert.run("favicon_url","/icons/icon-192.png","TEST");
+
+    const branding=await request("/api/public/branding");
+    assert.equal(branding.status,200,JSON.stringify(branding.payload));
+    assert.equal(branding.payload.favicon_url,"/uploads/branding-v6/existing-public-favicon.png");
+
+    const response=await fetch(origin+"/",{headers:{Accept:"text/html"}});
+    const html=await response.text();
+    assert.equal(response.status,200);
+    assert.ok(html.includes('id="appFavicon" rel="icon" href="/uploads/branding-v6/existing-public-favicon.png?v='),html.slice(0,1000));
+  }finally{
+    if(previousDesign===undefined)db.prepare("DELETE FROM app_settings WHERE setting_key='website_design_settings'").run();
+    else upsert.run("website_design_settings",previousDesign,"TEST");
+    if(previousSystemFavicon===undefined)db.prepare("DELETE FROM app_settings WHERE setting_key='favicon_url'").run();
+    else upsert.run("favicon_url",previousSystemFavicon,"TEST");
+  }
+});

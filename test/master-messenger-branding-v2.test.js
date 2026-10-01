@@ -155,7 +155,7 @@ test("public website and Klavierhaus System share the uploaded favicon while the
   assert.match(v6,/favicon_url:url/);
   assert.match(v6,/Website \/ System favicon/);
   assert.match(backend,/\{route:"public-favicon",key:"favicon_url",min:32\}/);
-  assert.match(server,/favicon_url:values\.favicon_url\|\|"\/icons\/icon-192\.png"/);
+  assert.match(server,/const sharedFavicon=websiteDesignFavicon\(\)\|\|values\.favicon_url\|\|"\/icons\/icon-192\.png"/);
   assert.match(server,/const favicon=brandingAssetUrl\(branding\.favicon_url,version\)/);
   assert.match(v6,/logo_url:url/);
 });

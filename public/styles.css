@@ -2231,7 +2231,7 @@ input,select,textarea,button{max-width:100%}
 .profile-menu>button:hover{background:var(--surface-2)}
 .profile-menu-separator{height:1px;background:var(--line);margin:5px 6px}
 .profile-menu .profile-menu-logout{color:var(--danger)}
-.profile-self-layout{display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:16px}
+.profile-self-layout{display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:16px;align-items:start}.profile-main-column{display:grid;gap:16px;min-width:0;align-content:start}
 .profile-self-card,.profile-editor-panel,.personal-settings-card,.team-settings-card{padding:22px}
 .profile-photo-editor{display:flex;align-items:center;gap:16px}.profile-photo-editor h2{margin:0 0 5px}.profile-photo-editor p{margin:0 0 8px}
 .profile-avatar.large,.profile-avatar-image.large{width:96px;height:96px;border-radius:28px;flex:0 0 96px}
@@ -3151,7 +3151,7 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
 }
 
 
-/* Superadmin service suspension: explicit login lock notice and hidden owner control. */
+/* Superadmin service suspension: explicit login lock notice and compact profile control. */
 .service-suspension-notice{
   display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;gap:14px;
   margin:16px 0;padding:16px 18px;border:1px solid rgba(255,255,255,.42);border-radius:16px;
@@ -3164,38 +3164,49 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
 }
 .service-suspension-notice strong{display:block;font-size:clamp(18px,2.1vw,26px);font-weight:950;letter-spacing:.06em}
 .service-suspension-notice p{margin:5px 0 0;color:#fff;font-size:13px;font-weight:700;line-height:1.45}
-.superadmin-service-control{display:grid;gap:14px}
-.superadmin-service-control.is-suspended{border-color:rgba(180,35,24,.46);box-shadow:0 0 0 1px rgba(180,35,24,.12)}
-.service-control-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.service-control-status{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border-radius:999px;font-size:11px;font-weight:900;letter-spacing:.04em}
-.service-control-status::before{content:"";width:9px;height:9px;border-radius:50%;background:currentColor}
+.superadmin-service-control{display:grid;gap:14px;padding:20px}
+.superadmin-service-control.is-active{border-color:color-mix(in srgb,#238153 24%,var(--line))}
+.superadmin-service-control.is-suspended{border-color:color-mix(in srgb,#b42318 42%,var(--line));box-shadow:0 0 0 1px rgba(180,35,24,.08)}
+.service-control-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.service-control-head>div{display:grid;gap:4px;min-width:0}
+.service-control-head h2{margin:0;font-size:18px}
+.service-control-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
+.service-control-status{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.06em;white-space:nowrap}
+.service-control-status::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
 .service-control-status.active{background:rgba(47,159,100,.12);color:#238153}
 .service-control-status.suspended{background:rgba(180,35,24,.12);color:#b42318}
-.service-control-copy{margin:0;color:var(--muted);line-height:1.55}
-.service-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.service-control-grid .full{grid-column:1/-1}
 .service-access-switch{
-  display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 16px;
   border:1px solid var(--line);border-radius:14px;background:var(--surface-2)
 }
-.service-access-switch>span{display:grid;gap:3px}
-.service-access-switch small{color:var(--muted)}
-.service-access-toggle{position:relative;display:inline-flex;flex:0 0 auto}
+.service-access-switch>span{display:grid;gap:4px;min-width:0}
+.service-access-switch strong{font-size:13px}
+.service-access-switch small{color:var(--muted);line-height:1.45}
+.service-access-toggle{position:relative;display:inline-flex;flex:0 0 auto;cursor:pointer}
 .service-access-toggle input{position:absolute;opacity:0;pointer-events:none}
 .service-access-toggle i{
-  position:relative;display:block;width:58px;height:32px;border-radius:999px;background:#b42318;
+  position:relative;display:block;width:54px;height:30px;border-radius:999px;background:#b42318;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);transition:.18s ease
 }
 .service-access-toggle i::after{
-  content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;
-  background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.28);transition:.18s ease
+  content:"";position:absolute;top:4px;left:4px;width:22px;height:22px;border-radius:50%;
+  background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.24);transition:.18s ease
 }
 .service-access-toggle input:checked+i{background:#238153}
-.service-access-toggle input:checked+i::after{transform:translateX(26px)}
+.service-access-toggle input:checked+i::after{transform:translateX(24px)}
 .service-access-toggle input:focus-visible+i{outline:3px solid color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:3px}
-.service-control-warning{padding:11px 13px;border-radius:12px;background:rgba(180,35,24,.1);color:#b42318;font-size:12px;font-weight:750;line-height:1.45}
+.service-control-warning{display:grid;gap:3px;padding:11px 13px;border:1px solid rgba(180,35,24,.18);border-radius:12px;background:rgba(180,35,24,.08);color:#b42318;font-size:11px;line-height:1.45}
+.service-control-warning strong{font-size:11px}.service-control-warning span{font-weight:600}
+.service-control-details{border-top:1px solid var(--line);padding-top:4px}
+.service-control-details>summary{cursor:pointer;list-style:none;padding:9px 0;color:var(--muted);font-size:11px;font-weight:800}
+.service-control-details>summary::-webkit-details-marker{display:none}
+.service-control-details>summary::after{content:"+";float:right;font-size:15px;line-height:1}
+.service-control-details[open]>summary::after{content:"−"}
+.service-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:8px}
+.service-control-grid .full{grid-column:1/-1}
 @media(max-width:640px){
   .service-suspension-notice{grid-template-columns:46px minmax(0,1fr);padding:14px}
   .service-suspension-mark{width:46px;height:46px;font-size:28px}
   .service-control-grid{grid-template-columns:1fr}
+  .service-access-switch{align-items:flex-start}
 }
