@@ -6,6 +6,8 @@ const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt
 const state={
   token:sessionStorage.getItem("kh_token")||"",
   user:null,
+  serviceSuspended:false,
+  serviceStatusUpdatedAt:"",
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
   clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,duplicateReviews:[],duplicatePendingCount:0,selectedDuplicateReviewId:null,intake:[],users:[],
@@ -19,6 +21,8 @@ const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPER
 
 const chromeText={
   login_copy:["Sign in to the Klavierhaus internal workspace.","Jelentkezz be a Klavierhaus belső munkafelületére."],
+  service_suspended_title:["SERVICE SUSPENDED","A SZOLGÁLTATÁS SZÜNETEL"],
+  service_suspended_body:["The service is suspended due to an outstanding payment. Only the Super Admin can sign in.","A szolgáltatás díjhátralék miatt szünetel. Kizárólag a szuperadmin jelentkezhet be."],
   email:["Email","E-mail"],password:["Password","Jelszó"],sign_in:["Sign in","Bejelentkezés"],
   account_activation:["ACCOUNT ACTIVATION","FIÓK AKTIVÁLÁS"],confirm_login:["Confirm your login","Erősítsd meg a belépést"],
   six_digit_code:["6-digit code","6 jegyű kód"],activate:["Activate","Aktiválás"],resend_code:["Send a new code","Új kód küldése"],back_to_login:["Back to login","Vissza a belépéshez"],
@@ -56,6 +60,11 @@ function humanError(error){
   const code=String(error?.message||error||"");
   const map={
     AUTH_REQUIRED:["Your session has expired.","A munkamenet lejárt."],INVALID_TOKEN:["Your session has expired.","A munkamenet lejárt."],SESSION_REVOKED:["Your session has expired.","A munkamenet lejárt."],
+    SERVICE_SUSPENDED:["The service is suspended due to an outstanding payment. Only the Super Admin can sign in.","A szolgáltatás díjhátralék miatt szünetel. Kizárólag a szuperadmin jelentkezhet be."],
+    SERVICE_SUSPENSION_STATE_REQUIRED:["Choose whether the service should be active or suspended.","Válaszd ki, hogy a szolgáltatás aktív vagy szüneteltetett legyen."],
+    SERVICE_SUSPENSION_CONFIRMATION_REQUIRED:["Confirm the service access change.","Erősítsd meg a szolgáltatás-hozzáférés módosítását."],
+    HIDDEN_OWNER_SELF_SERVICE_ONLY:["The protected Super Admin account can only be changed from its own profile.","A védett szuperadmin fiók kizárólag a saját profiljából módosítható."],
+    USER_EMAIL_ALREADY_USED:["This email address is already used by another account.","Ezt az e-mail címet már másik fiók használja."],
     CLIENT_NAME_REQUIRED:["Client name is required.","Az ügyfél neve kötelező."],INVALID_CLIENT_EMAIL:["Invalid client email.","Érvénytelen ügyfél e-mail."],INVALID_CLIENT_TYPE:["Choose Individual, Partner, Business or Institution.","Válassz Magánszemély, Partner, Üzleti vagy Intézményi típust."],
     PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],MASTER_DATA_INTEGRITY_FAILED:["The import was rolled back because the complete 33-column Master Data contract did not pass.","Az import vissza lett vonva, mert a teljes 33 oszlopos törzsadat-kontraktus ellenőrzése nem ment át."],MASTER_DATA_CSV_FORMAT_UNSUPPORTED:["Use the required Klavierhaus 33-column source CSV.","A kötelező Klavierhaus 33 oszlopos forrás-CSV-t használd."],
     REPORTED_ISSUE_REQUIRED:["Describe the requested service or issue.","A hiba vagy igény leírása kötelező."],INVALID_PIANO_ID:["The selected piano does not belong to this client.","A kiválasztott zongora nem ehhez az ügyfélhez tartozik."],
@@ -118,6 +127,24 @@ function humanError(error){
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
 }
+function readServiceBootstrap(){
+  const node=$("#khServiceBootstrap");if(!node)return null;
+  try{return JSON.parse(node.textContent||"{}");}catch(_error){return null;}
+}
+function applyServiceStatus(payload){
+  if(!payload||typeof payload!=="object")return;
+  const suspended=payload.suspended===true||payload.available===false||String(payload.status||"").toUpperCase()==="SUSPENDED";
+  state.serviceSuspended=suspended;state.serviceStatusUpdatedAt=payload.updated_at||state.serviceStatusUpdatedAt||"";
+  const notice=$("#serviceSuspensionNotice");if(notice)notice.classList.toggle("hidden",!suspended);
+  applyChromeLanguage();
+}
+async function refreshServiceStatus(){
+  try{
+    const response=await fetch("/api/public/service-status",{cache:"no-store",headers:{Accept:"application/json"}});
+    if(!response.ok)return state.serviceSuspended;
+    const payload=await response.json();applyServiceStatus(payload);return state.serviceSuspended;
+  }catch(_error){return state.serviceSuspended;}
+}
 const API_MEMORY_CACHE_MS=750;
 const API_MEMORY_CACHE_LIMIT=120;
 const apiInflightGets=new Map();
@@ -146,7 +173,10 @@ async function api(url,options={}){
     const type=response.headers.get("content-type")||"";
     const data=type.includes("application/json")?await response.json().catch(()=>({})):await response.text();
     if(!response.ok){
-      if(response.status===401&&state.token){clearSession();showLogin();}
+      if(data?.error==="SERVICE_SUSPENDED"){
+        applyServiceStatus({suspended:true,status:"SUSPENDED"});
+        if(state.token){clearSession();showLogin();}
+      }else if(response.status===401&&state.token){clearSession();showLogin();}
       const error=new Error(data?.error||`HTTP_${response.status}`);error.status=response.status;error.payload=data;throw error;
     }
     if(method!=="GET")clearApiMemoryCache();
@@ -161,6 +191,8 @@ async function api(url,options={}){
 function setSession(payload){
   clearApiMemoryCache();
   state.token=payload.token;state.user=payload.user;
+  if(payload.service_suspended!==undefined)applyServiceStatus({suspended:Boolean(payload.service_suspended),status:payload.service_suspended?"SUSPENDED":"ACTIVE"});
+  if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1)){state.view="profile";history.replaceState({},"","#profile");}
   sessionStorage.setItem("kh_token",state.token);sessionStorage.setItem("kh_user",JSON.stringify(state.user));
 }
 function clearSession(){
@@ -168,7 +200,7 @@ function clearSession(){
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
   clearInterval(state.notificationTimer);state.notificationTimer=null;clearTimeout(state.notificationReconnectTimer);state.notificationReconnectTimer=null;state.notificationSource?.close?.();state.notificationSource=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
 }
-function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");}
+function showLogin(){$("#loginScreen").classList.remove("hidden");$("#appShell").classList.add("hidden");void refreshServiceStatus();}
 function updateNewYorkClock(){
   const now=new Date(),locale=state.language==="hu"?"hu-HU":"en-US";
   const time=$("#newYorkClock"),date=$("#newYorkDate");
@@ -1255,10 +1287,13 @@ $("#resendActivationBtn").addEventListener("click",async()=>{try{const payload=a
 $("#backToLoginBtn").addEventListener("click",()=>{$("#activationForm").classList.add("hidden");$("#loginForm").classList.remove("hidden");sessionStorage.removeItem("kh_activation_token");});
 
 async function boot(){
-  applyChromeLanguage();startNewYorkClock();await loadBranding();bindNavigation();
+  applyServiceStatus(readServiceBootstrap()||{});applyChromeLanguage();startNewYorkClock();await loadBranding();bindNavigation();
   if(!state.token){showLogin();return;}
-  try{state.user=await api("/api/me");showApp();if(!activeViews.has(state.view))state.view="workshop";await renderView();}
-  catch(_error){clearSession();showLogin();}
+  try{
+    state.user=await api("/api/me");
+    if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1)){state.view="profile";history.replaceState({},"","#profile");}
+    showApp();if(!activeViews.has(state.view))state.view="workshop";await renderView();
+  }catch(_error){clearSession();showLogin();}
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(()=>{}),{once:true});
 }
 // Final compliance extensions invoke boot() after workflow and finance functions are registered.
