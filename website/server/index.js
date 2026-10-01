@@ -566,14 +566,24 @@ const pianoBrands = Object.freeze([
   { slug: "fazioli", label: "Fazioli", matches: (value) => /^fazioli/i.test(value) },
   { slug: "bosendorfer", label: "Bösendorfer", matches: (value) => /^(bösendorfer|bosendorfer)/i.test(value) }
 ]);
-
+function pianoBrandSlug(value) {
+  const source=String(value||"").trim();
+  const known=pianoBrands.find((brand)=>brand.matches(source));if(known)return known.slug;
+  return source.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80);
+}
 function pianoBrandPath(brand, language) {
   return language === "hu" ? `/hu/zongorak/${brand.slug}` : `/pianos/${brand.slug}`;
 }
-
+function pianoBrandContentKey(brand){return brand.slug==="steinway"?"steinway":`piano-brand--${brand.slug}`;}
 function resolvePianoBrand(value) {
-  const source = String(value || "").trim();
-  return pianoBrands.find((brand) => brand.matches(source)) || null;
+  const source=String(value||"").trim();if(!source)return null;
+  const known=pianoBrands.find((brand)=>brand.matches(source));if(known)return known;
+  const slug=pianoBrandSlug(source);return slug?{slug,label:source,matches:(candidate)=>pianoBrandSlug(candidate)===slug}:null;
+}
+function uniquePianoBrands(items=[]) {
+  const map=new Map();
+  for(const item of items){const brand=resolvePianoBrand(item?.brand);if(brand&&!map.has(brand.slug))map.set(brand.slug,brand);}
+  return [...map.values()];
 }
 
 function servicePath(item, language) {
@@ -607,7 +617,7 @@ function renderShowroomCollection(items, language, options = {}) {
   if (!items.length) return "";
   const compact = Boolean(options.compact);
   const labels = (options.copy || getGlobal(language)).collectionLabels || {};
-  const grouped = pianoBrands.map((brand) => ({ brand, items: items.filter((item) => brand.matches(item.brand)) })).filter((entry) => entry.items.length);
+  const grouped = uniquePianoBrands(items).map((brand) => ({ brand, items: items.filter((item) => brand.matches(item.brand)) })).filter((entry) => entry.items.length);
   const cards = grouped.map(({ brand, items: brandItems }) => {
     const item = brandItems[0];
     const path = pianoBrandPath(brand, language);
@@ -1209,7 +1219,7 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
   return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-id="${escapeHtml(isPiano ? item.id : "")}" data-service-id="${escapeHtml(!isPiano ? item.id : "")}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
-function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, globalOverride = null, seoConfig = null }) {
+function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, pageOverride = null, globalOverride = null, seoConfig = null }) {
   const copy = globalOverride || getGlobal(language);
   const labels = copy.collectionLabels || {};
   const alternateLanguage = getAlternateLanguage(language);
@@ -1217,10 +1227,13 @@ function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, 
   const alternatePath = pianoBrandPath(brand, alternateLanguage);
   const canonicalUrl = pageUrl(baseUrl, canonicalPath);
   const hu = language === "hu";
-  const description = hu
+  const defaultDescription = hu
     ? `${brand.label} zongorák a Klavierhaus New York-i bemutatótermében, személyes meghallgatásra és privát kiválasztásra.`
     : `${brand.label} pianos in the Klavierhaus New York showroom, available for private listening and personal selection.`;
-  const title = `${brand.label} Pianos | Klavierhaus`;
+  const description=pageOverride?.seo?.description||defaultDescription;
+  const title=pageOverride?.seo?.title||`${brand.label} Pianos | Klavierhaus`;
+  const hero=pageOverride?.hero||{};
+  const cta=pageOverride?.cta||(Array.isArray(pageOverride?.sections)?pageOverride.sections.find(section=>section?.type==="cta"):null)||{};
   const keywords = normalizedSeoKeywords([
     ...seoKeywords({ seoConfig, key: "pianos", language, title, description }),
     ...seoKeywords({ seoConfig, key: brand.slug, language, title, description })
@@ -1235,7 +1248,7 @@ function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, 
     <a class="piano-brand-instrument__media" href="${escapeHtml(showroomPath(item, language))}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
     <div class="piano-brand-instrument__copy"><p class="eyebrow">${escapeHtml([item.brand, item.model].filter(Boolean).join(" · "))}</p><h2 class="word-safe-title">${escapeHtml(item.title)}</h2>${publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<span class="catalog-status">${escapeHtml(hu ? ({ AVAILABLE: "Megtekinthető", RESERVED: "Foglalt", SOLD: "Elkelt" }[item.availability_status] || item.availability_status) : ({ AVAILABLE: "Available for private viewing", RESERVED: "Reserved", SOLD: "Sold" }[item.availability_status] || item.availability_status))}</span><div class="piano-brand-instrument__actions"><a class="text-link" href="${escapeHtml(showroomPath(item, language))}"><span>${escapeHtml(labels.brandInstrumentDetails || (hu ? "A hangszer részletei" : "Explore the instrument"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a><button class="button button--ghost" type="button" data-private-viewing-open data-piano-id="${escapeHtml(item.id)}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || brand.label)}" data-piano-model="${escapeHtml(item.model || item.title || "")}"><span>${escapeHtml(labels.brandInstrumentViewing || (hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"))}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div>
   </article>`).join("");
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: items[0]?.image_url || shared.heroImage, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), itemList], globalCopyOverride: copy, keywords })}</head><body class="template-piano-brand" data-language="${escapeHtml(language)}" data-page="pianos">${renderHeader({ copy, language, currentKey: "pianos", alternateRouteOverride: alternatePath })}<main id="main-content"><section class="hero hero--inner hero--with-image" aria-labelledby="page-title">${renderPicture(items[0]?.image_url || shared.heroImage, items[0]?.image_alt || brand.label, "hero-media", { eager: true })}<div class="hero-shade" aria-hidden="true"></div><div class="hero-content" data-reveal><p class="eyebrow">${escapeHtml(labels.showroomCardEyebrow || "Klavierhaus showroom")}</p><h1 id="page-title" class="word-safe-title">${escapeHtml(brand.label)}</h1><p class="hero-lead">${escapeHtml(labels.brandLead || (hu ? "A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás." : "Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter."))}</p></div></section><section class="piano-brand-list">${instruments}</section><section class="section section--cta"><div class="cta-inner"><p class="eyebrow">${escapeHtml(labels.brandPrivateSelection || (hu ? "Személyes kiválasztás" : "Private selection"))}</p><h2>${escapeHtml(labels.brandCtaTitle || (hu ? "Találkozzon a hangszerrel, mielőtt döntést hoz." : "Meet the instrument before making a decision."))}</h2><button class="button button--primary" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(brand.label)}">${escapeHtml(labels.brandCta || (hu ? "Privát időpont egyeztetése" : "Arrange a private appointment"))} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></section></main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: hero.image||items[0]?.image_url||shared.heroImage, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), itemList], globalCopyOverride: copy, keywords })}</head><body class="template-piano-brand" data-language="${escapeHtml(language)}" data-page="pianos">${renderHeader({ copy, language, currentKey: "pianos", alternateRouteOverride: alternatePath })}<main id="main-content"><section class="hero hero--inner hero--with-image" aria-labelledby="page-title">${renderPicture(hero.image||items[0]?.image_url||shared.heroImage,hero.imageAlt||items[0]?.image_alt||brand.label,"hero-media",{eager:true})}<div class="hero-shade" aria-hidden="true"></div><div class="hero-content" data-reveal><p class="eyebrow">${escapeHtml(hero.eyebrow||labels.showroomCardEyebrow||"Klavierhaus showroom")}</p><h1 id="page-title" class="word-safe-title">${escapeHtml(hero.title||brand.label)}</h1><p class="hero-lead">${escapeHtml(hero.lead||labels.brandLead||(hu?"A kiválasztás hallgatással kezdődik. Minden hangszer külön karakter, külön érintés és külön zenei találkozás.":"Selection begins with listening. Every instrument offers an individual character, touch, and musical encounter."))}</p></div></section><section class="piano-brand-list">${instruments}</section><section class="section section--cta"><div class="cta-inner"><p class="eyebrow">${escapeHtml(cta.eyebrow||labels.brandPrivateSelection||(hu?"Személyes kiválasztás":"Private selection"))}</p><h2>${escapeHtml(cta.title||labels.brandCtaTitle||(hu?"Találkozzon a hangszerrel, mielőtt döntést hoz.":"Meet the instrument before making a decision."))}</h2><button class="button button--primary" type="button" data-private-viewing-open data-piano-brand="${escapeHtml(brand.label)}">${escapeHtml(cta.buttonLabel||cta.link?.label||labels.brandCta||(hu?"Privát időpont egyeztetése":"Arrange a private appointment"))} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></section></main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
 function renderArtistDetail({ artist, language, baseUrl, allowIndexing, nonce, globalOverride = null, seoConfig = null }) {
@@ -1550,17 +1563,21 @@ function createApp(options = {}) {
     if (!eventClient.configured) return next();
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
-      const brand = pianoBrands.find((item) => item.slug === String(req.params.slug || "").toLowerCase());
-      if (brand) {
-        const [allItems, globalContent, seoConfig] = await Promise.all([eventClient.showroomPianos(language), eventClient.content("global", language).catch(() => null), loadSeoConfig()]);
-        const items = allItems.filter((item) => brand.matches(item.brand));
-        if (!items.length) return next();
-        res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-        return res.type("html").send(renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null, seoConfig }));
+      const allItems=await eventClient.showroomPianos(language);
+      const brand=uniquePianoBrands(allItems).find((item)=>item.slug===String(req.params.slug||"").toLowerCase());
+      if(brand){
+        const [pageContent,globalContent,seoConfig]=await Promise.all([
+          eventClient.content(pianoBrandContentKey(brand),language).catch(()=>null),
+          eventClient.content("global",language).catch(()=>null),
+          loadSeoConfig()
+        ]);
+        const items=allItems.filter((item)=>brand.matches(item.brand));if(!items.length)return next();
+        res.setHeader("Cache-Control","public, max-age=30, stale-while-revalidate=120");
+        return res.type("html").send(renderPianoBrandPage({brand,items,language,baseUrl,allowIndexing,nonce:res.locals.cspNonce,pageOverride:pageContent?.content||null,globalOverride:globalContent?.content||null,seoConfig}));
       }
-      const [item, globalContent, seoConfig] = await Promise.all([eventClient.showroomPiano(req.params.slug, language), eventClient.content("global", language).catch(() => null), loadSeoConfig()]);
-      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-      res.type("html").send(renderCatalogDetail({ item, kind: "piano", language, baseUrl, allowIndexing, nonce: res.locals.cspNonce, globalOverride: globalContent?.content || null, seoConfig }));
+      const [item,globalContent,seoConfig]=await Promise.all([eventClient.showroomPiano(req.params.slug,language),eventClient.content("global",language).catch(()=>null),loadSeoConfig()]);
+      res.setHeader("Cache-Control","public, max-age=30, stale-while-revalidate=120");
+      res.type("html").send(renderCatalogDetail({item,kind:"piano",language,baseUrl,allowIndexing,nonce:res.locals.cspNonce,globalOverride:globalContent?.content||null,seoConfig}));
     } catch (error) { if (error.status === 404) return next(); next(error); }
   });
 
