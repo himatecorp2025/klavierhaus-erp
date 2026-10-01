@@ -1372,6 +1372,7 @@ function createApp(options = {}) {
   }
   let serviceAvailability={available:true,checkedAt:0};
   async function publicServiceAvailable(){
+    if(!eventClient.configured)return true;
     const now=Date.now();
     if(now-serviceAvailability.checkedAt<1500)return serviceAvailability.available;
     try{
