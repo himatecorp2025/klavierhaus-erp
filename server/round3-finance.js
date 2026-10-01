@@ -25,6 +25,12 @@ function nyDate(value=new Date()){
   const p=Object.fromEntries(parts.filter(part=>part.type!=="literal").map(part=>[part.type,part.value]));
   return `${p.year}-${p.month}-${p.day}`;
 }
+function dbTimestamp(value){
+  const raw=text(value,80);if(!raw)return null;
+  const normalized=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)?raw.replace(" ","T")+"Z":raw;
+  const date=new Date(normalized);return Number.isNaN(date.getTime())?null:date;
+}
+function nyMonthOf(value){const date=dbTimestamp(value);return date?nyDate(date).slice(0,7):"";}
 function addDays(dateKey,days){const d=new Date(dateKey+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+Number(days||0));return d.toISOString().slice(0,10);}
 function nextMonth(month){const d=new Date(month+"-01T12:00:00Z");d.setUTCMonth(d.getUTCMonth()+1);return d.toISOString().slice(0,7);}
 function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="SUPERADMIN"||Number(user.is_superadmin||0)===1));}
@@ -418,8 +424,11 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     const month=validMonth(monthValue)?String(monthValue):nyDate().slice(0,7),first=month+"-01",next=nextMonth(month)+"-01";
     const laborRevenue=money(db.prepare(`SELECT COALESCE(SUM(subtotal_labor),0) amount FROM invoices
       WHERE deleted_at IS NULL AND direction='receivable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
-    const handoffMaterial=money(db.prepare("SELECT COALESCE(SUM(phase_material_cost),0) amount FROM job_handoffs WHERE created_at>=? AND created_at<?").get(first,next).amount);
-    const cancelledLabor=money(db.prepare(`SELECT COALESCE(SUM(total_labor_cost),0) amount FROM jobs WHERE cancelled_at>=? AND cancelled_at<?`).get(first,next).amount);
+    const utcWindowStart=addDays(first,-1),utcWindowEnd=addDays(next,1);
+    const handoffMaterial=money(db.prepare("SELECT phase_material_cost,created_at FROM job_handoffs WHERE created_at>=? AND created_at<?").all(utcWindowStart,utcWindowEnd)
+      .filter(row=>nyMonthOf(row.created_at)===month).reduce((sum,row)=>sum+Number(row.phase_material_cost||0),0));
+    const cancelledLabor=money(db.prepare("SELECT total_labor_cost,cancelled_at FROM jobs WHERE cancelled_at IS NOT NULL AND cancelled_at>=? AND cancelled_at<?").all(utcWindowStart,utcWindowEnd)
+      .filter(row=>nyMonthOf(row.cancelled_at)===month).reduce((sum,row)=>sum+Number(row.total_labor_cost||0),0));
     const directExpense=money(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM direct_expenses WHERE expense_date>=? AND expense_date<?").get(first,next).amount);
     const vendorCost=money(db.prepare(`SELECT COALESCE(SUM(total_amount),0) amount FROM invoices WHERE deleted_at IS NULL AND direction='payable' AND status='paid' AND paid_at>=? AND paid_at<?`).get(first,next).amount);
     const materialDirectCost=money(handoffMaterial+cancelledLabor+directExpense+vendorCost);
