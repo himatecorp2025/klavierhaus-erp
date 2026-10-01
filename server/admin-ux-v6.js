@@ -72,24 +72,28 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
   });
 
   app.put("/api/me/profile",auth,(req,res)=>{
-    const before=db.prepare("SELECT id,name,contact_email,phone,address,profile_image_url FROM users WHERE id=?").get(req.user.id);
+    const before=db.prepare("SELECT id,name,email,contact_email,phone,address,profile_image_url,password_hash,session_version,is_superadmin,hidden_user FROM users WHERE id=?").get(req.user.id);
     if(!before)return res.status(404).json({error:"USER_NOT_FOUND"});
+    const superadmin=Number(req.user?.is_superadmin||0)===1||req.user?.role==="SUPERADMIN";
     const name=text(req.body?.name??before.name,200),contactEmail=text(req.body?.contact_email??before.contact_email,320).toLowerCase(),phone=text(req.body?.phone??before.phone,100),address=text(req.body?.address??before.address,1000);
+    const loginEmail=superadmin?text(req.body?.email??before.email,320).toLowerCase():String(before.email||"").trim().toLowerCase();
     if(!name)return res.status(400).json({error:"USER_NAME_REQUIRED"});
+    if(!loginEmail||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail))return res.status(400).json({error:"INVALID_EMAIL"});
     if(contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail))return res.status(400).json({error:"INVALID_EMAIL"});
-    const password=String(req.body?.password||"");
-    if(password&&password.length<8)return res.status(400).json({error:"PASSWORD_TOO_SHORT"});
-    if(password&&password!==String(req.body?.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
-    if(password){
-      db.prepare("UPDATE users SET name=?,contact_email=?,phone=?,address=?,password_hash=?,session_version=COALESCE(session_version,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(name,contactEmail||null,phone,address,bcrypt.hashSync(password,10),req.user.id);
-    }else{
-      db.prepare("UPDATE users SET name=?,contact_email=?,phone=?,address=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(name,contactEmail||null,phone,address,req.user.id);
+    if(superadmin){
+      const duplicate=db.prepare("SELECT id FROM users WHERE id<>? AND (lower(trim(email))=? OR lower(trim(contact_email))=?) LIMIT 1").get(req.user.id,loginEmail,loginEmail);
+      if(duplicate)return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
     }
+    const password=String(req.body?.password||"");
+    if(password&&password.length<12)return res.status(400).json({error:"PASSWORD_TOO_SHORT"});
+    if(password&&password!==String(req.body?.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
+    const emailChanged=superadmin&&loginEmail!==String(before.email||"").trim().toLowerCase(),credentialChanged=emailChanged||Boolean(password);
+    const passwordHash=password?bcrypt.hashSync(password,12):before.password_hash;
+    db.prepare(`UPDATE users SET name=?,email=?,contact_email=?,phone=?,address=?,password_hash=?,session_version=session_version+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(name,loginEmail,contactEmail||null,phone,address,passwordHash,credentialChanged?1:0,req.user.id);
     const after=db.prepare("SELECT id,name,email,contact_email,role,status,phone,address,profile_image_url,theme_preference,language_preference,session_version,is_superadmin FROM users WHERE id=?").get(req.user.id);
-    audit(req,"UPDATE","user_profile",req.user.id,before,after);
-    res.json(after);
+    audit(req,"UPDATE","user_profile",req.user.id,{...before,password_hash:"[REDACTED]"},{...after,credential_changed:credentialChanged});
+    res.json({...after,reauth_required:credentialChanged});
   });
 
   app.post("/api/me/profile-image",auth,profileUpload,(req,res)=>{
