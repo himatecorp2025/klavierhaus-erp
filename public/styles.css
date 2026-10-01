@@ -2706,3 +2706,289 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   .workflow-column,.workflow-add-column{width:100%!important}
   .workflow-add-column{min-height:140px!important}
 }
+
+
+/* COMPACT CLOSED WORKFLOWS + CMS PAGES APP UI V33 */
+
+/* Closed Workflow archive: intentionally dense, read-only cards. */
+.closed-workflow-grid{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+  max-width:100%;
+}
+.closed-workflow-card{
+  position:relative;
+  display:grid;
+  grid-template-rows:auto auto auto auto auto;
+  gap:4px;
+  min-width:0;
+  min-height:118px;
+  padding:9px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--ink);
+  text-align:left;
+  cursor:pointer;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
+  transition:border-color .15s ease,transform .15s ease,background .15s ease;
+}
+.closed-workflow-card:hover,.closed-workflow-card:focus-visible{
+  border-color:var(--accent);
+  background:var(--accent-soft);
+  transform:translateY(-1px);
+  outline:none;
+}
+.closed-workflow-card.is-completed{border-top:3px solid #2f9b68}
+.closed-workflow-card.is-cancelled{border-top:3px solid #e55c62}
+.closed-workflow-card-top{display:flex;align-items:center;justify-content:space-between;gap:5px;min-width:0}
+.closed-workflow-card .job-code{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:8px;
+}
+.closed-workflow-state{
+  display:grid;
+  place-items:center;
+  flex:0 0 20px;
+  width:20px;
+  height:20px;
+  border-radius:7px;
+  background:var(--surface-2);
+  font-size:10px;
+  font-weight:900;
+}
+.closed-workflow-card.is-completed .closed-workflow-state{color:#2f9b68}
+.closed-workflow-card.is-cancelled .closed-workflow-state{color:#e55c62}
+.closed-workflow-title{
+  display:-webkit-box;
+  min-width:0;
+  overflow:hidden;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  font-size:11px;
+  line-height:1.22;
+}
+.closed-workflow-client,.closed-workflow-piano,.closed-workflow-date{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.closed-workflow-client{font-size:9px;font-weight:750}
+.closed-workflow-piano,.closed-workflow-date{font-size:8px;color:var(--muted)}
+.closed-workflow-empty{grid-column:1/-1}
+
+/* Website CMS / Pages is an application dashboard, not a long document form. */
+.cms-layout{grid-template-columns:270px minmax(0,1fr);align-items:start}
+.cms-sidebar{
+  display:grid;
+  gap:10px;
+  align-content:start;
+  padding:10px;
+  overflow:visible;
+}
+.cms-sidebar-group{
+  display:grid;
+  gap:6px;
+  padding:8px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:var(--surface-2);
+}
+.cms-sidebar-group:last-child{border-bottom:1px solid var(--line)}
+.cms-sidebar-group-title{
+  padding:3px 5px 6px;
+  border-bottom:1px solid var(--line);
+  color:var(--muted);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.12em;
+}
+.cms-sidebar-group-pages{display:grid;gap:5px}
+.cms-page-button{
+  position:relative;
+  min-height:52px!important;
+  padding:9px 10px 9px 13px!important;
+  border:1px solid transparent!important;
+  border-radius:11px!important;
+  background:var(--surface)!important;
+  text-align:left!important;
+}
+.cms-page-button::before{
+  content:"";
+  position:absolute;
+  left:5px;
+  top:11px;
+  bottom:11px;
+  width:3px;
+  border-radius:999px;
+  background:transparent;
+}
+.cms-page-button:hover{border-color:var(--line)!important;background:color-mix(in srgb,var(--accent) 5%,var(--surface))!important}
+.cms-page-button.active{
+  border-color:color-mix(in srgb,var(--accent) 30%,var(--line))!important;
+  background:var(--accent-soft)!important;
+}
+.cms-page-button.active::before{background:var(--accent)}
+.cms-page-button strong{font-size:11px!important;line-height:1.25}
+.cms-page-button small{
+  margin-top:2px;
+  font-size:8px!important;
+  opacity:.78;
+}
+.cms-editor{min-width:0}
+.cms-visual-fields{display:block}
+.cms-page-elements-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+}
+.cms-page-element-card{
+  position:relative;
+  display:grid;
+  grid-template-rows:120px minmax(0,1fr);
+  min-width:0;
+  min-height:220px;
+  padding:0;
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:var(--surface-2);
+  color:var(--ink);
+  text-align:left;
+  cursor:pointer;
+  transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease;
+}
+.cms-page-element-card:hover,.cms-page-element-card:focus-visible{
+  border-color:var(--accent);
+  transform:translateY(-2px);
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+  outline:none;
+}
+.cms-page-element-media{
+  display:block;
+  width:100%;
+  height:120px;
+  overflow:hidden;
+  background:var(--surface-3);
+}
+.cms-page-element-media img{width:100%;height:100%;object-fit:cover}
+.cms-page-element-icon{
+  display:grid;
+  place-items:center;
+  height:120px;
+  background:linear-gradient(135deg,var(--surface-2),var(--surface-3));
+  color:var(--accent);
+  font-size:30px;
+}
+.cms-page-element-body{
+  display:grid;
+  align-content:start;
+  gap:5px;
+  min-width:0;
+  padding:12px 30px 12px 12px;
+}
+.cms-page-element-body .eyebrow{font-size:7px}
+.cms-page-element-body strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+}
+.cms-page-element-body small{
+  display:-webkit-box;
+  overflow:hidden;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  color:var(--muted);
+  font-size:9px;
+  line-height:1.35;
+}
+.cms-page-element-body em{
+  margin-top:auto;
+  color:var(--muted);
+  font-size:8px;
+  font-style:normal;
+  font-weight:750;
+}
+.cms-page-element-arrow{
+  position:absolute;
+  right:11px;
+  bottom:11px;
+  color:var(--accent);
+  font-size:22px;
+  line-height:1;
+}
+.cms-section-dialog-copy{
+  margin-bottom:12px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface-2);
+  color:var(--muted);
+}
+.cms-section-editor-fields{display:grid;gap:12px}
+.cms-connected-collection{margin-top:16px}
+.cms-page-connected-panel{overflow:hidden}
+.cms-page-connected-panel>.panel-head{padding:14px 16px;border-bottom:1px solid var(--line)}
+.cms-page-connected-panel>.panel-head p{margin:4px 0 0;color:var(--muted);font-size:10px}
+.cms-page-connected-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cms-piano-brand-groups{display:grid;gap:14px;padding:14px}
+.cms-piano-brand-group{
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:var(--surface-2);
+}
+.cms-piano-brand-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+}
+.cms-piano-brand-group .cms-page-connected-grid{padding:10px}
+.cms-collection-delete{margin-right:auto}
+
+/* Exact requested closed-workflow density. */
+@media(max-width:1100px){
+  .closed-workflow-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .cms-layout{grid-template-columns:1fr}
+  .cms-sidebar{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cms-page-elements-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .cms-sidebar{
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding:8px;
+    scroll-snap-type:x proximity;
+  }
+  .cms-sidebar-group{
+    flex:0 0 220px;
+    min-width:220px;
+    scroll-snap-align:start;
+  }
+  .cms-page-button{width:100%!important;min-width:0!important}
+  .cms-page-connected-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .closed-workflow-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .closed-workflow-card{min-height:108px;padding:7px;border-radius:10px}
+  .closed-workflow-title{font-size:9px}
+  .closed-workflow-client{font-size:8px}
+  .closed-workflow-piano,.closed-workflow-date{font-size:7px}
+  .cms-page-elements-grid{grid-template-columns:1fr}
+  .cms-page-element-card{grid-template-columns:96px minmax(0,1fr);grid-template-rows:1fr;min-height:112px}
+  .cms-page-element-media,.cms-page-element-icon{width:96px;height:100%;min-height:112px}
+  .cms-page-connected-grid{grid-template-columns:1fr!important}
+  .cms-piano-brand-groups{padding:10px}
+}

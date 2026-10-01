@@ -364,15 +364,16 @@ function r2BindWorkflowActions(root,jobs){
   });
 }
 function r2ClosedWorkflowCard(job){
-  const cancelled=Boolean(job.cancelled_at);
-  return `<article class="job-card stage-card is-locked ${cancelled?"is-cancelled status-cancelled":"is-completed status-completed"}" data-job-id="${job.id}" data-history-card="${job.id}" role="button" tabindex="0">
-    <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${cancelled?tr("CANCELLED","TÖRÖLT / MEGSZAKÍTOTT"):tr("COMPLETED","LEZÁRVA")}</span></div>
-    <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
-    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(cancelled?job.cancelled_at:job.completed_at))}</span><span>👤 ${esc(cancelled?(job.cancelled_by_name||"—"):(job.completed_by_name||"—"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
-    ${cancelled&&job.cancel_reason?`<div class="blocked-note">${esc(job.cancel_reason)}</div>`:""}
-    <div class="job-actions"><button class="secondary-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Workflow details","Munkafolyamat részletei")}</button></div>
+  const cancelled=Boolean(job.cancelled_at),closedAt=cancelled?job.cancelled_at:job.completed_at;
+  return `<article class="closed-workflow-card ${cancelled?"is-cancelled":"is-completed"}" data-job-id="${job.id}" data-history-card="${job.id}" role="button" tabindex="0" title="${tr("Open workflow details","Workflow részleteinek megnyitása")}">
+    <div class="closed-workflow-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="closed-workflow-state" aria-label="${cancelled?tr("Cancelled","Törölt"):tr("Completed","Lezárt")}">${cancelled?"⊘":"✓"}</span></div>
+    <strong class="closed-workflow-title">${esc(job.title)}</strong>
+    <span class="closed-workflow-client">${esc(job.client_name||"—")}</span>
+    <small class="closed-workflow-piano">${esc(r2JobPiano(job)||"—")}</small>
+    <small class="closed-workflow-date">${esc(r2FormatDateTime(closedAt))}</small>
   </article>`;
 }
+
 function r2WorkflowColumn(column,{closed=false}={}){
   const label=state.language==="hu"?column.label_hu:column.label_en;
   const reorderable=!closed&&r2IsAdmin()&&!r2FixedStage(column.key);
@@ -741,7 +742,9 @@ async function r2RenderWorkflow(data){
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="private" class="private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
   </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
-  <div class="workflow-scroll"><div id="workflowBoard" class="workflow-board ${bucket==="closed"?"closed-workflow-board":""}" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column,{closed:bucket==="closed"})).join("")}${canAdd?r2AddStageColumn():""}</div></div>`;
+  ${bucket==="closed"
+    ?`<div id="workflowBoard" class="closed-workflow-grid">${(data.jobs||[]).length?(data.jobs||[]).map(r2ClosedWorkflowCard).join(""):`<div class="empty-state closed-workflow-empty">${tr("No workflows in this filter.","Nincs workflow ebben a szűrésben.")}</div>`}</div>`
+    :`<div class="workflow-scroll"><div id="workflowBoard" class="workflow-board" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column)).join("")}${canAdd?r2AddStageColumn():""}</div></div>`}`;
   $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const value=button.dataset.workflowBucket;if(value==="private")return r2LoadPrivateAppointments();if(value==="closed")return r2LoadWorkflowBucket("closed","completed");return r2LoadWorkflowBucket("active");}));
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
   $("#workflowAddStageCard")?.addEventListener("click",r2OpenAddStage);
