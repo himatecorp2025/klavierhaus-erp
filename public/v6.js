@@ -503,7 +503,7 @@ async function v6RenderBranding(){
   ];
   host.innerHTML=`<div class="branding-grid">
     ${v6BrandAssetCard("websiteLogo",tr("Public website logo","Publikus weboldal logó"),design.logo_url,tr("Independent header logo on the public website.","A publikus weboldal önálló fejléc-logója."))}
-    ${v6BrandAssetCard("websiteFavicon",tr("Public website favicon","Publikus weboldal favicon"),design.favicon_url,tr("Independent browser-tab icon for the public website.","A publikus weboldal önálló böngészőfül-ikonja."))}
+    ${v6BrandAssetCard("websiteFavicon",tr("Website / System favicon","Weboldal / System favicon"),design.favicon_url,tr("Shared browser-tab icon used by both the public website and Klavierhaus System.","Közös böngészőfül-ikon a publikus weboldalhoz és a Klavierhaus Systemhez."))}
     ${v6BrandAssetCard("chatLogo",tr("Chat Logo","Chat logó"),design.chat_logo_url,tr("Dedicated Klavierhaus logo used only inside the public customer chat. One dark-design version is enough.","Külön Klavierhaus logó kizárólag a publikus ügyfélchathez. Nem kell világos/sötét változat."))}
     ${v6BrandAssetCard("erpLogoDark",tr("System logo · dark mode","System logó · sötét mód"),assets.erp_logo_dark_url,tr("Klavierhaus System logo used in dark mode.","A Klavierhaus System sötét módban használt logója."))}
     ${v6BrandAssetCard("erpLogoLight",tr("System logo · light mode","System logó · világos mód"),assets.erp_logo_light_url,tr("Klavierhaus System logo used in light mode.","A Klavierhaus System világos módban használt logója."))}\n    ${v6BrandAssetCard("loginLogo",tr("Login logo","Login logó"),assets.login_logo_url,tr("Dedicated logo for the permanently dark login screen.","Külön logó az állandóan sötét login felülethez."))}
