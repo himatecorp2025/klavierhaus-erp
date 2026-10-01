@@ -26,6 +26,7 @@ const R2_BLOCKERS={
 const r2IsAdmin=()=>["ADMIN","SUPERADMIN"].includes(state.user?.role);
 
 function r2Definitions(){return state.r2Workflow?.stages?.length?state.r2Workflow.stages:R2_STAGES.map(row=>({key:row.key,label_en:row.en,label_hu:row.hu,position:row.position}));}
+function r2ActiveDefinitions(){return r2Definitions().filter(stage=>stage.key!=="completed");}
 function r2StageLabel(stage){if(stage==="cancelled")return tr("Cancelled","Törölt / megszakított");const row=r2Definitions().find(item=>item.key===stage)||R2_STAGES.find(item=>item.key===stage);return row?state.language==="hu"?(row.label_hu||row.hu):(row.label_en||row.en):stage||"";}
 function r2FixedStage(key){return ["received","admin_approval","completed"].includes(key);}
 function r2BlockerLabel(code){const pair=R2_BLOCKERS[code];return pair?(state.language==="hu"?pair[1]:pair[0]):tr("No delay reason","Nincs elakadás-ok");}
@@ -111,7 +112,7 @@ function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
 
 function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null}={}){
   const map=new Map((plan||[]).map(row=>[row.stage_key,row]));
-  return r2Definitions().map(stage=>{
+  return r2ActiveDefinitions().map(stage=>{
     const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):true);
     const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
     const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||defaultResponsible||state.user?.id||"";
@@ -125,7 +126,7 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
   }).join("");
 }
 function r2ReadWorkflowPlan(form){
-  return r2Definitions().map(stage=>{
+  return r2ActiveDefinitions().map(stage=>{
     const enabled=r2FixedStage(stage.key)?true:Boolean(form.querySelector(`[name="phase_${stage.key}"]`)?.checked);
     const startValue=form.querySelector(`[name="start_${stage.key}"]`)?.value||"";
     const dueValue=form.querySelector(`[name="due_${stage.key}"]`)?.value||"";
@@ -140,7 +141,7 @@ function r2PlannedCard(job){
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
     ${job.description?`<p class="job-description">${esc(job.description)}</p>`:""}
     <div class="job-meta"><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>⏱ ${Number(job.estimated_duration_min||120)} min</span><span>${job.location_type==="on_site"?"⌂ "+tr("On site","Helyszíni"):"♬ "+tr("Workshop","Műhely")}</span></div>
-    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled).map(p=>`<span class="phase-chip">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
+    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
     <div class="job-actions"><button class="primary-button" type="button" data-activate-job="${job.id}">${tr("Activate & Schedule","Aktiválás és ütemezés")}</button><button class="text-button" type="button" data-edit-job="${job.id}">${tr("Edit","Szerkesztés")}</button>${r2IsAdmin()?`<button class="text-button" type="button" data-plan-job="${job.id}">${tr("Workflow","Munkafolyamat")}</button><button class="danger-button" type="button" data-cancel-job="${job.id}">${tr("Cancel","Megszakítás")}</button>`:""}</div>
   </article>`;
 }
@@ -169,10 +170,12 @@ function r2RenderPlannedList(){
 
 async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   const [clients,,settings]=await Promise.all([loadClients(),loadUsers().then(()=>null),api("/api/workflow/settings")]);
-  state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages};
+  state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages,max_stages:settings.max_stages,active_stage_count:settings.active_stage_count,can_add_stage:settings.can_add_stage};
   if(!clients.length){toast(tr("Create a client and piano first.","Előbb hozz létre ügyfelet és zongorát."),"error");return;}
-  const scheduled=Boolean(defaults.date);
-  openDialog({title:scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka"),eyebrow:scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS"),variant:"wide",body:`<form id="jobCreateForm" class="form-grid">
+  const workflowEntry=Boolean(defaults.workflow),scheduled=workflowEntry||Boolean(defaults.date);
+  const dialogTitle=workflowEntry?tr("New Workflow Job","Új workflow munka"):scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka");
+  const dialogEyebrow=workflowEntry?tr("WORKFLOW","MUNKAFOLYAMAT"):scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS");
+  openDialog({title:dialogTitle,eyebrow:dialogEyebrow,variant:"wide",body:`<form id="jobCreateForm" class="form-grid">
     <label class="field"><span>${tr("Client","Ügyfél")} *</span><select id="jobClientSelect" name="client_id" required>${clients.map(client=>`<option value="${client.id}">${esc(client.name)}</option>`).join("")}</select></label>
     <label class="field"><span>${tr("Piano","Zongora")} *</span><select id="jobPianoSelect" name="piano_id" required></select></label>
     <label class="field full"><span>${tr("Job title","Munka megnevezése")} *</span><input name="title" required autofocus></label>
@@ -183,7 +186,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select><small>${tr("Defaults to the creator; this person owns the full workflow.","Alapértelmezetten a létrehozó; ő felel a teljes munkafolyamatért.")}</small></label>
     ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(defaults.datetime||r2DefaultInput(defaults.date))}" required></label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set the responsible person and editable timing for each phase. Times may be moved backward or forward later.","Fázisonként add meg a felelőst és a módosítható időket. Az időpontok később vissza- vagy előre is mozgathatók.")}</p></div></div>${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</section>
-    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${workflowEntry?tr("Create Workflow Job","Workflow munka létrehozása"):scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
   </form>`});
   async function loadPianos(){
     const id=$("#jobClientSelect").value,pianos=await api(`/api/clients/${id}/pianos`);
@@ -200,16 +203,17 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
       if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
     }
     if(!body.assigned_technician_id)delete body.assigned_technician_id;
-    try{await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();}
+    try{await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(workflowEntry?tr("Workflow Job created and synchronized with Calendar.","Workflow munka létrehozva és a Naptárral szinkronizálva."):scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();}
     catch(error){toast(humanError(error),"error");}
   });
 }
 async function r2OpenActivate(job){
   if(!state.users?.length)await loadUsers();
+  const plannedStart=(job.workflow_phases||[]).find(phase=>phase.stage_key==="received")?.starts_at;
   openDialog({title:tr("Activate & Schedule","Aktiválás és ütemezés"),eyebrow:job.job_code||tr("PIPELINE","TERVEZÉS"),body:`<form id="activateJobForm" class="form-grid">
     <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(job.client_name+" · "+r2JobPiano(job))}</div>
     <label class="field full"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${r2DefaultInput()}" required></label>
+    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(plannedStart?r2IsoToNyInput(plannedStart):r2DefaultInput())}" required></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Activate","Aktiválás")}</button></div></form>`});
   $("#activateJobForm").addEventListener("submit",async event=>{
@@ -329,14 +333,14 @@ function r2OpenCancel(job,refresh=renderWorkshop){
 
 function r2WorkflowCard(job){
   const status=r2ComputedStatus(job),phase=job.current_phase||{};
-  return `<article class="job-card stage-card status-${esc(status)}" draggable="false" data-job-id="${job.id}">
-    <div class="job-card-top job-drag-handle" draggable="true" data-job-drag-handle="${job.id}" title="${tr("Drag this card to another phase","Húzd a kártyát egy másik fázisba")}"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip status-chip status-${esc(status)}">${esc(r2StatusLabel(status))}</span></div>
+  return `<article class="job-card stage-card status-${esc(status)}" draggable="true" data-job-id="${job.id}" data-job-draggable="${job.id}" title="${tr("Drag this card to another phase","Húzd a teljes kártyát egy másik fázisba")}">
+    <div class="job-card-top job-drag-handle" draggable="false" data-job-drag-handle="${job.id}"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip status-chip status-${esc(status)}">${esc(r2StatusLabel(status))}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
     <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>👤 ${esc(phase.responsible_name||job.assigned_technician_name||tr("Unassigned","Nincs felelős"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
     ${phase.starts_at?`<div class="workflow-start">${tr("Start","Kezdés")}: ${esc(r2FormatDateTime(phase.starts_at))}</div>`:""}
     ${phase.due_at?`<div class="workflow-due ${status==="overdue"?"overdue":""}">${tr("Due","Határidő")}: ${esc(r2FormatDateTime(phase.due_at))}</div>`:""}
     ${phase.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(phase.blocker_code))}${phase.blocker_note?` · ${esc(phase.blocker_note)}`:""}</div>`:""}
-    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled).map(p=>`<span class="phase-chip phase-status-${esc(p.visual_status||"scheduled")}">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
+    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip phase-status-${esc(p.visual_status||"scheduled")}">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
     <div class="job-actions">
       <button class="text-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Details","Részletek")}</button>
       ${job.ready_for_closeout&&r2IsAdmin()?`<button class="primary-button closeout-button" type="button" data-closeout-job="${job.id}">${tr("Complete & Invoice","Lezárás és számlázás")}</button>`:""}
@@ -375,7 +379,7 @@ function r2WorkflowColumn(column,{closed=false}={}){
   return `<section class="workflow-column stage-${column.key} ${reorderable?"stage-reorderable":""}" data-drop-stage="${column.key}" data-stage-column="${column.key}"><header><div><span class="eyebrow">${tr("WORKFLOW","MUNKAFOLYAMAT")}</span><h2>${esc(label)}</h2></div><div class="workflow-column-tools">${reorderable?`<button type="button" class="stage-drag-handle" draggable="true" data-stage-drag="${column.key}" title="${tr("Drag to reorder phase","Húzd a fázis átrendezéséhez")}">↔</button>`:""}<span class="column-count">${column.jobs.length}</span></div></header><div class="workflow-stack">${column.jobs.length?column.jobs.map(closed?r2ClosedWorkflowCard:r2WorkflowCard).join(""):`<div class="workflow-empty">${tr("No jobs in this phase.","Nincs munka ebben a fázisban.")}</div>`}</div></section>`;
 }
 function r2AddStageColumn(){
-  return `<button type="button" class="workflow-add-column" id="workflowAddStageCard"><span>＋</span><strong>${tr("Add workflow phase","Új munkafázis")}</strong><small>${tr("Up to two additional intermediate phases","Legfeljebb két további köztes fázis")}</small></button>`;
+  return `<button type="button" class="workflow-add-column" id="workflowAddStageCard"><span>＋</span><strong>${tr("Add workflow phase","Új munkafázis")}</strong><small>${tr("Up to seven active workflow phases","Legfeljebb hét aktív workflow-fázis")}</small></button>`;
 }
 function r2CreateDragGhost(source,className="workflow-drag-ghost"){
   const rect=source.getBoundingClientRect(),ghost=source.cloneNode(true);
@@ -383,7 +387,7 @@ function r2CreateDragGhost(source,className="workflow-drag-ghost"){
   document.body.appendChild(ghost);return ghost;
 }
 function r2ClearDropHighlights(root){$$(".drag-over",root).forEach(node=>node.classList.remove("drag-over"));}
-function r2BindTouchCardDrag(handle,card,jobs,root){
+function r2BindTouchCardDrag(surface,card,jobs,root){
   let ghost=null,target=null,active=false;
   const move=event=>{
     if(!active||!ghost)return;event.preventDefault();
@@ -392,26 +396,27 @@ function r2BindTouchCardDrag(handle,card,jobs,root){
     target=column||null;if(target)target.classList.add("drag-over");
   };
   const end=event=>{
-    if(!active)return;active=false;try{handle.releasePointerCapture(event.pointerId);}catch(_error){}
+    if(!active)return;active=false;try{surface.releasePointerCapture(event.pointerId);}catch(_error){}
     ghost?.remove();ghost=null;r2ClearDropHighlights(root);card.classList.remove("dragging");
     const job=jobs.find(item=>String(item.id)===String(card.dataset.jobId)),stage=target?.dataset.dropStage;target=null;
     if(job&&stage&&job.stage!==stage)r2OpenHandoff(job,renderWorkshop,stage);
   };
-  handle.addEventListener("pointerdown",event=>{
-    if(event.pointerType==="mouse")return;active=true;handle.setPointerCapture?.(event.pointerId);ghost=r2CreateDragGhost(card,"workflow-touch-drag-ghost");card.classList.add("dragging");move(event);
+  surface.addEventListener("pointerdown",event=>{
+    if(event.pointerType==="mouse"||event.target.closest("button,input,select,textarea,a,label"))return;
+    active=true;surface.setPointerCapture?.(event.pointerId);ghost=r2CreateDragGhost(card,"workflow-touch-drag-ghost");card.classList.add("dragging");move(event);
   });
-  handle.addEventListener("pointermove",move,{passive:false});handle.addEventListener("pointerup",end);handle.addEventListener("pointercancel",end);
+  surface.addEventListener("pointermove",move,{passive:false});surface.addEventListener("pointerup",end);surface.addEventListener("pointercancel",end);
 }
 function r2BindDrag(root,jobs){
-  $$("[data-job-drag-handle]",root).forEach(handle=>{
-    const card=handle.closest("[data-job-id]");if(!card)return;
-    handle.addEventListener("dragstart",event=>{
-      const ghost=r2CreateDragGhost(card);handle._r2Ghost=ghost;event.dataTransfer.setData("text/job-id",card.dataset.jobId);event.dataTransfer.effectAllowed="move";
+  $$("[data-job-draggable]",root).forEach(card=>{
+    card.addEventListener("dragstart",event=>{
+      if(event.target.closest("button,input,select,textarea,a,label")){event.preventDefault();return;}
+      const ghost=r2CreateDragGhost(card);card._r2Ghost=ghost;event.dataTransfer.setData("text/job-id",card.dataset.jobId);event.dataTransfer.effectAllowed="move";
       try{event.dataTransfer.setDragImage(ghost,Math.min(70,ghost.offsetWidth/3),28);}catch(_error){}
       card.classList.add("dragging");
     });
-    handle.addEventListener("dragend",()=>{handle._r2Ghost?.remove();handle._r2Ghost=null;card.classList.remove("dragging");r2ClearDropHighlights(root);});
-    r2BindTouchCardDrag(handle,card,jobs,root);
+    card.addEventListener("dragend",()=>{card._r2Ghost?.remove();card._r2Ghost=null;card.classList.remove("dragging");r2ClearDropHighlights(root);});
+    r2BindTouchCardDrag(card,card,jobs,root);
   });
   $$("[data-drop-stage]",root).forEach(column=>{
     column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/job-id")){event.preventDefault();r2ClearDropHighlights(root);column.classList.add("drag-over");}});
@@ -463,8 +468,8 @@ function r2BindStageSettingsDrag(stages){
 }
 function r2OpenStageSettings(){
   if(!r2IsAdmin())return;
-  const stages=r2Definitions(),canAdd=(state.r2Workflow?.can_add_stage??stages.length<7);
-  openDialog({title:tr("Workflow stages","Munkafázisok"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form"><div class="detail-note">${tr("Drag intermediate phases to reorder them. Received is always first; Admin Approval is always the last active phase. Maximum seven total workflow definitions.","A köztes fázisokat húzással átrendezheted. A Beérkezett mindig első; az Admin jóváhagyás mindig az utolsó aktív fázis. Legfeljebb hét workflow-definíció lehet.")}</div>${stages.map(stage=>`<section class="stage-setting-row ${r2FixedStage(stage.key)?"is-fixed":""}" data-stage-setting-row="${stage.key}"><div class="stage-setting-head">${!r2FixedStage(stage.key)?`<button type="button" class="stage-drag-handle" draggable="true" data-stage-setting-drag="${stage.key}">↕</button>`:"<span class='stage-lock'>🔒</span>"}<strong>${stage.position}. ${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong>${stage.removable?`<button type="button" class="text-button danger-text" data-delete-stage="${stage.key}">${tr("Remove","Eltávolítás")}</button>`:""}</div><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button>${canAdd?`<button type="button" class="secondary-button" id="addStageFromSettings">＋ ${tr("Add phase","Új fázis")}</button>`:""}<button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
+  const stages=r2ActiveDefinitions(),canAdd=(state.r2Workflow?.can_add_stage??stages.length<7);
+  openDialog({title:tr("Workflow stages","Munkafázisok"),eyebrow:tr("WORKFLOW SETTINGS","MUNKAFOLYAMAT-BEÁLLÍTÁSOK"),body:`<form id="stageSettingsForm" class="stage-settings-form"><div class="detail-note">${tr("Drag intermediate phases to reorder them. Received stays first and Admin Approval stays last. Up to seven active workflow phases are available; Completed is a separate closed state.","A köztes fázisokat húzással átrendezheted. A Beérkezett első, az Admin jóváhagyás utolsó marad. Legfeljebb hét aktív workflow-fázis használható; a Lezárva külön lezárt állapot.")}</div>${stages.map(stage=>`<section class="stage-setting-row ${r2FixedStage(stage.key)?"is-fixed":""}" data-stage-setting-row="${stage.key}"><div class="stage-setting-head">${!r2FixedStage(stage.key)?`<button type="button" class="stage-drag-handle" draggable="true" data-stage-setting-drag="${stage.key}">↕</button>`:"<span class='stage-lock'>🔒</span>"}<strong>${stage.position}. ${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong>${stage.removable?`<button type="button" class="text-button danger-text" data-delete-stage="${stage.key}">${tr("Remove","Eltávolítás")}</button>`:""}</div><label class="field"><span>${tr("English name","Angol név")}</span><input name="en_${stage.key}" value="${esc(stage.label_en)}" required></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="hu_${stage.key}" value="${esc(stage.label_hu)}" required></label></section>`).join("")}<div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button>${canAdd?`<button type="button" class="secondary-button" id="addStageFromSettings">＋ ${tr("Add phase","Új fázis")}</button>`:""}<button class="primary-button" type="submit">${tr("Save names","Elnevezések mentése")}</button></div></form>`});
   $("#stageSettingsForm").addEventListener("submit",async event=>{
     event.preventDefault();const fd=new FormData(event.currentTarget),body={stages:stages.map(stage=>({key:stage.key,label_en:fd.get("en_"+stage.key),label_hu:fd.get("hu_"+stage.key)}))};
     try{const result=await api("/api/workflow/settings",{method:"PUT",body:JSON.stringify(body)});state.r2Workflow={...(state.r2Workflow||{}),...result};closeDialog();toast(tr("Workflow names updated.","Munkafázisok neve frissítve."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}
@@ -770,7 +775,11 @@ async function renderWorkshop(){
       <button class="workshop-kpi invoice" type="button" data-overview-key="open_invoice_actions"><span>${tr("Open invoice actions","Folyamatban lévő számlák")}</span><strong>${Number(overview.kpis.open_invoice_actions||0)}</strong><small>${tr("closeout / draft / sent","lezárás / piszkozat / kiküldött")}</small></button>
     </div>
     <div class="workshop-master-switch"><div class="segmented-control large"><button type="button" data-workshop-mode="calendar" class="${state.r2WorkshopMode==="calendar"?"active":""}">📅 ${tr("Calendar","Naptár")}</button><button type="button" data-workshop-mode="workflow" class="${state.r2WorkshopMode==="workflow"?"active":""}">📋 ${tr("Workflow","Munkafolyamat")}</button></div></div><div id="workshopContent">${loading()}</div>`;
-  $("#workshopNewJob").addEventListener("click",()=>r2OpenCreateJob(renderWorkshop,{date:state.r2WorkshopMode==="calendar"?state.r2CalendarDate||r2Today():null}));
+  $("#workshopNewJob").addEventListener("click",()=>{
+    const date=state.r2CalendarDate||r2Today();
+    const options=state.r2WorkshopMode==="workflow"?{workflow:true,date}:{date};
+    r2OpenCreateJob(renderWorkshop,options);
+  });
   $("#workflowSettingsBtn")?.addEventListener("click",r2OpenStageSettings);
   $$("[data-overview-key]").forEach(button=>button.addEventListener("click",()=>r2OpenOverview(button.dataset.overviewKey,overview)));
   $$("[data-workshop-mode]").forEach(button=>button.addEventListener("click",async()=>{
