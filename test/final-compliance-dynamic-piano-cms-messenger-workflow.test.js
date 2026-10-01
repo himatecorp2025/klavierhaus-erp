@@ -108,6 +108,54 @@ test("legacy archive foreign keys to removed documents table are rebuilt against
   migrated.close();fs.rmSync(dir,{recursive:true,force:true});
 });
 
+test("archive category migration rebuilds FKs retargeted to the temporary legacy archive",()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"kh-legacy-archive-category-fk-"));
+  const dbPath=path.join(dir,"legacy.sqlite"),backupDir=path.join(dir,"backups");
+  const db=new Database(dbPath);db.pragma("foreign_keys=OFF");db.exec(read("server/schema.sql"));
+  db.exec(`
+    DROP TABLE document_archive;
+    CREATE TABLE document_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL CHECK(category IN ('deleted_invoice','financial_document','contract','intake_assessment','exported_report','internal_correspondence','company_message','company_document')),
+      title TEXT NOT NULL,
+      description TEXT,
+      entity_type TEXT,
+      entity_id TEXT,
+      original_name TEXT,
+      stored_name TEXT,
+      mime_type TEXT,
+      size_bytes INTEGER,
+      file_path TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      archived_by_user_id TEXT,
+      archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (archived_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+  `);
+  const intakeId=Number(db.prepare("INSERT INTO intake_leads(raw_client_name,reported_issue) VALUES('Category migration delete test','Legacy archive category FK')").run().lastInsertRowid);
+  const archiveId=Number(db.prepare("INSERT INTO document_archive(category,title,entity_type,entity_id) VALUES('intake_assessment','Existing assessment','intake',?)").run(String(intakeId)).lastInsertRowid);
+  db.prepare("INSERT INTO intake_assessment_email_log(intake_id,archive_document_id,recipient,language,status) VALUES(?,?,?,'en','sent')").run(intakeId,archiveId,"category-migration@example.test");
+  db.close();
+
+  const run=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env:{...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir},encoding:"utf8"});
+  assert.equal(run.status,0,run.stdout+"\n"+run.stderr);
+  const migrated=new Database(dbPath);
+  assert.equal(Boolean(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_documents_legacy_archive'").get()),false);
+  for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"]){
+    const targets=migrated.prepare(`PRAGMA foreign_key_list("${table}")`).all().map(row=>row.table);
+    assert.ok(!targets.includes("_documents_legacy_archive"),`${table} still points at temporary legacy archive`);
+    assert.ok(!targets.includes("documents"),`${table} still points at removed documents table`);
+    assert.ok(targets.includes("document_archive"),`${table} must point at canonical document_archive`);
+  }
+  assert.equal(migrated.prepare("SELECT COUNT(*) count FROM document_archive WHERE id=?").get(archiveId).count,1);
+  migrated.pragma("foreign_keys=ON");
+  assert.doesNotThrow(()=>migrated.prepare("DELETE FROM intake_leads WHERE id=?").run(intakeId));
+  assert.equal(migrated.prepare("SELECT COUNT(*) count FROM intake_assessment_email_log WHERE intake_id=?").get(intakeId).count,0);
+  assert.equal(migrated.prepare("PRAGMA foreign_key_check").all().length,0);
+  migrated.close();fs.rmSync(dir,{recursive:true,force:true});
+});
+
 test("New Workflow Job has an inline add-phase card that does not mutate existing workflows",()=>{
   const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css");
   assert.match(ui,/id="workflowJobAddPhase"/);
