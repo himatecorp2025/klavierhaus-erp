@@ -321,7 +321,7 @@ function v6RenderCmsFields(){
 function v6CmsConnectedConfig(pageKey){
   const meta=(state.cmsPages||[]).find(page=>page.page_key===pageKey)||{};
   const brand=meta.piano_brand||null,brandSlug=meta.piano_brand_slug||null;
-  if(pageKey==="pianos")return {type:"piano",route:"showroom-pianos",title:tr("Showroom pianos","Bemutatótermi zongorák"),subtitle:tr("Every showroom brand and every individually added piano is managed here.","Minden bemutatótermi márka és minden egyedileg hozzáadott zongora itt kezelhető.")};
+  if(pageKey==="pianos")return {type:"piano",route:"showroom-pianos",title:tr("Showroom pianos","Bemutatótermi zongorák"),subtitle:tr("Steinway, Bösendorfer, Fazioli and every future showroom brand or individually added piano are managed here.","Steinway, Bösendorfer, Fazioli és minden jövőbeli bemutatótermi márka vagy egyedileg hozzáadott zongora itt kezelhető.")};
   if(brand||pageKey==="steinway")return {type:"piano",route:"showroom-pianos",brand:brand||"Steinway & Sons",brandSlug:brandSlug||"steinway",title:brand||"Steinway & Sons",subtitle:tr("Manage this brand page and its individual showroom pianos.","A márkaoldal és az egyedi bemutatótermi zongorák kezelése.")};
   if(pageKey==="services")return {type:"service",route:"website-services",title:tr("Services","Szolgáltatások"),subtitle:tr("Add, edit or remove the services shown on the public website.","A publikus weboldalon megjelenő szolgáltatások hozzáadása, szerkesztése vagy törlése.")};
   if(pageKey==="artists")return {type:"artist",route:"website-artists",title:tr("Artists","Művészek"),subtitle:tr("Add, edit or remove public artist profiles.","Publikus művészprofilok hozzáadása, szerkesztése vagy törlése.")};
