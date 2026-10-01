@@ -1299,6 +1299,19 @@ function renderInvitation({ invitation, token, language, baseUrl, nonce, result 
   </section></main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
+function renderTechnicalUnavailable(language="en"){
+  const hu=language==="hu";
+  const title=hu?"Weboldalunk átmenetileg nem elérhető":"We’re temporarily unavailable";
+  const body=hu?"Technikai okok miatt weboldalunk jelenleg nem érhető el. Kérjük, próbálja meg később.":"Our website is currently unavailable due to technical reasons. Please try again later.";
+  return `<!doctype html><html lang="${hu?"hu-HU":"en-US"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow,noarchive"><title>${escapeHtml(title)} | Klavierhaus</title><style>
+  :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 50% 20%,#24211d 0,#11100f 46%,#080807 100%);color:#f4efe6;font-family:Georgia,"Times New Roman",serif}
+  main{width:min(680px,100%);text-align:center;padding:clamp(28px,6vw,58px);border:1px solid rgba(221,190,126,.26);border-radius:28px;background:rgba(7,7,6,.78);box-shadow:0 28px 90px rgba(0,0,0,.42)}
+  .piano{width:126px;height:126px;margin:0 auto 24px;display:grid;place-items:center;border:1px solid rgba(221,190,126,.38);border-radius:50%;background:#111;color:#ddbe7e}
+  .piano svg{width:78px;height:78px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.piano .face{stroke-width:2.1}
+  .eyebrow{margin:0 0 10px;color:#ddbe7e;font:700 11px/1.2 Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase}h1{margin:0;font-size:clamp(34px,6vw,58px);font-weight:500;line-height:1.05}p{margin:20px auto 0;max-width:540px;color:#c9c1b5;font:400 16px/1.7 Arial,sans-serif}
+  </style></head><body><main><div class="piano" aria-hidden="true"><svg viewBox="0 0 96 96"><path d="M17 27h62v38H17z"/><path d="M17 49h62M29 27v38M41 27v38M53 27v38M65 27v38"/><path d="M25 27v14h8V27M49 27v14h8V27M69 27v14h7V27"/><path class="face" d="M35 56c3-3 6-3 9 0M52 56c3-3 6-3 9 0M39 62c6 5 12 5 18 0"/></svg></div><p class="eyebrow">KLAVIERHAUS · NEW YORK</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(body)}</p></main></body></html>`;
+}
+
 function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   const copy = getGlobal(language);
   const robots = allowIndexing ? "noindex, follow" : "noindex, nofollow, noarchive";
@@ -1357,6 +1370,18 @@ function createApp(options = {}) {
     if (!eventClient.configured) return null;
     try { return await eventClient.seoConfig(); } catch (_error) { return null; }
   }
+  let serviceAvailability={available:true,checkedAt:0};
+  async function publicServiceAvailable(){
+    const now=Date.now();
+    if(now-serviceAvailability.checkedAt<1500)return serviceAvailability.available;
+    try{
+      const status=await eventClient.serviceStatus();
+      serviceAvailability={available:status?.available!==false,checkedAt:now};
+    }catch(_error){
+      serviceAvailability={available:false,checkedAt:now};
+    }
+    return serviceAvailability.available;
+  }
 
   app.disable("x-powered-by");
   app.enable("strict routing");
@@ -1393,6 +1418,15 @@ function createApp(options = {}) {
       indexing: allowIndexing ? "enabled" : "disabled",
       event_api: eventClient.configured ? "configured" : "not-configured"
     });
+  });
+
+  app.use(async(req,res,next)=>{
+    if(req.path.startsWith("/preview/"))return next();
+    if(await publicServiceAvailable())return next();
+    res.setHeader("Cache-Control","no-store");res.setHeader("Retry-After","3600");res.setHeader("X-Robots-Tag","noindex, nofollow, noarchive");
+    if(req.path.startsWith("/api/"))return res.status(503).json({error:"SITE_TEMPORARILY_UNAVAILABLE"});
+    const language=req.path==="/hu"||req.path.startsWith("/hu/")?"hu":"en";
+    return res.status(503).type("html").send(renderTechnicalUnavailable(language));
   });
 
   app.get("/robots.txt", (_req, res) => {
