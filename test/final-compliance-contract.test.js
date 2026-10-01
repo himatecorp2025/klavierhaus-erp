@@ -109,6 +109,16 @@ test("retired ERP domains and duplicate calendar/workflow tables are absent from
   }
 });
 
+test("Round 2 is the only active workflow runtime in the admin shell",()=>{
+  const html=read("public/index.html"),server=read("server/index.js"),round2=read("public/round2.js");
+  assert.match(html,/\/round2\.js/);
+  assert.doesNotMatch(html,/\/workshop-v2\.js|\/workshop-shell\.js/);
+  assert.doesNotMatch(server,/registerWorkflowV2|registerWorkshopWorkflowRoutes/);
+  assert.match(round2,/workflowEntry=Boolean\(defaults\.workflow\)/);
+  assert.match(round2,/r2ActiveDefinitions\(\)/);
+  assert.match(round2,/data-job-draggable/);
+});
+
 test("Round J uses the canonical stock catalog instead of the retired legacy inventory shape",()=>{
   const schema=read("server/schema.sql"),inventory=read("server/inventory.js");
   assert.match(schema,/CREATE TABLE IF NOT EXISTS inventory_items\s*\([\s\S]*?sku TEXT NOT NULL UNIQUE[\s\S]*?quantity_on_hand REAL NOT NULL[\s\S]*?reorder_point REAL NOT NULL/);
