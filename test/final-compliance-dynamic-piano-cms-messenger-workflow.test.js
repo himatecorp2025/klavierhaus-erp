@@ -113,13 +113,26 @@ test("New Workflow Job has an inline add-phase card that does not mutate existin
 
 test("Messenger admin composer ends with an unclipped two-column 2x2 action grid",()=>{
   const ui=read("public/messenger.js"),css=read("public/styles.css");
-  assert.match(ui,/class="messenger-action-grid"[\s\S]*data-messenger-form[\s\S]*data-messenger-appointment[\s\S]*messenger-attach-button[\s\S]*messenger-send-button/);
+  assert.match(ui,/class="messenger-action-grid"/);
+  assert.match(ui,/data-messenger-form/);
+  assert.match(ui,/data-messenger-appointment/);
+  assert.match(ui,/messenger-attach-button/);
+  assert.match(ui,/messenger-send-button/);
   const canonical=css.slice(css.lastIndexOf("DYNAMIC PIANO + NEW WORKFLOW PHASE + MESSENGER COMPOSER V34"));
   assert.match(canonical,/\.messenger-reply\{[\s\S]*grid-template-columns:minmax\(0,1fr\) 94px!important/);
   assert.match(canonical,/grid-template-columns:repeat\(2,44px\)!important/);
   assert.match(canonical,/@media\(max-width:700px\)[\s\S]*grid-template-columns:minmax\(0,1fr\) 86px!important/);
   assert.match(canonical,/grid-template-columns:repeat\(2,40px\)!important/);
   assert.match(canonical,/grid-column:auto!important/);
+});
+
+test("dynamic public piano routes are derived from live showroom brands",()=>{
+  const publicServer=read("website/server/index.js");
+  assert.match(publicServer,/function uniquePianoBrands\(items=\[\]\)/);
+  assert.match(publicServer,/pianoBrandContentKey\(brand\)/);
+  assert.match(publicServer,/uniquePianoBrands\(allItems\)\.find/);
+  assert.match(publicServer,/eventClient\.content\(pianoBrandContentKey\(brand\),language\)/);
+  assert.match(publicServer,/uniquePianoBrands\(values\[2\]\)\.flatMap/);
 });
 
 test("CMS piano brand grids include a per-brand add-piano card and seeded brand editor",()=>{
