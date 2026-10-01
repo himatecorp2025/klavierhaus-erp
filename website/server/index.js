@@ -1299,7 +1299,7 @@ function renderInvitation({ invitation, token, language, baseUrl, nonce, result 
   </section></main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
-function renderTechnicalUnavailable(language="en"){
+function renderTechnicalUnavailable(language="en",nonce=""){
   const hu=language==="hu";
   const title=hu?"Weboldalunk átmenetileg nem elérhető":"We’re temporarily unavailable";
   const body=hu?"Technikai okok miatt weboldalunk jelenleg nem érhető el. Kérjük, próbálja meg később.":"Our website is currently unavailable due to technical reasons. Please try again later.";
@@ -1398,7 +1398,7 @@ function createApp(options = {}) {
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()");
-    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self' 'nonce-${nonce}' https://www.googletagmanager.com https://www.clarity.ms; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://www.clarity.ms; frame-src https://www.google.com https://maps.google.com; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
+    res.setHeader("Content-Security-Policy", `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self' 'nonce-${nonce}'; script-src 'self' 'nonce-${nonce}' https://www.googletagmanager.com https://www.clarity.ms; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://www.clarity.ms; frame-src https://www.google.com https://maps.google.com; font-src 'self'; form-action 'self' https://checkout.stripe.com mailto:`);
     if (!allowIndexing) res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
     next();
   });
@@ -1427,7 +1427,7 @@ function createApp(options = {}) {
     res.setHeader("Cache-Control","no-store");res.setHeader("Retry-After","3600");res.setHeader("X-Robots-Tag","noindex, nofollow, noarchive");
     if(req.path.startsWith("/api/"))return res.status(503).json({error:"SITE_TEMPORARILY_UNAVAILABLE"});
     const language=req.path==="/hu"||req.path.startsWith("/hu/")?"hu":"en";
-    return res.status(503).type("html").send(renderTechnicalUnavailable(language));
+    return res.status(503).type("html").send(renderTechnicalUnavailable(language,res.locals.cspNonce));
   });
 
   app.get("/robots.txt", (_req, res) => {
