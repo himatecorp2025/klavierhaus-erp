@@ -226,7 +226,7 @@ test("suspension contracts stay server-enforced and hidden-owner lookups exclude
   const round2=fs.readFileSync(path.join(root,"server","round2-workflow.js"),"utf8");
 
   assert.match(index,/serviceSuspension\.isSuspended\(\) && !isSuperadmin\(req\.user\)/);
-  assert.match(index,/serviceSuspension\.isSuspended\(\)&&!isSuperadmin\(row\)/);
+  assert.match(index,/serviceSuspension\.isSuspended\(\)&&Number\(row\.is_superadmin\|\|0\)!==1/);
   assert.match(index,/app\.put\("\/api\/superadmin\/service-suspension",auth,requireSuperadmin/);
   assert.match(index,/app\.use\("\/api\/public"/);
   assert.match(index,/HIDDEN_OWNER_SELF_SERVICE_ONLY/);
