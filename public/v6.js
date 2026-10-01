@@ -286,9 +286,13 @@ function v6CmsElementMeta(value){
   return tr("Editable field","Szerkeszthető mező");
 }
 function v6CmsCardTitle(value,key,index){
+  if(["hero","seo","brand","nav","items","imagealt","content"].includes(String(key||"").toLowerCase()))return v6CmsSectionTitle(key,index);
   if(value&&typeof value==="object"&&!Array.isArray(value)){
     const direct=value.title||value.heading||value.eyebrow||value.label||value.name||value.id;
-    if(typeof direct==="string"&&direct.trim())return direct.trim().replaceAll("_"," ");
+    if(typeof direct==="string"&&direct.trim()){
+      const clean=direct.trim().replaceAll("_"," ");
+      return direct===value.id?clean.replace(/\b\w/g,char=>char.toUpperCase()):clean;
+    }
   }
   return v6CmsSectionTitle(key,index);
 }
