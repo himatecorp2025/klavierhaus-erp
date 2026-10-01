@@ -113,18 +113,28 @@ function humanError(error){
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
 }
+const apiInflightGets=new Map();
 async function api(url,options={}){
-  const headers={Accept:"application/json",...(options.headers||{})};
-  if(state.token)headers.Authorization=`Bearer ${state.token}`;
-  if(options.body!==undefined&&!(options.body instanceof FormData)&&!headers["Content-Type"])headers["Content-Type"]="application/json";
-  const response=await fetch(url,{...options,headers,cache:"no-store"});
-  const type=response.headers.get("content-type")||"";
-  const data=type.includes("application/json")?await response.json().catch(()=>({})):await response.text();
-  if(!response.ok){
-    if(response.status===401&&state.token){clearSession();showLogin();}
-    const error=new Error(data?.error||`HTTP_${response.status}`);error.status=response.status;error.payload=data;throw error;
-  }
-  return data;
+  const method=String(options.method||"GET").toUpperCase(),dedupe=method==="GET"&&options.body===undefined;
+  const requestKey=dedupe?`${state.token||"anon"}:${url}`:"";
+  if(requestKey&&apiInflightGets.has(requestKey))return apiInflightGets.get(requestKey);
+  const request=(async()=>{
+    const headers={Accept:"application/json",...(options.headers||{})};
+    if(state.token)headers.Authorization=`Bearer ${state.token}`;
+    if(options.body!==undefined&&!(options.body instanceof FormData)&&!headers["Content-Type"])headers["Content-Type"]="application/json";
+    const response=await fetch(url,{...options,headers,cache:"no-store"});
+    const type=response.headers.get("content-type")||"";
+    const data=type.includes("application/json")?await response.json().catch(()=>({})):await response.text();
+    if(!response.ok){
+      if(response.status===401&&state.token){clearSession();showLogin();}
+      const error=new Error(data?.error||`HTTP_${response.status}`);error.status=response.status;error.payload=data;throw error;
+    }
+    return data;
+  })();
+  if(!requestKey)return request;
+  apiInflightGets.set(requestKey,request);
+  try{return await request;}
+  finally{if(apiInflightGets.get(requestKey)===request)apiInflightGets.delete(requestKey);}
 }
 function setSession(payload){
   state.token=payload.token;state.user=payload.user;

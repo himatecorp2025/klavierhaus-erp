@@ -178,11 +178,11 @@ function v6CmsMeta(){
 function v6CmsMetaKey(path){return path.join(".");}
 function v6CmsSectionTitle(key,index){
   const normalized=String(key||"").toLowerCase();
-  const special={hero:tr("Hero section","Hero szekció"),seo:"SEO",sections:tr("Page sections","Oldalszekciók"),brand:tr("Brand identity","Arculat"),nav:tr("Navigation","Navigáció"),items:tr("Cards / items","Kártyák / elemek"),imagealt:tr("Image alt text · SEO & accessibility","Kép ALT szöveg · SEO és akadálymentesség"),content:tr("Full legal text","Teljes jogi szöveg")};
+  const special={hero:tr("Hero section","Hero szekció"),seo:"SEO",brand:tr("Brand identity","Arculat"),nav:tr("Navigation","Navigáció"),items:tr("Cards / items","Kártyák / elemek"),imagealt:tr("Image alt text · SEO & accessibility","Kép ALT szöveg · SEO és akadálymentesség"),content:tr("Full legal text","Teljes jogi szöveg")};
   return special[normalized]||cmsFieldLabel(key,index);
 }
 function v6CmsItemTitle(item,label,index){
-  if(item&&typeof item==="object"&&!Array.isArray(item))return String(item.title||item.eyebrow||item.label||item.id||(label+" "+(index+1)));
+  if(item&&typeof item==="object"&&!Array.isArray(item))return String(item.title||item.heading||item.eyebrow||item.label||item.name||item.id||(label+" "+(index+1)));
   return label+" "+(index+1);
 }
 function v6CmsImageField(value,path,key){
@@ -285,18 +285,45 @@ function v6CmsElementMeta(value){
   }
   return tr("Editable field","Szerkeszthető mező");
 }
-function v6CmsElementCard(value,key,index){
-  const image=v6CmsFirstImage(value),preview=v6CmsPreviewText(value),title=v6CmsSectionTitle(key,index);
-  return `<button type="button" class="cms-page-element-card" data-cms-section="${esc(key)}" data-cms-section-index="${index}">
+function v6CmsCardTitle(value,key,index){
+  if(["hero","seo","brand","nav","items","imagealt","content"].includes(String(key||"").toLowerCase()))return v6CmsSectionTitle(key,index);
+  if(value&&typeof value==="object"&&!Array.isArray(value)){
+    const direct=value.title||value.heading||value.eyebrow||value.label||value.name||value.id;
+    if(typeof direct==="string"&&direct.trim()){
+      const clean=direct.trim().replaceAll("_"," ");
+      return direct===value.id?clean.replace(/\b\w/g,char=>char.toUpperCase()):clean;
+    }
+  }
+  return v6CmsSectionTitle(key,index);
+}
+function v6CmsPageElements(){
+  const entries=[];
+  for(const [key,value] of Object.entries(state.cmsDraft||{})){
+    if(key==="_cms_media"||key==="template")continue;
+    if(key==="sections"&&Array.isArray(value)){
+      value.forEach((section,index)=>entries.push({key:String(section?.id||section?.type||("section_"+(index+1))),value:section,index,path:["sections",index],group:"SECTION"}));
+      continue;
+    }
+    if(key==="sections"&&value&&typeof value==="object"){
+      Object.entries(value).forEach(([sectionKey,section],index)=>entries.push({key:sectionKey,value:section,index,path:["sections",sectionKey],group:"SECTION"}));
+      continue;
+    }
+    entries.push({key,value,index:entries.length,path:[key],group:String(key||"SECTION").replaceAll("_"," ").toUpperCase()});
+  }
+  return entries;
+}
+function v6CmsElementCard(value,key,index,path=[key],group=""){
+  const image=v6CmsFirstImage(value),preview=v6CmsPreviewText(value),title=v6CmsCardTitle(value,key,index);
+  return `<button type="button" class="cms-page-element-card" data-cms-section="${esc(key)}" data-cms-path="${v6CmsPath(path)}" data-cms-key="${esc(key)}" data-cms-section-index="${index}">
     ${image?`<span class="cms-page-element-media"><img src="${esc(v6CmsPreviewUrl(image))}" alt=""></span>`:`<span class="cms-page-element-icon" aria-hidden="true">◇</span>`}
-    <span class="cms-page-element-body"><span class="eyebrow">${esc(String(key||"SECTION").replaceAll("_"," ").toUpperCase())}</span><strong>${esc(title)}</strong>${preview?`<small>${esc(preview.slice(0,120))}</small>`:""}<em>${esc(v6CmsElementMeta(value))}</em></span>
+    <span class="cms-page-element-body"><span class="eyebrow">${esc(group||String(key||"SECTION").replaceAll("_"," ").toUpperCase())}</span><strong>${esc(title)}</strong>${preview&&preview!==title?`<small>${esc(preview.slice(0,120))}</small>`:""}<em>${esc(v6CmsElementMeta(value))}</em></span>
     <span class="cms-page-element-arrow" aria-hidden="true">›</span>
   </button>`;
 }
-function v6RenderCmsSectionEditor(key,index=0){
+function v6RenderCmsSectionEditor(path,key,index=0){
   const host=$("#cmsSectionEditorFields");if(!host)return;
-  host.innerHTML=v6CmsRender(state.cmsDraft?.[key],[key],key,index);
-  v6BindCmsFields(host,()=>v6RenderCmsSectionEditor(key,index));
+  host.innerHTML=v6CmsRender(v6CmsGet(path),path,key,index);
+  v6BindCmsFields(host,()=>v6RenderCmsSectionEditor(path,key,index));
 }
 async function v6PublishCmsDraft({close=false}={}){
   try{
@@ -306,17 +333,17 @@ async function v6PublishCmsDraft({close=false}={}){
     v6RenderCmsFields();
   }catch(error){toast(humanError(error),"error");}
 }
-function v6OpenCmsSectionEditor(key,index=0){
-  const value=state.cmsDraft?.[key],title=v6CmsSectionTitle(key,index);
-  openDialog({title,eyebrow:tr("PAGE ELEMENT","OLDAL ELEM"),variant:"wide",body:`<div class="cms-section-dialog-copy"><small>${tr("Edit this page element in a focused app-style panel. Changes affect only this page draft until published.","Ezt az oldalelemet külön, alkalmazásszerű panelen szerkesztheted. A módosítások publikálásig csak az oldal piszkozatát érintik.")}</small></div><div id="cmsSectionEditorFields" class="cms-section-editor-fields"></div><div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Close","Bezárás")}</button><button id="publishCmsSection" type="button" class="primary-button">${tr("Save & publish","Mentés és publikálás")}</button></div>`});
-  v6RenderCmsSectionEditor(key,index);
+function v6OpenCmsSectionEditor(path,key,index=0){
+  const value=v6CmsGet(path),title=v6CmsCardTitle(value,key,index);
+  openDialog({title,eyebrow:tr("PAGE ELEMENT · SECTION","OLDALELEM · SZEKCIÓ"),variant:"wide",body:`<div class="cms-section-dialog-copy"><small>${tr("Edit this page section in its own focused card. Changes affect only this page draft until published.","Ezt az oldalszekciót külön, saját szerkesztőkártyán módosíthatod. A változtatások publikálásig csak az oldal piszkozatát érintik.")}</small></div><div id="cmsSectionEditorFields" class="cms-section-editor-fields"></div><div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Close","Bezárás")}</button><button id="publishCmsSection" type="button" class="primary-button">${tr("Save & publish","Mentés és publikálás")}</button></div>`});
+  v6RenderCmsSectionEditor(path,key,index);
   $("#publishCmsSection")?.addEventListener("click",()=>v6PublishCmsDraft({close:true}));
 }
 function v6RenderCmsFields(){
   const host=$("#cmsVisualFields");if(!host)return;
-  const entries=Object.entries(state.cmsDraft||{}).filter(([key])=>key!=="_cms_media");
-  host.innerHTML=entries.length?`<div class="cms-page-elements-grid">${entries.map(([key,value],index)=>v6CmsElementCard(value,key,index)).join("")}</div>`:`<div class="cms-empty">${tr("No editable content.","Nincs szerkeszthető tartalom.")}</div>`;
-  $$("[data-cms-section]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCmsSectionEditor(button.dataset.cmsSection,Number(button.dataset.cmsSectionIndex||0))));
+  const entries=v6CmsPageElements();
+  host.innerHTML=entries.length?`<div class="cms-page-elements-grid">${entries.map(entry=>v6CmsElementCard(entry.value,entry.key,entry.index,entry.path,entry.group)).join("")}</div>`:`<div class="cms-empty">${tr("No editable content.","Nincs szerkeszthető tartalom.")}</div>`;
+  $$("[data-cms-path]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCmsSectionEditor(v6CmsPathRead(button.dataset.cmsPath),button.dataset.cmsKey,Number(button.dataset.cmsSectionIndex||0))));
 }
 function v6CmsConnectedConfig(pageKey){
   const meta=(state.cmsPages||[]).find(page=>page.page_key===pageKey)||{};
@@ -346,8 +373,13 @@ function v6CmsConnectedGrid(config,rows){
   for(const row of rows){const brand=String(row.brand||tr("Other","Egyéb"));if(!brands.has(brand))brands.set(brand,[]);brands.get(brand).push(row);}
   return `<div class="cms-piano-brand-groups">${[...brands.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([brand,items])=>`<section class="cms-piano-brand-group"><div class="cms-piano-brand-head"><strong>${esc(brand)}</strong><span class="badge">${items.length}</span></div><div class="cms-collection-grid cms-page-connected-grid">${items.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}${v6CmsAddCollectionCard("piano",tr("Add piano","Új zongora"),brand)}</div></section>`).join("")||`<div class="empty-state">${tr("No showroom pianos yet.","Még nincs bemutatótermi zongora.")}</div>`}</div>`;
 }
+async function v6EnsureCmsPages({force=false}={}){
+  const fresh=Array.isArray(state.cmsPages)&&state.cmsPages.length&&Date.now()-Number(state.cmsPagesLoadedAt||0)<30000;
+  if(fresh&&!force)return state.cmsPages;
+  const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];state.cmsPagesLoadedAt=Date.now();return state.cmsPages;
+}
 async function v6RefreshCmsSidebarMeta(){
-  const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];
+  await v6EnsureCmsPages({force:true});
   const sidebar=$("#cmsPageList");if(!sidebar)return;
   sidebar.innerHTML=v6CmsSidebarMarkup();
   $$("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
@@ -616,7 +648,7 @@ renderCms=async function(){
   const workspace=$("#workspace");
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role)){workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("Admin access required.","Admin jogosultság szükséges."));return;}
   state.cmsMode=state.cmsMode||"pages";if(state.cmsMode==="archive")state.cmsMode="recovery";
-  const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];if(!state.cmsPages.some(page=>page.page_key===state.cmsPage))state.cmsPage="home";
+  await v6EnsureCmsPages();if(!state.cmsPages.some(page=>page.page_key===state.cmsPage))state.cmsPage="home";
   workspace.innerHTML=pageHead(tr("Website CMS","Weboldal CMS"),tr("A visual mini-site builder for every public text, image and collection.","Vizuális mini weboldal-szerkesztő minden publikus szöveghez, képhez és gyűjteményhez."))+
     `<div class="cms-mode-tabs segmented-control"><button class="${state.cmsMode==="pages"?"active":""}" data-cms-mode="pages">${tr("Pages","Oldalak")}</button><button class="${state.cmsMode==="collections"?"active":""}" data-cms-mode="collections">${tr("Pianos · Services · Artists · Reviews","Zongorák · Szolgáltatások · Művészek · Vélemények")}</button><button class="${state.cmsMode==="branding"?"active":""}" data-cms-mode="branding">${tr("Branding & Login","Arculat és Login")}</button><button class="${state.cmsMode==="recovery"?"active":""}" data-cms-mode="recovery">↺ ${tr("Factory recovery","Gyári adatok visszaállítása")}</button></div><div id="cmsMain"></div>`;
   $$("[data-cms-mode]").forEach(button=>button.addEventListener("click",async()=>{state.cmsMode=button.dataset.cmsMode;await renderCms();}));

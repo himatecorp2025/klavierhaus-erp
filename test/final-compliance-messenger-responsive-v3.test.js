@@ -56,14 +56,33 @@ test("People, Private and Messenger notifications use actionable deduplicated ba
   assert.match(source,/if\(row\)row\.unread_count=0/);
 });
 
-test("public Messenger keeps the chat launcher icon and only shows a separate close control on tablet/mobile",()=>{
+test("public Messenger keeps the chat launcher icon and only shows a separate close control on touch tablet/mobile",()=>{
   const server=read("website/server/index.js"),css=read("website/public/styles.css");
   const launcher=server.match(/<button class="customer-chat__toggle"[\s\S]*?<\/button>/)?.[0]||"";
   assert.match(launcher,/customer-chat__toggle-icon/);
   assert.doesNotMatch(launcher,/customer-chat__logo--toggle|data-chat-logo/);
   assert.match(server,/customer-chat__logo--identity/);
-  assert.match(css,/@media\(min-width:1025px\)\{[\s\S]*\.customer-chat__panel-close\{display:none!important\}/);
-  assert.match(css,/@media\(max-width:1024px\)\{[\s\S]*\.customer-chat__panel-close\{display:grid!important\}/);
+  assert.match(css,/\.customer-chat \.customer-chat__panel-close\{display:none!important\}/);
+  assert.match(css,/@media \(max-width:1024px\) and \(hover:none\),[\s\S]*\(pointer:coarse\)[\s\S]*display:grid!important/);
+  assert.match(css,/@media \(min-width:761px\) and \(hover:hover\) and \(pointer:fine\)[\s\S]*display:none!important/);
+});
+
+test("Messenger loads core conversations even when secondary feeds fail and avoids two-second full-thread polling",()=>{
+  const source=read("public/messenger-responsive-v3.js"),app=read("public/app.js"),css=read("public/styles.css"),schema=read("server/schema.sql");
+  assert.match(source,/Promise\.allSettled/);
+  assert.match(source,/if\(results\[0\]\.status!==\"fulfilled\"\)throw results\[0\]\.reason/);
+  assert.match(source,/messengerAppointmentsFetchedAt/);
+  assert.match(source,/>=15000/);
+  assert.match(source,/activeChanged/);
+  assert.match(source,/!document\.hidden/);
+  assert.match(source,/\},4000\)/);
+  assert.doesNotMatch(source,/\},2000\)/);
+  assert.match(app,/apiInflightGets/);
+  assert.match(app,/apiInflightGets\.has\(requestKey\)/);
+  assert.match(schema,/idx_customer_messages_conversation_state/);
+  assert.match(css,/Messenger desktop containment/);
+  assert.match(css,/\.messenger-context-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(css,/\.status-pill,\.messenger-system-status,\.messenger-live-badge\{[^}]*max-width:100%/);
 });
 
 test("Admin Messenger is viewport-bound with mobile list thread context navigation",()=>{

@@ -56,8 +56,8 @@ test("every English and Hungarian route renders localized canonical metadata", a
 test("private appointment assets are cache-busted and the picker is reinitialized when dialogs open", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
     const body = await (await fetch(`${origin}/`)).text();
-    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.4-private-picker-chat-20260930-2/);
-    assert.match(body, /\/assets\/app\.js\?v=1\.2\.4-private-picker-chat-20260930-2/);
+    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.4-cms-messenger-layout-20261001-1/);
+    assert.match(body, /\/assets\/app\.js\?v=1\.2\.4-cms-messenger-layout-20261001-1/);
   });
   const browser=fs.readFileSync(path.join(__dirname,"..","public","app.js"),"utf8");
   const css=fs.readFileSync(path.join(__dirname,"..","public","styles.css"),"utf8");

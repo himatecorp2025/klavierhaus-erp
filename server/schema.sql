@@ -591,6 +591,7 @@ CREATE INDEX IF NOT EXISTS idx_customer_conversations_status_activity ON custome
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_resume ON customer_conversations(email,category,name,status,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_conversations_assignee ON customer_conversations(assigned_user_id,status,last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation_time ON customer_messages(conversation_id,created_at,id);
+CREATE INDEX IF NOT EXISTS idx_customer_messages_conversation_state ON customer_messages(conversation_id,direction,status,created_at DESC,id DESC);
 CREATE TABLE IF NOT EXISTS app_settings (
   setting_key TEXT PRIMARY KEY,
   setting_value TEXT,

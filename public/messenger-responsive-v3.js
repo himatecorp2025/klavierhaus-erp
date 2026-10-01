@@ -240,14 +240,19 @@ renderMessenger=async function(options){
   stopMessengerRefresh();document.documentElement.classList.remove("messenger-thread-open");
   const workspace=$("#workspace");workspace.innerHTML=pageHead(tr("Messenger","Messenger"),tr("Customer conversations and private appointments.","Ügyfélbeszélgetések és privát időpontok."))+loading();
   try{
-    const results=await Promise.all([
+    const results=await Promise.allSettled([
       api("/api/customer-conversations"),
       api("/api/private-appointments?status=SCHEDULED"),
       api("/api/private-appointment-requests"),
-      api("/api/notifications").catch(()=>null)
+      api("/api/notifications")
     ]);
-    const inbox=results[0],appointments=results[1],requests=results[2],notificationPayload=results[3];
+    if(results[0].status!=="fulfilled")throw results[0].reason;
+    const inbox=results[0].value;
+    const appointments=results[1].status==="fulfilled"?results[1].value:(state.messengerAppointments||[]);
+    const requests=results[2].status==="fulfilled"?results[2].value:(state.messengerRequests||[]);
+    const notificationPayload=results[3].status==="fulfilled"?results[3].value:null;
     state.messengerConversations=inbox.conversations||[];state.messengerAppointments=appointments||[];state.messengerRequests=requests||[];
+    state.messengerAppointmentsFetchedAt=Date.now();
     if(notificationPayload&&Array.isArray(notificationPayload.notifications))state.notifications=notificationPayload.notifications;
     state.messengerSection=["inbox","people","waiting","private","notifications","closed"].includes(state.messengerSection)?state.messengerSection:"inbox";
     if(!preserveSelection||!state.messengerConversationId||!state.messengerConversations.some(row=>row.id===state.messengerConversationId))state.messengerConversationId=state.messengerConversations.find(row=>row.status!=="CLOSED")?.id||state.messengerConversations[0]?.id||null;
@@ -264,28 +269,38 @@ renderMessenger=async function(options){
     bindMessengerShell();renderMessengerList(state.messengerSection);
     if(!messengerCompactMode()&&state.messengerConversationId)await openMessengerConversation(state.messengerConversationId,{quiet:true});
     else messengerShowList();
-    state.messengerTimer=setInterval(()=>{if(state.view==="messenger")void refreshMessengerInboxSilently();else stopMessengerRefresh();},2000);
+    state.messengerTimer=setInterval(()=>{if(state.view==="messenger"&&!document.hidden)void refreshMessengerInboxSilently();else if(state.view!=="messenger")stopMessengerRefresh();},4000);
   }catch(error){workspace.innerHTML=pageHead(tr("Messenger","Messenger"),"")+'<section class="panel empty-state">'+esc(humanError(error))+'</section>';}
 };
 refreshMessengerInboxSilently=async function(){
   try{
-    const activeId=state.messengerConversationId,shell=$("#messengerShell");
+    const activeId=state.messengerConversationId,shell=$("#messengerShell"),previousRows=state.messengerConversations||[];
+    const previousActive=previousRows.find(row=>String(row.id)===String(activeId))||null;
     const threadVisible=Boolean(activeId)&&(!messengerCompactMode()||shell?.classList.contains("show-thread")||shell?.classList.contains("show-context"));
-    const results=await Promise.all([
+    const refreshAppointments=state.messengerSection==="private"||Date.now()-Number(state.messengerAppointmentsFetchedAt||0)>=15000;
+    const results=await Promise.allSettled([
       api("/api/customer-conversations"),
-      api("/api/private-appointments?status=SCHEDULED"),
+      refreshAppointments?api("/api/private-appointments?status=SCHEDULED"):Promise.resolve(state.messengerAppointments||[]),
       api("/api/private-appointment-requests"),
-      threadVisible?api("/api/customer-conversations/"+encodeURIComponent(activeId)):Promise.resolve(null),
-      api("/api/notifications").catch(()=>null)
+      api("/api/notifications")
     ]);
-    const inbox=results[0],appointments=results[1],requests=results[2],conversation=results[3],notificationPayload=results[4];
-    state.messengerConversations=inbox.conversations||[];state.messengerAppointments=appointments||[];state.messengerRequests=requests||[];
+    if(results[0].status!=="fulfilled")return;
+    const inbox=results[0].value,appointments=results[1].status==="fulfilled"?results[1].value:(state.messengerAppointments||[]),requests=results[2].status==="fulfilled"?results[2].value:(state.messengerRequests||[]),notificationPayload=results[3].status==="fulfilled"?results[3].value:null;
+    const nextRows=inbox.conversations||[],nextActive=nextRows.find(row=>String(row.id)===String(activeId))||null;
+    const activeChanged=Boolean(threadVisible&&activeId&&(!previousActive||!nextActive||
+      [previousActive.updated_at,previousActive.last_activity_at,previousActive.last_message_at,previousActive.unread_count,previousActive.status].join("|")!==
+      [nextActive?.updated_at,nextActive?.last_activity_at,nextActive?.last_message_at,nextActive?.unread_count,nextActive?.status].join("|")));
+    state.messengerConversations=nextRows;state.messengerAppointments=appointments||[];state.messengerRequests=requests||[];
+    if(refreshAppointments&&results[1].status==="fulfilled")state.messengerAppointmentsFetchedAt=Date.now();
     if(notificationPayload&&Array.isArray(notificationPayload.notifications))state.notifications=notificationPayload.notifications;
     const active=state.messengerSection||"inbox";renderMessengerList(active);
     const nav=document.querySelector(".messenger-status-cards");if(nav){nav.innerHTML=messengerStatusCards();messengerBindNavButtons();}
-    if(conversation&&activeId===state.messengerConversationId){
-      const signature=messengerConversationSignature(conversation),form=$("#messengerReplyForm"),draft=String(form?.elements?.message?.value||""),files=form?.elements?.attachments?.files?.length||0,busy=Boolean(draft||files||(form&&form.contains(document.activeElement)));
-      if(signature!==state.messengerConversationSnapshot&&!busy)await openMessengerConversation(activeId,{quiet:true,preloaded:conversation});
+    if(activeChanged&&activeId===state.messengerConversationId){
+      let conversation=null;try{conversation=await api("/api/customer-conversations/"+encodeURIComponent(activeId));}catch(_error){}
+      if(conversation&&activeId===state.messengerConversationId){
+        const signature=messengerConversationSignature(conversation),form=$("#messengerReplyForm"),draft=String(form?.elements?.message?.value||""),files=form?.elements?.attachments?.files?.length||0,busy=Boolean(draft||files||(form&&form.contains(document.activeElement)));
+        if(signature!==state.messengerConversationSnapshot&&!busy)await openMessengerConversation(activeId,{quiet:true,preloaded:conversation});
+      }
     }
   }catch(_error){}
 };
