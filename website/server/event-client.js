@@ -69,6 +69,9 @@ function createEventClient(options = {}) {
 
   return Object.freeze({
     configured: Boolean(baseUrl),
+    serviceStatus() {
+      return request("/api/public/service-status");
+    },
     list(language) {
       return request(`/api/public/events?lang=${language === "hu" ? "hu" : "en"}`);
     },
