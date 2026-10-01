@@ -54,6 +54,8 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 const EVENT_IMAGE_DIR = path.join(UPLOAD_DIR, "events");
 const WEBSITE_IMAGE_DIR = path.join(UPLOAD_DIR, "website");
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+const ADMIN_INDEX_TEMPLATE = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 for (const directory of [path.dirname(DB_PATH),UPLOAD_DIR,EVENT_IMAGE_DIR,WEBSITE_IMAGE_DIR]) fs.mkdirSync(directory,{recursive:true});
 
 const db = new Database(DB_PATH);
@@ -157,22 +159,63 @@ function setSetting(key,value,user="SYSTEM") {
   db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).run(key,String(value??""),user);
 }
+const BRANDING_SETTING_KEYS=Object.freeze([
+  "company_name","short_name","logo_url","erp_logo_dark_url","erp_logo_light_url",
+  "login_logo_url","favicon_url","app_icon_url","login_background_url","branding_version"
+]);
+const brandingSettingsStatement=db.prepare(`SELECT setting_key,setting_value FROM app_settings
+  WHERE setting_key IN (${BRANDING_SETTING_KEYS.map(()=>"?").join(",")})`);
 function getBranding() {
-  const legacyLogo=setting("logo_url","/icons/icon-512.png");
+  const values=Object.fromEntries(brandingSettingsStatement.all(...BRANDING_SETTING_KEYS).map(row=>[row.setting_key,row.setting_value]));
+  const legacyLogo=values.logo_url||"/icons/icon-512.png";
   return {
-    company_name:setting("company_name","Klavierhaus"),
-    short_name:setting("short_name","KH System"),
+    company_name:values.company_name||"Klavierhaus",
+    short_name:values.short_name||"KH System",
     logo_url:legacyLogo,
-    erp_logo_dark_url:setting("erp_logo_dark_url",legacyLogo),
-    erp_logo_light_url:setting("erp_logo_light_url",legacyLogo),
-    login_logo_url:setting("login_logo_url",legacyLogo),
-    favicon_url:setting("favicon_url","/icons/icon-192.png"),
-    app_icon_url:setting("app_icon_url","/icons/icon-512.png"),
-    login_background_url:setting("login_background_url",""),
-    branding_version:setting("branding_version","1")
+    erp_logo_dark_url:values.erp_logo_dark_url||legacyLogo,
+    erp_logo_light_url:values.erp_logo_light_url||legacyLogo,
+    login_logo_url:values.login_logo_url||legacyLogo,
+    favicon_url:values.favicon_url||"/icons/icon-192.png",
+    app_icon_url:values.app_icon_url||"/icons/icon-512.png",
+    login_background_url:values.login_background_url||"",
+    branding_version:values.branding_version||"1"
   };
 }
 function bumpBranding(user){setSetting("branding_version",String(Date.now()),user||"SYSTEM");}
+function brandingAssetUrl(url,version){
+  const value=String(url||"").trim();if(!value)return "";
+  return `${value}${value.includes("?")?"&":"?"}v=${encodeURIComponent(version||"1")}`;
+}
+function htmlAttribute(value){
+  return String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+}
+function htmlText(value){return htmlAttribute(value);}
+function renderAdminIndex(){
+  const branding=getBranding(),version=branding.branding_version||"1";
+  const loginLogo=brandingAssetUrl(branding.login_logo_url||branding.erp_logo_dark_url||branding.logo_url,version);
+  const darkLogo=brandingAssetUrl(branding.erp_logo_dark_url||branding.logo_url,version);
+  const favicon=brandingAssetUrl(branding.favicon_url,version);
+  const touchIcon=brandingAssetUrl(branding.app_icon_url,version);
+  const background=brandingAssetUrl(branding.login_background_url,version);
+  let html=ADMIN_INDEX_TEMPLATE
+    .replace("<title>Klavierhaus System</title>",`<title>${htmlText(branding.company_name||"Klavierhaus")} System</title>`)
+    .replace(/<link id="appFavicon" rel="icon" href="[^"]*">/,`<link id="appFavicon" rel="icon" href="${htmlAttribute(favicon)}">`)
+    .replace(/<link id="appTouchIcon" rel="apple-touch-icon" href="[^"]*">/,`<link id="appTouchIcon" rel="apple-touch-icon" href="${htmlAttribute(touchIcon)}">`)
+    .replace(/<img id="loginBrandLogo" src="[^"]*" alt="">/,`<img id="loginBrandLogo" src="${htmlAttribute(loginLogo)}" alt="" fetchpriority="high" decoding="async">`)
+    .replace(/<img id="headerBrandLogo" src="[^"]*" alt="">/,`<img id="headerBrandLogo" src="${htmlAttribute(darkLogo)}" alt="" decoding="async">`)
+    .replace(/<img id="mobileBrandLogo" src="[^"]*" alt="">/,`<img id="mobileBrandLogo" src="${htmlAttribute(darkLogo)}" alt="" decoding="async">`);
+  if(background){
+    const cssValue=htmlAttribute(`url(${JSON.stringify(background)})`);
+    html=html.replace('<main id="loginScreen" class="login-screen">',`<main id="loginScreen" class="login-screen has-custom-background" style="--login-background:${cssValue}">`);
+  }
+  const preload=[
+    loginLogo?`<link rel="preload" as="image" href="${htmlAttribute(loginLogo)}" fetchpriority="high">`:"",
+    background?`<link rel="preload" as="image" href="${htmlAttribute(background)}" fetchpriority="high">`:""
+  ].filter(Boolean).join("\n  ");
+  const bootstrap=JSON.stringify(branding).replaceAll("<","\\u003c");
+  html=html.replace("</head>",`  ${preload}\n  <script id="khBrandingBootstrap" type="application/json">${bootstrap}</script>\n</head>`);
+  return html;
+}
 
 app.use(cors());
 app.use(compression({threshold:1024}));
@@ -198,19 +241,36 @@ app.use(express.json({limit:"10mb"}));
 
 app.get("/health",(_req,res)=>res.status(200).json({status:"ok",service:"klavierhaus-erp",architecture:"six-module-final-compliance"}));
 app.get("/api/health",(_req,res)=>res.status(200).json({status:"ok"}));
-app.get("/api/public/branding",(_req,res)=>res.json(getBranding()));
+app.get("/api/public/branding",(req,res)=>{
+  const branding=getBranding(),etag=`"branding-${String(branding.branding_version||"1").replace(/[^A-Za-z0-9._-]/g,"")}"`;
+  res.setHeader("Cache-Control","public, max-age=0, must-revalidate, stale-while-revalidate=300");
+  res.setHeader("ETag",etag);
+  if(String(req.headers["if-none-match"]||"")===etag)return res.status(304).end();
+  res.json(branding);
+});
 app.get("/manifest.webmanifest",(_req,res)=>{
   const branding=getBranding(),version=encodeURIComponent(branding.branding_version);
+  res.setHeader("Cache-Control","public, max-age=0, must-revalidate");
   res.type("application/manifest+json").send(JSON.stringify({
     name:branding.company_name,short_name:branding.short_name,start_url:"/",display:"standalone",
     background_color:"#0f1115",theme_color:"#0f1115",
     icons:[{src:`${branding.app_icon_url}${branding.app_icon_url.includes("?")?"&":"?"}v=${version}`,sizes:"192x192 512x512",type:/\.jpe?g(?:$|\?)/i.test(branding.app_icon_url)?"image/jpeg":"image/png",purpose:"any maskable"}]
   }));
 });
-app.use("/uploads",express.static(UPLOAD_DIR,{etag:true,lastModified:true,maxAge:"5m"}));
-app.use(express.static(path.join(__dirname,"..","public"),{
+app.get(["/","/index.html"],(_req,res)=>{
+  res.setHeader("Cache-Control","no-cache, max-age=0, must-revalidate");
+  res.type("html").send(renderAdminIndex());
+});
+app.use("/uploads",express.static(UPLOAD_DIR,{
   etag:true,lastModified:true,maxAge:"5m",
-  setHeaders(res,filePath){if(/(?:index\.html|service-worker\.js|app\.js|styles\.css)$/i.test(filePath))res.setHeader("Cache-Control","no-cache");}
+  setHeaders(res,filePath){
+    const relative=path.relative(UPLOAD_DIR,filePath),base=path.basename(filePath);
+    if(relative.startsWith(`branding-v6${path.sep}`)||/^branding-\d+/i.test(base))res.setHeader("Cache-Control","public, max-age=31536000, immutable");
+  }
+}));
+app.use(express.static(PUBLIC_DIR,{
+  etag:true,lastModified:true,maxAge:"5m",
+  setHeaders(res,filePath){if(/(?:index\.html|service-worker\.js|app\.js|styles\.css|v6\.js)$/i.test(filePath))res.setHeader("Cache-Control","no-cache");}
 }));
 
 const LOGIN_WINDOW_MS=15*60*1000;
