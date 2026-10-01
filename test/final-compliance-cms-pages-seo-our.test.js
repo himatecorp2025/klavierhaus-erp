@@ -44,6 +44,22 @@ test("CMS exposes clear page hierarchy, Our page, unified legal content and Chat
   assert.match(publicRenderer,/res\.redirect\(308,"\/privacy#terms-and-conditions"\)/);
 });
 
+test("CMS Pages renders every public page section as its own card instead of one Page Sections bucket",()=>{
+  const admin=read("public/v6.js"),contract=read("website/server/site-content.js");
+  assert.match(admin,/function v6CmsPageElements\(/);
+  assert.match(admin,/key===\"sections\"&&Array\.isArray\(value\)/);
+  assert.match(admin,/path:\[\"sections\",index\]/);
+  assert.match(admin,/data-cms-path/);
+  assert.match(admin,/v6CmsPathRead\(button\.dataset\.cmsPath\)/);
+  assert.match(admin,/function v6CmsCardTitle\(/);
+  assert.doesNotMatch(admin,/Page sections|Oldalszekciók/);
+  assert.match(contract,/id: \"testimonial\"/);
+  assert.match(contract,/title: \"Preserving the emotional language of music\.\"/);
+  assert.match(contract,/our:\s*\{[\s\S]*sections:\s*\[[\s\S]*id: \"company\"[\s\S]*id: \"founder\"[\s\S]*id: \"history\"/);
+  assert.match(admin,/function v6EnsureCmsPages\(/);
+  assert.match(admin,/cmsPagesLoadedAt/);
+});
+
 test("public website SEO is server rendered and the audit checks actual fallback content plus image ALT",()=>{
   const publicRenderer=read("website/server/index.js");
   const audit=read("server/business-operations.js");
