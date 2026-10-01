@@ -201,7 +201,7 @@ function renderAdminIndex(){
     .replace("<title>Klavierhaus System</title>",`<title>${htmlText(branding.company_name||"Klavierhaus")} System</title>`)
     .replace(/<link id="appFavicon" rel="icon" href="[^"]*">/,`<link id="appFavicon" rel="icon" href="${htmlAttribute(favicon)}">`)
     .replace(/<link id="appTouchIcon" rel="apple-touch-icon" href="[^"]*">/,`<link id="appTouchIcon" rel="apple-touch-icon" href="${htmlAttribute(touchIcon)}">`)
-    .replace(/<img id="loginBrandLogo" src="[^"]*" alt="">/,`<img id="loginBrandLogo" src="${htmlAttribute(loginLogo)}" alt="" fetchpriority="high" decoding="async">`)
+    .replace(/<img id="loginBrandLogo" src="[^"]*" alt="">/,`<img id="loginBrandLogo" src="${htmlAttribute(loginLogo)}" alt="" loading="eager" fetchpriority="high" decoding="sync">`)
     .replace(/<img id="headerBrandLogo" src="[^"]*" alt="">/,`<img id="headerBrandLogo" src="${htmlAttribute(darkLogo)}" alt="" decoding="async">`)
     .replace(/<img id="mobileBrandLogo" src="[^"]*" alt="">/,`<img id="mobileBrandLogo" src="${htmlAttribute(darkLogo)}" alt="" decoding="async">`);
   if(background){
