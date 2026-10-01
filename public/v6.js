@@ -911,7 +911,10 @@ function v6ProfileAvatarMarkup(user,size="large"){
   return image?`<img class="profile-avatar-image ${size}" src="${esc(image)}" alt="">`:`<div class="profile-avatar ${size}">${esc(initials(user?.name))}</div>`;
 }
 renderProfile=async function(){
-  const workspace=$("#workspace"),user=state.user||{};
+  const workspace=$("#workspace"),user=state.user||{},superadmin=user.role==="SUPERADMIN"||Number(user.is_superadmin||0)===1;
+  const service=superadmin?await api("/api/superadmin/service-suspension",{memoryCacheMs:0}).catch(()=>({suspended:state.serviceSuspended,status:state.serviceSuspended?"SUSPENDED":"ACTIVE"})):null;
+  if(service)applyServiceStatus(service);
+  const passwordMin=superadmin?12:8;
   workspace.innerHTML=pageHead(tr("Profile","Profil"),tr("Your personal Klavierhaus System account.","Saját Klavierhaus System fiókod."))+
     `<div class="profile-self-layout">
       <section class="panel profile-self-card">
@@ -928,15 +931,27 @@ renderProfile=async function(){
         <div class="panel-head"><div><span class="eyebrow">${tr("PERSONAL PROFILE","SZEMÉLYES PROFIL")}</span><h2>${tr("Contact details","Kapcsolati adatok")}</h2></div></div>
         <form id="selfProfileForm" class="form-grid">
           <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user.name||"")}" required></label>
-          <label class="field"><span>${tr("Login email","Belépési e-mail")}</span><input value="${esc(user.email||"")}" disabled></label>
+          <label class="field"><span>${superadmin?tr("Super Admin login email","Szuperadmin belépési e-mail"):tr("Login email","Belépési e-mail")}</span><input ${superadmin?'name="email" type="email" required':""} value="${esc(user.email||"")}" ${superadmin?"":"disabled"}></label>
           <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")}</span><input name="contact_email" type="email" value="${esc(user.contact_email||"")}"></label>
           <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user.phone||"")}"></label>
           <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user.address||"")}"></label>
-          <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="8" autocomplete="new-password"></label>
-          <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="8" autocomplete="new-password"></label>
+          <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
+          <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
+          ${superadmin?`<div class="detail-note full">${tr("Changing the Super Admin login email or password revokes existing sessions and requires a fresh sign-in.","A szuperadmin belépési e-mailjének vagy jelszavának módosítása visszavonja a meglévő munkameneteket, és új bejelentkezést kér.")}</div>`:""}
           <div class="form-actions full"><button class="primary-button" type="submit">${tr("Save profile","Profil mentése")}</button></div>
         </form>
       </section>
+      ${superadmin?`<section class="panel superadmin-service-control ${service?.suspended?"is-suspended":"is-active"}">
+        <div class="service-control-head"><div><span class="eyebrow">SUPER ADMIN · ${tr("SERVICE CONTROL","SZOLGÁLTATÁS VEZÉRLÉS")}</span><h2>${tr("Klavierhaus service access","Klavierhaus szolgáltatás-hozzáférés")}</h2></div><span class="service-control-status ${service?.suspended?"suspended":"active"}">${service?.suspended?tr("SUSPENDED","SZÜNETEL"):tr("ACTIVE","AKTÍV")}</span></div>
+        <p class="service-control-copy">${service?.suspended?tr("The public website is showing a technical-unavailability page and only the Super Admin can use the System.","A publikus weboldal technikai elérhetetlenséget jelez, a Systemet pedig kizárólag a szuperadmin használhatja."):tr("The public website and Klavierhaus System are available normally.","A publikus weboldal és a Klavierhaus System normál módon elérhető.")}</p>
+        ${service?.suspended?`<div class="service-control-warning">! ${tr("Payment-related suspension is active. Restoring access immediately re-enables the public website and normal user sign-in.","A díjhátralék miatti szüneteltetés aktív. A visszakapcsolás azonnal újra engedélyezi a publikus weboldalt és a normál felhasználói belépést.")}</div>`:""}
+        <div class="service-control-grid">
+          <label class="field"><span>${tr("Invoice reference (optional)","Számlahivatkozás (opcionális)")}</span><input id="serviceInvoiceReference" value="${esc(service?.invoice_reference||"")}" ${service?.suspended?"disabled":""}></label>
+          <label class="field"><span>${tr("Last changed","Utolsó módosítás")}</span><input value="${esc(service?.changed_at?new Date(service.changed_at).toLocaleString(state.language==="hu"?"hu-HU":"en-US"):"—")}" disabled></label>
+          <label class="field full"><span>${tr("Internal note (optional)","Belső megjegyzés (opcionális)")}</span><textarea id="serviceSuspensionNote" rows="3" ${service?.suspended?"disabled":""}>${esc(service?.note||"")}</textarea></label>
+        </div>
+        <div class="service-access-switch"><span><strong>${tr("Service enabled","Szolgáltatás bekapcsolva")}</strong><small>${tr("Turning this off suspends the website and all non-Super-Admin access.","Kikapcsoláskor a weboldal és minden nem szuperadmin hozzáférés szünetel.")}</small></span><label class="service-access-toggle"><input id="serviceAccessToggle" type="checkbox" ${service?.suspended?"":"checked"}><i aria-hidden="true"></i></label></div>
+      </section>`:""}
     </div>`;
   $("#profileImageFile")?.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0];if(!file)return;const data=new FormData();data.append("file",file,file.name);
@@ -948,12 +963,22 @@ renderProfile=async function(){
     if(!password){delete data.password;delete data.password_confirmation;}
     try{
       const saved=await api("/api/me/profile",{method:"PUT",body:JSON.stringify(data)});
-      Object.assign(state.user,{name:saved.name,contact_email:saved.contact_email||"",phone:saved.phone||"",address:saved.address||"",profile_image_url:saved.profile_image_url||state.user.profile_image_url||""});
+      Object.assign(state.user,{name:saved.name,email:saved.email||state.user.email,contact_email:saved.contact_email||"",phone:saved.phone||"",address:saved.address||"",profile_image_url:saved.profile_image_url||state.user.profile_image_url||""});
       sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();
       toast(tr("Profile saved.","A profil mentve."),"success");
-      if(password){clearSession();showLogin();return;}
+      if(saved.reauth_required){clearSession();showLogin();return;}
       await renderProfile();
     }catch(error){toast(humanError(error),"error");}
+  });
+  $("#serviceAccessToggle")?.addEventListener("change",async event=>{
+    const toggle=event.currentTarget,nextActive=Boolean(toggle.checked),nextSuspended=!nextActive;
+    const message=nextSuspended?tr("Suspend the Klavierhaus service now? The public website will show only a technical-unavailability page, all normal user sessions will be revoked, and only the Super Admin will be able to sign in.","Most szünetelteted a Klavierhaus szolgáltatást? A publikus weboldal csak technikai elérhetetlenséget mutat, minden normál felhasználói munkamenet visszavonásra kerül, és kizárólag a szuperadmin tud belépni."):tr("Restore the Klavierhaus service now? The public website and normal user sign-in will become available again.","Most visszakapcsolod a Klavierhaus szolgáltatást? A publikus weboldal és a normál felhasználói belépés ismét elérhető lesz.");
+    if(!window.confirm(message)){toggle.checked=!nextSuspended;return;}
+    toggle.disabled=true;
+    try{
+      const saved=await api("/api/superadmin/service-suspension",{method:"PUT",body:JSON.stringify({suspended:nextSuspended,confirmation:nextSuspended?"SUSPEND":"RESTORE",invoice_reference:$("#serviceInvoiceReference")?.value||"",note:$("#serviceSuspensionNote")?.value||""})});
+      applyServiceStatus(saved);toast(nextSuspended?tr("Service suspended.","A szolgáltatás szünetel."):tr("Service restored.","A szolgáltatás visszakapcsolva."),"success");await renderProfile();
+    }catch(error){toggle.disabled=false;toggle.checked=!nextSuspended;toast(humanError(error),"error");}
   });
 };
 
