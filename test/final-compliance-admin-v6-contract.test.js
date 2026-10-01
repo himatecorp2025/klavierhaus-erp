@@ -64,6 +64,20 @@ test("CMS v6 is a visual builder with uploadable page images, galleries and bran
   assert.match(css,/\.cms-gallery-grid/);
   assert.match(css,/\.branding-grid/);
   assert.match(css,/\.file-picker input\{position:absolute/);
+  assert.match(v6,/function v6CmsElementCard/);
+  assert.match(v6,/class="cms-page-elements-grid"/);
+  assert.match(v6,/data-cms-section=/);
+  assert.match(v6,/function v6OpenCmsSectionEditor/);
+  assert.match(v6,/PAGE ELEMENT/);
+  assert.match(v6,/function v6CmsConnectedConfig/);
+  assert.match(v6,/pageKey==="pianos"[\s\S]*showroom-pianos[\s\S]*Bösendorfer[\s\S]*Fazioli/);
+  assert.match(v6,/pageKey==="services"[\s\S]*website-services/);
+  assert.match(v6,/pageKey==="artists"[\s\S]*website-artists/);
+  assert.match(v6,/id="deleteCollectionItem"/);
+  assert.match(v6,/method:"DELETE"/);
+  assert.match(css,/COMPACT CLOSED WORKFLOWS \+ CMS PAGES APP UI V33/);
+  assert.match(css,/\.cms-page-elements-grid\{[\s\S]*repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(css,/\.cms-sidebar-group\{[\s\S]*border:1px solid var\(--line\)/);
 });
 
 test("Intake v6 removes manual URL entry in the active UI and adds catalog pricing plus one-step approval",()=>{
@@ -200,6 +214,12 @@ test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   assert.match(ui,/data-closed-type="completed"/);
   assert.match(ui,/data-closed-type="cancelled"/);
   assert.match(ui,/r2OpenWorkflowHistory/);
+  assert.match(ui,/class="closed-workflow-grid"/);
+  assert.match(ui,/class="closed-workflow-card/);
+  assert.match(ui,/data-history-card/);
+  assert.match(css,/\.closed-workflow-grid\{[\s\S]*repeat\(7,minmax\(0,1fr\)\)/);
+  assert.match(css,/@media\(max-width:1100px\)\{[\s\S]*\.closed-workflow-grid\{grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(css,/@media\(max-width:640px\)\{[\s\S]*\.closed-workflow-grid\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css,/--workflow-columns/);
   assert.match(css,/CANONICAL WORKFLOW \/ PLANNED SEPARATION V12/);
   assert.match(css,/\.workflow-scroll\{[\s\S]*overflow:visible!important/);
