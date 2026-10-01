@@ -146,14 +146,17 @@ test("mobile Master switches list/detail and mobile navigation reaches the physi
   assert.match(css,/padding:6px 8px calc\(6px \+ var\(--safe-bottom\)\)!important/);
 });
 
-test("website logo and website favicon are independent design settings",()=>{
-  const settings=read("server/website-content.js"),browser=read("website/public/app.js"),v6=read("public/v6.js");
+test("public website and Klavierhaus System share the uploaded favicon while the public logo stays independent",()=>{
+  const settings=read("server/website-content.js"),browser=read("website/public/app.js"),v6=read("public/v6.js"),backend=read("server/admin-ux-v6.js"),server=read("server/index.js");
   assert.match(settings,/logo_url: "", favicon_url: ""/);
   assert.match(settings,/for\(const key of \["logo_url","favicon_url"\]\)/);
   assert.match(browser,/settings\.favicon_url/);
   assert.match(browser,/link\[rel~="icon"\]/);
-  assert.doesNotMatch(v6,/v6SetGlobalFavicon/);
   assert.match(v6,/favicon_url:url/);
+  assert.match(v6,/Website \/ System favicon/);
+  assert.match(backend,/\{route:"public-favicon",key:"favicon_url",min:32\}/);
+  assert.match(server,/favicon_url:values\.favicon_url\|\|"\/icons\/icon-192\.png"/);
+  assert.match(server,/const favicon=brandingAssetUrl\(branding\.favicon_url,version\)/);
   assert.match(v6,/logo_url:url/);
 });
 

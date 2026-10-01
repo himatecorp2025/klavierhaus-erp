@@ -53,7 +53,7 @@ test("CMS v6 is a visual builder with uploadable page images, galleries and bran
   assert.match(v6,/Add gallery images/);
   assert.match(v6,/Image alt EN/);
   assert.match(v6,/Kép alt HU/);
-  assert.match(v6,/Public website favicon/);
+  assert.match(v6,/Website \/ System favicon/);
   assert.match(v6,/PWA \/ app icon/);
   assert.match(v6,/Login background/);
   assert.match(v6,/Public website logo/);
