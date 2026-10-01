@@ -42,5 +42,5 @@ test("branding metadata and versioned assets are optimized for repeated loads",(
   assert.match(server,/max-age=31536000, immutable/);
   assert.match(server,/branding-v6/);
   assert.match(server,/\^branding-\\d\+/);
-  assert.match(server,/v6\.js/);
+  assert.ok(server.includes("v6\\.js"));
 });
