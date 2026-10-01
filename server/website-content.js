@@ -315,7 +315,7 @@ function registerWebsiteContentRoutes(options) {
     if (!row) return res.status(404).json({ error: "WEBSITE_PREVIEW_EXPIRED_OR_NOT_FOUND" });
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-    res.json({ page_key: row.page_key, language: row.language, content: parseStoredPage(row, row.page_key, row.language), version: row.version, preview: true, expires_at: db.prepare("SELECT expires_at FROM website_preview_tokens WHERE token_hash=?").get(tokenHash).expires_at });
+    res.json({ page_key: row.page_key, language: row.language, content: parsePage(row, row.page_key, row.language), version: row.version, preview: true, expires_at: db.prepare("SELECT expires_at FROM website_preview_tokens WHERE token_hash=?").get(tokenHash).expires_at });
   });
 
   app.get("/api/website-content/pages", auth, admin, (_req, res) => {
@@ -391,7 +391,7 @@ function registerWebsiteContentRoutes(options) {
   app.get("/api/website-content/:pageKey", auth, admin, (req, res) => {
     const pageKey = String(req.params.pageKey || "");
     const language = normalizeLanguage(req.query.lang);
-    if (!PAGE_KEYS.has(pageKey) || !fallbackPage(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
+    if (!pageExists(pageKey, language)) return res.status(404).json({ error: "WEBSITE_PAGE_NOT_FOUND" });
     res.setHeader("Cache-Control", "no-store");
     res.json(pageResponse(pageKey, language));
   });
@@ -441,7 +441,7 @@ function registerWebsiteContentRoutes(options) {
     if (!row) return res.status(404).json({ error: "WEBSITE_CONTENT_VERSION_NOT_FOUND" });
     const restored = createVersion(row.page_key, row.language, row.content_json, req.user.id, "DRAFT");
     audit(req, "RESTORE_DRAFT", "website", `${row.page_key}:${row.language}:${restored.version}`, { restored_from: row.version }, { version: restored.version }, 1, "Historical version restored as new draft");
-    res.status(201).json({ id: restored.id, page_key: restored.page_key, language: restored.language, version: restored.version, status: restored.status, content: parseStoredPage(restored, restored.page_key, restored.language) });
+    res.status(201).json({ id: restored.id, page_key: restored.page_key, language: restored.language, version: restored.version, status: restored.status, content: parsePage(restored, restored.page_key, restored.language) });
   });
 
   app.put("/api/website-content/:pageKey", auth, admin, (req, res) => {
