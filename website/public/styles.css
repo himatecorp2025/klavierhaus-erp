@@ -2612,3 +2612,13 @@ html.customer-chat-open,html.customer-chat-open body{height:100%;overflow:hidden
     max-height:var(--kh-chat-visual-height,100dvh)!important;
   }
 }
+
+
+/* Public Messenger close affordance: the launcher itself toggles the panel on laptop/desktop. */
+@media(min-width:1025px){
+  .customer-chat__panel-close{display:none!important}
+  .customer-chat__heading-actions{padding-right:0}
+}
+@media(max-width:1024px){
+  .customer-chat__panel-close{display:grid!important}
+}
