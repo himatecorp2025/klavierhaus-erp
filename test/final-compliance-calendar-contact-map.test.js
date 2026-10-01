@@ -57,5 +57,5 @@ test("Contact page integrates the map with Visit the House and avoids duplicate 
 });
 
 test("PWA cache is bumped for calendar and date UX",()=>{
-  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(read("public/service-worker.js"),/klavierhaus-admin-v32-workflow-canonical-sync/);
 });
