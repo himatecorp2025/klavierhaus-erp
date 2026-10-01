@@ -13,6 +13,13 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 fs.mkdirSync(backupDir, { recursive: true });
 
 const db = new Database(dbPath);
+db.pragma("journal_mode = WAL");
+db.pragma("synchronous = NORMAL");
+db.pragma("temp_store = MEMORY");
+db.pragma("cache_size = -32768");
+db.pragma("mmap_size = 134217728");
+db.pragma("journal_size_limit = 67108864");
+db.pragma("wal_autocheckpoint = 1000");
 db.pragma("busy_timeout = 5000");
 db.pragma("foreign_keys = OFF");
 
@@ -752,6 +759,7 @@ const fk = db.prepare("PRAGMA foreign_key_check").all();
 if (fk.length) throw new Error(`FINAL_COMPLIANCE_FOREIGN_KEY_CHECK_FAILED:${JSON.stringify(fk.slice(0,10))}`);
 const integrity = db.prepare("PRAGMA integrity_check").get();
 if (String(integrity?.integrity_check || "").toLowerCase() !== "ok") throw new Error("FINAL_COMPLIANCE_INTEGRITY_CHECK_FAILED");
+db.pragma("optimize");
 
 console.log(`[COMPLIANCE] Database ready: clients=${db.prepare("SELECT COUNT(*) c FROM clients").get().c}, pianos=${db.prepare("SELECT COUNT(*) c FROM pianos").get().c}, intake=${db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c}, jobs=${db.prepare("SELECT COUNT(*) c FROM jobs").get().c}, handoffs=${db.prepare("SELECT COUNT(*) c FROM job_handoffs").get().c}, invoices=${db.prepare("SELECT COUNT(*) c FROM invoices").get().c}, expenses=${db.prepare("SELECT COUNT(*) c FROM direct_expenses").get().c}`);
 db.close();
