@@ -114,8 +114,8 @@ test("New Workflow Job has an inline add-phase card that does not mutate existin
 test("Messenger admin composer ends with an unclipped two-column 2x2 action grid",()=>{
   const ui=read("public/messenger.js"),css=read("public/styles.css");
   assert.match(ui,/class="messenger-action-grid"/);
-  assert.match(ui,/data-messenger-form/);
-  assert.match(ui,/data-messenger-appointment/);
+  assert.match(ui,/id="messengerSendProfileForm"/);
+  assert.match(ui,/id="messengerAppointmentAction"/);
   assert.match(ui,/messenger-attach-button/);
   assert.match(ui,/messenger-send-button/);
   const canonical=css.slice(css.lastIndexOf("DYNAMIC PIANO + NEW WORKFLOW PHASE + MESSENGER COMPOSER V34"));
