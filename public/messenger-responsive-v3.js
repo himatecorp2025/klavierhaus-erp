@@ -22,12 +22,13 @@ function messengerInitials(name){
 function messengerCustomerKey(row,{fallbackPrefix="customer"}={}){
   const clientId=String(row?.client_id||"").trim();
   const email=String(row?.email||"").trim().toLowerCase();
-  const conversationId=String(row?.conversation_id||row?.id||"").trim();
   const name=String(row?.name||"").trim().toLowerCase();
+  const conversationId=String(row?.conversation_id||"").trim();
   if(clientId)return "client:"+clientId;
   if(email)return "email:"+email;
+  if(name)return "name:"+name;
   if(conversationId)return "conversation:"+conversationId;
-  return fallbackPrefix+":"+(name||String(row?.id||"unknown"));
+  return fallbackPrefix+":"+String(row?.id||"unknown");
 }
 function messengerPeople(){
   const map=new Map();
