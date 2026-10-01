@@ -1303,7 +1303,7 @@ function renderTechnicalUnavailable(language="en",nonce=""){
   const hu=language==="hu";
   const title=hu?"Weboldalunk átmenetileg nem elérhető":"We’re temporarily unavailable";
   const body=hu?"Technikai okok miatt weboldalunk jelenleg nem érhető el. Kérjük, próbálja meg később.":"Our website is currently unavailable due to technical reasons. Please try again later.";
-  return `<!doctype html><html lang="${hu?"hu-HU":"en-US"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow,noarchive"><title>${escapeHtml(title)} | Klavierhaus</title><style>
+  return `<!doctype html><html lang="${hu?"hu-HU":"en-US"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow,noarchive"><title>${escapeHtml(title)} | Klavierhaus</title><style nonce="${escapeHtml(nonce)}">
   :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 50% 20%,#24211d 0,#11100f 46%,#080807 100%);color:#f4efe6;font-family:Georgia,"Times New Roman",serif}
   main{width:min(680px,100%);text-align:center;padding:clamp(28px,6vw,58px);border:1px solid rgba(221,190,126,.26);border-radius:28px;background:rgba(7,7,6,.78);box-shadow:0 28px 90px rgba(0,0,0,.42)}
   .piano{width:126px;height:126px;margin:0 auto 24px;display:grid;place-items:center;border:1px solid rgba(221,190,126,.38);border-radius:50%;background:#111;color:#ddbe7e}
