@@ -580,7 +580,6 @@ CREATE TABLE IF NOT EXISTS customer_appointment_proposals (
   FOREIGN KEY(finalized_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_customer_appointment_proposals_conversation ON customer_appointment_proposals(conversation_id,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_private_appointments_conversation ON private_appointments(conversation_id,scheduled_at DESC);
 
 CREATE TABLE IF NOT EXISTS support_holidays (
   holiday_date TEXT PRIMARY KEY,
