@@ -129,6 +129,61 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
     const source_refs=tableExists("master_data_client_source_map")?db.prepare("SELECT source_name,source_client_id,updated_at FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(id):[];
     return {client,pianos,jobs,invoices,intakes,source_refs};
   }
+  function clientRelationManifest(clientId){
+    const byId={};
+    for(const table of ["customer_conversations","private_appointments","private_appointment_requests","pianos","client_piano_review_queue","intake_leads","jobs","invoices","customer_communication_log"]){
+      if(!tableExists(table))continue;
+      const columns=new Set(db.prepare(`PRAGMA table_info("${table}")`).all().map(row=>row.name));
+      if(!columns.has("client_id")||!columns.has("id"))continue;
+      byId[table]=db.prepare(`SELECT id FROM "${table}" WHERE client_id=? ORDER BY id`).all(clientId).map(row=>row.id);
+    }
+    const sourceRefs=tableExists("master_data_client_source_map")?db.prepare("SELECT source_name,source_client_id FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(clientId):[];
+    const importRows=tableExists("master_data_import_rows")?db.prepare("SELECT source_name,source_instrument_id FROM master_data_import_rows WHERE client_id=? ORDER BY source_name,source_instrument_id").all(clientId):[];
+    const sourceRows=tableExists("master_data_source_rows")?db.prepare("SELECT source_name,source_row_number FROM master_data_source_rows WHERE client_id=? ORDER BY source_name,source_row_number").all(clientId):[];
+    return {by_id:byId,source_refs:sourceRefs,import_rows:importRows,source_rows:sourceRows};
+  }
+  function transferClientRelations(fromId,toId){
+    const manifest=clientRelationManifest(fromId);
+    for(const table of Object.keys(manifest.by_id)){
+      db.prepare(`UPDATE "${table}" SET client_id=? WHERE client_id=?`).run(toId,fromId);
+    }
+    if(tableExists("master_data_client_source_map"))db.prepare("UPDATE master_data_client_source_map SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(toId,fromId);
+    if(tableExists("master_data_import_rows"))db.prepare("UPDATE master_data_import_rows SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(toId,fromId);
+    if(tableExists("master_data_source_rows"))db.prepare("UPDATE master_data_source_rows SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE client_id=?").run(toId,fromId);
+    return manifest;
+  }
+  function restoreTransferredRelations(manifest,fromPrimaryId,toRestoredId){
+    for(const [table,ids] of Object.entries(manifest?.by_id||{})){
+      if(!tableExists(table)||!Array.isArray(ids)||!ids.length)continue;
+      const columns=new Set(db.prepare(`PRAGMA table_info("${table}")`).all().map(row=>row.name));
+      if(!columns.has("client_id")||!columns.has("id"))continue;
+      const update=db.prepare(`UPDATE "${table}" SET client_id=? WHERE id=? AND client_id=?`);
+      for(const rowId of ids)update.run(toRestoredId,rowId,fromPrimaryId);
+    }
+    if(tableExists("master_data_client_source_map")){
+      const update=db.prepare("UPDATE master_data_client_source_map SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_client_id=? AND client_id=?");
+      for(const row of manifest?.source_refs||[])update.run(toRestoredId,row.source_name,row.source_client_id,fromPrimaryId);
+    }
+    if(tableExists("master_data_import_rows")){
+      const update=db.prepare("UPDATE master_data_import_rows SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_instrument_id=? AND client_id=?");
+      for(const row of manifest?.import_rows||[])update.run(toRestoredId,row.source_name,row.source_instrument_id,fromPrimaryId);
+    }
+    if(tableExists("master_data_source_rows")){
+      const update=db.prepare("UPDATE master_data_source_rows SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE source_name=? AND source_row_number=? AND client_id=?");
+      for(const row of manifest?.source_rows||[])update.run(toRestoredId,row.source_name,row.source_row_number,fromPrimaryId);
+    }
+  }
+  function mergeClientFields(primaryId,duplicate){
+    const primary=db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(primaryId);
+    if(!primary)throw problem("CLIENT_NOT_FOUND",404);
+    const fill=["first_name","last_name","company_name","contact_name","email","mobile_phone","line_phone","phone","street","city","district","postcode","country","address","short_memo_to_name","last_visit"];
+    const next={};
+    for(const field of fill)next[field]=text(primary[field],5000)||text(duplicate[field],5000)||null;
+    const notes=[text(primary.notes,5000),text(duplicate.notes,5000)].filter(Boolean);
+    next.notes=[...new Set(notes)].join("\n\n")||null;
+    db.prepare(`UPDATE clients SET first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,short_memo_to_name=?,last_visit=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(next.first_name,next.last_name,next.company_name,next.contact_name,next.email,next.mobile_phone,next.line_phone,next.phone,next.street,next.city,next.district,next.postcode,next.country,next.address,next.short_memo_to_name,next.last_visit,next.notes,primaryId);
+  }
   function deleteClientToArchive(id,actor,reason=""){
     const source=clientArchiveSource(id),deletedAt=new Date().toISOString();
     const snapshot={source:"deleted_client",deleted_at:deletedAt,deleted_by_user_id:actor?.id||null,reason:text(reason,3000),...source};
@@ -150,6 +205,150 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
     return {...archived,metadata:snapshot};
   }
 
+  function normalizeIdentityText(value){
+    return text(value,1000).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+  }
+  function normalizeIdentityEmail(value){return text(value,320).toLowerCase();}
+  function normalizeIdentityPhone(value){const digits=String(value||"").replace(/\D/g,"");return digits.length>10?digits.slice(-10):digits;}
+  function normalizeIdentityAddress(value){
+    return normalizeIdentityText(value)
+      .replace(/\bstreet\b/g,"st").replace(/\bavenue\b/g,"ave").replace(/\broad\b/g,"rd")
+      .replace(/\bboulevard\b/g,"blvd").replace(/\bdrive\b/g,"dr").replace(/\blane\b/g,"ln")
+      .replace(/\bapartment\b/g,"apt").replace(/\bsuite\b/g,"ste").replace(/\s+/g," ").trim();
+  }
+  function clientIdentity(row){
+    const phoneValues=[row.phone,row.mobile_phone,row.line_phone].map(normalizeIdentityPhone).filter(value=>value.length>=7);
+    const structuredAddress=[row.street,row.city,row.district,row.postcode,row.country].filter(Boolean).join(" ");
+    const addressValues=[row.address,structuredAddress].map(normalizeIdentityAddress).filter(Boolean);
+    const nameValues=[row.name,[row.first_name,row.last_name].filter(Boolean).join(" ")].map(normalizeIdentityText).filter(Boolean);
+    return {
+      name:[...new Set(nameValues)],email:[normalizeIdentityEmail(row.email)].filter(Boolean),phone:[...new Set(phoneValues)],
+      address:[...new Set(addressValues)],postcode:[normalizeIdentityText(row.postcode)].filter(Boolean),
+      city:[normalizeIdentityText(row.city)].filter(Boolean),company_name:[normalizeIdentityText(row.company_name)].filter(Boolean),
+      contact_name:[normalizeIdentityText(row.contact_name)].filter(Boolean)
+    };
+  }
+  const DUPLICATE_WEIGHTS={email:5,phone:5,address:4,name:3,company_name:3,contact_name:2,postcode:2,city:1};
+  function shareIdentityValue(a,b,field){const right=new Set(b[field]||[]);return (a[field]||[]).some(value=>right.has(value));}
+  function identitySignature(a,b){
+    const payload=[a,b].sort((x,y)=>Number(x.id)-Number(y.id)).map(row=>({id:row.id,identity:clientIdentity(row)}));
+    return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  }
+  function duplicateCandidates(){
+    const clients=db.prepare("SELECT * FROM clients WHERE deleted_at IS NULL ORDER BY id").all();
+    const identities=new Map(clients.map(row=>[row.id,clientIdentity(row)])),byField=new Map(),pairs=new Set();
+    for(const field of ["email","phone","name","address","company_name","contact_name","postcode"]){
+      const values=new Map();
+      for(const row of clients)for(const value of identities.get(row.id)?.[field]||[]){if(!values.has(value))values.set(value,[]);values.get(value).push(row.id);}
+      byField.set(field,values);
+      for(const ids of values.values()){
+        if(ids.length<2)continue;
+        for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++)pairs.add(`${Math.min(ids[i],ids[j])}:${Math.max(ids[i],ids[j])}`);
+      }
+    }
+    const clientById=new Map(clients.map(row=>[row.id,row])),out=[];
+    for(const pairKey of pairs){
+      const [aId,bId]=pairKey.split(":").map(Number),a=clientById.get(aId),b=clientById.get(bId);if(!a||!b)continue;
+      const ia=identities.get(aId),ib=identities.get(bId),fields=Object.keys(DUPLICATE_WEIGHTS).filter(field=>shareIdentityValue(ia,ib,field));
+      if(fields.length<2)continue;
+      const score=fields.reduce((sum,field)=>sum+DUPLICATE_WEIGHTS[field],0);
+      out.push({pair_key:pairKey,client_a_id:aId,client_b_id:bId,signature:identitySignature(a,b),match_fields:fields,match_count:fields.length,match_score:score});
+    }
+    return out;
+  }
+  function syncDuplicateReviewQueue(){
+    if(!tableExists("client_duplicate_reviews"))return [];
+    const candidates=duplicateCandidates(),activeKeys=new Set(candidates.map(row=>row.pair_key));
+    const existing=new Map(db.prepare("SELECT * FROM client_duplicate_reviews").all().map(row=>[row.pair_key,row]));
+    const insert=db.prepare(`INSERT INTO client_duplicate_reviews(pair_key,client_a_id,client_b_id,signature,match_fields_json,match_count,match_score,status)
+      VALUES(?,?,?,?,?,?,?,'PENDING')`);
+    const update=db.prepare(`UPDATE client_duplicate_reviews SET signature=?,match_fields_json=?,match_count=?,match_score=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`);
+    db.transaction(()=>{
+      for(const candidate of candidates){
+        const row=existing.get(candidate.pair_key),fields=JSON.stringify(candidate.match_fields);
+        if(!row){insert.run(candidate.pair_key,candidate.client_a_id,candidate.client_b_id,candidate.signature,fields,candidate.match_count,candidate.match_score);continue;}
+        if(row.status==="MERGED")continue;
+        let status=row.status;
+        if(status==="CLEARED")status="PENDING";
+        else if(status==="NOT_DUPLICATE"&&row.signature!==candidate.signature)status="PENDING";
+        update.run(candidate.signature,fields,candidate.match_count,candidate.match_score,status,row.id);
+      }
+      db.prepare(`UPDATE client_duplicate_reviews SET status='CLEARED',updated_at=CURRENT_TIMESTAMP
+        WHERE status IN ('PENDING','REVIEW_LATER') AND pair_key NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify([...activeKeys]));
+    })();
+    return candidates;
+  }
+  function clientDuplicateSummary(id){
+    const client=db.prepare("SELECT * FROM clients WHERE id=?").get(id);if(!client)return null;
+    const count=table=>tableExists(table)?Number(db.prepare(`SELECT COUNT(*) count FROM "${table}" WHERE client_id=?`).get(id)?.count||0):0;
+    client.relationship_counts={
+      pianos:count("pianos"),jobs:count("jobs"),invoices:count("invoices"),intakes:count("intake_leads"),
+      conversations:count("customer_conversations"),appointments:count("private_appointments")+count("private_appointment_requests")
+    };
+    client.source_refs=tableExists("master_data_client_source_map")?db.prepare("SELECT source_name,source_client_id FROM master_data_client_source_map WHERE client_id=? ORDER BY source_name,source_client_id").all(id):[];
+    return client;
+  }
+  function duplicateReviewPayload(){
+    syncDuplicateReviewQueue();
+    const rows=db.prepare(`SELECT * FROM client_duplicate_reviews WHERE status IN ('PENDING','REVIEW_LATER')
+      ORDER BY CASE status WHEN 'PENDING' THEN 0 ELSE 1 END,match_score DESC,updated_at DESC,id DESC`).all();
+    return {
+      pending_count:rows.length,
+      cases:rows.map(row=>({...row,match_fields:json(row.match_fields_json||"[]"),client_a:clientDuplicateSummary(row.client_a_id),client_b:clientDuplicateSummary(row.client_b_id)}))
+    };
+  }
+  function archiveMergedDuplicate(review,primaryId,duplicateId,actor){
+    const duplicateSource=clientArchiveSource(duplicateId),deletedAt=new Date().toISOString(),manifest=clientRelationManifest(duplicateId);
+    const snapshot={
+      source:"merged_duplicate",deleted_at:deletedAt,deleted_by_user_id:actor?.id||null,reason:"Merged after duplicate review",
+      merged_into_client_id:primaryId,duplicate_review_id:review.id,transfer_manifest:manifest,...duplicateSource
+    };
+    const info=db.prepare(`INSERT INTO document_archive(category,title,description,entity_type,entity_id,metadata_json,archived_by_user_id)
+      VALUES('deleted_client',?,?,?,?,?,?)`).run(
+      `Merged Duplicate Client #${duplicateId} · ${duplicateSource.client.name||"Client"}`,
+      `Merged into active Client #${primaryId} after duplicate review. Original record remains restorable from this archive.`,
+      "client",String(duplicateId),JSON.stringify(snapshot),actor?.id||null
+    );
+    const archiveId=Number(info.lastInsertRowid);
+    mergeClientFields(primaryId,duplicateSource.client);
+    transferClientRelations(duplicateId,primaryId);
+    db.prepare("UPDATE clients SET deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=?,archive_document_id=?,deletion_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(actor?.id||null,archiveId,`Merged into Client #${primaryId}`,duplicateId);
+    db.prepare(`UPDATE client_duplicate_reviews SET status='MERGED',primary_client_id=?,archived_client_id=?,archive_document_id=?,resolution_note=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(primaryId,duplicateId,archiveId,`Merged into Client #${primaryId}`,actor?.id||null,review.id);
+    db.prepare(`UPDATE client_duplicate_reviews SET status='CLEARED',updated_at=CURRENT_TIMESTAMP
+      WHERE id<>? AND status IN ('PENDING','REVIEW_LATER') AND (client_a_id=? OR client_b_id=?)`).run(review.id,duplicateId,duplicateId);
+    return {...db.prepare(`${select} WHERE a.id=?`).get(archiveId),metadata:snapshot};
+  }
+  function restoreArchivedClient(archiveId,actor){
+    const archive=db.prepare(`${select} WHERE a.id=?`).get(archiveId);if(!archive||archive.category!=="deleted_client")throw problem("ARCHIVED_CLIENT_NOT_FOUND",404);
+    const metadata=json(archive.metadata_json),clientId=integerId(metadata?.client?.id||archive.entity_id);if(!clientId)throw problem("ARCHIVED_CLIENT_NOT_FOUND",404);
+    const current=db.prepare("SELECT * FROM clients WHERE id=?").get(clientId);if(!current)throw problem("ARCHIVED_CLIENT_RECORD_MISSING",409);
+    if(!current.deleted_at)return {...archive,metadata,restored:true,restored_client_id:clientId};
+    const restoredAt=new Date().toISOString();
+    db.transaction(()=>{
+      db.prepare("UPDATE clients SET deleted_at=NULL,deleted_by_user_id=NULL,archive_document_id=NULL,deletion_reason=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(clientId);
+      if(metadata.source==="merged_duplicate"&&integerId(metadata.merged_into_client_id)){
+        const primaryId=integerId(metadata.merged_into_client_id);
+        restoreTransferredRelations(metadata.transfer_manifest||{},primaryId,clientId);
+        if(integerId(metadata.duplicate_review_id)&&tableExists("client_duplicate_reviews")){
+          const primary=db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(primaryId),restored=db.prepare("SELECT * FROM clients WHERE id=?").get(clientId);
+          const signature=primary&&restored?identitySignature(primary,restored):"";
+          db.prepare(`UPDATE client_duplicate_reviews SET status='NOT_DUPLICATE',signature=COALESCE(NULLIF(?,''),signature),resolution_note=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(signature,"Restored from merge archive; treated as separate client",actor?.id||null,metadata.duplicate_review_id);
+        }
+      }else if(tableExists("pianos")){
+        const update=db.prepare("UPDATE pianos SET client_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND client_id IS NULL");
+        for(const piano of metadata.pianos||[])if(integerId(piano.id))update.run(clientId,piano.id);
+      }
+      const nextMetadata={...metadata,restored_at:restoredAt,restored_by_user_id:actor?.id||null};
+      db.prepare("UPDATE document_archive SET metadata_json=?,description=? WHERE id=?")
+        .run(JSON.stringify(nextMetadata),`${archive.description||""}${archive.description?" · ":""}Restored ${restoredAt}`,archiveId);
+    })();
+    const row=db.prepare(`${select} WHERE a.id=?`).get(archiveId);
+    return {...row,metadata:json(row.metadata_json),restored:true,restored_client_id:clientId};
+  }
+
   app.delete("/api/intake/:id",auth,admin,(req,res)=>{
     try{
       const id=integerId(req.params.id);if(!id)throw problem("INTAKE_NOT_FOUND",404);
@@ -168,13 +367,63 @@ function registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir,transac
       res.json({ok:true,archive_document:archived,deleted_client_id:id});
     }catch(error){respond(res,error);}
   });
+  app.get("/api/client-duplicates",auth,admin,(_req,res)=>{
+    try{res.json(duplicateReviewPayload());}catch(error){respond(res,error);}
+  });
+  app.post("/api/client-duplicates/rescan",auth,admin,(_req,res)=>{
+    try{res.json(duplicateReviewPayload());}catch(error){respond(res,error);}
+  });
+  app.post("/api/client-duplicates/:id/later",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id),review=id&&db.prepare("SELECT * FROM client_duplicate_reviews WHERE id=?").get(id);if(!review)throw problem("DUPLICATE_REVIEW_NOT_FOUND",404);
+      db.prepare("UPDATE client_duplicate_reviews SET status='REVIEW_LATER',reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user?.id||null,id);
+      audit(req,"REVIEW_LATER","client_duplicate_reviews",String(id),review,{status:"REVIEW_LATER"});
+      res.json({ok:true,...duplicateReviewPayload()});
+    }catch(error){respond(res,error);}
+  });
+  app.post("/api/client-duplicates/:id/not-duplicate",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id),review=id&&db.prepare("SELECT * FROM client_duplicate_reviews WHERE id=?").get(id);if(!review)throw problem("DUPLICATE_REVIEW_NOT_FOUND",404);
+      const a=db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(review.client_a_id),b=db.prepare("SELECT * FROM clients WHERE id=? AND deleted_at IS NULL").get(review.client_b_id);
+      const signature=a&&b?identitySignature(a,b):review.signature;
+      db.prepare(`UPDATE client_duplicate_reviews SET status='NOT_DUPLICATE',signature=?,resolution_note=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(signature,text(req.body?.note,1000)||"Reviewed as separate clients",req.user?.id||null,id);
+      audit(req,"NOT_DUPLICATE","client_duplicate_reviews",String(id),review,{status:"NOT_DUPLICATE"});
+      res.json({ok:true,...duplicateReviewPayload()});
+    }catch(error){respond(res,error);}
+  });
+  app.post("/api/client-duplicates/:id/merge",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id),primaryId=integerId(req.body?.primary_client_id),review=id&&db.prepare("SELECT * FROM client_duplicate_reviews WHERE id=?").get(id);
+      if(!review)throw problem("DUPLICATE_REVIEW_NOT_FOUND",404);
+      if(!["PENDING","REVIEW_LATER"].includes(review.status))throw problem("DUPLICATE_REVIEW_ALREADY_RESOLVED",409);
+      if(!primaryId||![Number(review.client_a_id),Number(review.client_b_id)].includes(primaryId))throw problem("INVALID_PRIMARY_CLIENT",400);
+      const duplicateId=primaryId===Number(review.client_a_id)?Number(review.client_b_id):Number(review.client_a_id);
+      const before={primary:clientDuplicateSummary(primaryId),duplicate:clientDuplicateSummary(duplicateId)};
+      const archived=db.transaction(()=>archiveMergedDuplicate(review,primaryId,duplicateId,req.user))();
+      audit(req,"MERGE_DUPLICATE","clients",String(duplicateId),before,{primary_client_id:primaryId,archive_document_id:archived.id},1,"Duplicate client merged and archived");
+      res.json({ok:true,primary_client_id:primaryId,archived_client_id:duplicateId,archive_document:archived,...duplicateReviewPayload()});
+    }catch(error){respond(res,error);}
+  });
+  app.post("/api/archive/documents/:id/restore-client",auth,admin,(req,res)=>{
+    try{
+      const id=integerId(req.params.id);if(!id)throw problem("ARCHIVE_DOCUMENT_NOT_FOUND",404);
+      const before=db.prepare(`${select} WHERE a.id=?`).get(id),restored=restoreArchivedClient(id,req.user);
+      audit(req,"RESTORE","clients",String(restored.restored_client_id),before,{archive_document_id:id,restored_client_id:restored.restored_client_id},1,"Archived client restored to active Master Data");
+      res.json({ok:true,archive_document:restored,restored_client_id:restored.restored_client_id});
+    }catch(error){respond(res,error);}
+  });
   app.get("/api/archive/documents",auth,admin,(req,res)=>{
     try{
       const category=text(req.query.category,80),q=text(req.query.q,240).toLowerCase(),like=`%${q}%`;
       if(category&&!CATEGORIES.has(category))throw problem("INVALID_ARCHIVE_CATEGORY");
-      const rows=db.prepare(`${select} WHERE (?='' OR a.category=?) AND (?='' OR lower(a.title) LIKE ? OR lower(COALESCE(a.description,'')) LIKE ? OR lower(COALESCE(a.original_name,'')) LIKE ? OR lower(COALESCE(a.entity_id,'')) LIKE ?)
-        ORDER BY a.archived_at DESC,a.id DESC`).all(category,category,q,like,like,like,like)
-        .map(row=>({...row,metadata:json(row.metadata_json)}));
+      const rows=db.prepare(`${select} WHERE (?='' OR a.category=?) AND (?='' OR lower(a.title) LIKE ? OR lower(COALESCE(a.description,'')) LIKE ? OR lower(COALESCE(a.original_name,'')) LIKE ? OR lower(COALESCE(a.entity_id,'')) LIKE ? OR lower(COALESCE(a.metadata_json,'')) LIKE ?)
+        ORDER BY a.archived_at DESC,a.id DESC`).all(category,category,q,like,like,like,like,like)
+        .map(row=>{
+          const metadata=json(row.metadata_json),clientId=row.category==="deleted_client"?integerId(metadata?.client?.id||row.entity_id):null;
+          const activeClient=clientId?db.prepare("SELECT deleted_at FROM clients WHERE id=?").get(clientId):null;
+          return {...row,metadata,restorable:Boolean(clientId&&activeClient?.deleted_at),restored:Boolean(metadata?.restored_at||clientId&&activeClient&&!activeClient.deleted_at)};
+        });
       res.json({categories:[...CATEGORIES],rows});
     }catch(error){respond(res,error);}
   });
