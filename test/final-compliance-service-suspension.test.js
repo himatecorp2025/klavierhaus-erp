@@ -231,6 +231,10 @@ test("suspension contracts stay server-enforced and hidden-owner lookups exclude
   assert.match(index,/app\.use\("\/api\/public"/);
   assert.match(index,/HIDDEN_OWNER_SELF_SERVICE_ONLY/);
   assert.match(v6,/serviceAccessToggle/);
+  assert.match(v6,/class="profile-main-column"/);
+  assert.match(v6,/<section class="panel profile-editor-panel"[\s\S]*\$\{serviceCard\}/);
+  assert.match(v6,/Service availability/);
+  assert.match(v6,/Suspension details/);
   assert.match(v6,/api\/superadmin\/service-suspension/);
   assert.match(website,/renderTechnicalUnavailable/);
   assert.match(website,/SITE_TEMPORARILY_UNAVAILABLE/);
