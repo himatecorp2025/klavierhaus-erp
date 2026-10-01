@@ -192,3 +192,26 @@ test("branding assets expose independent ERP dark/light, PWA and login slots",as
   for(const key of ["favicon_url","app_icon_url","login_background_url","logo_url","erp_logo_dark_url","erp_logo_light_url","branding_version"])assert.ok(Object.prototype.hasOwnProperty.call(assets.payload,key),key);
   assert.equal(assets.payload.app_icon_url,"/icons/icon-512.png");
 });
+
+test("CMS public favicon upload is also rendered as the Klavierhaus System favicon",async()=>{
+  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=","base64");
+  png.writeUInt32BE(64,16);png.writeUInt32BE(64,20);
+  const form=new FormData();
+  form.append("file",new Blob([png],{type:"image/png"}),"shared-favicon.png");
+  const uploaded=await request("/api/settings/branding/public-favicon",{token:ids.admin,method:"POST",form});
+  assert.equal(uploaded.status,200,JSON.stringify(uploaded.payload));
+  assert.match(uploaded.payload.url,/^\/uploads\/branding-v6\//);
+
+  const assets=await request("/api/settings/branding/assets",{token:ids.admin});
+  assert.equal(assets.status,200,JSON.stringify(assets.payload));
+  assert.equal(assets.payload.favicon_url,uploaded.payload.url);
+
+  const publicBranding=await request("/api/public/branding");
+  assert.equal(publicBranding.status,200,JSON.stringify(publicBranding.payload));
+  assert.equal(publicBranding.payload.favicon_url,uploaded.payload.url);
+
+  const htmlResponse=await fetch(origin+"/",{headers:{Accept:"text/html"}});
+  const html=await htmlResponse.text();
+  assert.equal(htmlResponse.status,200);
+  assert.ok(html.includes('id="appFavicon" rel="icon" href="'+uploaded.payload.url+'?v='),html.slice(0,800));
+});
