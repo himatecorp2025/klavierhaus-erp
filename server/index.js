@@ -176,9 +176,17 @@ const BRANDING_SETTING_KEYS=Object.freeze([
 ]);
 const brandingSettingsStatement=db.prepare(`SELECT setting_key,setting_value FROM app_settings
   WHERE setting_key IN (${BRANDING_SETTING_KEYS.map(()=>"?").join(",")})`);
+function websiteDesignFavicon() {
+  try {
+    const raw=db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_design_settings'").get()?.setting_value;
+    const parsed=JSON.parse(raw||"{}"),url=String(parsed?.favicon_url||"").trim();
+    return /^(?:https?:\/\/|\/)\S{1,1000}$/i.test(url)?url:"";
+  } catch (_error) { return ""; }
+}
 function getBranding() {
   const values=Object.fromEntries(brandingSettingsStatement.all(...BRANDING_SETTING_KEYS).map(row=>[row.setting_key,row.setting_value]));
   const legacyLogo=values.logo_url||"/icons/icon-512.png";
+  const sharedFavicon=websiteDesignFavicon()||values.favicon_url||"/icons/icon-192.png";
   return {
     company_name:values.company_name||"Klavierhaus",
     short_name:values.short_name||"KH System",
@@ -186,7 +194,7 @@ function getBranding() {
     erp_logo_dark_url:values.erp_logo_dark_url||legacyLogo,
     erp_logo_light_url:values.erp_logo_light_url||legacyLogo,
     login_logo_url:values.login_logo_url||legacyLogo,
-    favicon_url:values.favicon_url||"/icons/icon-192.png",
+    favicon_url:sharedFavicon,
     app_icon_url:values.app_icon_url||"/icons/icon-512.png",
     login_background_url:values.login_background_url||"",
     branding_version:values.branding_version||"1"
