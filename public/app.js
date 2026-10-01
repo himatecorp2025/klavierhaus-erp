@@ -8,7 +8,7 @@ const state={
   user:null,
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
   view:(location.hash||"#workshop").slice(1)||"workshop",
-  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,intake:[],users:[],
+  clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,duplicateReviews:[],duplicatePendingCount:0,selectedDuplicateReviewId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
 };
@@ -97,6 +97,11 @@ function humanError(error){
     INVALID_ARCHIVE_FILE_TYPE:["Use a supported document or image file.","Támogatott dokumentum- vagy képfájlt válassz."],
     ARCHIVE_DOCUMENT_NOT_FOUND:["The archive record no longer exists.","Az archív tétel már nem létezik."],
     ARCHIVE_FILE_NOT_FOUND:["The archived file is not available.","Az archivált fájl nem érhető el."],
+    DUPLICATE_REVIEW_NOT_FOUND:["This duplicate review no longer exists.","Ez a duplikációs ellenőrzés már nem létezik."],
+    DUPLICATE_REVIEW_ALREADY_RESOLVED:["This duplicate review has already been resolved.","Ez a duplikációs ellenőrzés már lezárult."],
+    INVALID_PRIMARY_CLIENT:["Choose which customer record should remain active.","Válaszd ki, melyik ügyfélrekord maradjon aktív."],
+    ARCHIVED_CLIENT_NOT_FOUND:["The archived client record was not found.","Az archivált ügyfélrekord nem található."],
+    ARCHIVED_CLIENT_RECORD_MISSING:["The archived customer cannot be restored because the underlying record is missing.","Az archivált ügyfél nem állítható vissza, mert az alaprekord hiányzik."],
     WORKFLOW_FIXED_STAGE_REQUIRED:["Received, Admin Approval and Completed are required.","A Beérkezett, Admin jóváhagyás és Lezárva fázis kötelező."],
     WORKFLOW_STAGE_LIMIT_REACHED:["The workflow already has the maximum seven phases.","A munkafolyamat már elérte a legfeljebb hét fázist."],
     INVALID_WORKFLOW_STAGE_ORDER:["The workflow phase order is invalid.","A munkafázisok sorrendje érvénytelen."],
@@ -518,12 +523,14 @@ function masterIconSvg(kind){
     PARTNER:'<path d="M8 12l2.2 2.2L16 8.5"></path><path d="M4 11.5 8 7l4 3.5L16 7l4 4.5v7H4z"></path>',
     BUSINESS:'<path d="M4 21V7l8-4v18M12 9h8v12M7 9h2M7 13h2M7 17h2M15 12h2M15 16h2M3 21h18"></path>',
     INSTITUTION:'<path d="m3 9 9-5 9 5M5 10h14M6 10v8M10 10v8M14 10v8M18 10v8M4 18h16M3 21h18"></path>',
-    PIANOS:'<path d="M3 5h18v14H3z"></path><path d="M6 5v9M10 5v9M14 5v9M18 5v9M3 14h18"></path><path d="M8 14v3M12 14v3M16 14v3"></path>'
+    PIANOS:'<path d="M3 5h18v14H3z"></path><path d="M6 5v9M10 5v9M14 5v9M18 5v9M3 14h18"></path><path d="M8 14v3M12 14v3M16 14v3"></path>',
+    DUPLICATES:'<path d="M8 7a4 4 0 1 1 4 4H8a4 4 0 1 1 0-8h4"></path><path d="M16 17a4 4 0 1 1-4-4h4a4 4 0 1 1 0 8h-4"></path><path d="M9 9l6 6M15 9l-6 6"></path>'
   };
   return `<svg class="master-tool-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[kind]||paths.CLIENTS}</svg>`;
 }
-function masterToolButton(kind,label,active=false){
-  return `<button class="master-tool-button ${active?"active":""}" type="button" data-master-tool="${kind}" aria-label="${esc(label)}" title="${esc(label)}">${masterIconSvg(kind)}</button>`;
+function masterToolButton(kind,label,active=false,count=null){
+  const badge=Number.isFinite(Number(count))&&Number(count)>0?`<span class="master-tool-badge">${Number(count)}</span>`:"";
+  return `<button class="master-tool-button ${active?"active":""}" type="button" data-master-tool="${kind}" aria-label="${esc(label)}" title="${esc(label)}">${masterIconSvg(kind)}${badge}</button>`;
 }
 function clientTypeLabel(value){
   return ({INDIVIDUAL:tr("Individual","Magánszemély"),PARTNER:tr("Professional partner","Szakmai partner"),BUSINESS:tr("Business","Vállalkozások"),INSTITUTION:tr("Institution","Intézmények")})[String(value||"INDIVIDUAL").toUpperCase()]||tr("Individual","Magánszemély");
@@ -624,14 +631,23 @@ function masterReadonlyItem(label,value,{full=false,brand=false,extra=""}={}){
 
 async function renderMaster(){
   if(masterQuery())state.masterSearchOpen=true;
-  const workspace=$("#workspace");
-  const [,pianoOverview]=await Promise.all([loadClients(),api("/api/master-data/piano-overview")]);
+  const workspace=$("#workspace"),canReviewDuplicates=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  const [,pianoOverview,duplicatePayload]=await Promise.all([
+    loadClients(),
+    api("/api/master-data/piano-overview"),
+    canReviewDuplicates?api("/api/client-duplicates").catch(()=>({pending_count:0,cases:[]})):Promise.resolve({pending_count:0,cases:[]})
+  ]);
   state.pianos=Array.isArray(pianoOverview?.classified)?pianoOverview.classified:[];
   state.pianoReviews=Array.isArray(pianoOverview?.review)?pianoOverview.review:[];
   state.pianoOverview=pianoOverview?.totals||{classified:state.pianos.length,review:state.pianoReviews.length,total_entities:state.pianos.length,source_rows:0,source_groups:0,owner_linked:state.pianos.filter(row=>row.client_id).length,owner_pending:state.pianos.filter(row=>!row.client_id).length};
   state.masterMigration=pianoOverview?.migration||{ok:false,status:"AWAITING_SOURCE",rows:0};
+  state.duplicateReviews=Array.isArray(duplicatePayload?.cases)?duplicatePayload.cases:[];
+  state.duplicatePendingCount=Number(duplicatePayload?.pending_count||state.duplicateReviews.length);
+  if(!canReviewDuplicates&&state.masterMode==="DUPLICATES")state.masterMode="CLIENTS";
   if(!state.selectedClientId&&state.clients.length)state.selectedClientId=Number(state.clients[0].id);
   if(!state.selectedPianoId&&state.pianos.length)state.selectedPianoId=Number(state.pianos[0].id);
+  if(!state.selectedDuplicateReviewId&&state.duplicateReviews.length)state.selectedDuplicateReviewId=Number(state.duplicateReviews[0].id);
+  if(state.selectedDuplicateReviewId&&!state.duplicateReviews.some(row=>Number(row.id)===Number(state.selectedDuplicateReviewId)))state.selectedDuplicateReviewId=Number(state.duplicateReviews[0]?.id||0)||null;
   const filter=state.clientMasterFilter||"ALL",mode=state.masterMode||"CLIENTS";
   workspace.innerHTML=pageHead(tr("Master Data","Törzsadatok"),tr("Clients and pianos in one editable workspace. Every source field remains available.","Ügyfelek és zongorák egyetlen szerkeszthető munkafelületen. Minden forrásadatmező elérhető."),
     `<button id="addClientBtn" class="primary-button" type="button">＋ ${tr("New client","Új ügyfél")}</button>`)+
@@ -647,9 +663,10 @@ async function renderMaster(){
             ${masterToolButton("BUSINESS",tr("Business","Vállalkozások"),mode==="CLIENTS"&&filter==="BUSINESS")}
             ${masterToolButton("INSTITUTION",tr("Institution","Intézmények"),mode==="CLIENTS"&&filter==="INSTITUTION")}
             ${masterToolButton("PIANOS",tr("Pianos","Zongorák"),mode==="PIANOS")}
+            ${canReviewDuplicates?masterToolButton("DUPLICATES",tr("Possible duplicates","Vélelmezett duplikációk"),mode==="DUPLICATES",state.duplicatePendingCount):""}
           </div>
           <div class="master-search-reveal ${state.masterSearchOpen?"open":""}" id="masterSearchReveal">
-            <input id="masterSearch" type="search" value="${esc(state.masterSearch||"")}" placeholder="${mode==="PIANOS"?tr("Piano, serial, owner or service data…","Zongora, gyári szám, tulajdonos vagy szervizadat…"):tr("Name, company, email, phone or address…","Név, cég, e-mail, telefon vagy cím…")}" aria-label="${tr("Search Master Data","Keresés a törzsadatokban")}">
+            <input id="masterSearch" type="search" value="${esc(state.masterSearch||"")}" placeholder="${mode==="PIANOS"?tr("Piano, serial, owner or service data…","Zongora, gyári szám, tulajdonos vagy szervizadat…"):mode==="DUPLICATES"?tr("Search duplicate candidates…","Keresés a duplikációjelöltek között…"):tr("Name, company, email, phone or address…","Név, cég, e-mail, telefon vagy cím…")}" aria-label="${tr("Search Master Data","Keresés a törzsadatokban")}">
           </div>
         </div>
         <div id="masterList" class="client-list master-list"></div>
@@ -663,7 +680,7 @@ async function renderMaster(){
 }
 function updateMasterToolbar(){
   const searchActive=Boolean(state.masterSearchOpen||masterQuery()),reveal=$("#masterSearchReveal");reveal?.classList.toggle("open",searchActive);
-  const active=state.masterMode==="PIANOS"?"PIANOS":state.clientMasterFilter||"ALL";
+  const active=state.masterMode==="PIANOS"?"PIANOS":state.masterMode==="DUPLICATES"?"DUPLICATES":state.clientMasterFilter||"ALL";
   $$("[data-master-tool]").forEach(button=>{const kind=button.dataset.masterTool;button.classList.toggle("active",kind==="SEARCH"?searchActive:(kind==="CLIENTS"?active==="ALL":kind===active));});
 }
 async function handleMasterTool(kind){
@@ -676,8 +693,16 @@ async function handleMasterTool(kind){
     updateMasterToolbar();if(state.masterSearchOpen)requestAnimationFrame(()=>$("#masterSearch")?.focus());return;
   }
   state.masterSearchOpen=Boolean(masterQuery());
-  if(kind==="PIANOS"){state.masterMode="PIANOS";state.masterDetailKind="PIANO";if(!filteredMasterPianos().some(piano=>Number(piano.id)===Number(state.selectedPianoId)))state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;}
-  else{state.masterMode="CLIENTS";state.clientMasterFilter=kind==="CLIENTS"?"ALL":kind;state.masterDetailKind="CLIENT";if(!filteredMasterClients().some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=Number(filteredMasterClients()[0]?.id||0)||null;}
+  if(kind==="PIANOS"){
+    state.masterMode="PIANOS";state.masterDetailKind="PIANO";
+    if(!filteredMasterPianos().some(piano=>Number(piano.id)===Number(state.selectedPianoId)))state.selectedPianoId=Number(filteredMasterPianos()[0]?.id||state.pianos[0]?.id||0)||null;
+  }else if(kind==="DUPLICATES"){
+    state.masterMode="DUPLICATES";state.masterDetailKind="DUPLICATE";
+    if(!filteredDuplicateReviews().some(row=>Number(row.id)===Number(state.selectedDuplicateReviewId)))state.selectedDuplicateReviewId=Number(filteredDuplicateReviews()[0]?.id||0)||null;
+  }else{
+    state.masterMode="CLIENTS";state.clientMasterFilter=kind==="CLIENTS"?"ALL":kind;state.masterDetailKind="CLIENT";
+    if(!filteredMasterClients().some(client=>Number(client.id)===Number(state.selectedClientId)))state.selectedClientId=Number(filteredMasterClients()[0]?.id||0)||null;
+  }
   updateMasterToolbar();renderMasterList();void renderMasterDetail();
 }
 function masterQuery(){return String(state.masterSearch||"").trim().toLowerCase();}
@@ -717,7 +742,70 @@ function filteredMasterPianos(){
 function filteredMasterPianoReviews(){
   const q=masterQuery();return (state.pianoReviews||[]).filter(item=>!q||[item.source_brand,item.source_model,item.source_serial_number,item.source_build_year,item.client_name,item.client_address,item.source_note].some(value=>String(value||"").toLowerCase().includes(q)));
 }
-function renderMasterList(){if(state.masterMode==="PIANOS")renderPianoList();else renderClientList();}
+function duplicateReviewSearchValues(row={}){
+  const a=row.client_a||{},b=row.client_b||{};
+  return [...masterClientSearchValues(a),...masterClientSearchValues(b),...(row.match_fields||[]),row.status,row.id];
+}
+function filteredDuplicateReviews(){
+  const q=masterQuery();return (state.duplicateReviews||[]).filter(row=>!q||masterSearchMatch(duplicateReviewSearchValues(row),q));
+}
+function duplicateRelationshipTotal(client={}){
+  return Object.values(client.relationship_counts||{}).reduce((sum,value)=>sum+Number(value||0),0);
+}
+function renderDuplicateReviewList(){
+  const host=$("#masterList");if(!host)return;const rows=filteredDuplicateReviews();
+  const summary=`<div class="duplicate-review-summary"><div><strong>${Number(state.duplicatePendingCount||0)}</strong><span>${tr("duplicate cases remaining","duplikációs eset van hátra")}</span></div><button class="secondary-button" type="button" id="duplicateRescan">${tr("Re-scan","Újraellenőrzés")}</button></div>`;
+  host.innerHTML=summary+(rows.length?rows.map(row=>`<button class="duplicate-review-row ${Number(row.id)===Number(state.selectedDuplicateReviewId)?"active":""}" type="button" data-duplicate-review-id="${row.id}">
+    <span class="duplicate-review-names"><strong>${esc(row.client_a?.name||("#"+row.client_a_id))}</strong><b>↔</b><strong>${esc(row.client_b?.name||("#"+row.client_b_id))}</strong></span>
+    <small>${tr("Matching data","Egyező adatok")}: ${esc((row.match_fields||[]).map(duplicateFieldLabel).join(" · "))}</small>
+    <span class="duplicate-review-meta"><span class="badge">${Number(row.match_count||0)} ${tr("matches","egyezés")}</span><span>${tr("Linked records","Kapcsolatok")}: ${duplicateRelationshipTotal(row.client_a)+duplicateRelationshipTotal(row.client_b)}</span>${row.status==="REVIEW_LATER"?`<span class="badge">${tr("Review later","Későbbre hagyva")}</span>`:""}</span>
+  </button>`).join(""):`<div class="empty-state">${tr("No possible client duplicates remain.","Nincs több vélelmezett ügyfélduplikáció.")}</div>`);
+  $("#duplicateRescan")?.addEventListener("click",async()=>{try{await api("/api/client-duplicates/rescan",{method:"POST",body:"{}"});toast(tr("Duplicate review queue refreshed.","A duplikációs ellenőrzőlista frissült."),"success");await renderMaster();}catch(error){toast(humanError(error),"error");}});
+  $$("[data-duplicate-review-id]",host).forEach(button=>button.addEventListener("click",()=>{state.selectedDuplicateReviewId=Number(button.dataset.duplicateReviewId);renderDuplicateReviewList();void renderDuplicateReviewDetail();openMasterMobileDetail();}));
+}
+function duplicateFieldLabel(field){
+  return ({name:tr("Name","Név"),email:"Email",phone:tr("Phone","Telefon"),address:tr("Address","Cím"),postcode:tr("Postcode","Irányítószám"),city:tr("City","Város"),company_name:tr("Company","Cég"),contact_name:tr("Contact","Kapcsolattartó")})[field]||field;
+}
+function duplicateClientValue(client,field){
+  if(field==="phone")return client.phone||client.mobile_phone||client.line_phone||"";
+  if(field==="address")return client.address||[client.street,client.city,client.district,client.postcode,client.country].filter(Boolean).join(", ");
+  return client[field]||"";
+}
+function duplicateClientReviewCard(client,matchFields=[]){
+  const fields=["name","company_name","contact_name","email","phone","address","postcode","city"];
+  const counts=client.relationship_counts||{},sources=client.source_refs||[];
+  return `<section class="duplicate-client-card"><div class="duplicate-client-head"><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${esc(client.id)}</span><h3>${esc(client.name||"—")}</h3><span class="badge">${esc(clientTypeLabel(client.client_type))}</span></div>
+    <div class="duplicate-field-list">${fields.map(field=>{const value=duplicateClientValue(client,field),matched=matchFields.includes(field);return `<div class="${matched?"is-match":""}"><small>${esc(duplicateFieldLabel(field))}</small><strong>${esc(value||tr("Data pending","Adatpótlásra vár"))}</strong>${matched?`<span>✓ ${tr("match","egyezik")}</span>`:""}</div>`;}).join("")}</div>
+    <div class="duplicate-relation-grid"><span><strong>${Number(counts.pianos||0)}</strong><small>${tr("Pianos","Zongorák")}</small></span><span><strong>${Number(counts.jobs||0)}</strong><small>Jobs</small></span><span><strong>${Number(counts.invoices||0)}</strong><small>${tr("Invoices","Számlák")}</small></span><span><strong>${Number(counts.intakes||0)}</strong><small>Intake</small></span><span><strong>${Number(counts.conversations||0)}</strong><small>Messenger</small></span><span><strong>${Number(counts.appointments||0)}</strong><small>${tr("Appointments","Időpontok")}</small></span></div>
+    <div class="duplicate-source-refs"><small>${tr("Source references","Forráshivatkozások")}</small><strong>${sources.length?sources.map(row=>esc(row.source_name+" · "+row.source_client_id)).join("<br>"):tr("Legacy / no source reference","Legacy / nincs forráshivatkozás")}</strong></div>
+  </section>`;
+}
+async function renderDuplicateReviewDetail(){
+  const host=$("#clientDetail");if(!host)return;
+  const row=(state.duplicateReviews||[]).find(item=>Number(item.id)===Number(state.selectedDuplicateReviewId));
+  if(!row){host.innerHTML=`<div class="empty-state">${tr("Select a duplicate case.","Válassz duplikációs esetet.")}</div>`;return;}
+  const a=row.client_a||{},b=row.client_b||{},matches=row.match_fields||[];
+  host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
+    <div class="detail-title duplicate-detail-title"><div><span class="eyebrow">${tr("DUPLICATE REVIEW","DUPLIKÁCIÓ ELLENŐRZÉS")} #${row.id}</span><h2>${tr("Possible same customer","Lehetséges azonos ügyfél")}</h2><p>${tr("Nothing is deleted automatically. Choose the record to keep only after reviewing both sides.","Semmi nem törlődik automatikusan. Csak az összehasonlítás után válaszd ki a megtartandó rekordot.")}</p></div><span class="badge">${Number(row.match_count||0)} ${tr("matching fields","egyező adat")}</span></div>
+    <div class="duplicate-match-strip">${matches.map(field=>`<span>✓ ${esc(duplicateFieldLabel(field))}</span>`).join("")}</div>
+    <div class="duplicate-compare-grid">${duplicateClientReviewCard(a,matches)}${duplicateClientReviewCard(b,matches)}</div>
+    <div class="duplicate-review-actions">
+      <button class="primary-button" type="button" data-duplicate-merge-primary="${a.id}">${tr("Keep","Megtartás")} #${a.id} · ${esc(a.name||"")}</button>
+      <button class="primary-button" type="button" data-duplicate-merge-primary="${b.id}">${tr("Keep","Megtartás")} #${b.id} · ${esc(b.name||"")}</button>
+      <button class="secondary-button" type="button" id="duplicateNotSame">${tr("Not duplicate","Nem duplikáció")}</button>
+      <button class="secondary-button" type="button" id="duplicateReviewLater">${tr("Review later","Később ellenőrzöm")}</button>
+    </div>
+    <div class="detail-note">${tr("When records are merged, every linked piano, job, intake, invoice, Messenger conversation, appointment and source reference is moved to the kept customer. The duplicate record is archived under Documents → Deleted clients and remains restorable.","Összevonáskor minden kapcsolt zongora, munka, igény, számla, Messenger-beszélgetés, időpont és forráshivatkozás átkerül a megtartott ügyfélhez. A duplikált rekord a Dokumentumok → Törölt ügyfelek közé kerül, és visszaállítható marad.")}</div>`;
+  $("[data-master-back]",host)?.addEventListener("click",()=>closeMasterMobileDetail());
+  $$("[data-duplicate-merge-primary]",host).forEach(button=>button.addEventListener("click",async()=>{
+    const primaryId=Number(button.dataset.duplicateMergePrimary),primary=primaryId===Number(a.id)?a:b,duplicate=primaryId===Number(a.id)?b:a;
+    if(!window.confirm(tr(`Keep ${primary.name||("#"+primaryId)} and archive ${duplicate.name||("#"+duplicate.id)} as a merged duplicate? All linked records will move to the kept customer.`,`${primary.name||("#"+primaryId)} maradjon meg, és ${duplicate.name||("#"+duplicate.id)} kerüljön archívumba összevont duplikációként? Minden kapcsolódó rekord átkerül a megtartott ügyfélhez.`)))return;
+    try{await api(`/api/client-duplicates/${row.id}/merge`,{method:"POST",body:JSON.stringify({primary_client_id:primaryId})});toast(tr("Duplicate merged and archived.","A duplikáció összevonva és archiválva."),"success");state.selectedDuplicateReviewId=null;await renderMaster();}catch(error){toast(humanError(error),"error");}
+  }));
+  $("#duplicateNotSame")?.addEventListener("click",async()=>{try{await api(`/api/client-duplicates/${row.id}/not-duplicate`,{method:"POST",body:JSON.stringify({})});toast(tr("Marked as separate customers.","Külön ügyfélként megjelölve."),"success");state.selectedDuplicateReviewId=null;await renderMaster();}catch(error){toast(humanError(error),"error");}});
+  $("#duplicateReviewLater")?.addEventListener("click",async()=>{try{await api(`/api/client-duplicates/${row.id}/later`,{method:"POST",body:JSON.stringify({})});toast(tr("Kept in the review queue.","Az eset az ellenőrzőlistán marad."),"success");await renderMaster();}catch(error){toast(humanError(error),"error");}});
+}
+function renderMasterList(){if(state.masterMode==="PIANOS")renderPianoList();else if(state.masterMode==="DUPLICATES")renderDuplicateReviewList();else renderClientList();}
 function contactActionButton(client,kind){
   const isEmail=kind==="email",available=isEmail?Boolean(client.email):Boolean(client.phone),label=isEmail?tr("Email","E-mail"):kind==="message"?tr("Messages","Üzenetek"):tr("Phone","Telefon");
   const icon=isEmail?'<path d="M3 6h18v12H3z"></path><path d="m4 7 8 6 8-6"></path>':kind==="message"?'<path d="M4 5h16v11H9l-5 4V5Z"></path>':'<path d="M7 3h3l1.5 4-2 1.5a15 15 0 0 0 6 6L17 12.5l4 1.5v3c0 2-1 4-4 4C9 20 4 15 3 7c0-3 2-4 4-4Z"></path>';
@@ -773,7 +861,7 @@ function renderPianoList(){
 }
 function openMasterMobileDetail(){$("#masterLayout")?.classList.add("detail-open");}
 function closeMasterMobileDetail(){$("#masterLayout")?.classList.remove("detail-open");}
-async function renderMasterDetail(){if(state.masterDetailKind==="PIANO"||state.masterMode==="PIANOS")return renderPianoDetail();return renderClientDetail();}
+async function renderMasterDetail(){if(state.masterMode==="DUPLICATES"||state.masterDetailKind==="DUPLICATE")return renderDuplicateReviewDetail();if(state.masterDetailKind==="PIANO"||state.masterMode==="PIANOS")return renderPianoDetail();return renderClientDetail();}
 async function renderClientDetail(){
   const host=$("#clientDetail");if(!host)return;
   const client=state.clients.find(row=>Number(row.id)===Number(state.selectedClientId));
