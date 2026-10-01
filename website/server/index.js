@@ -1421,6 +1421,7 @@ function createApp(options = {}) {
       dynamicRoutes.push(...values[1].map((event) => eventPath(event, "hu")));
       dynamicRoutes.push(...values[2].map((item) => showroomPath(item, "en")));
       dynamicRoutes.push(...values[3].map((item) => showroomPath(item, "hu")));
+      dynamicRoutes.push(...uniquePianoBrands(values[2]).flatMap((brand)=>[pianoBrandPath(brand,"en"),pianoBrandPath(brand,"hu")]));
       dynamicRoutes.push(...values[4].map((item) => servicePath(item, "en")));
       dynamicRoutes.push(...values[5].map((item) => servicePath(item, "hu")));
       dynamicRoutes.push(...values[6].map((item) => artistPath(item, "en")));
