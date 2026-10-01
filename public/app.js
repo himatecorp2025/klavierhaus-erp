@@ -113,22 +113,39 @@ function humanError(error){
   const pair=map[code];
   return pair?(state.language==="hu"?pair[1]:pair[0]):code.replaceAll("_"," ");
 }
+const API_MEMORY_CACHE_MS=750;
+const API_MEMORY_CACHE_LIMIT=120;
 const apiInflightGets=new Map();
+const apiRecentGets=new Map();
+function clearApiMemoryCache(){apiRecentGets.clear();}
+function pruneApiMemoryCache(now=Date.now()){
+  for(const [key,row] of apiRecentGets)if(now-row.at>API_MEMORY_CACHE_MS*4)apiRecentGets.delete(key);
+  while(apiRecentGets.size>API_MEMORY_CACHE_LIMIT)apiRecentGets.delete(apiRecentGets.keys().next().value);
+}
 async function api(url,options={}){
   const method=String(options.method||"GET").toUpperCase(),dedupe=method==="GET"&&options.body===undefined;
+  const memoryCacheMs=dedupe?Math.max(0,Number(options.memoryCacheMs??API_MEMORY_CACHE_MS)||0):0;
   const requestKey=dedupe?`${state.token||"anon"}:${url}`:"";
+  if(requestKey&&memoryCacheMs>0){
+    const cached=apiRecentGets.get(requestKey),now=Date.now();
+    if(cached&&now-cached.at<=memoryCacheMs)return cached.value;
+    if(cached)apiRecentGets.delete(requestKey);
+  }
   if(requestKey&&apiInflightGets.has(requestKey))return apiInflightGets.get(requestKey);
   const request=(async()=>{
-    const headers={Accept:"application/json",...(options.headers||{})};
+    const requestOptions={...options};delete requestOptions.memoryCacheMs;
+    const headers={Accept:"application/json",...(requestOptions.headers||{})};
     if(state.token)headers.Authorization=`Bearer ${state.token}`;
-    if(options.body!==undefined&&!(options.body instanceof FormData)&&!headers["Content-Type"])headers["Content-Type"]="application/json";
-    const response=await fetch(url,{...options,headers,cache:"no-store"});
+    if(requestOptions.body!==undefined&&!(requestOptions.body instanceof FormData)&&!headers["Content-Type"])headers["Content-Type"]="application/json";
+    const response=await fetch(url,{...requestOptions,headers,cache:"no-store"});
     const type=response.headers.get("content-type")||"";
     const data=type.includes("application/json")?await response.json().catch(()=>({})):await response.text();
     if(!response.ok){
       if(response.status===401&&state.token){clearSession();showLogin();}
       const error=new Error(data?.error||`HTTP_${response.status}`);error.status=response.status;error.payload=data;throw error;
     }
+    if(method!=="GET")clearApiMemoryCache();
+    else if(requestKey&&memoryCacheMs>0){apiRecentGets.set(requestKey,{at:Date.now(),value:data});pruneApiMemoryCache();}
     return data;
   })();
   if(!requestKey)return request;
@@ -137,10 +154,12 @@ async function api(url,options={}){
   finally{if(apiInflightGets.get(requestKey)===request)apiInflightGets.delete(requestKey);}
 }
 function setSession(payload){
+  clearApiMemoryCache();
   state.token=payload.token;state.user=payload.user;
   sessionStorage.setItem("kh_token",state.token);sessionStorage.setItem("kh_user",JSON.stringify(state.user));
 }
 function clearSession(){
+  clearApiMemoryCache();apiInflightGets.clear();
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
   clearInterval(state.notificationTimer);state.notificationTimer=null;clearTimeout(state.notificationReconnectTimer);state.notificationReconnectTimer=null;state.notificationSource?.close?.();state.notificationSource=null;state.notifications=[];state.notificationInitialized=false;state.notificationSeen=new Set();updateAppBadge(0);closeNotificationDrawer();
 }

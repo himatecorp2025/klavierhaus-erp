@@ -99,9 +99,24 @@ function registerWebsiteConversationRoutes({
     const linkedPianos=linkedClient?db.prepare("SELECT id,brand,model,serial_number,location_address,location_notes FROM pianos WHERE client_id=? ORDER BY id").all(linkedClient.id):[];
     return {...row,messages,appointment_proposals:proposals(row.id),private_appointments:linkedAppointments,linked_intake:linkedIntake,linked_client:linkedClient,linked_pianos:linkedPianos,support:supportState({db,env}),staff_view:staffView};
   }
+  function fileSha256(filePath){
+    return new Promise((resolve,reject)=>{
+      const digest=crypto.createHash("sha256"),stream=fs.createReadStream(filePath);
+      stream.on("error",reject);stream.on("data",chunk=>digest.update(chunk));stream.on("end",()=>resolve(digest.digest("hex")));
+    });
+  }
+  async function prepareFiles(files){
+    return Promise.all((files||[]).map(async file=>({
+      stored_name:path.basename(file.filename||file.path),
+      original_name:clean(file.originalname,500),
+      mime_type:clean(file.mimetype,200),
+      file_size:Number(file.size||0),
+      sha256:await fileSha256(file.path)
+    })));
+  }
   function saveFiles(files,conversationId,messageId){
     const insert=db.prepare("INSERT INTO customer_message_attachments(id,conversation_id,message_id,stored_name,original_name,mime_type,file_size,sha256) VALUES(?,?,?,?,?,?,?,?)");
-    for(const file of files||[]){const bytes=fs.readFileSync(file.path);insert.run(id("ATT"),conversationId,messageId,path.basename(file.filename||file.path),clean(file.originalname,500),clean(file.mimetype,200),Number(file.size||bytes.length),crypto.createHash("sha256").update(bytes).digest("hex"));}
+    for(const file of files||[])insert.run(id("ATT"),conversationId,messageId,file.stored_name,file.original_name,file.mime_type,file.file_size,file.sha256);
   }
   function event(conversationId,type,{actor=null,fromStatus=null,toStatus=null,details={}}={}){
     db.prepare("INSERT INTO customer_conversation_events(id,conversation_id,event_type,actor_user_id,actor_name,actor_role,from_status,to_status,details) VALUES(?,?,?,?,?,?,?,?,?)")
@@ -139,6 +154,8 @@ function registerWebsiteConversationRoutes({
     if(!name||!validEmail(mail)||!PUBLIC_CATEGORIES.has(category)||!consent){removeFiles(req.files);return res.status(400).json({error:"CONVERSATION_IDENTITY_REQUIRED",required_fields:["name","email","category"]});}
     const support=supportState({db,env}),existingRaw=matchingConversation(name,mail,category),existing=existingRaw?closeIfInactive(existingRaw):null;
     const token=crypto.randomBytes(32).toString("base64url"),customerMessageId=message||req.files?.length?id("MSG"):null;
+    let preparedFiles=[];
+    try{preparedFiles=await prepareFiles(req.files);}catch(_error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_ATTACHMENT_PROCESSING_FAILED"});}
     if(existing){
       const before=existing.status,wasClosed=before==="CLOSED",nextCycle=Math.max(1,Number(existing.activity_cycle||1))+(wasClosed?1:0);
       try{
@@ -152,7 +169,7 @@ function registerWebsiteConversationRoutes({
           if(customerMessageId){
             db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')")
               .run(customerMessageId,existing.id,"CUSTOMER",name,mail,message||"");
-            saveFiles(req.files,existing.id,customerMessageId);
+            saveFiles(preparedFiles,existing.id,customerMessageId);
           }
           event(existing.id,wasClosed?"CUSTOMER_REOPENED":"CUSTOMER_RESUMED",{fromStatus:before,toStatus:"PENDING_STAFF",details:{message_id:customerMessageId,activity_cycle:nextCycle,support_open:support.open}});
         })();
@@ -176,7 +193,7 @@ function registerWebsiteConversationRoutes({
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,body,status) VALUES(?,?,?,?,?,'READ')").run(welcomeMessageId,conversationId,"STAFF","Klavierhaus Customer Service",welcome);
         if(customerMessageId){
           db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(customerMessageId,conversationId,"CUSTOMER",name,mail,message||"");
-          saveFiles(req.files,conversationId,customerMessageId);
+          saveFiles(preparedFiles,conversationId,customerMessageId);
         }
         event(conversationId,"CREATED",{toStatus:"PENDING_STAFF",details:{message_id:customerMessageId,support_open:support.open,activity_cycle:1}});
       })();
@@ -241,15 +258,17 @@ function registerWebsiteConversationRoutes({
     res.status(201).json(payload(after,{token:req.params.token}));
   });
 
-  app.post("/api/public/customer-conversations/:token/messages",upload,(req,res)=>{
+  app.post("/api/public/customer-conversations/:token/messages",upload,async(req,res)=>{
     const row=byToken(req.params.token);if(!row){removeFiles(req.files);return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});}
     if(row.status==="CLOSED"){removeFiles(req.files);return res.status(409).json({error:"CONVERSATION_REAUTH_REQUIRED",required_fields:["name","email","category"],reason:row.closure_note||"CLOSED"});}
     const body=clean(req.body?.message,5000);if(!body&&!(req.files||[]).length){removeFiles(req.files);return res.status(400).json({error:"MESSAGE_REQUIRED"});}
     const messageId=id("MSG"),before=row.status;
+    let preparedFiles=[];
+    try{preparedFiles=await prepareFiles(req.files);}catch(_error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_ATTACHMENT_PROCESSING_FAILED"});}
     try{
       db.transaction(()=>{
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(messageId,row.id,"CUSTOMER",row.name||"Guest",row.email||null,body);
-        saveFiles(req.files,row.id,messageId);
+        saveFiles(preparedFiles,row.id,messageId);
         db.prepare("UPDATE customer_conversations SET status='PENDING_STAFF',last_message_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(row.id);
         event(row.id,"CUSTOMER_MESSAGE",{fromStatus:before,toStatus:"PENDING_STAFF",details:{message_id:messageId,activity_cycle:Number(row.activity_cycle||1)}});
       })();
@@ -336,11 +355,13 @@ function registerWebsiteConversationRoutes({
     const row=byId(req.params.id);if(!row){removeFiles(req.files);return res.status(404).json({error:"CONVERSATION_NOT_FOUND"});}
     const body=clean(req.body?.message,5000);if(!body){removeFiles(req.files);return res.status(400).json({error:"MESSAGE_REQUIRED"});}
     const messageId=id("MSG"),before=row.status;
+    let preparedFiles=[];
+    try{preparedFiles=await prepareFiles(req.files);}catch(_error){removeFiles(req.files);return res.status(500).json({error:"CONVERSATION_ATTACHMENT_PROCESSING_FAILED"});}
     try{
       db.transaction(()=>{
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,sender_user_id,body,status) VALUES(?,?,?,?,?,?,?,'READ')")
           .run(messageId,row.id,"STAFF",req.user.name||"Klavierhaus",req.user.email||null,req.user.id,body);
-        saveFiles(req.files,row.id,messageId);
+        saveFiles(preparedFiles,row.id,messageId);
         db.prepare("UPDATE customer_conversations SET status='PENDING_CUSTOMER',assigned_user_id=COALESCE(assigned_user_id,?),last_message_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id,row.id);
         event(row.id,"STAFF_REPLY",{actor:req.user,fromStatus:before,toStatus:"PENDING_CUSTOMER",details:{message_id:messageId}});
       })();

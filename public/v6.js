@@ -137,22 +137,38 @@ showApp=function(){
   v6ApplySidebar();
   v6SyncAccountChrome();
 };
-loadBranding=async function(){
+function v6ReadBrandingBootstrap(){
+  const node=$("#khBrandingBootstrap");if(!node)return null;
+  node.remove();
   try{
-    const branding=await fetch("/api/public/branding",{cache:"no-store"}).then(response=>response.json());
-    state.v6Branding=branding;v6ApplyBrandLogo();
-    if(branding.login_background_url){
-      $("#loginScreen")?.style.setProperty("--login-background",`url("${String(branding.login_background_url).replaceAll('"','%22')}")`);
-      $("#loginScreen")?.classList.add("has-custom-background");
-    }else{
-      $("#loginScreen")?.style.removeProperty("--login-background");$("#loginScreen")?.classList.remove("has-custom-background");
-    }
-    const favicon=branding.favicon_url;
-    if(favicon)$("#appFavicon")?.setAttribute("href",v6BrandAssetUrl(favicon));
-    const touch=branding.app_icon_url;
-    if(touch)$("#appTouchIcon")?.setAttribute("href",v6BrandAssetUrl(touch));
-    document.title=`${branding.company_name||"Klavierhaus"} System`;
-  }catch(_error){}
+    const parsed=JSON.parse(node.textContent||"{}");
+    return parsed&&typeof parsed==="object"?parsed:null;
+  }catch(_error){return null;}
+}
+function v6ApplyBrandingState(branding){
+  if(!branding||typeof branding!=="object")return;
+  state.v6Branding=branding;v6ApplyBrandLogo();
+  if(branding.login_background_url){
+    const background=v6BrandAssetUrl(branding.login_background_url);
+    $("#loginScreen")?.style.setProperty("--login-background",`url("${String(background).replaceAll('"','%22')}")`);
+    $("#loginScreen")?.classList.add("has-custom-background");
+  }else{
+    $("#loginScreen")?.style.removeProperty("--login-background");$("#loginScreen")?.classList.remove("has-custom-background");
+  }
+  const favicon=branding.favicon_url;
+  if(favicon)$("#appFavicon")?.setAttribute("href",v6BrandAssetUrl(favicon));
+  const touch=branding.app_icon_url;
+  if(touch)$("#appTouchIcon")?.setAttribute("href",v6BrandAssetUrl(touch));
+  document.title=`${branding.company_name||"Klavierhaus"} System`;
+}
+loadBranding=async function(){
+  const bootstrap=v6ReadBrandingBootstrap();
+  if(bootstrap){v6ApplyBrandingState(bootstrap);return bootstrap;}
+  try{
+    const response=await fetch("/api/public/branding",{cache:"no-store"});
+    if(!response.ok)throw new Error("BRANDING_LOAD_FAILED");
+    const branding=await response.json();v6ApplyBrandingState(branding);return branding;
+  }catch(_error){return null;}
 };
 
 /* ---------- Website CMS / mini site builder ---------- */

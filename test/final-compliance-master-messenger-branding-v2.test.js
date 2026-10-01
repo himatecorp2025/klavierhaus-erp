@@ -136,10 +136,10 @@ test("public logo uses the same validated branding upload pipeline as ERP logos"
 
 test("ERP dark and light logos switch with theme while PWA icon remains independent",()=>{
   const server=read("server/index.js"),v6=read("public/v6.js");
-  assert.match(server,/erp_logo_dark_url:setting\("erp_logo_dark_url",legacyLogo\)/);
-  assert.match(server,/erp_logo_light_url:setting\("erp_logo_light_url",legacyLogo\)/);
-  assert.match(server,/app_icon_url:setting\("app_icon_url","\/icons\/icon-512\.png"\)/);
-  assert.doesNotMatch(server,/app_icon_url:setting\("app_icon_url",setting\("logo_url"/);
+  assert.match(server,/erp_logo_dark_url:values\.erp_logo_dark_url\|\|legacyLogo/);
+  assert.match(server,/erp_logo_light_url:values\.erp_logo_light_url\|\|legacyLogo/);
+  assert.match(server,/app_icon_url:values\.app_icon_url\|\|"\/icons\/icon-512\.png"/);
+  assert.doesNotMatch(server,/app_icon_url:values\.logo_url/);
   assert.match(v6,/theme==="light"\?\(branding\.erp_logo_light_url\|\|branding\.logo_url\):\(branding\.erp_logo_dark_url\|\|branding\.logo_url\)/);
   assert.match(v6,/const touch=branding\.app_icon_url;/);
 });

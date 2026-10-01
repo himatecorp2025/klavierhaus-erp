@@ -86,7 +86,7 @@ test("CMS Login logo has preview upload backend persistence and login applicatio
   assert.match(v6,/const loginUrl=branding\.login_logo_url\|\|branding\.erp_logo_dark_url\|\|branding\.logo_url/);
   assert.match(v6,/v6BrandAssetUrl\(url\)/);
   assert.match(backend,/\{route:"login-logo",key:"login_logo_url",min:192\}/);
-  assert.match(server,/login_logo_url:setting\("login_logo_url",legacyLogo\)/);
+  assert.match(server,/login_logo_url:values\.login_logo_url\|\|legacyLogo/);
 });
 
 test("Master Data production reconcile is fail-closed until the strict source contract is ready",()=>{
