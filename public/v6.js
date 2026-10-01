@@ -915,6 +915,25 @@ renderProfile=async function(){
   const service=superadmin?await api("/api/superadmin/service-suspension",{memoryCacheMs:0}).catch(()=>({suspended:state.serviceSuspended,status:state.serviceSuspended?"SUSPENDED":"ACTIVE"})):null;
   if(service)applyServiceStatus(service);
   const passwordMin=superadmin?12:8;
+  const serviceCard=superadmin?`<section class="panel superadmin-service-control ${service?.suspended?"is-suspended":"is-active"}">
+    <div class="service-control-head">
+      <div><span class="eyebrow">SUPER ADMIN</span><h2>${tr("Service availability","Szolgáltatás elérhetősége")}</h2><p>${tr("Controls access to the Klavierhaus website and System.","A Klavierhaus weboldal és System hozzáférését vezérli.")}</p></div>
+      <span class="service-control-status ${service?.suspended?"suspended":"active"}">${service?.suspended?tr("SUSPENDED","SZÜNETEL"):tr("ACTIVE","AKTÍV")}</span>
+    </div>
+    <div class="service-access-switch">
+      <span><strong>${tr("Klavierhaus service","Klavierhaus szolgáltatás")}</strong><small>${service?.suspended?tr("Only the Super Admin can access the System. The public website shows a technical-unavailability page.","Kizárólag a szuperadmin fér hozzá a Systemhez. A publikus weboldal technikai elérhetetlenséget jelez."):tr("Website and normal System access are available.","A weboldal és a normál System-hozzáférés elérhető.")}</small></span>
+      <label class="service-access-toggle" title="${tr("Enable or suspend service","Szolgáltatás be- vagy kikapcsolása")}"><input id="serviceAccessToggle" type="checkbox" ${service?.suspended?"":"checked"}><i aria-hidden="true"></i></label>
+    </div>
+    ${service?.suspended?`<div class="service-control-warning"><strong>! ${tr("Payment suspension active","Díjhátralék miatti szüneteltetés aktív")}</strong><span>${tr("Restoring access immediately re-enables the public website and normal user sign-in.","A visszakapcsolás azonnal újra engedélyezi a publikus weboldalt és a normál felhasználói belépést.")}</span></div>`:""}
+    <details class="service-control-details" ${service?.suspended?"open":""}>
+      <summary>${tr("Suspension details","Szüneteltetés részletei")}</summary>
+      <div class="service-control-grid">
+        <label class="field"><span>${tr("Invoice reference (optional)","Számlahivatkozás (opcionális)")}</span><input id="serviceInvoiceReference" value="${esc(service?.invoice_reference||"")}" ${service?.suspended?"disabled":""}></label>
+        <label class="field"><span>${tr("Last changed","Utolsó módosítás")}</span><input value="${esc(service?.changed_at?new Date(service.changed_at).toLocaleString(state.language==="hu"?"hu-HU":"en-US"):"—")}" disabled></label>
+        <label class="field full"><span>${tr("Internal note (optional)","Belső megjegyzés (opcionális)")}</span><textarea id="serviceSuspensionNote" rows="2" ${service?.suspended?"disabled":""}>${esc(service?.note||"")}</textarea></label>
+      </div>
+    </details>
+  </section>`:"";
   workspace.innerHTML=pageHead(tr("Profile","Profil"),tr("Your personal Klavierhaus System account.","Saját Klavierhaus System fiókod."))+
     `<div class="profile-self-layout">
       <section class="panel profile-self-card">
@@ -927,31 +946,23 @@ renderProfile=async function(){
           ${user.profile_image_url?`<button id="removeProfileImage" class="text-button danger-text" type="button">${tr("Remove photo","Kép eltávolítása")}</button>`:""}
         </div>
       </section>
-      <section class="panel profile-editor-panel">
-        <div class="panel-head"><div><span class="eyebrow">${tr("PERSONAL PROFILE","SZEMÉLYES PROFIL")}</span><h2>${tr("Contact details","Kapcsolati adatok")}</h2></div></div>
-        <form id="selfProfileForm" class="form-grid">
-          <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user.name||"")}" required></label>
-          <label class="field"><span>${superadmin?tr("Super Admin login email","Szuperadmin belépési e-mail"):tr("Login email","Belépési e-mail")}</span><input ${superadmin?'name="email" type="email" required':""} value="${esc(user.email||"")}" ${superadmin?"":"disabled"}></label>
-          <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")}</span><input name="contact_email" type="email" value="${esc(user.contact_email||"")}"></label>
-          <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user.phone||"")}"></label>
-          <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user.address||"")}"></label>
-          <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
-          <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
-          ${superadmin?`<div class="detail-note full">${tr("Changing the Super Admin login email or password revokes existing sessions and requires a fresh sign-in.","A szuperadmin belépési e-mailjének vagy jelszavának módosítása visszavonja a meglévő munkameneteket, és új bejelentkezést kér.")}</div>`:""}
-          <div class="form-actions full"><button class="primary-button" type="submit">${tr("Save profile","Profil mentése")}</button></div>
-        </form>
-      </section>
-      ${superadmin?`<section class="panel superadmin-service-control ${service?.suspended?"is-suspended":"is-active"}">
-        <div class="service-control-head"><div><span class="eyebrow">SUPER ADMIN · ${tr("SERVICE CONTROL","SZOLGÁLTATÁS VEZÉRLÉS")}</span><h2>${tr("Klavierhaus service access","Klavierhaus szolgáltatás-hozzáférés")}</h2></div><span class="service-control-status ${service?.suspended?"suspended":"active"}">${service?.suspended?tr("SUSPENDED","SZÜNETEL"):tr("ACTIVE","AKTÍV")}</span></div>
-        <p class="service-control-copy">${service?.suspended?tr("The public website is showing a technical-unavailability page and only the Super Admin can use the System.","A publikus weboldal technikai elérhetetlenséget jelez, a Systemet pedig kizárólag a szuperadmin használhatja."):tr("The public website and Klavierhaus System are available normally.","A publikus weboldal és a Klavierhaus System normál módon elérhető.")}</p>
-        ${service?.suspended?`<div class="service-control-warning">! ${tr("Payment-related suspension is active. Restoring access immediately re-enables the public website and normal user sign-in.","A díjhátralék miatti szüneteltetés aktív. A visszakapcsolás azonnal újra engedélyezi a publikus weboldalt és a normál felhasználói belépést.")}</div>`:""}
-        <div class="service-control-grid">
-          <label class="field"><span>${tr("Invoice reference (optional)","Számlahivatkozás (opcionális)")}</span><input id="serviceInvoiceReference" value="${esc(service?.invoice_reference||"")}" ${service?.suspended?"disabled":""}></label>
-          <label class="field"><span>${tr("Last changed","Utolsó módosítás")}</span><input value="${esc(service?.changed_at?new Date(service.changed_at).toLocaleString(state.language==="hu"?"hu-HU":"en-US"):"—")}" disabled></label>
-          <label class="field full"><span>${tr("Internal note (optional)","Belső megjegyzés (opcionális)")}</span><textarea id="serviceSuspensionNote" rows="3" ${service?.suspended?"disabled":""}>${esc(service?.note||"")}</textarea></label>
-        </div>
-        <div class="service-access-switch"><span><strong>${tr("Service enabled","Szolgáltatás bekapcsolva")}</strong><small>${tr("Turning this off suspends the website and all non-Super-Admin access.","Kikapcsoláskor a weboldal és minden nem szuperadmin hozzáférés szünetel.")}</small></span><label class="service-access-toggle"><input id="serviceAccessToggle" type="checkbox" ${service?.suspended?"":"checked"}><i aria-hidden="true"></i></label></div>
-      </section>`:""}
+      <div class="profile-main-column">
+        <section class="panel profile-editor-panel">
+          <div class="panel-head"><div><span class="eyebrow">${tr("PERSONAL PROFILE","SZEMÉLYES PROFIL")}</span><h2>${tr("Contact details","Kapcsolati adatok")}</h2></div></div>
+          <form id="selfProfileForm" class="form-grid">
+            <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user.name||"")}" required></label>
+            <label class="field"><span>${superadmin?tr("Super Admin login email","Szuperadmin belépési e-mail"):tr("Login email","Belépési e-mail")}</span><input ${superadmin?'name="email" type="email" required':""} value="${esc(user.email||"")}" ${superadmin?"":"disabled"}></label>
+            <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")}</span><input name="contact_email" type="email" value="${esc(user.contact_email||"")}"></label>
+            <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user.phone||"")}"></label>
+            <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user.address||"")}"></label>
+            <label class="field"><span>${tr("New password (optional)","Új jelszó (opcionális)")}</span><input name="password" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
+            <label class="field"><span>${tr("Confirm new password","Új jelszó újra")}</span><input name="password_confirmation" type="password" minlength="${passwordMin}" autocomplete="new-password"></label>
+            ${superadmin?`<div class="detail-note full">${tr("Changing the Super Admin login email or password revokes existing sessions and requires a fresh sign-in.","A szuperadmin belépési e-mailjének vagy jelszavának módosítása visszavonja a meglévő munkameneteket, és új bejelentkezést kér.")}</div>`:""}
+            <div class="form-actions full"><button class="primary-button" type="submit">${tr("Save profile","Profil mentése")}</button></div>
+          </form>
+        </section>
+        ${serviceCard}
+      </div>
     </div>`;
   $("#profileImageFile")?.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0];if(!file)return;const data=new FormData();data.append("file",file,file.name);
