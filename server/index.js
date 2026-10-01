@@ -336,7 +336,7 @@ app.post("/api/login",async(req,res)=>{
   const valid=await new Promise(resolve=>bcrypt.compare(password,row?.password_hash||dummyHash,(_e,ok)=>resolve(Boolean(ok))));
   if(!row||!valid){recordFailure(req,email);audit({user:row?safeUser(row):null},"LOGIN_FAILED","authentication",row?.id||"",null,{email},0);return res.status(401).json({error:"INVALID_LOGIN"});}
   loginBuckets.delete(accountKey);
-  if(serviceSuspension.isSuspended()&&!isSuperadmin(row)){
+  if(serviceSuspension.isSuspended()&&Number(row.is_superadmin||0)!==1){
     audit({user:safeUser(row)},"LOGIN_BLOCKED","authentication",row.id,null,{reason:"SERVICE_SUSPENDED"},0);
     return res.status(423).json({error:"SERVICE_SUSPENDED"});
   }
@@ -351,7 +351,7 @@ app.post("/api/login",async(req,res)=>{
 app.post("/api/account-activation/verify",(req,res)=>{
   try{
     const user=activationUser(req.body?.activation_token);
-    if(serviceSuspension.isSuspended()&&!isSuperadmin(user))return res.status(423).json({error:"SERVICE_SUSPENDED"});
+    if(serviceSuspension.isSuspended()&&Number(user.is_superadmin||0)!==1)return res.status(423).json({error:"SERVICE_SUSPENDED"});
     const result=accountActivation.verify(user.id,req.body?.activation_code);
     if(!result.ok)return res.status(result.error==="ACTIVATION_TEMPORARILY_LOCKED"?429:400).json({error:result.error,retry_after_seconds:result.retryAfterSeconds});
     res.json(sessionFor(user));
@@ -360,7 +360,7 @@ app.post("/api/account-activation/verify",(req,res)=>{
 app.post("/api/account-activation/resend",async(req,res)=>{
   try{
     const user=activationUser(req.body?.activation_token);
-    if(serviceSuspension.isSuspended()&&!isSuperadmin(user))return res.status(423).json({error:"SERVICE_SUSPENDED"});
+    if(serviceSuspension.isSuspended()&&Number(user.is_superadmin||0)!==1)return res.status(423).json({error:"SERVICE_SUSPENDED"});
     const state=accountActivation.state(user.id);
     if(!state||state.status!=="PENDING")return res.status(409).json({error:"ACTIVATION_ALREADY_COMPLETED"});
     const issuance=accountActivation.issue(user.id),delivery=await accountActivation.deliver(user,issuance,"USER_RESEND");
