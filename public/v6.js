@@ -335,7 +335,7 @@ async function v6PublishCmsDraft({close=false}={}){
 }
 function v6OpenCmsSectionEditor(path,key,index=0){
   const value=v6CmsGet(path),title=v6CmsCardTitle(value,key,index);
-  openDialog({title,eyebrow:tr("PAGE SECTION","OLDALSZEKCIÓ"),variant:"wide",body:`<div class="cms-section-dialog-copy"><small>${tr("Edit this page section in its own focused card. Changes affect only this page draft until published.","Ezt az oldalszekciót külön, saját szerkesztőkártyán módosíthatod. A változtatások publikálásig csak az oldal piszkozatát érintik.")}</small></div><div id="cmsSectionEditorFields" class="cms-section-editor-fields"></div><div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Close","Bezárás")}</button><button id="publishCmsSection" type="button" class="primary-button">${tr("Save & publish","Mentés és publikálás")}</button></div>`});
+  openDialog({title,eyebrow:tr("PAGE ELEMENT · SECTION","OLDALELEM · SZEKCIÓ"),variant:"wide",body:`<div class="cms-section-dialog-copy"><small>${tr("Edit this page section in its own focused card. Changes affect only this page draft until published.","Ezt az oldalszekciót külön, saját szerkesztőkártyán módosíthatod. A változtatások publikálásig csak az oldal piszkozatát érintik.")}</small></div><div id="cmsSectionEditorFields" class="cms-section-editor-fields"></div><div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Close","Bezárás")}</button><button id="publishCmsSection" type="button" class="primary-button">${tr("Save & publish","Mentés és publikálás")}</button></div>`});
   v6RenderCmsSectionEditor(path,key,index);
   $("#publishCmsSection")?.addEventListener("click",()=>v6PublishCmsDraft({close:true}));
 }
@@ -343,7 +343,7 @@ function v6RenderCmsFields(){
   const host=$("#cmsVisualFields");if(!host)return;
   const entries=v6CmsPageElements();
   host.innerHTML=entries.length?`<div class="cms-page-elements-grid">${entries.map(entry=>v6CmsElementCard(entry.value,entry.key,entry.index,entry.path,entry.group)).join("")}</div>`:`<div class="cms-empty">${tr("No editable content.","Nincs szerkeszthető tartalom.")}</div>`;
-  $("[data-cms-path]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCmsSectionEditor(v6CmsPathRead(button.dataset.cmsPath),button.dataset.cmsKey,Number(button.dataset.cmsSectionIndex||0))));
+  $$("[data-cms-path]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCmsSectionEditor(v6CmsPathRead(button.dataset.cmsPath),button.dataset.cmsKey,Number(button.dataset.cmsSectionIndex||0))));
 }
 function v6CmsConnectedConfig(pageKey){
   const meta=(state.cmsPages||[]).find(page=>page.page_key===pageKey)||{};
@@ -382,7 +382,7 @@ async function v6RefreshCmsSidebarMeta(){
   await v6EnsureCmsPages({force:true});
   const sidebar=$("#cmsPageList");if(!sidebar)return;
   sidebar.innerHTML=v6CmsSidebarMarkup();
-  $("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
+  $$("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
 }
 async function v6LoadCmsConnectedCollection(config){
   const host=$("#cmsConnectedCollection");if(!host||!config)return;
