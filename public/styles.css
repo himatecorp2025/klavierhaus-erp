@@ -2992,3 +2992,96 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   .cms-page-connected-grid{grid-template-columns:1fr!important}
   .cms-piano-brand-groups{padding:10px}
 }
+
+
+/* DYNAMIC PIANO + NEW WORKFLOW PHASE + MESSENGER COMPOSER V34 */
+
+/* Messenger admin composer: two direct children only — editor + fixed 2x2 action block. */
+.messenger-reply{
+  grid-template-columns:minmax(0,1fr) 94px!important;
+  align-items:end!important;
+  width:100%;
+  min-width:0;
+  overflow:visible;
+}
+.messenger-reply-main{min-width:0!important;max-width:100%}
+.messenger-reply textarea{min-width:0!important;max-width:100%!important}
+.messenger-reply .messenger-action-grid{
+  display:grid!important;
+  grid-template-columns:repeat(2,44px)!important;
+  grid-template-rows:repeat(2,44px)!important;
+  gap:6px!important;
+  width:94px!important;
+  min-width:94px!important;
+  max-width:94px!important;
+  overflow:visible!important;
+}
+.messenger-reply .messenger-action-button,
+.messenger-reply .messenger-send-button,
+.messenger-reply .messenger-attach-button{
+  width:44px!important;min-width:44px!important;height:44px!important;min-height:44px!important;
+  grid-column:auto!important;grid-row:auto!important;
+}
+.messenger-reply .messenger-send-button{font-size:14px!important}
+.messenger-reply .messenger-send-button::after{content:none!important}
+
+/* New Workflow Job: app-style empty phase card and inline creator. */
+.workflow-job-phase-adder{display:grid;gap:10px;margin-top:10px}
+.workflow-add-phase-card{
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  grid-template-areas:"icon title" "icon copy";
+  gap:2px 12px;
+  align-items:center;
+  width:100%;
+  min-height:88px;
+  padding:12px 14px;
+  border:1px dashed color-mix(in srgb,var(--accent) 55%,var(--line));
+  border-radius:14px;
+  background:color-mix(in srgb,var(--accent) 5%,var(--surface));
+  color:var(--ink);
+  text-align:left;
+  cursor:pointer;
+}
+.workflow-add-phase-card>span{
+  grid-area:icon;display:grid;place-items:center;width:48px;height:48px;
+  border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--accent);font-size:25px
+}
+.workflow-add-phase-card>strong{grid-area:title;font-size:12px}
+.workflow-add-phase-card>small{grid-area:copy;color:var(--muted);font-size:9px;line-height:1.4}
+.workflow-add-phase-card:hover{border-color:var(--accent);background:var(--accent-soft)}
+.workflow-add-phase-card:disabled{opacity:.45;cursor:not-allowed}
+.workflow-add-phase-inline{
+  display:grid;grid-template-columns:1fr 1fr auto;gap:9px;align-items:end;
+  padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)
+}
+.workflow-add-phase-inline.hidden{display:none!important}
+
+/* CMS brand grids always end with an explicit add card. */
+.cms-add-collection-card{
+  display:grid!important;
+  grid-template-rows:minmax(140px,1fr) auto!important;
+  min-height:0!important;
+  border-style:dashed!important;
+  border-color:color-mix(in srgb,var(--accent) 52%,var(--line))!important;
+}
+.cms-add-collection-card:hover{border-color:var(--accent)!important;background:var(--accent-soft)!important}
+.cms-add-collection-icon{
+  display:grid;place-items:center;min-height:140px;background:color-mix(in srgb,var(--accent) 6%,var(--surface-3));
+  color:var(--accent);font-size:34px;font-weight:300
+}
+
+@media(max-width:700px){
+  .messenger-reply{grid-template-columns:minmax(0,1fr) 86px!important;gap:6px!important}
+  .messenger-reply .messenger-action-grid{
+    grid-template-columns:repeat(2,40px)!important;grid-template-rows:repeat(2,40px)!important;
+    width:86px!important;min-width:86px!important;max-width:86px!important
+  }
+  .messenger-reply .messenger-action-button,
+  .messenger-reply .messenger-send-button,
+  .messenger-reply .messenger-attach-button{
+    width:40px!important;min-width:40px!important;height:40px!important;min-height:40px!important
+  }
+  .workflow-add-phase-inline{grid-template-columns:1fr}
+  .workflow-add-phase-inline .primary-button{width:100%}
+}

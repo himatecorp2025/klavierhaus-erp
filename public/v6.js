@@ -319,7 +319,10 @@ function v6RenderCmsFields(){
   $$("[data-cms-section]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCmsSectionEditor(button.dataset.cmsSection,Number(button.dataset.cmsSectionIndex||0))));
 }
 function v6CmsConnectedConfig(pageKey){
-  if(pageKey==="pianos")return {type:"piano",route:"showroom-pianos",title:tr("Showroom pianos","Bemutatótermi zongorák"),subtitle:tr("Steinway, Bösendorfer, Fazioli and every individually added showroom piano.","Steinway, Bösendorfer, Fazioli és minden egyedileg hozzáadott bemutatótermi zongora.")};
+  const meta=(state.cmsPages||[]).find(page=>page.page_key===pageKey)||{};
+  const brand=meta.piano_brand||null,brandSlug=meta.piano_brand_slug||null;
+  if(pageKey==="pianos")return {type:"piano",route:"showroom-pianos",title:tr("Showroom pianos","Bemutatótermi zongorák"),subtitle:tr("Steinway, Bösendorfer, Fazioli and every future showroom brand or individually added piano are managed here.","Steinway, Bösendorfer, Fazioli és minden jövőbeli bemutatótermi márka vagy egyedileg hozzáadott zongora itt kezelhető.")};
+  if(brand||pageKey==="steinway")return {type:"piano",route:"showroom-pianos",brand:brand||"Steinway & Sons",brandSlug:brandSlug||"steinway",title:brand||"Steinway & Sons",subtitle:tr("Manage this brand page and its individual showroom pianos.","A márkaoldal és az egyedi bemutatótermi zongorák kezelése.")};
   if(pageKey==="services")return {type:"service",route:"website-services",title:tr("Services","Szolgáltatások"),subtitle:tr("Add, edit or remove the services shown on the public website.","A publikus weboldalon megjelenő szolgáltatások hozzáadása, szerkesztése vagy törlése.")};
   if(pageKey==="artists")return {type:"artist",route:"website-artists",title:tr("Artists","Művészek"),subtitle:tr("Add, edit or remove public artist profiles.","Publikus művészprofilok hozzáadása, szerkesztése vagy törlése.")};
   return null;
@@ -330,20 +333,35 @@ function v6CmsConnectedTitle(config,row){
   return row.title_en;
 }
 function v6CmsConnectedImage(config,row){return config.type==="artist"?row.portrait_url:row.image_url;}
+function v6CmsAddCollectionCard(type,label,brand=""){
+  return `<button class="cms-collection-card cms-add-collection-card" type="button" data-add-page-collection="${type}" ${brand?`data-add-piano-brand="${esc(brand)}"`:""}><span class="cms-add-collection-icon">＋</span><span><strong>${esc(label)}</strong><small>${tr("Create new item","Új elem létrehozása")}</small></span></button>`;
+}
 function v6CmsConnectedGrid(config,rows){
-  if(config.type!=="piano")return `<div class="cms-collection-grid cms-page-connected-grid">${rows.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="${config.type}" data-id="${esc(row.id)}">${v6MediaUrlCard(v6CmsConnectedImage(config,row))}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${tr("Open editor","Szerkesztés megnyitása")}</small></span></button>`).join("")||`<div class="empty-state">${tr("No items yet.","Még nincs elem.")}</div>`}</div>`;
+  if(config.type!=="piano")return `<div class="cms-collection-grid cms-page-connected-grid">${rows.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="${config.type}" data-id="${esc(row.id)}">${v6MediaUrlCard(v6CmsConnectedImage(config,row))}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${tr("Open editor","Szerkesztés megnyitása")}</small></span></button>`).join("")}${v6CmsAddCollectionCard(config.type,tr("Add new","Új hozzáadása"))}</div>`;
+  if(config.brand){
+    const filtered=rows.filter(row=>String(row.brand||"").trim().toLowerCase()===String(config.brand).trim().toLowerCase()||(config.brandSlug==="steinway"&&/^steinway/i.test(String(row.brand||"")))||(config.brandSlug==="bosendorfer"&&/^(bösendorfer|bosendorfer)/i.test(String(row.brand||""))));
+    return `<div class="cms-collection-grid cms-page-connected-grid">${filtered.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}${v6CmsAddCollectionCard("piano",tr("Add piano to this brand","Új zongora ehhez a márkához"),config.brand)}</div>`;
+  }
   const brands=new Map();
   for(const row of rows){const brand=String(row.brand||tr("Other","Egyéb"));if(!brands.has(brand))brands.set(brand,[]);brands.get(brand).push(row);}
-  return `<div class="cms-piano-brand-groups">${[...brands.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([brand,items])=>`<section class="cms-piano-brand-group"><div class="cms-piano-brand-head"><strong>${esc(brand)}</strong><span class="badge">${items.length}</span></div><div class="cms-collection-grid cms-page-connected-grid">${items.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}</div></section>`).join("")||`<div class="empty-state">${tr("No showroom pianos yet.","Még nincs bemutatótermi zongora.")}</div>`}</div>`;
+  return `<div class="cms-piano-brand-groups">${[...brands.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([brand,items])=>`<section class="cms-piano-brand-group"><div class="cms-piano-brand-head"><strong>${esc(brand)}</strong><span class="badge">${items.length}</span></div><div class="cms-collection-grid cms-page-connected-grid">${items.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}${v6CmsAddCollectionCard("piano",tr("Add piano","Új zongora"),brand)}</div></section>`).join("")||`<div class="empty-state">${tr("No showroom pianos yet.","Még nincs bemutatótermi zongora.")}</div>`}</div>`;
+}
+async function v6RefreshCmsSidebarMeta(){
+  const meta=await api("/api/website-content/pages");state.cmsPages=meta.pages||[];
+  const sidebar=$("#cmsPageList");if(!sidebar)return;
+  sidebar.innerHTML=v6CmsSidebarMarkup();
+  $$("[data-cms-page]",sidebar).forEach(button=>button.addEventListener("click",async()=>{state.cmsPage=button.dataset.cmsPage;await renderCms();}));
 }
 async function v6LoadCmsConnectedCollection(config){
   const host=$("#cmsConnectedCollection");if(!host||!config)return;
   host.innerHTML=loading();
   try{
     const rows=await api(`/api/${config.route}`);state.cmsConnectedRows=rows;
-    host.innerHTML=`<section class="panel cms-page-connected-panel"><div class="panel-head"><div><span class="eyebrow">${tr("CONNECTED CONTENT","KAPCSOLT TARTALOM")}</span><h3>${esc(config.title)}</h3><p>${esc(config.subtitle)}</p></div><button class="primary-button" id="addCmsConnectedItem" type="button">＋ ${tr("Add","Hozzáadás")}</button></div>${v6CmsConnectedGrid(config,rows)}</section>`;
-    $("#addCmsConnectedItem")?.addEventListener("click",()=>v6OpenCollectionEditor(config.type,null,()=>v6LoadCmsConnectedCollection(config)));
-    $$("[data-edit-page-collection]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.id));if(row)v6OpenCollectionEditor(config.type,row,()=>v6LoadCmsConnectedCollection(config));}));
+    host.innerHTML=`<section class="panel cms-page-connected-panel"><div class="panel-head"><div><span class="eyebrow">${tr("CONNECTED CONTENT","KAPCSOLT TARTALOM")}</span><h3>${esc(config.title)}</h3><p>${esc(config.subtitle)}</p></div><button class="primary-button" id="addCmsConnectedItem" type="button">＋ ${config.brand?tr("Add piano","Új zongora"):tr("Add","Hozzáadás")}</button></div>${v6CmsConnectedGrid(config,rows)}</section>`;
+    const refreshConnected=async()=>{if(config.type==="piano")await v6RefreshCmsSidebarMeta();await v6LoadCmsConnectedCollection(config);};
+    $("#addCmsConnectedItem")?.addEventListener("click",()=>v6OpenCollectionEditor(config.type,null,refreshConnected,config.brand?{brand:config.brand}:{}));
+    $$("[data-add-page-collection]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCollectionEditor(button.dataset.addPageCollection,null,refreshConnected,button.dataset.addPianoBrand?{brand:button.dataset.addPianoBrand}:{})));
+    $$("[data-edit-page-collection]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.id));if(row)v6OpenCollectionEditor(config.type,row,refreshConnected);}));
   }catch(error){host.innerHTML=`<div class="empty-state">${esc(humanError(error))}</div>`;}
 }
 async function v6LoadCmsPage(){
@@ -369,7 +387,7 @@ function v6GalleryParse(value){try{const rows=Array.isArray(value)?value:JSON.pa
 function v6GalleryMarkup(rows){
   return `<div class="cms-gallery-grid">${rows.map((row,index)=>`<article><img src="${esc(v6CmsPreviewUrl(row.url))}" data-cms-original-src="${esc(row.url)}" alt=""><input data-gallery-alt-en="${index}" placeholder="Alt text EN" value="${esc(row.alt_en||"")}"><input data-gallery-alt-hu="${index}" placeholder="Alt text HU" value="${esc(row.alt_hu||"")}"><button type="button" class="text-button danger-text" data-gallery-remove="${index}">${tr("Remove","Eltávolítás")}</button></article>`).join("")}<label class="file-picker gallery-add"><input id="galleryFiles" type="file" accept="image/*" multiple><span>＋ ${tr("Add gallery images","Galériaképek hozzáadása")}</span></label></div>`;
 }
-async function v6OpenCollectionEditor(type,row=null,refresh){
+async function v6OpenCollectionEditor(type,row=null,refresh,seed={}){
   const definitions={
     piano:{title:tr(row?"Edit showroom piano":"New showroom piano",row?"Bemutatótermi zongora szerkesztése":"Új bemutatótermi zongora"),route:"showroom-pianos",image:"image_url",gallery:true},
     service:{title:tr(row?"Edit service":"New service",row?"Szolgáltatás szerkesztése":"Új szolgáltatás"),route:"website-services",image:"image_url",gallery:true},
@@ -380,7 +398,7 @@ async function v6OpenCollectionEditor(type,row=null,refresh){
   const common=`
     <div class="cms-collection-media full" id="collectionMainImage">${v6MediaUrlCard(image)}<label class="file-picker"><input id="collectionImageFile" type="file" accept="image/*"><span>↑ ${tr(image?"Replace main image":"Upload main image",image?"Főkép cseréje":"Főkép feltöltése")}</span></label></div>`;
   let fields="";
-  if(type==="piano")fields=`<label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" value="${esc(row?.brand||"")}" required></label><label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(row?.model||"")}"></label>`;
+  if(type==="piano")fields=`<label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" value="${esc(row?.brand||seed?.brand||"")}" required></label><label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(row?.model||"")}"></label>`;
   if(type==="artist")fields=`<label class="field full"><span>${tr("Artist name","Művész neve")} *</span><input name="name" value="${esc(row?.name||"")}" required></label><label class="field"><span>Role EN</span><input name="role_en" value="${esc(row?.role_en||"")}"></label><label class="field"><span>Szerep HU</span><input name="role_hu" value="${esc(row?.role_hu||"")}"></label><label class="field full"><span>Biography EN</span><textarea name="biography_en">${esc(row?.biography_en||"")}</textarea></label><label class="field full"><span>Bemutatkozás HU</span><textarea name="biography_hu">${esc(row?.biography_hu||"")}</textarea></label>`;
   else if(type==="review")fields=`<label class="field full"><span>${tr("Person name","Személy neve")} *</span><input name="person_name" value="${esc(row?.person_name||"")}" required></label><label class="field"><span>Role EN</span><input name="role_en" value="${esc(row?.role_en||"")}"></label><label class="field"><span>Szerep HU</span><input name="role_hu" value="${esc(row?.role_hu||"")}"></label><label class="field full"><span>Quote EN *</span><textarea name="quote_en" required>${esc(row?.quote_en||"")}</textarea></label><label class="field full"><span>Idézet HU *</span><textarea name="quote_hu" required>${esc(row?.quote_hu||"")}</textarea></label>`;
   else fields+=`<label class="field full"><span>Title EN *</span><input name="title_en" value="${esc(row?.title_en||"")}" required></label><label class="field full"><span>Cím HU *</span><input name="title_hu" value="${esc(row?.title_hu||"")}" required></label><label class="field full"><span>Summary EN</span><textarea name="summary_en">${esc(row?.summary_en||"")}</textarea></label><label class="field full"><span>Összefoglaló HU</span><textarea name="summary_hu">${esc(row?.summary_hu||"")}</textarea></label><label class="field full"><span>Description EN</span><textarea name="description_en">${esc(row?.description_en||"")}</textarea></label><label class="field full"><span>Leírás HU</span><textarea name="description_hu">${esc(row?.description_hu||"")}</textarea></label>`;

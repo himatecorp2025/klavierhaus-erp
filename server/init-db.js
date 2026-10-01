@@ -25,6 +25,18 @@ function columns(name) {
 function quoteName(name) {
   return `"${String(name).replaceAll('"','""')}"`;
 }
+function foreignKeyReferences(table,target){
+  if(!tableExists(table))return false;
+  try{return db.prepare(`PRAGMA foreign_key_list(${quoteName(table)})`).all().some(row=>String(row.table||"").toLowerCase()===String(target||"").toLowerCase());}
+  catch(_error){return false;}
+}
+function copyCommonTableColumns(source,target){
+  const sourceCols=columns(source),targetCols=columns(target);
+  const common=[...targetCols].filter(name=>sourceCols.has(name));
+  if(!common.length)return;
+  const list=common.map(quoteName).join(",");
+  db.exec(`INSERT OR IGNORE INTO ${quoteName(target)}(${list}) SELECT ${list} FROM ${quoteName(source)}`);
+}
 function setting(key) {
   if (!tableExists("app_settings")) return null;
   return db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(key)?.setting_value ?? null;
@@ -371,6 +383,15 @@ if(archiveCategoryNeedsMigration){
   db.exec('ALTER TABLE "document_archive" RENAME TO "_documents_legacy_archive"');
   console.log("[DOCUMENTS] Legacy archive category table isolated");
 }
+const legacyDocumentFkTables=[];
+for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"]){
+  if(!foreignKeyReferences(table,"documents"))continue;
+  const legacy=`_legacy_documents_fk_${table}`;
+  if(tableExists(legacy))db.exec(`DROP TABLE ${quoteName(legacy)}`);
+  db.exec(`ALTER TABLE ${quoteName(table)} RENAME TO ${quoteName(legacy)}`);
+  legacyDocumentFkTables.push({table,legacy});
+  console.log(`[DOCUMENTS] Legacy FK ${table} -> documents isolated for canonical archive repair`);
+}
 // Existing production databases already have private_appointments/intake_leads/clients.
 // Add compatibility columns before schema.sql creates indexes that depend on them.
 prepareMessengerV12Compatibility();
@@ -395,6 +416,12 @@ if(tableExists("_documents_legacy_archive")){
   db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_category_time ON document_archive(category,archived_at DESC)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_document_archive_entity ON document_archive(entity_type,entity_id)");
   console.log("[DOCUMENTS] Archive categories migrated");
+}
+for(const {table,legacy} of legacyDocumentFkTables){
+  copyCommonTableColumns(legacy,table);
+  db.exec(`DROP TABLE ${quoteName(legacy)}`);
+  if(foreignKeyReferences(table,"documents"))throw new Error(`DOCUMENTS_LEGACY_FK_REPAIR_FAILED:${table}`);
+  console.log(`[DOCUMENTS] Canonical FK restored for ${table} -> document_archive`);
 }
 
 // schema.sql enables FK enforcement for normal runtime use. The migration must keep

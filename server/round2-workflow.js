@@ -299,9 +299,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         const order=stageDefinitions().filter(stage=>stage.key!==key).map(stage=>stage.key);
         order.splice(order.indexOf("admin_approval"),0,key);applyStageOrder(order,req.user.id);
         const stage=stageDefinitions().find(row=>row.key===key);
-        const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,responsible_user_id,created_at,updated_at)
-          SELECT id,?,?,1,COALESCE(created_by_user_id,workflow_owner_user_id),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
-        insert.run(key,stage.position);
+        if(req.body?.apply_to_existing!==false){
+          const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,responsible_user_id,created_at,updated_at)
+            SELECT id,?,?,1,COALESCE(created_by_user_id,workflow_owner_user_id),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
+          insert.run(key,stage.position);
+        }
       })();
       const after=stageDefinitions();audit(req,"CREATE","workflow_stage_definitions",key,null,after.find(row=>row.key===key));res.status(201).json(workflowSettingsPayload());
     }catch(error){respondError(res,error);}
