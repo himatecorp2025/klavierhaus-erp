@@ -314,7 +314,7 @@ function v6CmsPageElements(){
 }
 function v6CmsElementCard(value,key,index,path=[key],group=""){
   const image=v6CmsFirstImage(value),preview=v6CmsPreviewText(value),title=v6CmsCardTitle(value,key,index);
-  return `<button type="button" class="cms-page-element-card" data-cms-path="${v6CmsPath(path)}" data-cms-key="${esc(key)}" data-cms-section-index="${index}">
+  return `<button type="button" class="cms-page-element-card" data-cms-section="${esc(key)}" data-cms-path="${v6CmsPath(path)}" data-cms-key="${esc(key)}" data-cms-section-index="${index}">
     ${image?`<span class="cms-page-element-media"><img src="${esc(v6CmsPreviewUrl(image))}" alt=""></span>`:`<span class="cms-page-element-icon" aria-hidden="true">◇</span>`}
     <span class="cms-page-element-body"><span class="eyebrow">${esc(group||String(key||"SECTION").replaceAll("_"," ").toUpperCase())}</span><strong>${esc(title)}</strong>${preview&&preview!==title?`<small>${esc(preview.slice(0,120))}</small>`:""}<em>${esc(v6CmsElementMeta(value))}</em></span>
     <span class="cms-page-element-arrow" aria-hidden="true">›</span>
