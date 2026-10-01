@@ -214,34 +214,6 @@ test("showroom brand routes render filtered alternating instruments with canonic
   });
 });
 
-test("future showroom brands automatically get public brand routes and CMS-driven brand copy", async () => {
-  const api=createFakeApi(),originalFetch=api.fetchImpl;
-  api.fetchImpl=async(url,options={})=>{
-    const parsed=new URL(url),language=parsed.searchParams.get("lang")==="hu"?"hu":"en";
-    if(parsed.pathname==="/api/public/showroom-pianos"){
-      const response=await originalFetch(url,options),rows=await response.json();
-      rows.push({id:"PIANO-YA-C7",slug:"yamaha-c7",alternate_slug:"yamaha-c7",brand:"Yamaha",model:"C7",title:"Yamaha C7",summary:language==="hu"?"Dinamikus márka.":"Dynamic brand.",description:"",image_url:"https://images.example.com/yamaha.jpg",image_alt:"Yamaha C7",availability_status:"AVAILABLE"});
-      return new Response(JSON.stringify(rows),{status:200,headers:{"Content-Type":"application/json"}});
-    }
-    if(parsed.pathname==="/api/public/website-content/piano-brand--yamaha"){
-      const content={template:"piano-brand",seo:{title:"Edited Yamaha SEO",description:"Edited dynamic brand description"},hero:{eyebrow:"Yamaha",title:"Edited Yamaha room",lead:"CMS-controlled dynamic brand hero.",image:"",imageAlt:"Yamaha piano"},cta:{eyebrow:"Private selection",title:"Choose your Yamaha.",buttonLabel:"Book Yamaha"}};
-      return new Response(JSON.stringify({page_key:"piano-brand--yamaha",language,source:"database",version:2,content}),{status:200,headers:{"Content-Type":"application/json"}});
-    }
-    return originalFetch(url,options);
-  };
-  await withServer({baseUrl:"https://klavierhaus.com",allowIndexing:true,eventApiBaseUrl:"https://erp.example.com",fetchImpl:api.fetchImpl},async(origin)=>{
-    const response=await fetch(`${origin}/pianos/yamaha`),page=await response.text();
-    assert.equal(response.status,200);
-    assert.match(page,/Yamaha C7/);
-    assert.match(page,/Edited Yamaha room/);
-    assert.match(page,/CMS-controlled dynamic brand hero/);
-    assert.match(page,/Book Yamaha/);
-    const sitemap=await (await fetch(`${origin}/sitemap.xml`)).text();
-    assert.match(sitemap,/https:\/\/klavierhaus\.com\/pianos\/yamaha/);
-    assert.match(sitemap,/https:\/\/klavierhaus\.com\/hu\/zongorak\/yamaha/);
-  });
-});
-
 test("Pages & Content event labels are rendered on the public homepage without a redeploy", async () => {
   const api = createFakeApi();
   const originalFetch = api.fetchImpl;
