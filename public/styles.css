@@ -3085,3 +3085,26 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   .workflow-add-phase-inline{grid-template-columns:1fr}
   .workflow-add-phase-inline .primary-button{width:100%}
 }
+
+
+/* Messenger desktop containment: every status, label and action stays inside its grid column. */
+.messenger-shell,.messenger-inbox,.messenger-thread,.messenger-context,
+.messenger-list-item,.messenger-list-copy,.messenger-list-top,.messenger-list-meta,
+.messenger-thread-head,.messenger-thread-head>div,.messenger-context-section,
+.messenger-reply,.messenger-reply-main,.messenger-action-grid{box-sizing:border-box;min-width:0;max-width:100%}
+.messenger-list-top,.messenger-list-meta,.messenger-thread-head{flex-wrap:wrap}
+.messenger-list-copy,.messenger-thread-head>div,.messenger-context-section{overflow:hidden}
+.messenger-list-item strong,.messenger-list-item small,.messenger-thread-head h2,.messenger-thread-head p,
+.messenger-context-section h3,.messenger-context-section p{max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+.status-pill,.messenger-system-status,.messenger-live-badge{width:auto;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.messenger-context-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+.messenger-context-actions>*,
+.messenger-context-section>.secondary-button,
+.messenger-context-section button,
+.messenger-context-section select{box-sizing:border-box;min-width:0;max-width:100%}
+.messenger-context-actions button,.messenger-context-section>.secondary-button{white-space:normal;overflow-wrap:anywhere}
+.messenger-reply{overflow:hidden}
+.messenger-action-grid{width:94px;min-width:0}
+@media(max-width:1180px) and (min-width:701px){
+  .messenger-context{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
