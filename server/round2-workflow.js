@@ -9,7 +9,7 @@ const WORKFLOW_STAGES=Object.freeze([
   {key:"completed",label_en:"Completed",label_hu:"Lezárva",position:5,stage_type:"completed",active:1,removable:0}
 ]);
 const ACTIVE_STAGE_KEYS=new Set(WORKFLOW_STAGES.map(stage=>stage.key));
-const MAX_WORKFLOW_STAGES=7;
+const MAX_WORKFLOW_STAGES=7; // active workflow phases; Completed is a separate closed state
 const FIXED_STAGE_KEYS=new Set(["received","admin_approval","completed"]);
 const BLOCKER_CODES=new Set(["material_procurement","parts_procurement","material_issue","waiting_client","waiting_technician","waiting_admin","waiting_invoice","other"]);
 
@@ -55,6 +55,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const rows=db.prepare(`SELECT stage_key key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_at
       FROM workflow_stage_definitions ${includeInactive?"":"WHERE active=1"} ORDER BY position,created_at,stage_key`).all();
     return rows.length?rows.map(row=>({...row,active:Boolean(row.active),removable:Boolean(row.removable)})):WORKFLOW_STAGES.map(row=>({...row,active:true,removable:false}));
+  }
+  function activeStageDefinitions(){
+    return stageDefinitions().filter(stage=>stage.key!=="completed");
   }
   function stageByKey(key,{includeInactive=false}={}){
     return stageDefinitions({includeInactive}).find(stage=>stage.key===key)||null;
@@ -251,8 +254,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   }
 
   function workflowSettingsPayload(){
-    const stages=stageDefinitions();
-    return {stages,blocker_codes:[...BLOCKER_CODES],max_stages:MAX_WORKFLOW_STAGES,can_add_stage:stages.length<MAX_WORKFLOW_STAGES};
+    const stages=stageDefinitions(),activeStages=stages.filter(stage=>stage.key!=="completed");
+    return {stages,blocker_codes:[...BLOCKER_CODES],max_stages:MAX_WORKFLOW_STAGES,active_stage_count:activeStages.length,can_add_stage:activeStages.length<MAX_WORKFLOW_STAGES};
   }
   function stageKeyFromLabels(labelEn,labelHu){
     const base=(labelEn||labelHu||"phase").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,28)||"phase";
@@ -286,7 +289,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   });
   app.post("/api/workflow/stages",auth,admin,(req,res)=>{
     try{
-      const before=stageDefinitions();if(before.length>=MAX_WORKFLOW_STAGES)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});
+      const before=stageDefinitions(),activeBefore=before.filter(stage=>stage.key!=="completed");if(activeBefore.length>=MAX_WORKFLOW_STAGES)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});
       const labelEn=text(req.body?.label_en,80),labelHu=text(req.body?.label_hu,80);if(!labelEn||!labelHu)throw problem("WORKFLOW_LABEL_REQUIRED");
       const key=stageKeyFromLabels(labelEn,labelHu),adminIndex=before.findIndex(stage=>stage.key==="admin_approval");
       const position=adminIndex>=0?adminIndex+1:Math.max(2,before.length-1);
@@ -381,7 +384,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const jobs=rows.map(decorateJob),allStages=stageDefinitions();
     let visibleStages=bucket==="active"?allStages.filter(stage=>stage.key!=="completed"):allStages.filter(stage=>stage.key==="completed");
     if(bucket==="closed"&&closedType==="cancelled")visibleStages=[{key:"cancelled",position:1,label_en:"Cancelled",label_hu:"Törölt / megszakított",stage_type:"closed",active:true,removable:false}];
-    res.json({bucket,closed_type:bucket==="closed"?closedType:null,stages:allStages,max_stages:MAX_WORKFLOW_STAGES,can_add_stage:allStages.length<MAX_WORKFLOW_STAGES,
+    const activeStageCount=allStages.filter(stage=>stage.key!=="completed").length;
+    res.json({bucket,closed_type:bucket==="closed"?closedType:null,stages:allStages,max_stages:MAX_WORKFLOW_STAGES,active_stage_count:activeStageCount,can_add_stage:activeStageCount<MAX_WORKFLOW_STAGES,
       columns:visibleStages.map(stage=>({...stage,jobs:bucket==="closed"?jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
   });
   app.get("/api/workshop",auth,staff,(_req,res)=>{
@@ -466,7 +470,16 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         return merged;
       });
       if(currentPhase&&!safe.find(row=>row.stage_key===before.stage)?.enabled)throw problem("CURRENT_WORKFLOW_PHASE_REQUIRED",409);
-      writePlan(id,safe,{preserveProgress:true});
+      const currentPlan=currentPhase?safe.find(row=>row.stage_key===before.stage):null;
+      const calendarStart=currentPlan?.starts_at||before.scheduled_at||null;
+      if(currentPhase&&calendarStart&&before.assigned_technician_id){
+        const conflict=findConflict(id,before.assigned_technician_id,calendarStart,before.estimated_duration_min);
+        if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
+      }
+      db.transaction(()=>{
+        writePlan(id,safe,{preserveProgress:true});
+        if(currentPhase&&calendarStart)db.prepare("UPDATE jobs SET scheduled_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(calendarStart,id);
+      })();
       const after=jobById(id);audit(req,"UPDATE_WORKFLOW_PLAN","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
@@ -483,8 +496,17 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
       const blockerNote=req.body?.blocker_note===undefined?phase.blocker_note:text(req.body.blocker_note,2000)||null;
       if(blockerCode&&!BLOCKER_CODES.has(blockerCode))throw problem("INVALID_BLOCKER_CODE");
-      db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,responsible_user_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
-        .run(startsAt,dueAt,responsibleId,blockerCode,blockerNote,id,stage);
+      const currentActive=before.stage!=="planned"&&before.stage!=="completed"&&stage===before.stage;
+      const calendarStart=currentActive?(startsAt||before.scheduled_at):null;
+      if(currentActive&&calendarStart&&before.assigned_technician_id){
+        const conflict=findConflict(id,before.assigned_technician_id,calendarStart,before.estimated_duration_min);
+        if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
+      }
+      db.transaction(()=>{
+        db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,responsible_user_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
+          .run(currentActive?calendarStart:startsAt,dueAt,responsibleId,blockerCode,blockerNote,id,stage);
+        if(currentActive&&calendarStart)db.prepare("UPDATE jobs SET scheduled_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(calendarStart,id);
+      })();
       const after=jobById(id);audit(req,"UPDATE_PHASE_STATUS","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
   });
@@ -500,7 +522,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const stage=firstEnabledStage(id);if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
-      db.prepare("UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,?),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
+      db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       activatePhase(id,stage);
       const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);
       customerMilestone(after,"JOB_CONFIRMED");customerMilestone(after,"APPOINTMENT_SCHEDULED");
@@ -520,7 +542,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
-      if(stage==="received")db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='received'").run(scheduledAt,id);
+      db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       if(before.stage==="planned")activatePhase(id,stage);
       const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);
       if(before.stage==="planned")customerMilestone(after,"JOB_CONFIRMED");
@@ -577,7 +599,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("INVALID_HANDOFF_COST");
       const materialUsage=inventoryService?.normalizeUsage?inventoryService.normalizeUsage(req.body?.materials||[]):[];
       const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
-      const resourceTechnician=before.assigned_technician_id;
+      const resourceTechnician=before.assigned_technician_id,targetCalendarStart=target.starts_at||before.scheduled_at||null;
+      if(targetCalendarStart&&resourceTechnician){
+        const conflict=findConflict(id,resourceTechnician,targetCalendarStart,before.estimated_duration_min);
+        if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
+      }
       const note=text(req.body?.phase_note,5000)||null,billingDescription=text(req.body?.billing_description,500)||null;
       const result=db.transaction(()=>{
         const info=db.prepare(`INSERT INTO job_handoffs(job_id,from_stage,to_stage,performed_by_user_id,performed_by,assigned_to_user_id,assigned_to,phase_note,billing_description,phase_labor_cost,phase_material_cost,phase_duration_min,created_at)
@@ -585,10 +611,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         const handoffId=Number(info.lastInsertRowid);
         const usage=inventoryService?.consumeForHandoff?inventoryService.consumeForHandoff({jobId:id,handoffId,userId:req.user.id,materials:materialUsage.map(row=>({inventory_item_id:row.item.id,quantity:row.quantity}))}):[];
         completePhase(id,before.stage);
-        db.prepare("UPDATE job_workflow_phases SET responsible_user_id=?,starts_at=COALESCE(starts_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(responsible.id,id,toStage);
+        db.prepare("UPDATE job_workflow_phases SET responsible_user_id=?,starts_at=COALESCE(starts_at,?),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(responsible.id,targetCalendarStart,id,toStage);
         activatePhase(id,toStage);
-        db.prepare(`UPDATE jobs SET stage=?,workflow_stage_key=?,assigned_technician_id=?,total_labor_cost=ROUND(total_labor_cost+?,2),total_material_cost=ROUND(total_material_cost+?,2),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(storageStage(toStage),toStage,resourceTechnician,labor,material,id);
+        db.prepare(`UPDATE jobs SET stage=?,workflow_stage_key=?,assigned_technician_id=?,scheduled_at=COALESCE(?,scheduled_at),total_labor_cost=ROUND(total_labor_cost+?,2),total_material_cost=ROUND(total_material_cost+?,2),updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(storageStage(toStage),toStage,resourceTechnician,targetCalendarStart,labor,material,id);
         return {handoff:db.prepare("SELECT * FROM job_handoffs WHERE id=?").get(Number(info.lastInsertRowid)),material_usage:usage,job:jobById(id)};
       })();
       const purchaseRequests=inventoryService?.checkLowStockForUsage?inventoryService.checkLowStockForUsage(result.material_usage,req.user.id):[];
