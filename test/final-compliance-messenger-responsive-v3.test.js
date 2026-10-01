@@ -58,7 +58,7 @@ test("People, Private and Messenger notifications use actionable deduplicated ba
 
 test("public Messenger keeps the chat launcher icon and only shows a separate close control on tablet/mobile",()=>{
   const server=read("website/server/index.js"),css=read("website/public/styles.css");
-  const launcher=server.match(/<button class="customer-chat__toggle"[\\s\\S]*?<\\/button>/)?.[0]||"";
+  const launcher=server.match(/<button class="customer-chat__toggle"[\s\S]*?<\/button>/)?.[0]||"";
   assert.match(launcher,/customer-chat__toggle-icon/);
   assert.doesNotMatch(launcher,/customer-chat__logo--toggle|data-chat-logo/);
   assert.match(server,/customer-chat__logo--identity/);
