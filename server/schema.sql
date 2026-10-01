@@ -1258,6 +1258,34 @@ CREATE TABLE IF NOT EXISTS master_data_client_field_values (
 );
 CREATE INDEX IF NOT EXISTS idx_master_data_client_field_values_client ON master_data_client_field_values(source_name,source_client_id,field_name);
 
+
+CREATE TABLE IF NOT EXISTS client_duplicate_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pair_key TEXT NOT NULL UNIQUE,
+  client_a_id INTEGER NOT NULL,
+  client_b_id INTEGER NOT NULL,
+  signature TEXT NOT NULL,
+  match_fields_json TEXT NOT NULL DEFAULT '[]',
+  match_count INTEGER NOT NULL DEFAULT 0 CHECK(match_count >= 0),
+  match_score INTEGER NOT NULL DEFAULT 0 CHECK(match_score >= 0),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','REVIEW_LATER','NOT_DUPLICATE','MERGED','CLEARED')),
+  primary_client_id INTEGER,
+  archived_client_id INTEGER,
+  archive_document_id INTEGER,
+  resolution_note TEXT,
+  reviewed_by_user_id TEXT,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_a_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (client_b_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (primary_client_id) REFERENCES clients(id) ON DELETE SET NULL,
+  FOREIGN KEY (archived_client_id) REFERENCES clients(id) ON DELETE SET NULL,
+  FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_duplicate_reviews_status_score ON client_duplicate_reviews(status,match_score DESC,updated_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_client_duplicate_reviews_clients ON client_duplicate_reviews(client_a_id,client_b_id,status);
+
 CREATE TABLE IF NOT EXISTS intake_leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER,
