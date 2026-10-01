@@ -384,13 +384,15 @@ if(archiveCategoryNeedsMigration){
   console.log("[DOCUMENTS] Legacy archive category table isolated");
 }
 const legacyDocumentFkTables=[];
+const legacyDocumentTargets=["documents","_documents_legacy_archive"];
 for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"]){
-  if(!foreignKeyReferences(table,"documents"))continue;
+  const legacyTarget=legacyDocumentTargets.find(target=>foreignKeyReferences(table,target));
+  if(!legacyTarget)continue;
   const legacy=`_legacy_documents_fk_${table}`;
   if(tableExists(legacy))db.exec(`DROP TABLE ${quoteName(legacy)}`);
   db.exec(`ALTER TABLE ${quoteName(table)} RENAME TO ${quoteName(legacy)}`);
-  legacyDocumentFkTables.push({table,legacy});
-  console.log(`[DOCUMENTS] Legacy FK ${table} -> documents isolated for canonical archive repair`);
+  legacyDocumentFkTables.push({table,legacy,legacyTarget});
+  console.log(`[DOCUMENTS] Legacy FK ${table} -> ${legacyTarget} isolated for canonical archive repair`);
 }
 // Existing production databases already have private_appointments/intake_leads/clients.
 // Add compatibility columns before schema.sql creates indexes that depend on them.
@@ -420,7 +422,9 @@ if(tableExists("_documents_legacy_archive")){
 for(const {table,legacy} of legacyDocumentFkTables){
   copyCommonTableColumns(legacy,table);
   db.exec(`DROP TABLE ${quoteName(legacy)}`);
-  if(foreignKeyReferences(table,"documents"))throw new Error(`DOCUMENTS_LEGACY_FK_REPAIR_FAILED:${table}`);
+  const staleTarget=legacyDocumentTargets.find(target=>foreignKeyReferences(table,target));
+  if(staleTarget)throw new Error(`DOCUMENTS_LEGACY_FK_REPAIR_FAILED:${table}:${staleTarget}`);
+  if(!foreignKeyReferences(table,"document_archive"))throw new Error(`DOCUMENTS_CANONICAL_FK_MISSING:${table}`);
   console.log(`[DOCUMENTS] Canonical FK restored for ${table} -> document_archive`);
 }
 

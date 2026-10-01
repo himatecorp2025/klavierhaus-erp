@@ -224,7 +224,7 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
   </header>
   <aside class="customer-chat" data-customer-chat data-language="${escapeHtml(language)}">
     <div class="customer-chat__welcome" data-chat-welcome role="status"><span>${escapeHtml(chatCopy.welcome)}</span><button type="button" data-chat-welcome-close aria-label="${escapeHtml(chatCopy.close)}">×</button></div>
-    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><img class="customer-chat__logo customer-chat__logo--toggle" data-chat-logo src="" alt="Klavierhaus" hidden><span class="customer-chat__toggle-icon customer-chat__logo-fallback" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span></button>
+    <button class="customer-chat__toggle" type="button" data-chat-toggle aria-expanded="false" aria-controls="customer-chat-panel" aria-label="${escapeHtml(chatCopy.title)}"><span class="customer-chat__toggle-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.2-.7L4 20l1.5-4A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span></button>
     <div class="customer-chat__panel" id="customer-chat-panel" data-chat-panel hidden>
       <div class="customer-chat__heading">
         <div class="customer-chat__heading-actions">

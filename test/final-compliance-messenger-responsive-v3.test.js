@@ -36,16 +36,34 @@ test("Inbox unread emphasis and after-hours Waiting are driven by backend data",
   assert.match(source,/is-unread/);
 });
 
-test("People, Private and Messenger notifications are first-class list views",()=>{
+test("People, Private and Messenger notifications use actionable deduplicated badge state",()=>{
   const source=read("public/messenger-responsive-v3.js");
+  assert.match(source,/function messengerCustomerKey\(/);
   assert.match(source,/function messengerPeople\(/);
-  assert.match(source,/"email:"\+email\.toLowerCase/);
+  assert.match(source,/filter\(item=>item\.status!==\"CLOSED\"\)/);
+  assert.match(source,/"client:"\+clientId/);
+  assert.match(source,/"email:"\+email/);
   assert.match(source,/conversation_id:row\.id/);
-  assert.match(source,/function messengerRenderPrivate\(/);
-  assert.match(source,/REQUESTED","PROPOSED/);
+  assert.match(source,/function messengerPendingPrivateCustomers\(/);
+  assert.match(source,/\["REQUESTED","PROPOSED"\]\.includes\(item\.status\)/);
+  assert.match(source,/private:messengerPendingPrivateCustomers\(\)\.length/);
+  assert.doesNotMatch(source,/private:[^\n]*messengerAppointments/);
+  assert.match(source,/function messengerUnreadConversations\(/);
+  assert.match(source,/Number\(row\.unread_count\|\|0\)>0/);
+  assert.match(source,/last_message_direction/);
   assert.match(source,/function messengerNotifications\(/);
-  assert.match(source,/CUSTOMER_CONVERSATION/);
-  assert.match(source,/PRIVATE_APPOINTMENT/);
+  assert.match(source,/_conversation_unread:true/);
+  assert.match(source,/if\(row\)row\.unread_count=0/);
+});
+
+test("public Messenger keeps the chat launcher icon and only shows a separate close control on tablet/mobile",()=>{
+  const server=read("website/server/index.js"),css=read("website/public/styles.css");
+  const launcher=server.match(/<button class="customer-chat__toggle"[\s\S]*?<\/button>/)?.[0]||"";
+  assert.match(launcher,/customer-chat__toggle-icon/);
+  assert.doesNotMatch(launcher,/customer-chat__logo--toggle|data-chat-logo/);
+  assert.match(server,/customer-chat__logo--identity/);
+  assert.match(css,/@media\(min-width:1025px\)\{[\s\S]*\.customer-chat__panel-close\{display:none!important\}/);
+  assert.match(css,/@media\(max-width:1024px\)\{[\s\S]*\.customer-chat__panel-close\{display:grid!important\}/);
 });
 
 test("Admin Messenger is viewport-bound with mobile list thread context navigation",()=>{
