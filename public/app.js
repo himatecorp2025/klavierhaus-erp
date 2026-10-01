@@ -761,7 +761,7 @@ function renderDuplicateReviewList(){
     <span class="duplicate-review-meta"><span class="badge">${Number(row.match_count||0)} ${tr("matches","egyezés")}</span><span>${tr("Linked records","Kapcsolatok")}: ${duplicateRelationshipTotal(row.client_a)+duplicateRelationshipTotal(row.client_b)}</span>${row.status==="REVIEW_LATER"?`<span class="badge">${tr("Review later","Későbbre hagyva")}</span>`:""}</span>
   </button>`).join(""):`<div class="empty-state">${tr("No possible client duplicates remain.","Nincs több vélelmezett ügyfélduplikáció.")}</div>`);
   $("#duplicateRescan")?.addEventListener("click",async()=>{try{await api("/api/client-duplicates/rescan",{method:"POST",body:"{}"});toast(tr("Duplicate review queue refreshed.","A duplikációs ellenőrzőlista frissült."),"success");await renderMaster();}catch(error){toast(humanError(error),"error");}});
-  $("[data-duplicate-review-id]",host).forEach(button=>button.addEventListener("click",()=>{state.selectedDuplicateReviewId=Number(button.dataset.duplicateReviewId);renderDuplicateReviewList();void renderDuplicateReviewDetail();openMasterMobileDetail();}));
+  $$("[data-duplicate-review-id]",host).forEach(button=>button.addEventListener("click",()=>{state.selectedDuplicateReviewId=Number(button.dataset.duplicateReviewId);renderDuplicateReviewList();void renderDuplicateReviewDetail();openMasterMobileDetail();}));
 }
 function duplicateFieldLabel(field){
   return ({name:tr("Name","Név"),email:"Email",phone:tr("Phone","Telefon"),address:tr("Address","Cím"),postcode:tr("Postcode","Irányítószám"),city:tr("City","Város"),company_name:tr("Company","Cég"),contact_name:tr("Contact","Kapcsolattartó")})[field]||field;
@@ -797,7 +797,7 @@ async function renderDuplicateReviewDetail(){
     </div>
     <div class="detail-note">${tr("When records are merged, every linked piano, job, intake, invoice, Messenger conversation, appointment and source reference is moved to the kept customer. The duplicate record is archived under Documents → Deleted clients and remains restorable.","Összevonáskor minden kapcsolt zongora, munka, igény, számla, Messenger-beszélgetés, időpont és forráshivatkozás átkerül a megtartott ügyfélhez. A duplikált rekord a Dokumentumok → Törölt ügyfelek közé kerül, és visszaállítható marad.")}</div>`;
   $("[data-master-back]",host)?.addEventListener("click",()=>closeMasterMobileDetail());
-  $("[data-duplicate-merge-primary]",host).forEach(button=>button.addEventListener("click",async()=>{
+  $$("[data-duplicate-merge-primary]",host).forEach(button=>button.addEventListener("click",async()=>{
     const primaryId=Number(button.dataset.duplicateMergePrimary),primary=primaryId===Number(a.id)?a:b,duplicate=primaryId===Number(a.id)?b:a;
     if(!window.confirm(tr(`Keep ${primary.name||("#"+primaryId)} and archive ${duplicate.name||("#"+duplicate.id)} as a merged duplicate? All linked records will move to the kept customer.`,`${primary.name||("#"+primaryId)} maradjon meg, és ${duplicate.name||("#"+duplicate.id)} kerüljön archívumba összevont duplikációként? Minden kapcsolódó rekord átkerül a megtartott ügyfélhez.`)))return;
     try{await api(`/api/client-duplicates/${row.id}/merge`,{method:"POST",body:JSON.stringify({primary_client_id:primaryId})});toast(tr("Duplicate merged and archived.","A duplikáció összevonva és archiválva."),"success");state.selectedDuplicateReviewId=null;await renderMaster();}catch(error){toast(humanError(error),"error");}
