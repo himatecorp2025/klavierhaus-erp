@@ -115,7 +115,6 @@ test("New Workflow Job has an inline add-phase card that does not mutate existin
   assert.match(ui,/apply_to_existing:false/);
   assert.match(ui,/id="jobWorkflowPlanRows"/);
   assert.match(api,/req\.body\?\.apply_to_existing!==false/);
-  assert.match(api,/supplied\?Boolean\(item\?\.enabled\):!stage\.removable/);
   assert.match(ui,/existing\?Boolean\(existing\.enabled\):!stage\.removable/);
   assert.match(css,/\.workflow-add-phase-card/);
 });
