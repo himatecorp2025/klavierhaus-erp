@@ -559,17 +559,19 @@ test("Website recovery API enforces backup creation and destructive-action permi
 });
 
 
-test("Dynamic workflow supports two extra reorderable intermediate phases and cancelled history",async()=>{
+test("Dynamic workflow supports seven active reorderable phases plus a separate closed state",async()=>{
   const token=shared.adminToken;
   const initial=await request("/api/workflow/settings",{token});
   assert.equal(initial.status,200,JSON.stringify(initial.payload));
   assert.equal(initial.payload.stages.length,5);
   assert.equal(initial.payload.max_stages,7);
+  assert.equal(initial.payload.active_stage_count,4);
   assert.equal(initial.payload.can_add_stage,true);
 
   const firstAdd=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Voicing",label_hu:"Intonálás"}});
   assert.equal(firstAdd.status,201,JSON.stringify(firstAdd.payload));
   assert.equal(firstAdd.payload.stages.length,6);
+  assert.equal(firstAdd.payload.active_stage_count,5);
   const voicing=firstAdd.payload.stages.find(stage=>stage.label_en==="Voicing");
   assert.ok(voicing);
   assert.equal(voicing.removable,true);
@@ -577,15 +579,24 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
   const secondAdd=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Final Polish",label_hu:"Végső finomítás"}});
   assert.equal(secondAdd.status,201,JSON.stringify(secondAdd.payload));
   assert.equal(secondAdd.payload.stages.length,7);
-  assert.equal(secondAdd.payload.can_add_stage,false);
+  assert.equal(secondAdd.payload.active_stage_count,6);
+  assert.equal(secondAdd.payload.can_add_stage,true);
   const polish=secondAdd.payload.stages.find(stage=>stage.label_en==="Final Polish");
   assert.ok(polish);
 
-  const deniedThird=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Extra Eighth",label_hu:"Nyolcadik extra"}});
-  assert.equal(deniedThird.status,409,JSON.stringify(deniedThird.payload));
-  assert.equal(deniedThird.payload.error,"WORKFLOW_STAGE_LIMIT_REACHED");
+  const thirdAdd=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Action Regulation",label_hu:"Mechanika szabályozás"}});
+  assert.equal(thirdAdd.status,201,JSON.stringify(thirdAdd.payload));
+  assert.equal(thirdAdd.payload.stages.length,8);
+  assert.equal(thirdAdd.payload.active_stage_count,7);
+  assert.equal(thirdAdd.payload.can_add_stage,false);
+  const regulation=thirdAdd.payload.stages.find(stage=>stage.label_en==="Action Regulation");
+  assert.ok(regulation);
 
-  const middle=[polish.key,"qa_review","in_progress",voicing.key];
+  const deniedFourth=await request("/api/workflow/stages",{token,method:"POST",body:{label_en:"Extra Eighth Active",label_hu:"Nyolcadik aktív"}});
+  assert.equal(deniedFourth.status,409,JSON.stringify(deniedFourth.payload));
+  assert.equal(deniedFourth.payload.error,"WORKFLOW_STAGE_LIMIT_REACHED");
+
+  const middle=[polish.key,"qa_review","in_progress",voicing.key,regulation.key];
   const reordered=await request("/api/workflow/stages/order",{token,method:"PUT",body:{stage_keys:middle}});
   assert.equal(reordered.status,200,JSON.stringify(reordered.payload));
   assert.deepEqual(reordered.payload.stages.map(stage=>stage.key),["received",...middle,"admin_approval","completed"]);
@@ -595,7 +606,8 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
   }});
   assert.equal(created.status,201,JSON.stringify(created.payload));
   assert.equal(created.payload.stage,"planned");
-  assert.equal(created.payload.workflow_phases.filter(phase=>phase.enabled).length,7);
+  assert.equal(created.payload.workflow_phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").length,7);
+  assert.equal(created.payload.workflow_phases.filter(phase=>phase.enabled).length,8);
 
   const activated=await request("/api/jobs/activate/"+created.payload.id,{token,method:"POST",body:{
     scheduled_at:futureIso(6,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"
@@ -621,6 +633,8 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
   assert.equal(toPolish.status,201,JSON.stringify(toPolish.payload));
   const toProgress=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"in_progress"}});
   assert.equal(toProgress.status,201,JSON.stringify(toProgress.payload));
+  const toRegulation=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:regulation.key}});
+  assert.equal(toRegulation.status,201,JSON.stringify(toRegulation.payload));
   const toApproval=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"admin_approval"}});
   assert.equal(toApproval.status,201,JSON.stringify(toApproval.payload));
   assert.equal(toApproval.payload.job.stage,"admin_approval");
@@ -628,7 +642,7 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
 
   const historyBeforeCancel=await request("/api/jobs/"+created.payload.id+"/history",{token});
   assert.equal(historyBeforeCancel.status,200,JSON.stringify(historyBeforeCancel.payload));
-  assert.equal(historyBeforeCancel.payload.handoffs.length,5);
+  assert.equal(historyBeforeCancel.payload.handoffs.length,6);
   assert.ok(historyBeforeCancel.payload.phases.find(phase=>phase.stage_key===voicing.key)?.completed_at);
   assert.ok(historyBeforeCancel.payload.events.length>=1);
 
@@ -648,9 +662,10 @@ test("Dynamic workflow supports two extra reorderable intermediate phases and ca
   assert.equal(removeVoicing.status,200,JSON.stringify(removeVoicing.payload));
   const removePolish=await request("/api/workflow/stages/"+encodeURIComponent(polish.key),{token,method:"DELETE"});
   assert.equal(removePolish.status,200,JSON.stringify(removePolish.payload));
-  assert.deepEqual(removePolish.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
+  const removeRegulation=await request("/api/workflow/stages/"+encodeURIComponent(regulation.key),{token,method:"DELETE"});
+  assert.equal(removeRegulation.status,200,JSON.stringify(removeRegulation.payload));
+  assert.deepEqual(removeRegulation.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
 });
-
 
 test("Workflow timing can move backward and forward and recomputes colors",async()=>{
   const token=shared.adminToken;
@@ -681,6 +696,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(started.status,200,JSON.stringify(started.payload));
   assert.equal(started.payload.workflow_status,"in_progress");
   assert.equal(started.payload.current_phase.responsible_user_id,"U-F-MANAGER");
+  assert.equal(started.payload.scheduled_at,pastStart);
 
   const overdue=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
     due_at:new Date(Date.now()-60*60*1000).toISOString()
@@ -699,12 +715,35 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   }});
   assert.equal(scheduledAgain.status,200,JSON.stringify(scheduledAgain.payload));
   assert.equal(scheduledAgain.payload.workflow_status,"scheduled");
+  assert.equal(scheduledAgain.payload.scheduled_at,futureIso(32,10));
+
+  const calendarMovedAt=futureIso(33,11);
+  const calendarMoved=await request("/api/jobs/"+created.payload.id+"/schedule",{token,method:"PATCH",body:{scheduled_at:calendarMovedAt}});
+  assert.equal(calendarMoved.status,200,JSON.stringify(calendarMoved.payload));
+  assert.equal(calendarMoved.payload.scheduled_at,calendarMovedAt);
+  assert.equal(calendarMoved.payload.current_phase.starts_at,calendarMovedAt);
 
   const retroactiveAgain=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
     starts_at:pastStart,due_at:farFuture
   }});
   assert.equal(retroactiveAgain.status,200,JSON.stringify(retroactiveAgain.payload));
   assert.equal(retroactiveAgain.payload.workflow_status,"in_progress");
+  assert.equal(retroactiveAgain.payload.scheduled_at,pastStart);
+
+  const nextPhaseStart=futureIso(34,12);
+  const plannedNext=await request("/api/jobs/"+created.payload.id+"/workflow-phases/in_progress",{token,method:"PATCH",body:{starts_at:nextPhaseStart,due_at:futureIso(34,18)}});
+  assert.equal(plannedNext.status,200,JSON.stringify(plannedNext.payload));
+  assert.equal(plannedNext.payload.scheduled_at,pastStart);
+  const movedByWorkflowCard=await request("/api/jobs/"+created.payload.id+"/handoff",{token:shared.workerToken,method:"POST",body:{to_stage:"in_progress"}});
+  assert.equal(movedByWorkflowCard.status,201,JSON.stringify(movedByWorkflowCard.payload));
+  assert.equal(movedByWorkflowCard.payload.job.stage,"in_progress");
+  assert.equal(movedByWorkflowCard.payload.job.scheduled_at,nextPhaseStart);
+  assert.equal(movedByWorkflowCard.payload.job.current_phase.starts_at,nextPhaseStart);
+  const calendarFrom=new Date(new Date(nextPhaseStart).getTime()-60*60*1000).toISOString();
+  const calendarTo=new Date(new Date(nextPhaseStart).getTime()+4*60*60*1000).toISOString();
+  const calendarSynced=await request("/api/calendar?from="+encodeURIComponent(calendarFrom)+"&to="+encodeURIComponent(calendarTo),{token});
+  assert.equal(calendarSynced.status,200,JSON.stringify(calendarSynced.payload));
+  assert.equal(calendarSynced.payload.jobs.find(job=>job.id===created.payload.id)?.scheduled_at,nextPhaseStart);
 
   const cancelled=await request("/api/jobs/"+created.payload.id+"/cancel",{token,method:"POST",body:{party:"klavierhaus",reason:"Timing status acceptance cleanup"}});
   assert.equal(cancelled.status,200,JSON.stringify(cancelled.payload));

@@ -98,7 +98,7 @@ test("PWA is English-first, bilingual and implements required operational contro
   assert.match(css,/min-height:48px/);
   assert.match(css,/\.segmented-control/);
   assert.match(css,/\.typeahead-menu/);
-  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(sw,/klavierhaus-admin-v32-workflow-canonical-sync/);
   assert.match(sw,/url\.pathname\.startsWith\("\/api\/"\)/);
 });
 
@@ -107,6 +107,16 @@ test("retired ERP domains and duplicate calendar/workflow tables are absent from
   for(const table of ["planned_jobs","calendar_jobs","workflow_jobs","financial_items","workflow_finance_sources","journal_entries","journal_lines"]){
     assert.doesNotMatch(schema,new RegExp("CREATE TABLE IF NOT EXISTS "+table+"\\s*\\("),table);
   }
+});
+
+test("Round 2 is the only active workflow runtime in the admin shell",()=>{
+  const html=read("public/index.html"),server=read("server/index.js"),round2=read("public/round2.js");
+  assert.match(html,/\/round2\.js/);
+  assert.doesNotMatch(html,/\/workshop-v2\.js|\/workshop-shell\.js/);
+  assert.doesNotMatch(server,/registerWorkflowV2|registerWorkshopWorkflowRoutes/);
+  assert.match(round2,/workflowEntry=Boolean\(defaults\.workflow\)/);
+  assert.match(round2,/r2ActiveDefinitions\(\)/);
+  assert.match(round2,/data-job-draggable/);
 });
 
 test("Round J uses the canonical stock catalog instead of the retired legacy inventory shape",()=>{

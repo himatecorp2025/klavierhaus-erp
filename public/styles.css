@@ -2661,3 +2661,48 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   stroke-linejoin:round;
   overflow:visible;
 }
+
+
+/* CANONICAL WORKFLOW / PLANNED SEPARATION V12 */
+.workflow-scroll{
+  overflow:visible!important;
+  padding-bottom:0!important;
+  overscroll-behavior-inline:auto!important;
+  scroll-snap-type:none!important;
+}
+.workflow-board{
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))!important;
+  align-items:start!important;
+}
+.workflow-column,.workflow-add-column{
+  min-width:0!important;
+  width:auto!important;
+  scroll-snap-align:none!important;
+}
+.workflow-add-column{
+  min-height:220px!important;
+  position:relative;
+}
+.stage-card[data-job-draggable]{
+  cursor:grab;
+  user-select:none;
+  touch-action:pan-y;
+}
+.stage-card[data-job-draggable]:active{cursor:grabbing}
+.stage-card[data-job-draggable] button,
+.stage-card[data-job-draggable] input,
+.stage-card[data-job-draggable] select,
+.stage-card[data-job-draggable] textarea,
+.stage-card[data-job-draggable] a,
+.stage-card[data-job-draggable] label{
+  cursor:auto;
+  user-select:auto;
+}
+@media(max-width:700px){
+  .workflow-board{grid-template-columns:1fr!important}
+  .workflow-column,.workflow-add-column{width:100%!important}
+  .workflow-add-column{min-height:140px!important}
+}

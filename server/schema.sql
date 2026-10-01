@@ -1405,7 +1405,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE TABLE IF NOT EXISTS workflow_stage_definitions (
   stage_key TEXT PRIMARY KEY,
-  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 7),
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
   label_en TEXT NOT NULL,
   label_hu TEXT NOT NULL,
   stage_type TEXT NOT NULL DEFAULT 'intermediate' CHECK(stage_type IN ('start','intermediate','approval','completed')),
@@ -1422,7 +1422,7 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,
   stage_key TEXT NOT NULL,
-  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 7),
+  position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
   starts_at TEXT,
   due_at TEXT,

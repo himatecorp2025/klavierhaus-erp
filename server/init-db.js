@@ -343,6 +343,21 @@ if(dynamicWorkflowNeedsMigration){
   if(tableExists("workflow_stage_definitions"))db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_dynamic_legacy_workflow_stage_definitions"');
   console.log("[WORKFLOW-DYNAMIC] Legacy five-stage workflow tables isolated");
 }
+
+const workflowStageDefinitionSql=tableExists("workflow_stage_definitions")?String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_stage_definitions'").get()?.sql||""):"";
+const workflowPhaseSql=tableExists("job_workflow_phases")?String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='job_workflow_phases'").get()?.sql||""):"";
+const workflowCapacityNeedsMigration=
+  !dynamicWorkflowNeedsMigration&&
+  tableExists("workflow_stage_definitions")&&tableExists("job_workflow_phases")&&
+  (workflowStageDefinitionSql.includes("BETWEEN 1 AND 7")||workflowPhaseSql.includes("BETWEEN 1 AND 7"));
+if(workflowCapacityNeedsMigration){
+  if(tableExists("_workflow_capacity_legacy_job_workflow_phases"))db.exec('DROP TABLE "_workflow_capacity_legacy_job_workflow_phases"');
+  if(tableExists("_workflow_capacity_legacy_workflow_stage_definitions"))db.exec('DROP TABLE "_workflow_capacity_legacy_workflow_stage_definitions"');
+  for(const indexName of ["idx_workflow_stage_active_position","idx_workflow_stage_definitions_position","idx_job_workflow_phases_job","idx_job_workflow_phases_due"])db.exec(`DROP INDEX IF EXISTS ${quoteName(indexName)}`);
+  db.exec('ALTER TABLE "job_workflow_phases" RENAME TO "_workflow_capacity_legacy_job_workflow_phases"');
+  db.exec('ALTER TABLE "workflow_stage_definitions" RENAME TO "_workflow_capacity_legacy_workflow_stage_definitions"');
+  console.log("[WORKFLOW-CAPACITY] Workflow tables isolated for seven-active-phase upgrade");
+}
 const inventoryCatalogNeedsMigration=tableExists("inventory_items")&&(!columns("inventory_items").has("sku")||!columns("inventory_items").has("quantity_on_hand")||!columns("inventory_items").has("reorder_point"));
 if(inventoryCatalogNeedsMigration){
   if(tableExists("_inventory_legacy_items"))db.exec('DROP TABLE "_inventory_legacy_items"');
@@ -362,6 +377,17 @@ prepareMessengerV12Compatibility();
 prepareClientSegmentationCompatibility();
 prepareMasterDataCompatibility();
 db.exec(canonicalSchemaSql);
+if(tableExists("_workflow_capacity_legacy_workflow_stage_definitions")){
+  db.pragma("foreign_keys = OFF");
+  db.exec(`INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_by_user_id,updated_at)
+    SELECT stage_key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_by_user_id,updated_at FROM _workflow_capacity_legacy_workflow_stage_definitions`);
+  db.exec(`INSERT INTO job_workflow_phases(id,job_id,stage_key,position,enabled,starts_at,due_at,responsible_user_id,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at)
+    SELECT id,job_id,stage_key,position,enabled,starts_at,due_at,responsible_user_id,blocker_code,blocker_note,activated_at,completed_at,created_at,updated_at FROM _workflow_capacity_legacy_job_workflow_phases`);
+  db.exec('DROP TABLE "_workflow_capacity_legacy_job_workflow_phases"');
+  db.exec('DROP TABLE "_workflow_capacity_legacy_workflow_stage_definitions"');
+  setSetting("workflow_active_capacity_schema_version","1");
+  console.log("[WORKFLOW-CAPACITY] Seven active workflow phases enabled without data loss");
+}
 if(tableExists("_documents_legacy_archive")){
   db.exec(`INSERT INTO document_archive(id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at)
     SELECT id,category,title,description,entity_type,entity_id,original_name,stored_name,mime_type,size_bytes,file_path,metadata_json,archived_by_user_id,archived_at,created_at FROM _documents_legacy_archive`);

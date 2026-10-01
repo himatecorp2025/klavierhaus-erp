@@ -40,7 +40,7 @@ test("Admin UX v6 shell is dark-first, user-themed, responsive and sidebar-drive
   assert.match(css,/\.app-sidebar/);
   assert.match(css,/@media\(max-width:1024px\)/);
   assert.match(css,/\.mobile-intake-primary/);
-  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(sw,/klavierhaus-admin-v32-workflow-canonical-sync/);
   assert.match(sw,/"\/v6\.js"/);
 });
 
@@ -183,7 +183,7 @@ test("CMS archive, workflow lifecycle split and send-time client email are wired
 
 test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   const schema=read("server/schema.sql"),workflow=read("server/round2-workflow.js"),ui=read("public/round2.js"),v6=read("public/v6.js"),css=read("public/styles.css");
-  assert.match(schema,/position INTEGER NOT NULL CHECK\(position BETWEEN 1 AND 7\)/);
+  assert.match(schema,/position INTEGER NOT NULL CHECK\(position BETWEEN 1 AND 8\)/);
   assert.match(schema,/stage_type TEXT NOT NULL DEFAULT 'intermediate'/);
   assert.match(schema,/workflow_stage_key TEXT/);
   assert.match(workflow,/MAX_WORKFLOW_STAGES=7/);
@@ -192,11 +192,18 @@ test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   assert.match(workflow,/closed_type/);
   assert.match(workflow,/\/api\/jobs\/\:id\/history/);
   assert.match(ui,/workflowAddStageCard/);
+  assert.match(ui,/function r2ActiveDefinitions\(\)/);
+  assert.match(ui,/data-job-draggable/);
+  assert.match(ui,/workflowEntry=Boolean\(defaults\.workflow\)/);
+  assert.match(ui,/state\.r2WorkshopMode==="workflow"\?\{workflow:true,date\}:\{date\}/);
   assert.match(ui,/data-stage-drag/);
   assert.match(ui,/data-closed-type="completed"/);
   assert.match(ui,/data-closed-type="cancelled"/);
   assert.match(ui,/r2OpenWorkflowHistory/);
   assert.match(css,/--workflow-columns/);
+  assert.match(css,/CANONICAL WORKFLOW \/ PLANNED SEPARATION V12/);
+  assert.match(css,/\.workflow-scroll\{[\s\S]*overflow:visible!important/);
+  assert.match(css,/\.workflow-board\{[\s\S]*repeat\(auto-fit,minmax\(min\(260px,100%\),1fr\)\)!important/);
   assert.match(css,/calendar-event-block\.is-completed/);
   assert.match(v6,/function v6CmsPreviewUrl/);
   assert.match(v6,/url\.pathname\.startsWith\("\/uploads\/website\/"\)/);
@@ -286,7 +293,7 @@ test("Notification center is a global hidden portal, never workspace content",()
   assert.match(app,/layer\.hidden=true/);
   assert.match(app,/document\.documentElement\.classList\.add\("notification-layer-open"\)/);
   assert.match(app,/document\.documentElement\.classList\.remove\("notification-layer-open"\)/);
-  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(sw,/klavierhaus-admin-v32-workflow-canonical-sync/);
   assert.match(sw,/const critical=request\.mode==="navigate"/);
 });
 
@@ -303,5 +310,5 @@ test("Responsive PWA layout keeps intake tiles compact and removes desktop-only 
   assert.match(css,/@media\(max-width:900px\)[\s\S]*\.month-calendar\{min-width:0!important;overflow-x:auto/);
   assert.match(css,/@media\(pointer:coarse\)[\s\S]*min-height:42px/);
   assert.match(round2,/window\.matchMedia\?\.\("\(max-width:700px\)"\)\?\.matches\?"day":"week"/);
-  assert.match(sw,/klavierhaus-admin-v31-mobile-nav-svg/);
+  assert.match(sw,/klavierhaus-admin-v32-workflow-canonical-sync/);
 });
