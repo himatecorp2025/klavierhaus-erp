@@ -270,7 +270,7 @@ function createGoogleCalendarIntegration(options) {
   function mappedUser(event) {
     const email = normalizeEmail(event.creator?.email);
     if (!email) return null;
-    return db.prepare("SELECT id,name,email,calendar_color FROM users WHERE status='Active' AND lower(trim(google_calendar_email))=? LIMIT 1").get(email) || null;
+    return db.prepare("SELECT id,name,email,calendar_color FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND lower(trim(google_calendar_email))=? LIMIT 1").get(email) || null;
   }
 
   function importedInstructions(event) {
@@ -291,7 +291,7 @@ function createGoogleCalendarIntegration(options) {
   }
 
   function adminUsers() {
-    return db.prepare("SELECT id,name FROM users WHERE status='Active' AND (role='ADMIN' OR COALESCE(is_superadmin,0)=1)").all();
+    return db.prepare("SELECT id,name FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role='ADMIN'").all();
   }
 
   function notifyAdmins(type, event, job, titleEn, titleHu, bodyEn, bodyHu, suffix = "") {

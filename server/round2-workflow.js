@@ -124,14 +124,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   function technician(id,{optional=true}={}){
     const value=text(id,160);
     if(!value&&optional)return null;
-    const row=value&&db.prepare("SELECT id,name,role,status,calendar_color FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN')").get(value);
+    const row=value&&db.prepare("SELECT id,name,role,status,calendar_color FROM users WHERE id=? AND status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('WORKER','MANAGER','ADMIN')").get(value);
     if(!row)throw problem("INVALID_TECHNICIAN_ID");
     return row;
   }
   function responsibleUser(id,{optional=true}={}){
     const value=text(id,160);
     if(!value&&optional)return null;
-    const row=value&&db.prepare("SELECT id,name,role,status,calendar_color FROM users WHERE id=? AND status='Active' AND role IN ('WORKER','MANAGER','ADMIN','SUPERADMIN')").get(value);
+    const row=value&&db.prepare("SELECT id,name,role,status,calendar_color FROM users WHERE id=? AND status='Active' AND COALESCE(hidden_user,0)=0 AND role IN ('WORKER','MANAGER','ADMIN')").get(value);
     if(!row)throw problem("INVALID_RESPONSIBLE_USER_ID");
     return row;
   }
