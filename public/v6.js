@@ -597,8 +597,8 @@ async function v6RenderArchive(target="#cmsMain"){
   $("#archiveCategory").addEventListener("change",async event=>{state.archiveCategory=event.target.value;state.archiveQuery="";await v6RenderArchive(target);});
   $("#archiveSearch").addEventListener("input",debounce(async event=>{state.archiveQuery=event.target.value.trim();await v6RenderArchive(target);},220));
   $("#archiveAddDocument").addEventListener("click",()=>v6OpenArchiveUpload(()=>v6RenderArchive(target)));
-  $("[data-archive-download]",main).forEach(button=>button.addEventListener("click",()=>v6DownloadArchive(rows.find(row=>String(row.id)===button.dataset.archiveDownload))));
-  $("[data-archive-restore-client]",main).forEach(button=>button.addEventListener("click",async()=>{
+  $$("[data-archive-download]",main).forEach(button=>button.addEventListener("click",()=>v6DownloadArchive(rows.find(row=>String(row.id)===button.dataset.archiveDownload))));
+  $$("[data-archive-restore-client]",main).forEach(button=>button.addEventListener("click",async()=>{
     const row=rows.find(item=>String(item.id)===button.dataset.archiveRestoreClient);if(!row)return;
     const clientName=row?.metadata?.client?.name||("#"+(row.entity_id||""));
     if(!window.confirm(tr(`Restore ${clientName} to active Master Data? For a merged duplicate, only relationships that still belong to the merge target will be moved back.`,`${clientName} visszaálljon az aktív törzsadatok közé? Összevont duplikáció esetén csak azok a kapcsolatok kerülnek vissza, amelyek még mindig az összevonás célügyfeléhez tartoznak.`)))return;
