@@ -7,7 +7,7 @@ const compression = require("compression");
 const multer = require("multer");
 const { createEventClient } = require("./event-client");
 const { PAYMENT_METHODS } = require("../../server/payment-methods");
-const PRIVATE_PICKER_ASSET_REV = "private-picker-chat-20260930-2";
+const PRIVATE_PICKER_ASSET_REV = "cms-messenger-layout-20261001-1";
 const {
   VERSION,
   findRoute,
