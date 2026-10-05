@@ -511,8 +511,8 @@ CREATE TABLE IF NOT EXISTS user_staff_skills (
 CREATE INDEX IF NOT EXISTS idx_user_staff_skills_skill ON user_staff_skills(skill_id,user_id);
 CREATE TABLE IF NOT EXISTS milestone_dashboard (
   id INTEGER PRIMARY KEY CHECK(id=1),
-  title_en TEXT NOT NULL DEFAULT 'Our next milestone',
-  title_hu TEXT NOT NULL DEFAULT 'A következő mérföldkő',
+  title_en TEXT NOT NULL DEFAULT 'Road to One Million',
+  title_hu TEXT NOT NULL DEFAULT 'Út az egymillióhoz',
   quote_en TEXT,
   quote_hu TEXT,
   start_date TEXT,
@@ -520,9 +520,9 @@ CREATE TABLE IF NOT EXISTS milestone_dashboard (
   target_label TEXT,
   hero_media_url TEXT,
   hero_icon TEXT,
-  reference_code TEXT NOT NULL DEFAULT 'JOB #1042',
-  subtitle_en TEXT NOT NULL DEFAULT 'Track the progress of this piano service from intake to completion.',
-  subtitle_hu TEXT NOT NULL DEFAULT 'Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.',
+  reference_code TEXT NOT NULL DEFAULT 'GROWTH ROADMAP',
+  subtitle_en TEXT NOT NULL DEFAULT 'Track the company milestones, projects and next actions that lead Klavierhaus to its next growth target.',
+  subtitle_hu TEXT NOT NULL DEFAULT 'Kövesd a Klavierhaus következő növekedési céljához vezető vállalati mérföldköveket, projekteket és feladatokat.',
   client_name TEXT,
   client_type TEXT,
   client_contact TEXT,
@@ -555,17 +555,31 @@ CREATE TABLE IF NOT EXISTS milestone_steps (
   completed_at TEXT,
   icon TEXT,
   media_url TEXT,
+  uid TEXT UNIQUE,
+  parent_uid TEXT,
+  step_kind TEXT NOT NULL DEFAULT 'major' CHECK(step_kind IN ('major','minor')),
+  link_view TEXT,
+  link_record_id TEXT,
+  color_key TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);`);
+CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_milestone_steps_parent ON milestone_steps(parent_uid,step_kind,sort_order,id);`);
 for(const [name,definition] of [
-  ["reference_code","TEXT NOT NULL DEFAULT 'JOB #1042'"],
-  ["subtitle_en","TEXT NOT NULL DEFAULT 'Track the progress of this piano service from intake to completion.'"],
-  ["subtitle_hu","TEXT NOT NULL DEFAULT 'Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.'"],
+  ["uid","TEXT"],["parent_uid","TEXT"],["step_kind","TEXT NOT NULL DEFAULT 'major' CHECK(step_kind IN ('major','minor'))"],
+  ["link_view","TEXT"],["link_record_id","TEXT"],["color_key","TEXT"]
+])ensureColumn("milestone_steps",name,definition);
+db.prepare("UPDATE milestone_steps SET uid='legacy-'||id WHERE uid IS NULL OR trim(uid)='' ").run();
+db.prepare("UPDATE milestone_steps SET step_kind='major' WHERE step_kind IS NULL OR step_kind NOT IN ('major','minor')").run();
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_milestone_steps_uid ON milestone_steps(uid); CREATE INDEX IF NOT EXISTS idx_milestone_steps_parent ON milestone_steps(parent_uid,step_kind,sort_order,id);");
+for(const [name,definition] of [
+  ["reference_code","TEXT NOT NULL DEFAULT 'GROWTH ROADMAP'"],
+  ["subtitle_en","TEXT NOT NULL DEFAULT 'Track the company milestones, projects and next actions that lead Klavierhaus to its next growth target.'"],
+  ["subtitle_hu","TEXT NOT NULL DEFAULT 'Kövesd a Klavierhaus következő növekedési céljához vezető vállalati mérföldköveket, projekteket és feladatokat.'"],
   ["client_name","TEXT"],["client_type","TEXT"],["client_contact","TEXT"],["location_label","TEXT"],["scheduled_label","TEXT"],
   ["status_label","TEXT NOT NULL DEFAULT 'In Progress'"],["instrument_name","TEXT"],["instrument_serial","TEXT"],["instrument_year","TEXT"],["instrument_media_url","TEXT"],
   ["schedule_range","TEXT"],["delivery_estimate","TEXT"],
@@ -573,16 +587,31 @@ for(const [name,definition] of [
   ["craft_body_en","TEXT NOT NULL DEFAULT 'Precision service for extraordinary instruments.'"],["craft_body_hu","TEXT NOT NULL DEFAULT 'Precíz szerviz kivételes hangszerekhez.'"],
   ["craft_media_url","TEXT"],["quote_media_url","TEXT"]
 ])ensureColumn("milestone_dashboard",name,definition);
-db.prepare(`INSERT OR IGNORE INTO milestone_dashboard(id,title_en,title_hu,quote_en,quote_hu,target_label) VALUES(1,?,?,?,?,?)`).run('Our next milestone','A következő mérföldkő','Progress is built one completed step at a time.','A fejlődés minden teljesített lépéssel közelebb visz.','Klavierhaus');
+db.prepare(`INSERT OR IGNORE INTO milestone_dashboard(id,title_en,title_hu,quote_en,quote_hu,target_label) VALUES(1,?,?,?,?,?)`).run('Road to One Million','Út az egymillióhoz','Caring for extraordinary instruments and the people who play them.','Gondoskodás a kivételes hangszerekről és azokról, akik játszanak rajtuk.','$1M Klavierhaus');
 if(Number(db.prepare('SELECT COUNT(*) count FROM milestone_steps').get()?.count||0)===0){
-  const seedMilestone=db.prepare('INSERT INTO milestone_steps(title_en,title_hu,description_en,description_hu,icon,sort_order) VALUES(?,?,?,?,?,?)');
+  const seedMilestone=db.prepare('INSERT INTO milestone_steps(title_en,title_hu,description_en,description_hu,icon,uid,step_kind,color_key,sort_order) VALUES(?,?,?,?,?,?,\'major\',?,?)');
   [
-    ['Intake','Igényfelvétel','Register client, piano details and initial request.','Ügyfél, zongoraadatok és kezdeti igény rögzítése.','clipboard',0],
-    ['Assessment','Felmérés','On-site inspection, condition report and measurements.','Helyszíni felmérés, állapotjelentés és mérések.','piano',1],
-    ['Quote','Ajánlat','Prepare service plan and send quote to client.','Szervizterv és ajánlat elkészítése az ügyfélnek.','document',2],
-    ['Workshop','Műhely','Service, regulation, repairs and quality checks.','Szerviz, szabályozás, javítások és minőségellenőrzés.','tools',3],
-    ['Delivery & Follow-up','Átadás és utánkövetés','Return piano, final tuning and follow-up with client.','Zongora átadása, végső hangolás és utánkövetés.','flag',4]
+    ['Revenue foundation','Bevételi alapok','Build repeatable revenue and service capacity.','Ismételhető bevételi és szervizkapacitás felépítése.','growth','roadmap-1','gold',0],
+    ['Premium piano pipeline','Prémium zongora pipeline','Move priority instruments and opportunities forward.','A kiemelt hangszerek és lehetőségek előremozdítása.','piano','roadmap-2','cyan',1],
+    ['Client & partner growth','Ügyfél- és partnernövekedés','Deepen institutional, VIP and partner relationships.','Intézményi, VIP és partnerkapcsolatok erősítése.','partner','roadmap-3','blue',2],
+    ['Operational scale','Operatív skálázás','Increase workshop throughput without losing quality.','A műhely kapacitásának növelése a minőség megtartásával.','workshop','roadmap-4','amber',3],
+    ['$1M company milestone','1M USD vállalati mérföldkő','Reach the next major company revenue milestone.','A következő nagy vállalati bevételi mérföldkő elérése.','flag','roadmap-5','green',4]
   ].forEach(row=>seedMilestone.run(...row));
+}
+const legacyMilestoneTitles=db.prepare("SELECT title_en FROM milestone_steps WHERE step_kind='major' ORDER BY sort_order,id").all().map(row=>row.title_en);
+if(legacyMilestoneTitles.length===5&&JSON.stringify(legacyMilestoneTitles)===JSON.stringify(['Intake','Assessment','Quote','Workshop','Delivery & Follow-up'])){
+  db.transaction(()=>{
+    db.prepare('DELETE FROM milestone_steps').run();
+    const seedMilestone=db.prepare('INSERT INTO milestone_steps(title_en,title_hu,description_en,description_hu,icon,uid,step_kind,color_key,sort_order) VALUES(?,?,?,?,?,?,\'major\',?,?)');
+    [
+      ['Revenue foundation','Bevételi alapok','Build repeatable revenue and service capacity.','Ismételhető bevételi és szervizkapacitás felépítése.','growth','roadmap-1','gold',0],
+      ['Premium piano pipeline','Prémium zongora pipeline','Move priority instruments and opportunities forward.','A kiemelt hangszerek és lehetőségek előremozdítása.','piano','roadmap-2','cyan',1],
+      ['Client & partner growth','Ügyfél- és partnernövekedés','Deepen institutional, VIP and partner relationships.','Intézményi, VIP és partnerkapcsolatok erősítése.','partner','roadmap-3','blue',2],
+      ['Operational scale','Operatív skálázás','Increase workshop throughput without losing quality.','A műhely kapacitásának növelése a minőség megtartásával.','workshop','roadmap-4','amber',3],
+      ['$1M company milestone','1M USD vállalati mérföldkő','Reach the next major company revenue milestone.','A következő nagy vállalati bevételi mérföldkő elérése.','flag','roadmap-5','green',4]
+    ].forEach(row=>seedMilestone.run(...row));
+    db.prepare("UPDATE milestone_dashboard SET title_en='Road to One Million',title_hu='Út az egymillióhoz',reference_code='GROWTH ROADMAP',subtitle_en='Track the company milestones, projects and next actions that lead Klavierhaus to its next growth target.',subtitle_hu='Kövesd a Klavierhaus következő növekedési céljához vezető vállalati mérföldköveket, projekteket és feladatokat.',updated_at=CURRENT_TIMESTAMP WHERE id=1 AND title_en IN ('Our next milestone','Steinway B — Concert Grand')").run();
+  })();
 }
 
 if(Number(db.prepare('SELECT COUNT(*) count FROM staff_skills').get()?.count||0)===0){

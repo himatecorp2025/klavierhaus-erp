@@ -93,7 +93,13 @@
           <img id="mobileBrandLogo" src="/icons/icon-192.png" alt="">
         </button>
         <button id="headerSidebarToggle" class="header-sidebar-toggle" type="button" aria-label="Show navigation" aria-expanded="true" aria-controls="appSidebar">☰</button>
-        <div class="header-welcome" id="headerWelcome" aria-live="polite"></div>
+        <div class="header-center">
+          <div class="global-search-shell">
+            <label class="global-search-field" for="globalSearchInput"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="globalSearchInput" type="search" autocomplete="off" placeholder="Search clients, jobs, or instruments…" aria-label="Global search"></label>
+            <div id="globalSearchResults" class="global-search-results" hidden></div>
+          </div>
+          <div class="header-welcome" id="headerWelcome" aria-live="polite"></div>
+        </div>
         <div class="header-tools">
           <div class="ny-clock" aria-live="off">
             <span data-i18n="new_york_time">New York time</span>

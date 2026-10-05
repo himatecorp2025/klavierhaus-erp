@@ -105,20 +105,29 @@ test("operations enhancements persist staff profiles, Milestone and full XLSX ex
 
   const milestone=await request("/api/milestone",{token,method:"PUT",body:{dashboard:{
     title_en:"Road to One Million",title_hu:"Út az egymillióhoz",quote_en:"One completed step at a time.",quote_hu:"Lépésről lépésre.",
-    start_date:"2035-01-01",end_date:"2035-12-31",target_label:"$1M Klavierhaus",hero_icon:"◆"
+    start_date:"2035-01-01",end_date:"2035-12-31",target_label:"$1M Klavierhaus",hero_icon:"growth"
   },steps:[
-    {title_en:"Build repeatable workshop flow",title_hu:"Ismételhető műhelyfolyamat",target_date:"2035-04-01",completed:true,icon:"✓"},
-    {title_en:"Reach the next revenue milestone",title_hu:"Következő bevételi cél",target_date:"2035-09-01",completed:false,icon:"★"}
+    {uid:"m1",step_kind:"major",title_en:"Build repeatable workshop flow",title_hu:"Ismételhető műhelyfolyamat",target_date:"2035-04-01",completed:true,icon:"workshop",link_view:"workshop"},
+    {uid:"s1",parent_uid:"m1",step_kind:"minor",title_en:"Finish priority grand piano",title_hu:"Kiemelt zongora befejezése",completed:true,icon:"piano",link_view:"master"},
+    {uid:"m2",step_kind:"major",title_en:"Reach the next revenue milestone",title_hu:"Következő bevételi cél",target_date:"2035-09-01",completed:false,icon:"revenue",link_view:"finance"},
+    {uid:"s2",parent_uid:"m2",step_kind:"minor",title_en:"Contact institutional prospect",title_hu:"Intézményi kapcsolat felkeresése",completed:false,icon:"phone",link_view:"master"},
+    {uid:"m3",step_kind:"major",title_en:"Expand partner network",title_hu:"Partnerhálózat bővítése",completed:false,icon:"partner"},
+    {uid:"m4",step_kind:"major",title_en:"Cross one million dollars",title_hu:"Egymillió dollár átlépése",completed:false,icon:"flag"}
   ]}});
   assert.equal(milestone.status,200,JSON.stringify(milestone.payload));
-  assert.equal(milestone.payload.total_count,5);
-  assert.equal(milestone.payload.completed_count,1);
+  assert.equal(milestone.payload.total_count,6);
+  assert.equal(milestone.payload.major_steps.length,4);
+  assert.equal(milestone.payload.minor_steps.length,2);
+  assert.equal(milestone.payload.completed_count,2);
   assert.equal(milestone.payload.dashboard.target_label,"$1M Klavierhaus");
   assert.equal(milestone.payload.next_step.title_en,"Reach the next revenue milestone");
+  assert.ok(milestone.payload.icon_keys.includes("piano"));
+  assert.ok(milestone.payload.icon_keys.length>=30);
 
   const milestoneRead=await request("/api/milestone",{token});
   assert.equal(milestoneRead.status,200,JSON.stringify(milestoneRead.payload));
-  assert.equal(milestoneRead.payload.steps.length,5);
+  assert.equal(milestoneRead.payload.steps.length,6);
+  assert.equal(milestoneRead.payload.steps.find(row=>row.uid==="s1").parent_uid,"m1");
 
   const exportResponse=await fetch(origin+"/api/system-export.xlsx",{headers:{Authorization:"Bearer "+token}});
   assert.equal(exportResponse.status,200);

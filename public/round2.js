@@ -375,11 +375,11 @@ async function renderPlanned(){
   workspace.innerHTML=pageHead(tr("Planned Jobs","Tervezett munkák"),tr("Negotiation and unscheduled work stays outside the active workshop until you activate it.","A tárgyalás alatt álló, ütemezetlen munka nem kerül az aktív műhelybe, amíg nem aktiválod."),
     `<button id="newPlannedBtn" class="primary-button" type="button">＋ ${tr("New Planned Job","Új tervezett munka")}</button>`)+
     `<div class="stats-grid"><div class="stat-card"><small>${tr("Pipeline","Tervezési lista")}</small><strong>${jobs.length}</strong></div><div class="stat-card"><small>${tr("No workflow owner","Nincs fő felelős")}</small><strong>${jobs.filter(job=>!job.workflow_owner_user_id).length}</strong></div><div class="stat-card"><small>${tr("On site","Helyszíni")}</small><strong>${jobs.filter(job=>job.location_type==="on_site").length}</strong></div><div class="stat-card"><small>${tr("Workshop","Műhely")}</small><strong>${jobs.filter(job=>job.location_type==="workshop").length}</strong></div></div>
-    <div class="planned-toolbar"><div class="search-field"><input id="plannedSearch" type="search" placeholder="${tr("Search job, client or piano…","Keresés munka, ügyfél vagy zongora alapján…")}"></div><button id="openWorkshopBtn" class="secondary-button" type="button">${tr("Workshop & Calendar","Műhely és naptár")} →</button></div>
+    <div class="planned-toolbar"><div class="search-field"><input id="plannedSearch" type="search" value="${esc(state.plannedSearch||"")}" placeholder="${tr("Search job, client or piano…","Keresés munka, ügyfél vagy zongora alapján…")}"></div><button id="openWorkshopBtn" class="secondary-button" type="button">${tr("Workshop & Calendar","Műhely és naptár")} →</button></div>
     <div id="plannedList" class="planned-grid"></div>`;
   $("#newPlannedBtn").addEventListener("click",()=>r2OpenCreateJob(renderPlanned));
   $("#openWorkshopBtn").addEventListener("click",()=>navTo("workshop"));
-  $("#plannedSearch").addEventListener("input",r2RenderPlannedList);r2RenderPlannedList();
+  $("#plannedSearch").addEventListener("input",event=>{state.plannedSearch=event.currentTarget.value;r2RenderPlannedList();});r2RenderPlannedList();
 }
 function r2RenderPlannedList(){
   const host=$("#plannedList");if(!host)return;
