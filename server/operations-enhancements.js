@@ -11,6 +11,31 @@ function integerId(value){const n=Number(value);return Number.isSafeInteger(n)&&
 function problem(code,status=400){const error=new Error(code);error.status=status;return error;}
 function xml(value){return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");}
 function columnName(index){let n=index+1,out="";while(n){const r=(n-1)%26;out=String.fromCharCode(65+r)+out;n=Math.floor((n-1)/26);}return out;}
+function excelSafeTable(headers,rows){
+  const CHUNK=30000,parts=new Map();
+  for(const header of headers){
+    let max=1;
+    for(const row of rows){
+      const value=row?.[header];
+      if(value===null||value===undefined||typeof value==="number")continue;
+      const raw=typeof value==="object"?JSON.stringify(value):String(value);
+      max=Math.max(max,Math.ceil(raw.length/CHUNK));
+    }
+    parts.set(header,max);
+  }
+  const expandedHeaders=[];for(const header of headers){expandedHeaders.push(header);for(let part=2;part<=parts.get(header);part++)expandedHeaders.push(header+"__part_"+part);}
+  const expandedRows=rows.map(row=>{
+    const out={};
+    for(const header of headers){
+      const value=row?.[header],count=parts.get(header);
+      if(value===null||value===undefined||typeof value==="number"){out[header]=value;continue;}
+      const raw=typeof value==="object"?JSON.stringify(value):String(value);
+      for(let part=1;part<=count;part++)out[part===1?header:header+"__part_"+part]=raw.slice((part-1)*CHUNK,part*CHUNK);
+    }
+    return out;
+  });
+  return {headers:expandedHeaders,rows:expandedRows};
+}
 function safeSheetName(value,used){
   let base=String(value||"Sheet").replace(/[\\/*?:[\]]/g," ").replace(/\s+/g," ").trim().slice(0,31)||"Sheet",name=base,index=2;
   while(used.has(name)){const suffix=" "+index++;name=(base.slice(0,31-suffix.length)+suffix).slice(0,31);}
@@ -170,11 +195,18 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
     try{
       const tables=db.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
       const manifestRows=tables.map(row=>({table_name:row.name,row_count:Number(db.prepare('SELECT COUNT(*) count FROM "'+String(row.name).replaceAll('"','""')+'"').get().count||0),schema_sql:row.sql||""}));
-      const sheets=[{name:"Manifest",headers:["table_name","row_count","schema_sql"],rows:manifestRows}];
+      const sheets=[
+        {name:"Export Notes",headers:["topic","detail"],rows:[
+          {topic:"Completeness",detail:"All operational SQLite tables are exported. Original IDs and relationship keys are preserved."},
+          {topic:"Long values",detail:"Values longer than the Excel cell limit are continued in __part_2, __part_3, ... columns without data loss."},
+          {topic:"Authentication security",detail:"Credential secrets such as password hashes, tokens and code hashes are redacted; business and relationship data remain complete."}
+        ]},
+        {name:"Manifest",headers:["table_name","row_count","schema_sql"],rows:manifestRows}
+      ];
       for(const table of tables){
         const tableName=String(table.name),quoted='"'+tableName.replaceAll('"','""')+'"',headers=db.prepare("PRAGMA table_info("+quoted+")").all().map(row=>row.name);
         const raw=db.prepare("SELECT * FROM "+quoted).all(),rows=raw.map(row=>Object.fromEntries(headers.map(header=>[header,redactCell(tableName,header,row[header])])));
-        sheets.push({name:tableName,headers,rows});
+        const safe=excelSafeTable(headers,rows);sheets.push({name:tableName,headers:safe.headers,rows:safe.rows});
       }
       const workbook=createWorkbook(sheets),stamp=new Date().toISOString().slice(0,10);
       audit(req,"EXPORT","database","FULL",null,{tables:tables.length,format:"xlsx"});
@@ -185,4 +217,4 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
   });
 }
 
-module.exports={registerOperationsEnhancementRoutes,createWorkbook};
+module.exports={registerOperationsEnhancementRoutes,createWorkbook,excelSafeTable};
