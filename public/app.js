@@ -73,6 +73,7 @@ function humanError(error){
     STAFF_SKILL_EXISTS:["A professional job role with this code already exists.","Ez a szakmai munkakör már létezik."],
     STAFF_SKILL_NOT_FOUND:["The selected professional job role is no longer available.","A kiválasztott szakmai munkakör már nem elérhető."],
     INVALID_MANAGER_SCOPE:["Choose Inside Manager or Outside Manager.","Válassz Belső menedzser vagy Külső menedzser típust."],
+    MANAGER_SCOPE_REQUIRED:["Every manager must be assigned as Inside Manager or Outside Manager.","Minden menedzsernél kötelező megadni, hogy Belső vagy Külső menedzser."],
     MILESTONE_TITLE_REQUIRED:["Enter the milestone title.","Add meg a mérföldkő címét."],
     MILESTONE_STEP_TITLE_REQUIRED:["Every milestone step needs a title.","Minden mérföldkőlépéshez adj címet."],
     MILESTONE_MEDIA_REQUIRED:["Choose an image or GIF to upload.","Válassz feltöltendő képet vagy GIF-et."],
@@ -1328,7 +1329,7 @@ async function openUserDialog(user=null){
     <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
   const roleSelect=$("#userEditor")?.elements?.role,scopeField=$("#managerScopeField");
-  const syncManagerScope=()=>scopeField?.classList.toggle("hidden",roleSelect?.value!=="MANAGER");roleSelect?.addEventListener("change",syncManagerScope);syncManagerScope();
+  const syncManagerScope=()=>{const manager=roleSelect?.value==="MANAGER";scopeField?.classList.toggle("hidden",!manager);const select=scopeField?.querySelector("select");if(select)select.required=manager;};roleSelect?.addEventListener("change",syncManagerScope);syncManagerScope();
   $("#userEditor").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     if(editing&&!body.password){delete body.password;delete body.password_confirmation;}
