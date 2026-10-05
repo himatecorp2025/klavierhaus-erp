@@ -229,6 +229,10 @@ function r2BindWorkflowCards(form,{defaultTechnicianId="",defaultTechnicianName=
     row.querySelector("[data-phase-select]")?.addEventListener("click",select);
     box?.addEventListener("change",()=>row.classList.toggle("selected",box.checked));
     row.querySelector("[data-phase-detail]")?.addEventListener("click",()=>{const details=row.querySelector("[data-phase-details]"),open=details?.classList.toggle("hidden")===false;row.querySelector("[data-phase-detail]")?.setAttribute("aria-expanded",String(open));});
+    const skillSelect=row.querySelector("[data-phase-skill]"),responsibleSelect=row.querySelector("[data-phase-responsible]");
+    const refreshResponsible=()=>{if(!responsibleSelect)return;const selected=responsibleSelect.value;responsibleSelect.innerHTML='<option value="">'+tr("Use job technician","Munka technikusa")+'</option>'+r2ResponsibleOptions(selected,skillSelect?.value||"");responsibleSelect.value=selected;};
+    skillSelect?.addEventListener("change",refreshResponsible);
+    row.querySelector("[data-add-phase-skill]")?.addEventListener("click",()=>{if(typeof createOperationalSkillInline!=="function")return;createOperationalSkillInline("",saved=>{if(skillSelect){skillSelect.innerHTML=r2SkillOptions(saved.id);skillSelect.value=String(saved.id);refreshResponsible();}});});
     row.querySelector("[data-add-cost]")?.addEventListener("click",()=>{
       const host=row.querySelector("[data-phase-costs]"),wrap=document.createElement("div");wrap.innerHTML=r2PhaseCostRows([{category:"material",title:"",amount:0}],key);const cost=wrap.firstElementChild;if(host&&cost){host.append(cost);cost.querySelector("[data-cost-title]")?.focus();cost.querySelector("[data-cost-remove]")?.addEventListener("click",()=>{cost.remove();r2RefreshWorkflowFinancialSummary(form);});}
     });
