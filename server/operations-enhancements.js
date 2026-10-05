@@ -45,7 +45,7 @@ function safeCode(value){return text(value,120).toUpperCase().replace(/[^A-Z0-9]
 function redactCell(table,column,value){
   const key=String(column||"").toLowerCase();
   if(table==="users"&&key==="password_hash")return "[REDACTED]";
-  if(/(?:password|secret|token|code_hash|signature)/i.test(key))return value==null?value:"[REDACTED]";
+  if(/(?:password|secret|token|code_hash|otp_hash|activation_hash)/i.test(key))return value==null?value:"[REDACTED]";
   return Buffer.isBuffer(value)?value.toString("base64"):value;
 }
 function worksheetXml(headers,rows){
