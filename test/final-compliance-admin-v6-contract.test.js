@@ -258,7 +258,9 @@ test("Workflow status, responsibility, intake grid and Documents UX contracts ar
   assert.match(css,/stage-card\.status-cancelled/);
   assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2/);
-  assert.doesNotMatch(v6,/assessment-option-icon/);\n  assert.match(v6,/assessmentAddCustom/);\n  assert.match(v6,/data-assessment-custom-price/);
+  assert.doesNotMatch(v6,/assessment-option-icon/);
+  assert.match(v6,/assessmentAddCustom/);
+  assert.match(v6,/data-assessment-custom-price/);
   assert.match(archive,/intakeAssessmentPdf/);
   assert.match(archive,/\/api\/intake\/:id\/export-pdf/);
 });
