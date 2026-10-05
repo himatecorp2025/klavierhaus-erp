@@ -48,6 +48,9 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/GOAL ACHIEVED/);
   assert.match(ops,/openMilestoneEditor/);
   assert.match(ops,/step_progress/);
+  const v6=read("public/v6.js");
+  assert.match(v6,/operationsMilestoneProfileCard/);
+  assert.match(v6,/bindOperationsMilestoneProfile/);
   assert.match(css,/\.milestone-hero/);
   assert.match(css,/\.milestone-roadmap/);
   assert.match(css,/@media\(max-width:699px\)[\s\S]{0,120}\.milestone-view\{display:none!important\}/);
@@ -64,19 +67,26 @@ test("VIP clients have explicit last-contacted tracking and a three-month warnin
   assert.match(core,/last_contacted_at/);
   assert.match(core,/vip_followup_due/);
   assert.match(app,/Last contacted/);
+  assert.match(app,/name="last_contacted_at" type="date"/);
   assert.match(app,/vipFollowupWarning/);
   assert.match(app,/vip-followup-warning/);
   assert.match(css,/\.vip-followup-warning/);
 });
 
-test("complete database export creates a structured native XLSX workbook",()=>{
-  const api=read("server/operations-enhancements.js"),v6=read("public/v6.js");
+test("complete database export creates a structured native XLSX workbook and protects authentication secrets",()=>{
+  const api=read("server/operations-enhancements.js"),v6=read("public/v6.js"),ops=read("public/operations-ui.js");
   assert.match(api,/\/api\/system-export\.xlsx/);
-  assert.match(api,/SELECT name,sql FROM sqlite_master/);
+  assert.match(api,/SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name/);
   assert.match(api,/Manifest/);
   assert.match(api,/schema_sql/);
   assert.match(api,/Content-Disposition/);
+  assert.match(api,/password_hash/);
+  assert.match(api,/password\|secret\|token\|code_hash\|signature/);
+  assert.match(api,/\[REDACTED\]/);
   assert.match(v6,/operationsExportRecoveryCard/);
+  assert.match(v6,/bindOperationsExportRecovery/);
+  assert.match(ops,/Authentication secrets such as password hashes and tokens are securely redacted/);
+  assert.match(ops,/business and relationship data remain complete/);
   const buffer=createWorkbook([
     {name:"Manifest",headers:["table_name","row_count"],rows:[{table_name:"clients",row_count:1}]},
     {name:"clients",headers:["id","name"],rows:[{id:1,name:"Test Client"}]}
@@ -99,7 +109,25 @@ test("final theme normalization covers legacy fixed-light admin surfaces and nar
   assert.match(css,/\.invoice-line\{[\s\S]{0,200}grid-template-columns:minmax\(105px,.62fr\) minmax\(240px,1.65fr\) 72px minmax\(145px,.8fr\) 42px!important/);
   assert.match(css,/\[data-line-quantity\][\s\S]{0,120}max-width:72px!important/);
   assert.match(css,/\.typeahead-menu,[\s\S]{0,600}background:var\(--surface\)!important/);
+  assert.match(css,/\.invoice-detail-kpis>div,[\s\S]{0,1000}background:var\(--surface\)!important/);
+  assert.match(css,/\.database-export-card/);
+  assert.match(css,/\.database-export-security-note/);
+  assert.match(css,/\.vip-followup-warning/);
+  assert.match(css,/\.milestone-view/);
   assert.match(css,/:root\[data-theme="dark"\] input\[type="date"\]/);
   assert.match(round3,/data-line-quantity/);
   assert.match(round3,/data-line-price/);
+});
+
+test("admin surfaces wire Milestone editing, skills management and complete export into existing Profile, Settings and CMS recovery",()=>{
+  const v6=read("public/v6.js"),ops=read("public/operations-ui.js");
+  assert.match(v6,/operationsMilestoneProfileCard/);
+  assert.match(v6,/bindOperationsMilestoneProfile/);
+  assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.match(v6,/bindOperationsSkillsSettings/);
+  assert.match(v6,/operationsExportRecoveryCard/);
+  assert.match(v6,/bindOperationsExportRecovery/);
+  assert.match(ops,/function operationsMilestoneProfileCard/);
+  assert.match(ops,/function operationsSkillsSettingsCard/);
+  assert.match(ops,/function operationsExportRecoveryCard/);
 });
