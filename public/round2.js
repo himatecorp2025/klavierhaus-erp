@@ -39,15 +39,19 @@ function r2IsoToNyInput(value){
   const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 function r2NyInputToIso(value){
-  const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  const raw=String(value||"").trim(),match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if(!match)throw new Error("INVALID_SCHEDULE_TIME");
-  const wanted={year:+match[1],month:+match[2],day:+match[3],hour:+match[4],minute:+match[5]};
-  let guess=Date.UTC(wanted.year,wanted.month-1,wanted.day,wanted.hour,wanted.minute);
-  for(let i=0;i<3;i+=1){
+  const wanted={year:+match[1],month:+match[2],day:+match[3],hour:+match[4],minute:+match[5],second:+(match[6]||0)};
+  const wallCheck=new Date(Date.UTC(wanted.year,wanted.month-1,wanted.day,wanted.hour,wanted.minute,wanted.second));
+  if(wallCheck.getUTCFullYear()!==wanted.year||wallCheck.getUTCMonth()!==wanted.month-1||wallCheck.getUTCDate()!==wanted.day||wanted.hour>23||wanted.minute>59||wanted.second>59)throw new Error("INVALID_SCHEDULE_TIME");
+  let guess=Date.UTC(wanted.year,wanted.month-1,wanted.day,wanted.hour,wanted.minute,wanted.second);
+  for(let i=0;i<4;i+=1){
     const p=r2NyParts(new Date(guess)),represented=Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute),desired=Date.UTC(wanted.year,wanted.month-1,wanted.day,wanted.hour,wanted.minute);
     guess+=desired-represented;
   }
-  return new Date(guess).toISOString();
+  const result=new Date(guess),rendered=r2NyParts(result);
+  if(+rendered.year!==wanted.year||+rendered.month!==wanted.month||+rendered.day!==wanted.day||+rendered.hour!==wanted.hour||+rendered.minute!==wanted.minute)throw new Error("INVALID_SCHEDULE_TIME");
+  return result.toISOString();
 }
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
 function r2Today(){return r2NyDate(new Date());}
@@ -88,7 +92,8 @@ function r2PrivateContext(row){
     row?.service_id?(state.language==="hu"?(row.service_title_hu||"Szolgáltatás"):(row.service_title_en||"Service")):tr("Private visit","Privát látogatás");
 }
 function r2PrivateCalendarRow(row){
-  return {...row,id:"private:"+row.id,private_appointment:true,private_id:row.id,title:r2PrivateContext(row),client_name:row.name,scheduled_end:new Date(new Date(row.scheduled_at).getTime()+60*60000).toISOString(),estimated_duration_min:60,assigned_technician_name:row.assigned_user_name||"",assigned_technician_color:"#c99a45",location_type:"private",stage:"private",workflow_status:"private"};
+  const duration=Math.max(15,Number(row.duration_min||60)),scheduledEnd=row.scheduled_end_at||new Date(new Date(row.scheduled_at).getTime()+duration*60000).toISOString();
+  return {...row,id:"private:"+row.id,private_appointment:true,private_id:row.id,title:r2PrivateContext(row),client_name:row.name,scheduled_end:scheduledEnd,estimated_duration_min:duration,assigned_technician_name:row.assigned_user_name||"",assigned_technician_color:"#c99a45",location_type:"private",stage:"private",workflow_status:"private"};
 }
 function r2PrivateStatusLabel(status){return ({SCHEDULED:tr("Scheduled","Ütemezve"),COMPLETED:tr("Completed","Lezárva"),CANCELLED:tr("Cancelled","Törölt")})[status]||status||"";}
 
@@ -213,18 +218,19 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     finally{button.disabled=false;}
   });
   $("#jobCreateForm").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);
-    body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
-    if(scheduled){
-      body.scheduled_at=r2NyInputToIso(body.scheduled_at);
-      const received=body.workflow_phases.find(phase=>phase.stage_key==="received");
-      if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
-    }
-    if(!body.assigned_technician_id)delete body.assigned_technician_id;
-    try{await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(workflowEntry?tr("Workflow Job created and synchronized with Calendar.","Workflow munka létrehozva és a Naptárral szinkronizálva."):scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();}
-    catch(error){toast(humanError(error),"error");}
-  });
-}
+    event.preventDefault();
+    try{
+      const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);
+      body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
+      if(scheduled){
+        body.scheduled_at=r2NyInputToIso(body.scheduled_at);
+        const received=body.workflow_phases.find(phase=>phase.stage_key==="received");
+        if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
+      }
+      if(!body.assigned_technician_id)delete body.assigned_technician_id;
+      await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(workflowEntry?tr("Workflow Job created and synchronized with Calendar.","Workflow munka létrehozva és a Naptárral szinkronizálva."):scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();
+    }catch(error){toast(humanError(error),"error");}
+  });}
 async function r2OpenActivate(job){
   if(!state.users?.length)await loadUsers();
   const plannedStart=(job.workflow_phases||[]).find(phase=>phase.stage_key==="received")?.starts_at;
@@ -648,9 +654,13 @@ function r2BindCalendarPointer(host,jobs){
     clean();await r2RenderCalendar(state.r2Workflow?.jobs||[]);
   }
   $$("[data-calendar-job]",host).forEach(card=>{
+    const job=jobs.find(row=>String(row.id)===String(card.dataset.calendarJob));if(!job)return;
+    if(job.stage==="completed"){
+      card.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();void r2OpenWorkflowHistory(Number(job.id));});
+      return;
+    }
     card.addEventListener("pointerdown",event=>{
       if(event.button!==undefined&&event.button!==0)return;
-      const job=jobs.find(row=>String(row.id)===String(card.dataset.calendarJob));if(!job||job.stage==="completed")return;
       const resize=Boolean(event.target.closest("[data-resize-job]"));
       gesture={card,job,startX:event.clientX,startY:event.clientY,pointerType:event.pointerType,active:false,mode:resize?"resize":"move",timer:null,targetDate:null,targetMinutes:null,targetDuration:null,ghost:null,tip:null};
       if(resize||event.pointerType==="mouse"){if(resize)activate(event,"resize");}
@@ -664,7 +674,7 @@ function r2BindCalendarPointer(host,jobs){
 }
 function r2BindCalendarCreate(host){
   $$("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
-    if(event.target.closest("[data-calendar-job],[data-new-calendar-job],.calendar-now-line"))return;
+    if(event.target.closest("[data-calendar-job],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
@@ -697,7 +707,7 @@ async function r2RenderCalendar(){
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
   $("#calendarPrivateFilter").addEventListener("click",()=>{state.r2CalendarPrivateOnly=!state.r2CalendarPrivateOnly;void r2RenderCalendar();});
   $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));
-  $$("[data-private-appointment]",host).forEach(button=>button.addEventListener("click",()=>{const row=(privateAppointments||[]).find(item=>String(item.id)===String(button.dataset.privateAppointment));if(row)r2OpenPrivateAppointment(row,r2RenderCalendar);}));
+  $$("[data-private-appointment]",host).forEach(button=>button.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const row=(privateAppointments||[]).find(item=>String(item.id)===String(button.dataset.privateAppointment));if(row)r2OpenPrivateAppointment(row,r2RenderCalendar);}));
   r2BindCalendarPointer(host,jobRows);r2BindCalendarCreate(host);r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);
   clearInterval(state.r2NowTimer);state.r2NowTimer=setInterval(()=>{r2UpdateCalendarNowLine();r2RefreshCalendarStatuses(host,jobRows);},30000);
 }
@@ -716,17 +726,40 @@ function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(stat
   openDialog({title:row.name,eyebrow:`◈ ${tr("PRIVATE APPOINTMENT","PRIVÁT IDŐPONT")}`,body:`<form id="privateAppointmentEditor" class="form-grid">
     <div class="detail-note full private-context-note"><strong>${esc(r2PrivateContext(row))}</strong></div>
     <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
+    <label class="field"><span>${tr("Email","E-mail")}</span><input name="email" type="email" value="${esc(row.email||"")}" autocomplete="email"></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
     <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(r2IsoToNyInput(row.scheduled_at))}" required></label>
+    <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="duration_min" type="number" min="15" step="15" value="${Number(row.duration_min||60)}" required></label>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
     <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
     <label class="field full"><span>${tr("Status","Státusz")}</span><select name="status"><option value="SCHEDULED" ${row.status==="SCHEDULED"?"selected":""}>${tr("Scheduled","Ütemezve")}</option><option value="COMPLETED" ${row.status==="COMPLETED"?"selected":""}>${tr("Completed","Lezárva")}</option><option value="CANCELLED" ${row.status==="CANCELLED"?"selected":""}>${tr("Cancelled","Törölt")}</option></select></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div>
   </form>`});
   $("#privateAppointmentEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);if(!body.assigned_user_id)body.assigned_user_id=null;
-    try{await api("/api/private-appointments/"+encodeURIComponent(row.id),{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Private appointment updated.","Privát időpont frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+    event.preventDefault();
+    try{
+      const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);body.duration_min=Number(body.duration_min||60);if(!body.assigned_user_id)body.assigned_user_id=null;
+      await api("/api/private-appointments/"+encodeURIComponent(row.id),{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Private appointment updated.","Privát időpont frissítve."),"success");await refresh();
+    }catch(error){toast(humanError(error),"error");}
   });
+}
+async function r2OpenPrivateEmailTemplate(){
+  try{
+    const template=await api("/api/private-appointments/email-template");
+    openDialog({title:tr("Private appointment email","Privát időpont e-mail"),eyebrow:tr("CUSTOMER NOTIFICATION","ÜGYFÉL ÉRTESÍTÉS"),body:`<form id="privateEmailTemplateForm" class="form-grid">
+      <div class="detail-note full">${tr("Available variables: {{name}}, {{date}}, {{time}}, {{end_time}}, {{duration}}, {{email}}, {{phone}}","Használható változók: {{name}}, {{date}}, {{time}}, {{end_time}}, {{duration}}, {{email}}, {{phone}}")}</div>
+      <label class="field full"><span>English · ${tr("Subject","Tárgy")}</span><input name="subject_en" maxlength="240" value="${esc(template.subject_en||"")}" required></label>
+      <label class="field full"><span>English · ${tr("Message","Üzenet")}</span><textarea name="body_en" maxlength="6000" rows="6" required>${esc(template.body_en||"")}</textarea></label>
+      <label class="field full"><span>Magyar · ${tr("Subject","Tárgy")}</span><input name="subject_hu" maxlength="240" value="${esc(template.subject_hu||"")}" required></label>
+      <label class="field full"><span>Magyar · ${tr("Message","Üzenet")}</span><textarea name="body_hu" maxlength="6000" rows="6" required>${esc(template.body_hu||"")}</textarea></label>
+      <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save template","Sablon mentése")}</button></div>
+    </form>`});
+    $("#privateEmailTemplateForm").addEventListener("submit",async event=>{
+      event.preventDefault();
+      try{const body=Object.fromEntries(new FormData(event.currentTarget));await api("/api/private-appointments/email-template",{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Email template saved.","E-mail sablon mentve."),"success");}
+      catch(error){toast(humanError(error),"error");}
+    });
+  }catch(error){toast(humanError(error),"error");}
 }
 async function r2LoadPrivateAppointments(status=""){
   state.r2WorkflowBucket="private";state.r2PrivateStatus=status;
@@ -739,11 +772,12 @@ async function r2RenderPrivateAppointments(rows,status=""){
     <button type="button" data-workflow-bucket="active">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="closed">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="private" class="active private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
-  </div><div class="segmented-control compact private-status-switch"><button type="button" data-private-status="" class="${!status?"active":""}">${tr("All","Mind")}</button><button type="button" data-private-status="SCHEDULED" class="${status==="SCHEDULED"?"active":""}">${tr("Scheduled","Ütemezve")}</button><button type="button" data-private-status="COMPLETED" class="${status==="COMPLETED"?"active":""}">${tr("Completed","Lezárt")}</button><button type="button" data-private-status="CANCELLED" class="${status==="CANCELLED"?"active":""}">${tr("Cancelled","Törölt")}</button></div></div>
+  </div><div class="segmented-control compact private-status-switch"><button type="button" data-private-status="" class="${!status?"active":""}">${tr("All","Mind")}</button><button type="button" data-private-status="SCHEDULED" class="${status==="SCHEDULED"?"active":""}">${tr("Scheduled","Ütemezve")}</button><button type="button" data-private-status="COMPLETED" class="${status==="COMPLETED"?"active":""}">${tr("Completed","Lezárt")}</button><button type="button" data-private-status="CANCELLED" class="${status==="CANCELLED"?"active":""}">${tr("Cancelled","Törölt")}</button></div>${r2IsAdmin()?`<button type="button" class="secondary-button" id="privateEmailTemplateBtn">✉ ${tr("Email template","E-mail sablon")}</button>`:""}</div>
     <small>${tr("Private piano viewings and service consultations. These do not consume workshop scheduling capacity.","Privát zongoramegtekintések és szolgáltatási konzultációk. Ezek nem foglalják a műhely kapacitását.")}</small></div>
     <div class="private-appointments-grid">${rows.length?rows.map(r2PrivateAppointmentCard).join(""):`<div class="empty-state">${tr("No private appointments in this filter.","Nincs privát időpont ebben a szűrésben.")}</div>`}</div>`;
   $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const bucket=button.dataset.workflowBucket;if(bucket==="private")return;if(bucket==="closed")void r2LoadWorkflowBucket("closed","completed");else void r2LoadWorkflowBucket("active");}));
   $$("[data-private-status]",host).forEach(button=>button.addEventListener("click",()=>r2LoadPrivateAppointments(button.dataset.privateStatus||"")));
+  $("#privateEmailTemplateBtn")?.addEventListener("click",r2OpenPrivateEmailTemplate);
   $$("[data-private-edit]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.privateEdit));if(row)r2OpenPrivateAppointment(row);}));
 }
 async function r2LoadWorkflowBucket(bucket,closedType=null){
