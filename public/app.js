@@ -113,6 +113,8 @@ function humanError(error){
     ARCHIVED_CLIENT_RECORD_MISSING:["The archived customer cannot be restored because the underlying record is missing.","Az archivált ügyfél nem állítható vissza, mert az alaprekord hiányzik."],
     WORKFLOW_FIXED_STAGE_REQUIRED:["Received, Admin Approval and Completed are required.","A Beérkezett, Admin jóváhagyás és Lezárva fázis kötelező."],
     WORKFLOW_STAGE_LIMIT_REACHED:["The workflow already has the maximum seven phases.","A munkafolyamat már elérte a legfeljebb hét fázist."],
+    WORKFLOW_PHASE_END_BEFORE_START:["The phase completion must be later than its start.","A fázis befejezése csak a kezdés után lehet."],
+    WORKFLOW_LOGISTICS_MINIMUM_WINDOW:["Arrival and delivery phases require at least a three-hour time window.","A beérkezési és kiszállítási fázisokhoz legalább háromórás időablak szükséges."],
     INVALID_WORKFLOW_STAGE_ORDER:["The workflow phase order is invalid.","A munkafázisok sorrendje érvénytelen."],
     WORKFLOW_FIXED_STAGE_ORDER:["Received must stay first and Admin Approval must stay last.","A Beérkezettnek elsőnek, az Admin jóváhagyásnak utolsónak kell maradnia."],
     WORKFLOW_STAGE_NOT_REMOVABLE:["This system workflow phase cannot be removed.","Ez a rendszerfázis nem távolítható el."],
