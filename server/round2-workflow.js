@@ -591,7 +591,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
       const safe=incoming.map(row=>{
         const old=oldByKey.get(row.stage_key);
-        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id,costs:Array.isArray(row.costs)?row.costs:old?.costs};
+        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id,responsibility_skill_id:row.responsibility_skill_id??old?.responsibility_skill_id??null,costs:Array.isArray(row.costs)?row.costs:old?.costs};
         if(old?.completed_at||row.stage_key===before.stage||FIXED_STAGE_KEYS.has(row.stage_key))return {...merged,enabled:true};
         return merged;
       });
@@ -628,6 +628,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const costs=req.body?.costs===undefined?undefined:normalizePhaseCosts(req.body.costs);
       const responsibleId=req.body?.responsible_user_id===undefined?phase.responsible_user_id:(text(req.body.responsible_user_id,160)||null);
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
+      const responsibilitySkillId=req.body?.responsibility_skill_id===undefined?(integerId(phase.responsibility_skill_id)||null):(integerId(req.body.responsibility_skill_id)||null);
+      if(responsibilitySkillId)responsibilitySkill(responsibilitySkillId,{optional:false});
       let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
       const blockerNote=req.body?.blocker_note===undefined?phase.blocker_note:text(req.body.blocker_note,2000)||null;
       if(blockerCode&&!BLOCKER_CODES.has(blockerCode))throw problem("INVALID_BLOCKER_CODE");
@@ -638,8 +640,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
       }
       db.transaction(()=>{
-        db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,customer_price=?,responsible_user_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
-          .run(currentActive?calendarStart:startsAt,dueAt,customerPrice,responsibleId,blockerCode,blockerNote,id,stage);
+        db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,customer_price=?,responsible_user_id=?,responsibility_skill_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
+          .run(currentActive?calendarStart:startsAt,dueAt,customerPrice,responsibleId,responsibilitySkillId,blockerCode,blockerNote,id,stage);
+        if(responsibilitySkillId)ensureUserSkill(responsibleId||before.assigned_technician_id||null,responsibilitySkillId,req.user.id);
         if(Array.isArray(costs))replacePhaseCosts(id,stage,costs,req.user.id);
         if(currentActive&&calendarStart)db.prepare("UPDATE jobs SET scheduled_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(calendarStart,id);
       })();
