@@ -28,6 +28,15 @@ function optionalIso(value,code="INVALID_WORKFLOW_DUE_AT"){
   if(value===null||value===undefined||String(value).trim()==="")return null;
   return iso(value,code);
 }
+function quarterIso(value,code="INVALID_SCHEDULE_TIME"){
+  const normalized=iso(value,code),date=new Date(normalized);
+  if(date.getUTCMinutes()%15!==0||date.getUTCSeconds()!==0||date.getUTCMilliseconds()!==0)throw problem(code);
+  return normalized;
+}
+function optionalQuarterIso(value,code="INVALID_WORKFLOW_DUE_AT"){
+  if(value===null||value===undefined||String(value).trim()==="")return null;
+  return quarterIso(value,code);
+}
 function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="SUPERADMIN"||Number(user.is_superadmin||0)===1));}
 function newYorkYear(){return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date());}
 function endAt(start,duration){return new Date(new Date(start).getTime()+positiveDuration(duration)*60000).toISOString();}
@@ -173,8 +182,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       const row={stage_key:stage.key,position:stage.position,enabled,
-        starts_at:item?.starts_at?optionalIso(item.starts_at):(stage.key==="received"&&defaultStartAt?optionalIso(defaultStartAt):null),
-        due_at:item?.due_at?optionalIso(item.due_at):null,responsible_user_id:responsibleId};
+        starts_at:item?.starts_at?optionalQuarterIso(item.starts_at):(stage.key==="received"&&defaultStartAt?optionalQuarterIso(defaultStartAt):null),
+        due_at:item?.due_at?optionalQuarterIso(item.due_at):null,responsible_user_id:responsibleId};
       assertPhaseWindow(stage,row);return row;
     });
     for(const key of ["received","admin_approval","completed"])if(!plan.find(row=>row.stage_key===key)?.enabled)throw problem("WORKFLOW_FIXED_STAGE_REQUIRED");
@@ -199,7 +208,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const labelEn=text(input?.label_en??input?.custom_label_en,80),labelHu=text(input?.label_hu??input?.custom_label_hu,80);if(!labelEn||!labelHu)throw problem("WORKFLOW_LABEL_REQUIRED");
     const key=stageKeyFromLabels(labelEn,labelHu),adminPhase=phases.find(row=>row.stage_key==="admin_approval"),position=Number(adminPhase?.position||Math.max(2,phases.length));
     const responsibleId=text(input?.responsible_user_id||defaultResponsibleId,160)||null;if(responsibleId)responsibleUser(responsibleId,{optional:false});
-    const startsAt=input?.starts_at?optionalIso(input.starts_at):null,dueAt=input?.due_at?optionalIso(input.due_at):null;
+    const startsAt=input?.starts_at?optionalQuarterIso(input.starts_at):null,dueAt=input?.due_at?optionalQuarterIso(input.due_at):null;
     const definition={key,stage_key:key,label_en:labelEn,label_hu:labelHu,position,stage_type:"intermediate",active:false,removable:true};
     assertPhaseWindow(definition,{starts_at:startsAt,due_at:dueAt});
     const shifts=db.prepare("SELECT id,position FROM job_workflow_phases WHERE job_id=? AND position>=? ORDER BY position DESC,id DESC").all(jobId,position);
@@ -240,7 +249,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const rawSchedule=text(body?.scheduled_at??defaults.scheduled_at,80);
     let scheduledAt=null,stage=PIPELINE_STAGE;
     if(rawSchedule){
-      scheduledAt=iso(rawSchedule);
+      scheduledAt=quarterIso(rawSchedule);
       if(!assigned)throw problem("TECHNICIAN_REQUIRED_FOR_SCHEDULE");
       const conflict=findConflict(0,assigned.id,scheduledAt,duration);
       if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
@@ -542,8 +551,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const phase=before.workflow_phases.find(row=>row.stage_key===stage);if(!phase)return res.status(404).json({error:"WORKFLOW_PHASE_NOT_FOUND"});
     if(req.user.role==="WORKER"&&stage!==before.stage)return res.status(403).json({error:"PERMISSION_DENIED"});
     try{
-      const startsAt=req.body?.starts_at===undefined?phase.starts_at:optionalIso(req.body.starts_at);
-      const dueAt=req.body?.due_at===undefined?phase.due_at:optionalIso(req.body.due_at);
+      const startsAt=req.body?.starts_at===undefined?phase.starts_at:optionalQuarterIso(req.body.starts_at);
+      const dueAt=req.body?.due_at===undefined?phase.due_at:optionalQuarterIso(req.body.due_at);
       assertPhaseWindow(stageByKey(stage,{includeInactive:true})||phase,{starts_at:startsAt,due_at:dueAt});
       const responsibleId=req.body?.responsible_user_id===undefined?phase.responsible_user_id:(text(req.body.responsible_user_id,160)||null);
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
@@ -570,7 +579,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(before.cancelled_at)return res.status(409).json({error:"JOB_CANCELLED"});
     if(before.stage!=="planned")return res.status(409).json({error:"JOB_NOT_IN_PIPELINE"});
     try{
-      const scheduledAt=iso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
+      const scheduledAt=quarterIso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:false});
       const conflict=findConflict(id,assigned.id,scheduledAt,duration);if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
       const stage=firstEnabledStage(id);if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
@@ -589,7 +598,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(before.cancelled_at)return res.status(409).json({error:"JOB_CANCELLED"});
     if(before.stage==="completed")return res.status(409).json({error:"JOB_ALREADY_COMPLETED"});
     try{
-      const scheduledAt=iso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
+      const scheduledAt=quarterIso(req.body?.scheduled_at),duration=positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min);
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:false});
       const conflict=findConflict(id,assigned.id,scheduledAt,duration);if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
       const stage=before.stage==="planned"?firstEnabledStage(id):before.stage;
