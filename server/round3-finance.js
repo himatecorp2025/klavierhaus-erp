@@ -164,7 +164,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       ORDER BY p.position,p.id`).all(job.id);
     const quoted=phaseRows.filter(row=>Number(row.customer_price||0)>0).map(row=>({
       item_type:"other",item_description:text(row.label_en,500)||phaseLabel(row.stage_key),quantity:1,
-      unit_price:money(row.customer_price),labor_amount:0,material_amount:0,phase_key:row.stage_key
+      unit_price:money(row.customer_price),phase_key:row.stage_key
     }));
     let rows=quoted;
     if(!rows.length){
@@ -182,7 +182,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
       }
     }
     const deposit=money(job.deposit_amount||0);
-    if(deposit>0)rows.push({item_type:"adjustment",item_description:"Deposit received",quantity:1,unit_price:-deposit,labor_amount:0,material_amount:0,phase_key:null});
+    if(deposit>0)rows.push({item_type:"adjustment",item_description:"Deposit received",quantity:1,unit_price:-deposit,phase_key:null});
     return rows;
   }
   function persistPdf(invoiceId,{statusOverride=null}={}){
