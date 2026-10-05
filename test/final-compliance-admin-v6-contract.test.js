@@ -149,11 +149,11 @@ test("Invoice closeout keeps the manual decision gate and durable automation sta
   assert.match(outbox,/dedupe_key TEXT|dedupeKey/);
 });
 
-test("calendar v6 shares horizontal scroll for header/body and creates jobs from an empty 15-minute slot",()=>{
+test("calendar v6 shares horizontal scroll and creates jobs on half-hour business slots",()=>{
   const round2=read("public/round2.js"),css=read("public/styles.css");
   assert.match(round2,/time-calendar-scroll[\s\S]*time-calendar-head[\s\S]*time-calendar-body/);
   assert.match(round2,/function r2BindCalendarCreate/);
-  assert.match(round2,/r2SnapMinutes\(\(event\.clientY-rect\.top\)\/R2_PX_PER_MIN\)/);
+  assert.match(round2,/r2SnapJobMinutes\(\(event\.clientY-rect\.top\)\/R2_PX_PER_MIN\)/);
   assert.match(round2,/datetime:r2MinutesInput\(date,minutes\)/);
   assert.match(css,/\.time-calendar-inner/);
   assert.match(css,/scrollbar-gutter:stable/);
@@ -258,7 +258,9 @@ test("Workflow status, responsibility, intake grid and Documents UX contracts ar
   assert.match(css,/stage-card\.status-cancelled/);
   assert.match(css,/Intake work selectors deliberately mirror the More-menu card language/);
   assert.match(css,/@media\(max-width:700px\)[\s\S]*\.assessment-grid\{grid-template-columns:repeat\(2/);
-  assert.match(v6,/assessment-option-icon/);
+  assert.doesNotMatch(v6,/assessment-option-icon/);
+  assert.match(v6,/assessmentAddCustom/);
+  assert.match(v6,/data-assessment-custom-price/);
   assert.match(archive,/intakeAssessmentPdf/);
   assert.match(archive,/\/api\/intake\/:id\/export-pdf/);
 });

@@ -166,9 +166,12 @@ function registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir,appBaseUrl=
       const requested=Array.isArray(req.body?.items)?req.body.items:[];
       const normalized=requested.map((item,index)=>{
         const catalogId=integerId(item?.catalog_item_id),catalog=catalogId&&db.prepare("SELECT * FROM intake_catalog_items WHERE id=?").get(catalogId);
-        if(!catalog)throw problem("INTAKE_CATALOG_ITEM_NOT_FOUND");
-        const price=money(item?.price??catalog.default_price);if(!(price>=0))throw problem("INVALID_INTAKE_CATALOG_PRICE");
-        return {catalog_item_id:catalog.id,item_title_en:catalog.title_en,item_title_hu:catalog.title_hu,price,notes:text(item?.notes,2000)||null,sort_order:index};
+        if(catalogId&&!catalog)throw problem("INTAKE_CATALOG_ITEM_NOT_FOUND");
+        const titleEn=catalog?.title_en||text(item?.item_title_en??item?.title_en??item?.title,240);
+        const titleHu=catalog?.title_hu||text(item?.item_title_hu??item?.title_hu,240)||titleEn;
+        if(!titleEn)throw problem("INTAKE_CUSTOM_ITEM_TITLE_REQUIRED");
+        const price=money(item?.price??catalog?.default_price??0);if(!(price>=0))throw problem("INVALID_INTAKE_CATALOG_PRICE");
+        return {catalog_item_id:catalog?.id||null,item_title_en:titleEn,item_title_hu:titleHu,price,notes:text(item?.notes,2000)||null,sort_order:index};
       });
       const total=money(normalized.reduce((sum,item)=>sum+item.price,0));
       db.transaction(()=>{

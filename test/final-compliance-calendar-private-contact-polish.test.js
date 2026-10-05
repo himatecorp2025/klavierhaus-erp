@@ -14,11 +14,16 @@ test("calendar keeps existing events separate from empty-slot creation",()=>{
   assert.match(source,/job\.stage==="completed"[\s\S]{0,260}r2OpenWorkflowHistory/);
 });
 
-test("New York datetime conversion is validated and job creation catches conversion failures",()=>{
+test("New York job datetime conversion uses compact half-hour business controls while private appointments keep 15-minute precision",()=>{
   const source=read("public/round2.js");
   assert.match(source,/function r2NyInputToIso\(value\)[\s\S]{0,1800}rendered=r2NyParts\(result\)/);
-  assert.match(source,/function r2QuarterTimeOptions/);
-  assert.match(source,/jobCreateForm[\s\S]{0,3500}r2NyInputToIso\(r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:true\}\)\)/);
+  assert.match(source,/const R2_JOB_SLOT_MIN=30/);
+  assert.match(source,/name="'\+esc\(name\)\+'_year"/);
+  assert.match(source,/class="r2-date-month"/);
+  assert.match(source,/class="r2-date-day"/);
+  assert.match(source,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
+  assert.match(source,/body\.scheduled_at=r2NyInputToIso\(r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:true\}\)\)/);
+  assert.match(source,/slotMinutes:15,startMinutes:0,endMinutes:23\*60\+45/);
   assert.match(source,/r2PrivateCalendarRow[\s\S]{0,700}row\.duration_min[\s\S]{0,700}row\.scheduled_end_at/);
 });
 

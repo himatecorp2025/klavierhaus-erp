@@ -11,6 +11,7 @@ const R2_TZ="America/New_York";
 const R2_DAY_START=7*60;
 const R2_DAY_END=20*60;
 const R2_SLOT_MIN=15;
+const R2_JOB_SLOT_MIN=30;
 const R2_SLOT_HEIGHT=18;
 const R2_PX_PER_MIN=R2_SLOT_HEIGHT/R2_SLOT_MIN;
 const R2_BLOCKERS={
@@ -53,41 +54,65 @@ function r2NyInputToIso(value){
   if(+rendered.year!==wanted.year||+rendered.month!==wanted.month||+rendered.day!==wanted.day||+rendered.hour!==wanted.hour||+rendered.minute!==wanted.minute)throw new Error("INVALID_SCHEDULE_TIME");
   return result.toISOString();
 }
-function r2QuarterLocalValue(value){
+function r2SlotLocalValue(value,{slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
   let raw=String(value||"").trim();if(!raw)return "";
   if(/(?:Z|[+-]\d{2}:\d{2})$/.test(raw))raw=r2IsoToNyInput(raw);
   const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);if(!match)return "";
-  const base=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],0,0,0)),minutes=Math.round((+match[4]*60+(+match[5]))/R2_SLOT_MIN)*R2_SLOT_MIN;
-  base.setUTCMinutes(minutes);
-  return base.toISOString().slice(0,16);
+  const day=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],0,0,0));
+  if(day.getUTCFullYear()!==+match[1]||day.getUTCMonth()!==+match[2]-1||day.getUTCDate()!==+match[3])return "";
+  let minutes=Math.round((+match[4]*60+(+match[5]))/slotMinutes)*slotMinutes;
+  minutes=Math.max(startMinutes,Math.min(endMinutes,minutes));
+  return `${match[1]}-${match[2]}-${match[3]}T${r2Pad(Math.floor(minutes/60))}:${r2Pad(minutes%60)}`;
 }
-function r2QuarterTimeOptions(selected="",allowEmpty=true){
-  const normalized=selected?r2QuarterLocalValue("2000-01-01T"+String(selected)).slice(11,16):"";
+function r2QuarterLocalValue(value){return r2SlotLocalValue(value);}
+function r2TimeOptions(selected="",allowEmpty=true,{slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
+  const normalized=selected?r2SlotLocalValue("2000-01-01T"+String(selected),{slotMinutes,startMinutes,endMinutes}).slice(11,16):"";
   let html=allowEmpty?'<option value="">—</option>':"";
-  for(let minutes=0;minutes<24*60;minutes+=R2_SLOT_MIN){
+  for(let minutes=startMinutes;minutes<=endMinutes;minutes+=slotMinutes){
     const value=r2Pad(Math.floor(minutes/60))+":"+r2Pad(minutes%60);
     html+='<option value="'+value+'" '+(value===normalized?'selected':'')+'>'+value+'</option>';
   }
   return html;
 }
-function r2DateTimeFields(name,value,{required=false}={}){
-  const normalized=r2QuarterLocalValue(value),date=normalized.slice(0,10),time=normalized.slice(11,16);
-  return '<div class="r2-quarter-datetime" data-r2-datetime="'+esc(name)+'"><input type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" '+(required?"required":"")+'>' +
-    '<select name="'+esc(name)+'_time" '+(required?"required":"")+'>'+r2QuarterTimeOptions(time,!required)+'</select></div>';
+function r2QuarterTimeOptions(selected="",allowEmpty=true){return r2TimeOptions(selected,allowEmpty);}
+function r2MonthOptions(selected="",allowEmpty=true){
+  let html=allowEmpty?'<option value="">MM</option>':"";
+  for(let month=1;month<=12;month+=1){const value=r2Pad(month);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+}
+function r2DayOptions(selected="",allowEmpty=true){
+  let html=allowEmpty?'<option value="">DD</option>':"";
+  for(let day=1;day<=31;day+=1){const value=r2Pad(day);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+}
+function r2DateTimeFields(name,value,{required=false,slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
+  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes}),year=normalized.slice(0,4)||r2Today().slice(0,4),month=normalized.slice(5,7),day=normalized.slice(8,10),time=normalized.slice(11,16);
+  return '<div class="r2-quarter-datetime r2-compact-datetime" data-r2-datetime="'+esc(name)+'" data-slot-minutes="'+slotMinutes+'" data-start-minutes="'+startMinutes+'" data-end-minutes="'+endMinutes+'">'+
+    '<input type="hidden" name="'+esc(name)+'_year" value="'+esc(year)+'">'+
+    '<select class="r2-date-month" name="'+esc(name)+'_month" '+(required?"required":"")+' aria-label="'+esc(tr("Month","Hónap"))+'">'+r2MonthOptions(month,!required)+'</select>'+
+    '<select class="r2-date-day" name="'+esc(name)+'_day" '+(required?"required":"")+' aria-label="'+esc(tr("Day","Nap"))+'">'+r2DayOptions(day,!required)+'</select>'+
+    '<select class="r2-date-time" name="'+esc(name)+'_time" '+(required?"required":"")+' aria-label="'+esc(tr("Time","Idő"))+'">'+r2TimeOptions(time,!required,{slotMinutes,startMinutes,endMinutes})+'</select></div>';
 }
 function r2DateTimeValue(root,name){
-  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  return date&&time?date+"T"+time:"";
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  return year&&month&&day&&time?year+"-"+month+"-"+day+"T"+time:"";
 }
 function r2ReadDateTime(root,name,{required=false}={}){
-  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  if(!date&&!time&&!required)return "";
-  if(!date||!time)throw new Error("INVALID_SCHEDULE_TIME");
-  const value=date+"T"+time;if(!r2QuarterLocalValue(value))throw new Error("INVALID_SCHEDULE_TIME");return value;
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]');
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  if(!month&&!day&&!time&&!required)return "";
+  if(!year||!month||!day||!time)throw new Error("INVALID_SCHEDULE_TIME");
+  const slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
+  const value=year+"-"+month+"-"+day+"T"+time,match=value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)throw new Error("INVALID_SCHEDULE_TIME");
+  const check=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],+match[4],+match[5])),minutes=+match[4]*60+(+match[5]);
+  if(check.getUTCFullYear()!==+match[1]||check.getUTCMonth()!==+match[2]-1||check.getUTCDate()!==+match[3])throw new Error("INVALID_SCHEDULE_TIME");
+  if(minutes<startMinutes||minutes>endMinutes)throw new Error("WORK_TIME_OUTSIDE_BUSINESS_HOURS");
+  if(minutes%slotMinutes!==0)throw new Error("WORK_TIME_HALF_HOUR_REQUIRED");
+  return value;
 }
 function r2SetDateTime(root,name,value){
-  const normalized=r2QuarterLocalValue(value),date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
-  if(date)date.value=normalized.slice(0,10);if(time)time.value=normalized.slice(11,16);
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]'),slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
+  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes});
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]'),month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]'),day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
+  if(year)year.value=normalized.slice(0,4);if(month)month.value=normalized.slice(5,7);if(day)day.value=normalized.slice(8,10);if(time)time.value=normalized.slice(11,16);
 }
 function r2WallAddMinutes(value,minutes){
   const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)return "";
@@ -103,14 +128,15 @@ function r2WorkflowDefinitions(plan=[]){
   const adminPosition=Number(defs.find(stage=>stage.key==="admin_approval")?.position||99);let draftOffset=0;
   for(const phase of source){
     const key=String(phase?.stage_key||phase?.key||"");if(!key||key==="completed"||keys.has(key))continue;
-    draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
+    draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||phase.label_en||phase.custom_label_en||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
   }
   return defs.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
 }
 function r2BindStandaloneLogisticsTiming(root,stage,startName,dueName){
   if(!root||!r2IsLogisticsStage(stage))return;
   const enforce=()=>{
-    const start=r2DateTimeValue(root,startName);if(!start)return;const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(root,dueName);
+    const start=r2DateTimeValue(root,startName);if(!start)return;
+    const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(root,dueName);
     if(!due||new Date(r2NyInputToIso(due)).getTime()<new Date(r2NyInputToIso(minimum)).getTime())r2SetDateTime(root,dueName,minimum);
   };
   root.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
@@ -121,6 +147,28 @@ function r2BindWorkflowTiming(form){
     const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};
     r2BindStandaloneLogisticsTiming(row,stage,"start_"+stage.key,"due_"+stage.key);
   });
+}
+function r2WorkflowFinancialSummary(form){
+  const phases=$$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked);
+  const phaseTotal=phases.reduce((sum,row)=>sum+Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0)),0);
+  const deposit=Math.max(0,Number(form?.elements?.deposit_amount?.value||0)),balance=Math.max(0,phaseTotal-deposit);
+  return {phaseTotal,deposit,balance};
+}
+function r2RefreshWorkflowFinancialSummary(form){
+  const summary=form?.querySelector("[data-workflow-finance-summary]");if(!summary)return;
+  const totals=r2WorkflowFinancialSummary(form),phaseLines=$$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked).map(row=>{
+    const label=state.language==="hu"?(row.dataset.phaseLabelHu||row.dataset.phaseLabelEn):(row.dataset.phaseLabelEn||row.dataset.phaseLabelHu),price=Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0));
+    return '<div class="workflow-finance-phase"><span>'+esc(label)+'</span><strong>'+r2Money(price)+'</strong></div>';
+  }).join("");
+  summary.innerHTML='<div class="workflow-finance-lines">'+phaseLines+'</div>'+
+    '<div><span>'+tr("Phase total","Fázisok összege")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
+    '<div><span>'+tr("Deposit received","Kapott előleg")+'</span><strong>− '+r2Money(totals.deposit)+'</strong></div>'+
+    '<div class="workflow-finance-balance"><span>'+tr("Remaining to invoice","Még számlázandó")+'</span><strong>'+r2Money(totals.balance)+'</strong></div>';
+}
+function r2BindWorkflowFinance(form){
+  if(!form)return;r2RefreshWorkflowFinancialSummary(form);
+  form.addEventListener("input",event=>{if(event.target.matches('[name^="price_"],[name="deposit_amount"]'))r2RefreshWorkflowFinancialSummary(form);});
+  form.addEventListener("change",event=>{if(event.target.matches('[name^="phase_"]'))r2RefreshWorkflowFinancialSummary(form);});
 }
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
 function r2Today(){return r2NyDate(new Date());}
@@ -145,13 +193,15 @@ function r2FormatDate(dateKey,options={month:"short",day:"numeric"}){
 }
 function r2DefaultInput(dateKey=null){
   if(dateKey)return dateKey+"T09:00";
-  const date=new Date(Date.now()+60*60000);date.setMinutes(Math.ceil(date.getMinutes()/15)*15,0,0);return r2IsoToNyInput(date);
+  const raw=r2IsoToNyInput(new Date(Date.now()+60*60000).toISOString()),date=raw.slice(0,10),minutes=Number(raw.slice(11,13))*60+Number(raw.slice(14,16));
+  const snapped=Math.max(R2_DAY_START,Math.min(R2_DAY_END,Math.ceil(minutes/R2_JOB_SLOT_MIN)*R2_JOB_SLOT_MIN));
+  return date+"T"+r2Pad(Math.floor(snapped/60))+":"+r2Pad(snapped%60);
 }
 function r2TechnicianOptions(selected=""){
-  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
+  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
 }
 function r2ResponsibleOptions(selected=""){
-  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
+  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
 }
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
@@ -183,6 +233,7 @@ function r2TimeMinutes(value){const p=r2NyParts(new Date(value));return Number(p
 function r2Pad(value){return String(value).padStart(2,"0");}
 function r2MinutesInput(date,minutes){const safe=Math.max(0,Math.min(1439,minutes)),h=Math.floor(safe/60),m=safe%60;return `${date}T${r2Pad(h)}:${r2Pad(m)}`;}
 function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
+function r2SnapJobMinutes(value){return Math.round(value/R2_JOB_SLOT_MIN)*R2_JOB_SLOT_MIN;}
 
 function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null}={}){
   const source=Array.isArray(plan)?plan:[],map=new Map(source.map(row=>[String(row.stage_key||row.key||""),row]));
@@ -190,13 +241,14 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
     const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):!stage.removable);
     const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
     const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||defaultResponsible||state.user?.id||"";
-    const status=existing?.visual_status||"",labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||stage.key;
-    const jobSpecific=Boolean(existing?.job_specific||stage.job_specific);
+    const status=existing?.visual_status||"",labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||labelEn;
+    const jobSpecific=Boolean(existing?.job_specific||stage.job_specific),logistics=r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu}),customerPrice=Math.max(0,Number(existing?.customer_price||0));
     return `<div class="workflow-plan-row ${status?"phase-status-"+status:""}" data-workflow-phase="${esc(stage.key)}" data-phase-position="${Number(existing?.position||stage.position||0)}" data-phase-label-en="${esc(labelEn)}" data-phase-label-hu="${esc(labelHu)}" data-job-specific="${jobSpecific?"1":"0"}">
       <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${esc(stage.key)}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?labelHu:labelEn)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):jobSpecific?tr("Only for this job","Csak ehhez a munkához"):tr("Include this phase","Fázis használata")}</small></span></label>
       <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_${esc(stage.key)}" required>${r2ResponsibleOptions(responsible)}</select></label>
-      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start)}</label>
-      <label class="field"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu})?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
+      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start,{endMinutes:logistics?17*60:R2_DAY_END})}</label>
+      <label class="field"><span>${tr("Expected completion","Várható befejezés")}${logistics?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
+      <label class="field workflow-customer-price"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="price_${esc(stage.key)}" type="number" min="0" step="0.01" value="${customerPrice.toFixed(2)}"></label>
     </div>`;
   }).join("");
 }
@@ -204,13 +256,13 @@ function r2ReadWorkflowPlan(form){
   return $$("[data-workflow-phase]",form).map(row=>{
     const key=String(row.dataset.workflowPhase||""),enabled=r2FixedStage(key)?true:Boolean(row.querySelector(`[name="phase_${CSS.escape(key)}"]`)?.checked);
     const startValue=r2ReadDateTime(row,"start_"+key),dueValue=r2ReadDateTime(row,"due_"+key),responsible=row.querySelector(`[name="responsible_${CSS.escape(key)}"]`)?.value||state.user?.id||"";
-    const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||key,jobSpecific=row.dataset.jobSpecific==="1";
+    const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||labelEn,jobSpecific=row.dataset.jobSpecific==="1",customerPrice=Math.max(0,Number(row.querySelector(`[name="price_${CSS.escape(key)}"]`)?.value||0));
     const startsAt=startValue?r2NyInputToIso(startValue):null,dueAt=dueValue?r2NyInputToIso(dueValue):null;
     if(startsAt&&dueAt){
       const duration=(new Date(dueAt).getTime()-new Date(startsAt).getTime())/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");
       if(r2IsLogisticsStage({key,label_en:labelEn,label_hu:labelHu})&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
     }
-    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,responsible_user_id:responsible||null,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
+    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,customer_price:customerPrice,responsible_user_id:responsible||null,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
   });
 }
 
@@ -254,56 +306,64 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   const workflowEntry=Boolean(defaults.workflow),scheduled=workflowEntry||Boolean(defaults.date);let draftPhaseCounter=0;
   const dialogTitle=workflowEntry?tr("New Workflow Job","Új workflow munka"):scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka");
   const dialogEyebrow=workflowEntry?tr("WORKFLOW","MUNKAFOLYAMAT"):scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS");
-  openDialog({title:dialogTitle,eyebrow:dialogEyebrow,variant:"wide",body:`<form id="jobCreateForm" class="form-grid">
+  openDialog({title:dialogTitle,eyebrow:dialogEyebrow,variant:"wide",body:`<form id="jobCreateForm" class="form-grid job-create-grid">
     <label class="field"><span>${tr("Client","Ügyfél")} *</span><select id="jobClientSelect" name="client_id" required>${clients.map(client=>`<option value="${client.id}">${esc(client.name)}</option>`).join("")}</select></label>
     <label class="field"><span>${tr("Piano","Zongora")} *</span><select id="jobPianoSelect" name="piano_id" required></select></label>
     <label class="field full"><span>${tr("Job title","Munka megnevezése")} *</span><input name="title" required autofocus></label>
     <label class="field full"><span>${tr("Description","Leírás")}</span><textarea name="description"></textarea></label>
     <label class="field"><span>${tr("Location","Helyszín")}</span><select name="location_type"><option value="workshop">${tr("Workshop","Műhely")}</option><option value="on_site">${tr("On site","Helyszíni")}</option></select></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
-    <label class="field full"><span>${tr("Service address","Szervizcím")}</span><input name="site_address"></label>
-    <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select><small>${tr("Defaults to the creator; this person owns the full workflow.","Alapértelmezetten a létrehozó; ő felel a teljes munkafolyamatért.")}</small></label>
+    <label class="field"><span>${tr("Service address","Szervizcím")}</span><input name="site_address"></label>
+    <label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(defaults.deposit_amount||0).toFixed(2)}"></label>
+    <label class="field"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select></label>
     ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",defaults.datetime||r2DefaultInput(defaults.date),{required:true})}</label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
-    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set the responsible person and editable timing for each phase. Times may be moved backward or forward later.","Fázisonként add meg a felelőst és a módosítható időket. Az időpontok később vissza- vagy előre is mozgathatók.")}</p></div></div><div id="jobWorkflowPlanRows">${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</div>${r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("This phase belongs only to the job being created and does not change other workflows.","Ez a fázis kizárólag a most létrehozott munkához tartozik, más workflow-kat nem módosít.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")}</span><input id="workflowJobPhaseEn" maxlength="80"></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}</section>
+    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set responsibility, timing and the customer-facing price for each phase.","Fázisonként add meg a felelőst, az időzítést és az ügyfélnek felszámítandó árat.")}</p></div></div><div id="jobWorkflowPlanRows">${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</div>${r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("English is required. Hungarian is optional and only belongs to this job.","Az angol név kötelező. A magyar opcionális, és ez a fázis csak ehhez a munkához tartozik.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")} *</span><input id="workflowJobPhaseEn" maxlength="80"></label><button class="phase-hu-toggle" id="workflowJobHuToggle" type="button" aria-expanded="false">HU</button><label class="field workflow-hu-field hidden" id="workflowJobHuField"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}
+      <section class="workflow-finance-summary" data-workflow-finance-summary aria-live="polite"></section>
+    </section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${workflowEntry?tr("Create Workflow Job","Workflow munka létrehozása"):scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
   </form>`});
+  const form=$("#jobCreateForm");
   async function loadPianos(){
     const id=$("#jobClientSelect").value,pianos=await api(`/api/clients/${id}/pianos`);
     $("#jobPianoSelect").innerHTML=pianos.length?pianos.map(piano=>`<option value="${piano.id}">${esc([piano.brand,piano.model,piano.serial_number].filter(Boolean).join(" · "))}</option>`).join(""):`<option value="">${tr("No piano — add one in Master Data","Nincs zongora — add hozzá a Törzsadatokban")}</option>`;
     $("#jobPianoSelect").disabled=!pianos.length;
   }
-  $("#jobClientSelect").addEventListener("change",()=>loadPianos().catch(error=>toast(humanError(error),"error")));await loadPianos();r2BindWorkflowTiming($("#jobCreateForm"));
+  $("#jobClientSelect").addEventListener("change",()=>loadPianos().catch(error=>toast(humanError(error),"error")));await loadPianos();r2BindWorkflowTiming(form);r2BindWorkflowFinance(form);
   $("#workflowJobAddPhase")?.addEventListener("click",()=>$("#workflowJobAddPhaseInline")?.classList.toggle("hidden"));
+  $("#workflowJobHuToggle")?.addEventListener("click",event=>{const field=$("#workflowJobHuField"),open=field?.classList.toggle("hidden")===false;event.currentTarget.setAttribute("aria-expanded",String(open));if(open)$("#workflowJobPhaseHu")?.focus();});
   $("#workflowJobCreatePhase")?.addEventListener("click",()=>{
-    const form=$("#jobCreateForm"),labelEn=String($("#workflowJobPhaseEn")?.value||"").trim(),labelHu=String($("#workflowJobPhaseHu")?.value||"").trim();
-    if(!labelEn||!labelHu){toast(tr("Enter both phase names.","Add meg mindkét fázisnevet."),"error");return;}
+    const labelEn=String($("#workflowJobPhaseEn")?.value||"").trim(),labelHu=String($("#workflowJobPhaseHu")?.value||"").trim()||labelEn;
+    if(!labelEn){toast(tr("Enter the English phase name.","Add meg az angol fázisnevet."),"error");return;}
     try{
       const existingPlan=r2ReadWorkflowPlan(form),currentCount=r2WorkflowDefinitions(existingPlan).length,max=Number(state.r2Workflow?.max_stages||7);
       if(currentCount>=max)throw new Error("WORKFLOW_STAGE_LIMIT_REACHED");
       const adminPosition=Number(r2ActiveDefinitions().find(stage=>stage.key==="admin_approval")?.position||currentCount+1),key="draft_custom_"+(++draftPhaseCounter);
-      existingPlan.push({stage_key:key,position:adminPosition-.25-(draftPhaseCounter/100),enabled:true,starts_at:null,due_at:null,responsible_user_id:form.elements.workflow_owner_user_id?.value||state.user?.id||null,job_specific:true,custom_label_en:labelEn,custom_label_hu:labelHu,label_en:labelEn,label_hu:labelHu});
+      existingPlan.push({stage_key:key,position:adminPosition-.25-(draftPhaseCounter/100),enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:form.elements.workflow_owner_user_id?.value||state.user?.id||null,job_specific:true,custom_label_en:labelEn,custom_label_hu:labelHu,label_en:labelEn,label_hu:labelHu});
       const host=$("#jobWorkflowPlanRows"),defaultStart=scheduled?(r2DateTimeValue(form,"scheduled_at")||defaults.datetime||r2DefaultInput(defaults.date)):"";
       if(host)host.innerHTML=r2WorkflowPlanRows(existingPlan,{defaultResponsible:form.elements.workflow_owner_user_id?.value||state.user?.id,defaultStart});
-      r2BindWorkflowTiming(form);
-      $("#workflowJobPhaseEn").value="";$("#workflowJobPhaseHu").value="";$("#workflowJobAddPhaseInline")?.classList.add("hidden");
+      r2BindWorkflowTiming(form);r2RefreshWorkflowFinancialSummary(form);
+      $("#workflowJobPhaseEn").value="";$("#workflowJobPhaseHu").value="";$("#workflowJobHuField")?.classList.add("hidden");$("#workflowJobHuToggle")?.setAttribute("aria-expanded","false");$("#workflowJobAddPhaseInline")?.classList.add("hidden");
       const addButton=$("#workflowJobAddPhase");if(addButton)addButton.disabled=r2WorkflowDefinitions(existingPlan).length>=max;
       toast(tr("Job-specific phase added.","A munkához tartozó egyedi fázis hozzáadva."),"success");
     }catch(error){toast(humanError(error),"error");}
   });
-  $("#jobCreateForm").addEventListener("submit",async event=>{
+  form.addEventListener("submit",async event=>{
     event.preventDefault();
     try{
-      const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);
+      const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);body.deposit_amount=Math.max(0,Number(body.deposit_amount||0));
       body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
+      const phaseTotal=body.workflow_phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0);
+      if(phaseTotal>0&&body.deposit_amount>phaseTotal)throw new Error("JOB_DEPOSIT_EXCEEDS_TOTAL");
       if(scheduled){
         body.scheduled_at=r2NyInputToIso(r2ReadDateTime(event.currentTarget,"scheduled_at",{required:true}));
-        const received=body.workflow_phases.find(phase=>phase.stage_key==="received");
-        if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
+        const received=body.workflow_phases.find(phase=>phase.stage_key==="received");if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
       }
       if(!body.assigned_technician_id)delete body.assigned_technician_id;
       await api("/api/jobs",{method:"POST",body:JSON.stringify(body)});closeDialog();toast(workflowEntry?tr("Workflow Job created and synchronized with Calendar.","Workflow munka létrehozva és a Naptárral szinkronizálva."):scheduled?tr("Job added to the active calendar.","Munka bekerült az aktív naptárba."):tr("Planned Job created.","Tervezett munka létrehozva."),"success");await refresh();
     }catch(error){toast(humanError(error),"error");}
-  });}
+  });
+}
+
 async function r2OpenActivate(job){
   if(!state.users?.length)await loadUsers();
   const plannedStart=(job.workflow_phases||[]).find(phase=>phase.stage_key==="received")?.starts_at;
@@ -353,32 +413,40 @@ async function r2OpenSchedule(job,refresh=renderWorkshop){
 function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
   if(!r2IsAdmin())return;
   const currentCount=r2WorkflowDefinitions(job.workflow_phases||[]).length,max=Number(state.r2Workflow?.max_stages||7);
-  openDialog({title:tr("Workflow configuration","Munkafolyamat beállítása"),eyebrow:job.job_code||tr("WORKFLOW","MUNKAFOLYAMAT"),body:`<form id="workflowPlanForm">
-    <div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Future phases can be activated or removed while the job is running. Job-specific phases stay on this job only.","A még el nem ért fázisok futás közben is hozzáadhatók vagy kikapcsolhatók. Az egyedi fázisok kizárólag ehhez a munkához tartoznak.")}</div>
+  openDialog({title:tr("Workflow configuration","Munkafolyamat beállítása"),eyebrow:job.job_code||tr("WORKFLOW","MUNKAFOLYAMAT"),variant:"wide",body:`<form id="workflowPlanForm">
+    <div class="workflow-editor-finance-head"><div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Future phases can be activated or removed while the job is running. Job-specific phases stay on this job only.","A még el nem ért fázisok futás közben is hozzáadhatók vagy kikapcsolhatók. Az egyedi fázisok kizárólag ehhez a munkához tartoznak.")}</div><label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(job.deposit_amount||0).toFixed(2)}"></label></div>
     <div class="workflow-plan-editor" id="workflowExistingPlanRows">${r2WorkflowPlanRows(job.workflow_phases)}</div>
-    <div class="workflow-job-phase-adder"><button class="workflow-add-phase-card" id="workflowExistingAddPhase" type="button" ${currentCount>=max?"disabled":""}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("Creates a phase only for this planned, calendar or active workflow job.","Csak ehhez a tervezett, naptári vagy aktív workflow munkához hoz létre fázist.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowExistingAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")}</span><input id="workflowExistingPhaseEn" maxlength="80"></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowExistingPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowExistingCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>
+    <div class="workflow-job-phase-adder"><button class="workflow-add-phase-card" id="workflowExistingAddPhase" type="button" ${currentCount>=max?"disabled":""}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("English is required; Hungarian is optional.","Az angol név kötelező, a magyar opcionális.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowExistingAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")} *</span><input id="workflowExistingPhaseEn" maxlength="80"></label><button class="phase-hu-toggle" id="workflowExistingHuToggle" type="button" aria-expanded="false">HU</button><label class="field workflow-hu-field hidden" id="workflowExistingHuField"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowExistingPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowExistingCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>
+    <section class="workflow-finance-summary" data-workflow-finance-summary aria-live="polite"></section>
     <div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save workflow","Munkafolyamat mentése")}</button></div></form>`});
-  const form=$("#workflowPlanForm");r2BindWorkflowTiming(form);
+  const form=$("#workflowPlanForm");r2BindWorkflowTiming(form);r2BindWorkflowFinance(form);
   $("#workflowExistingAddPhase")?.addEventListener("click",()=>$("#workflowExistingAddPhaseInline")?.classList.toggle("hidden"));
+  $("#workflowExistingHuToggle")?.addEventListener("click",event=>{const field=$("#workflowExistingHuField"),open=field?.classList.toggle("hidden")===false;event.currentTarget.setAttribute("aria-expanded",String(open));if(open)$("#workflowExistingPhaseHu")?.focus();});
   $("#workflowExistingCreatePhase")?.addEventListener("click",async()=>{
-    const labelEn=String($("#workflowExistingPhaseEn")?.value||"").trim(),labelHu=String($("#workflowExistingPhaseHu")?.value||"").trim();if(!labelEn||!labelHu){toast(tr("Enter both phase names.","Add meg mindkét fázisnevet."),"error");return;}
+    const labelEn=String($("#workflowExistingPhaseEn")?.value||"").trim(),labelHu=String($("#workflowExistingPhaseHu")?.value||"").trim()||labelEn;if(!labelEn){toast(tr("Enter the English phase name.","Add meg az angol fázisnevet."),"error");return;}
     const button=$("#workflowExistingCreatePhase");button.disabled=true;
     try{
-      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(form)})});
+      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(form),deposit_amount:Math.max(0,Number(form.elements.deposit_amount?.value||0))})});
       const updated=await api(`/api/jobs/${job.id}/workflow-phases/custom`,{method:"POST",body:JSON.stringify({label_en:labelEn,label_hu:labelHu})});
       closeDialog();toast(tr("Job-specific phase added.","A munkához tartozó egyedi fázis hozzáadva."),"success");r2OpenWorkflowPlan(updated,refresh);
     }catch(error){button.disabled=false;toast(humanError(error),"error");}
   });
   form.addEventListener("submit",async event=>{
-    event.preventDefault();try{await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(event.currentTarget)})});closeDialog();toast(tr("Workflow updated.","Munkafolyamat frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+    event.preventDefault();try{
+      const phases=r2ReadWorkflowPlan(event.currentTarget),deposit_amount=Math.max(0,Number(event.currentTarget.elements.deposit_amount?.value||0)),phaseTotal=phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0);
+      if(phaseTotal>0&&deposit_amount>phaseTotal)throw new Error("JOB_DEPOSIT_EXCEEDS_TOTAL");
+      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases,deposit_amount})});closeDialog();toast(tr("Workflow updated.","Munkafolyamat frissítve."),"success");await refresh();
+    }catch(error){toast(humanError(error),"error");}
   });
 }
+
 function r2OpenBlocker(job,refresh=renderWorkshop){
   const phase=job.current_phase||{};
   openDialog({title:tr("Phase timing & responsibility","Fázis időzítése és felelőse"),eyebrow:r2StageLabel(job.stage),body:`<form id="blockerForm" class="form-grid">
     <div class="detail-note full">${tr("Start and finish times may always be moved backward or forward. The card color is recalculated from the saved times every time the workflow renders.","A kezdési és befejezési idő mindig vissza- vagy előre módosítható. A kártya színe minden megjelenítéskor a mentett időkből újraszámolódik.")}</div>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
-    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"")}</label>
+    <label class="field"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="customer_price" type="number" min="0" step="0.01" value="${Number(phase.customer_price||0).toFixed(2)}"></label>
+    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"",{endMinutes:r2IsLogisticsStage(phase)?17*60:R2_DAY_END})}</label>
     <label class="field full"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage(phase)?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_at",phase.due_at?r2IsoToNyInput(phase.due_at):"")}</label>
     <label class="field full"><span>${tr("Delay / blocker reason","Elakadás / késés oka")}</span><select name="blocker_code"><option value="">${tr("No blocker","Nincs elakadás")}</option>${Object.entries(R2_BLOCKERS).map(([code,pair])=>`<option value="${code}" ${phase.blocker_code===code?"selected":""}>${esc(state.language==="hu"?pair[1]:pair[0])}</option>`).join("")}</select></label>
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
@@ -389,6 +457,7 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     try{const form=Object.fromEntries(new FormData(event.currentTarget)),startLocal=r2ReadDateTime(event.currentTarget,"starts_at"),dueLocal=r2ReadDateTime(event.currentTarget,"due_at"),body={
       starts_at:startLocal?r2NyInputToIso(startLocal):null,
       due_at:dueLocal?r2NyInputToIso(dueLocal):null,
+      customer_price:Math.max(0,Number(form.customer_price||0)),
       responsible_user_id:form.responsible_user_id||null,
       blocker_code:form.blocker_code||null,blocker_note:form.blocker_note||null
     };if(body.starts_at&&body.due_at){const duration=(new Date(body.due_at)-new Date(body.starts_at))/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");if(r2IsLogisticsStage(phase)&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");}await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
@@ -682,7 +751,7 @@ function r2UpdateCalendarNowLine(){
 async function r2MoveCalendarJob(job,targetDate,targetMinutes=null,newDuration=null){
   let minutes=targetMinutes;
   if(minutes===null){minutes=r2TimeMinutes(job.scheduled_at);}
-  minutes=Math.max(0,Math.min(23*60+45,r2SnapMinutes(minutes)));
+  minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,r2SnapJobMinutes(minutes)));
   const body={scheduled_at:r2NyInputToIso(r2MinutesInput(targetDate,minutes)),estimated_duration_min:Number(newDuration||job.estimated_duration_min||120),assigned_technician_id:job.assigned_technician_id};
   await api(`/api/jobs/${job.id}/schedule`,{method:"PATCH",body:JSON.stringify(body)});
 }
@@ -721,8 +790,8 @@ function r2BindCalendarPointer(host,jobs){
       if(state.r2CalendarMode==="month"){
         gesture.targetMinutes=r2TimeMinutes(gesture.job.scheduled_at);
       }else{
-        const rect=target.getBoundingClientRect(),minute=R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN);
-        gesture.targetMinutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,minute));
+        const rect=target.getBoundingClientRect(),minute=R2_DAY_START+r2SnapJobMinutes((event.clientY-rect.top)/R2_PX_PER_MIN);
+        gesture.targetMinutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,minute));
       }
       gesture.tip.textContent=`${r2FormatDate(gesture.targetDate,{month:"short",day:"numeric"})} · ${r2Pad(Math.floor(gesture.targetMinutes/60))}:${r2Pad(gesture.targetMinutes%60)}`;
     }
@@ -765,7 +834,7 @@ function r2BindCalendarCreate(host){
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
-    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
+    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,R2_DAY_START+r2SnapJobMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
     r2OpenCreateJob(renderWorkshop,{date,datetime:r2MinutesInput(date,minutes)});
   }));
 }
@@ -815,7 +884,7 @@ function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(stat
     <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
     <label class="field"><span>${tr("Email","E-mail")}</span><input name="email" type="email" value="${esc(row.email||"")}" autocomplete="email"></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
-    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span>${r2DateTimeFields("scheduled_at",r2IsoToNyInput(row.scheduled_at),{required:true})}</label>
+    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span>${r2DateTimeFields("scheduled_at",r2IsoToNyInput(row.scheduled_at),{required:true,slotMinutes:15,startMinutes:0,endMinutes:23*60+45})}</label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="duration_min" type="number" min="15" step="15" value="${Number(row.duration_min||60)}" required></label>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
     <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
