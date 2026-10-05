@@ -305,12 +305,12 @@ async function r2OpenActivate(job){
   openDialog({title:tr("Activate & Schedule","Aktiválás és ütemezés"),eyebrow:job.job_code||tr("PIPELINE","TERVEZÉS"),body:`<form id="activateJobForm" class="form-grid">
     <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(job.client_name+" · "+r2JobPiano(job))}</div>
     <label class="field full"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(plannedStart?r2IsoToNyInput(plannedStart):r2DefaultInput())}" required></label>
+    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",plannedStart?r2IsoToNyInput(plannedStart):r2DefaultInput(),{required:true})}</label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Activate","Aktiválás")}</button></div></form>`});
   $("#activateJobForm").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);body.estimated_duration_min=Number(body.estimated_duration_min||120);
-    try{await api(`/api/jobs/activate/${job.id}`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Job activated and scheduled.","Munka aktiválva és ütemezve."),"success");navTo("workshop");}
+    event.preventDefault();
+    try{const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(r2ReadDateTime(event.currentTarget,"scheduled_at",{required:true}));body.estimated_duration_min=Number(body.estimated_duration_min||120);await api(`/api/jobs/activate/${job.id}`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Job activated and scheduled.","Munka aktiválva és ütemezve."),"success");navTo("workshop");}
     catch(error){toast(error.payload?.conflict?tr("Schedule conflict with ","Ütemezési ütközés: ")+(error.payload.conflict.job_code||error.payload.conflict.title):humanError(error),"error");}
   });
 }
@@ -336,22 +336,35 @@ async function r2OpenSchedule(job,refresh=renderWorkshop){
   openDialog({title:tr("Schedule job","Munka ütemezése"),eyebrow:job.job_code||tr("CALENDAR","NAPTÁR"),body:`<form id="scheduleJobForm" class="form-grid">
     <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(job.client_name+" · "+r2JobPiano(job))}</div>
     <label class="field full"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(job.scheduled_at?r2IsoToNyInput(job.scheduled_at):r2DefaultInput())}" required></label>
+    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",job.scheduled_at?r2IsoToNyInput(job.scheduled_at):r2DefaultInput(),{required:true})}</label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save schedule","Ütemezés mentése")}</button></div></form>`});
   $("#scheduleJobForm").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);body.estimated_duration_min=Number(body.estimated_duration_min||120);
-    try{await api(`/api/jobs/${job.id}/schedule`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Schedule updated.","Ütemezés frissítve."),"success");await refresh();}
+    event.preventDefault();
+    try{const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(r2ReadDateTime(event.currentTarget,"scheduled_at",{required:true}));body.estimated_duration_min=Number(body.estimated_duration_min||120);await api(`/api/jobs/${job.id}/schedule`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Schedule updated.","Ütemezés frissítve."),"success");await refresh();}
     catch(error){toast(humanError(error),"error");}
   });
 }
 function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
   if(!r2IsAdmin())return;
+  const currentCount=r2WorkflowDefinitions(job.workflow_phases||[]).length,max=Number(state.r2Workflow?.max_stages||7);
   openDialog({title:tr("Workflow configuration","Munkafolyamat beállítása"),eyebrow:job.job_code||tr("WORKFLOW","MUNKAFOLYAMAT"),body:`<form id="workflowPlanForm">
-    <div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Future phases can be activated or removed while the job is running. Completed remains mandatory.","A még el nem ért fázisok futás közben is hozzáadhatók vagy kikapcsolhatók. A Lezárva kötelező marad.")}</div>
-    <div class="workflow-plan-editor">${r2WorkflowPlanRows(job.workflow_phases)}</div>
+    <div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Future phases can be activated or removed while the job is running. Job-specific phases stay on this job only.","A még el nem ért fázisok futás közben is hozzáadhatók vagy kikapcsolhatók. Az egyedi fázisok kizárólag ehhez a munkához tartoznak.")}</div>
+    <div class="workflow-plan-editor" id="workflowExistingPlanRows">${r2WorkflowPlanRows(job.workflow_phases)}</div>
+    <div class="workflow-job-phase-adder"><button class="workflow-add-phase-card" id="workflowExistingAddPhase" type="button" ${currentCount>=max?"disabled":""}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("Creates a phase only for this planned, calendar or active workflow job.","Csak ehhez a tervezett, naptári vagy aktív workflow munkához hoz létre fázist.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowExistingAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")}</span><input id="workflowExistingPhaseEn" maxlength="80"></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowExistingPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowExistingCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>
     <div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save workflow","Munkafolyamat mentése")}</button></div></form>`});
-  $("#workflowPlanForm").addEventListener("submit",async event=>{
+  const form=$("#workflowPlanForm");r2BindWorkflowTiming(form);
+  $("#workflowExistingAddPhase")?.addEventListener("click",()=>$("#workflowExistingAddPhaseInline")?.classList.toggle("hidden"));
+  $("#workflowExistingCreatePhase")?.addEventListener("click",async()=>{
+    const labelEn=String($("#workflowExistingPhaseEn")?.value||"").trim(),labelHu=String($("#workflowExistingPhaseHu")?.value||"").trim();if(!labelEn||!labelHu){toast(tr("Enter both phase names.","Add meg mindkét fázisnevet."),"error");return;}
+    const button=$("#workflowExistingCreatePhase");button.disabled=true;
+    try{
+      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(form)})});
+      const updated=await api(`/api/jobs/${job.id}/workflow-phases/custom`,{method:"POST",body:JSON.stringify({label_en:labelEn,label_hu:labelHu})});
+      closeDialog();toast(tr("Job-specific phase added.","A munkához tartozó egyedi fázis hozzáadva."),"success");r2OpenWorkflowPlan(updated,refresh);
+    }catch(error){button.disabled=false;toast(humanError(error),"error");}
+  });
+  form.addEventListener("submit",async event=>{
     event.preventDefault();try{await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(event.currentTarget)})});closeDialog();toast(tr("Workflow updated.","Munkafolyamat frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
@@ -360,19 +373,20 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
   openDialog({title:tr("Phase timing & responsibility","Fázis időzítése és felelőse"),eyebrow:r2StageLabel(job.stage),body:`<form id="blockerForm" class="form-grid">
     <div class="detail-note full">${tr("Start and finish times may always be moved backward or forward. The card color is recalculated from the saved times every time the workflow renders.","A kezdési és befejezési idő mindig vissza- vagy előre módosítható. A kártya színe minden megjelenítéskor a mentett időkből újraszámolódik.")}</div>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
-    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span><input name="starts_at" type="datetime-local" step="900" value="${esc(phase.starts_at?r2IsoToNyInput(phase.starts_at):"")}"></label>
-    <label class="field full"><span>${tr("Expected completion","Várható befejezés")}</span><input name="due_at" type="datetime-local" step="900" value="${esc(phase.due_at?r2IsoToNyInput(phase.due_at):"")}"></label>
+    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"")}</label>
+    <label class="field full"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage(phase)?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_at",phase.due_at?r2IsoToNyInput(phase.due_at):"")}</label>
     <label class="field full"><span>${tr("Delay / blocker reason","Elakadás / késés oka")}</span><select name="blocker_code"><option value="">${tr("No blocker","Nincs elakadás")}</option>${Object.entries(R2_BLOCKERS).map(([code,pair])=>`<option value="${code}" ${phase.blocker_code===code?"selected":""}>${esc(state.language==="hu"?pair[1]:pair[0])}</option>`).join("")}</select></label>
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
+  r2BindWorkflowTiming($("#blockerForm"));$("#blockerForm").querySelector(".form-grid");
   $("#blockerForm").addEventListener("submit",async event=>{
-    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={
-      starts_at:form.starts_at?r2NyInputToIso(form.starts_at):null,
-      due_at:form.due_at?r2NyInputToIso(form.due_at):null,
+    event.preventDefault();
+    try{const form=Object.fromEntries(new FormData(event.currentTarget)),startLocal=r2ReadDateTime(event.currentTarget,"starts_at"),dueLocal=r2ReadDateTime(event.currentTarget,"due_at"),body={
+      starts_at:startLocal?r2NyInputToIso(startLocal):null,
+      due_at:dueLocal?r2NyInputToIso(dueLocal):null,
       responsible_user_id:form.responsible_user_id||null,
       blocker_code:form.blocker_code||null,blocker_note:form.blocker_note||null
-    };
-    try{await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
+    };if(body.starts_at&&body.due_at){const duration=(new Date(body.due_at)-new Date(body.starts_at))/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");if(r2IsLogisticsStage(phase)&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");}await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
 }
 async function r2OpenHandoff(job,refresh=renderWorkshop,targetStage=null){
@@ -796,7 +810,7 @@ function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(stat
     <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
     <label class="field"><span>${tr("Email","E-mail")}</span><input name="email" type="email" value="${esc(row.email||"")}" autocomplete="email"></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
-    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(r2IsoToNyInput(row.scheduled_at))}" required></label>
+    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span>${r2DateTimeFields("scheduled_at",r2IsoToNyInput(row.scheduled_at),{required:true})}</label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="duration_min" type="number" min="15" step="15" value="${Number(row.duration_min||60)}" required></label>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
     <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
@@ -806,7 +820,7 @@ function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(stat
   $("#privateAppointmentEditor").addEventListener("submit",async event=>{
     event.preventDefault();
     try{
-      const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(body.scheduled_at);body.duration_min=Number(body.duration_min||60);if(!body.assigned_user_id)body.assigned_user_id=null;
+      const body=Object.fromEntries(new FormData(event.currentTarget));body.scheduled_at=r2NyInputToIso(r2ReadDateTime(event.currentTarget,"scheduled_at",{required:true}));body.duration_min=Number(body.duration_min||60);if(!body.assigned_user_id)body.assigned_user_id=null;
       await api("/api/private-appointments/"+encodeURIComponent(row.id),{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Private appointment updated.","Privát időpont frissítve."),"success");await refresh();
     }catch(error){toast(humanError(error),"error");}
   });
