@@ -635,8 +635,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 CREATE TABLE IF NOT EXISTS milestone_dashboard (
   id INTEGER PRIMARY KEY CHECK(id=1),
-  title_en TEXT NOT NULL DEFAULT 'Our next milestone',
-  title_hu TEXT NOT NULL DEFAULT 'A következő mérföldkő',
+  title_en TEXT NOT NULL DEFAULT 'Road to One Million',
+  title_hu TEXT NOT NULL DEFAULT 'Út az egymillióhoz',
   quote_en TEXT,
   quote_hu TEXT,
   start_date TEXT,
@@ -644,9 +644,9 @@ CREATE TABLE IF NOT EXISTS milestone_dashboard (
   target_label TEXT,
   hero_media_url TEXT,
   hero_icon TEXT,
-  reference_code TEXT NOT NULL DEFAULT 'JOB #1042',
-  subtitle_en TEXT NOT NULL DEFAULT 'Track the progress of this piano service from intake to completion.',
-  subtitle_hu TEXT NOT NULL DEFAULT 'Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.',
+  reference_code TEXT NOT NULL DEFAULT 'GROWTH ROADMAP',
+  subtitle_en TEXT NOT NULL DEFAULT 'Track the company milestones, projects and next actions that lead Klavierhaus to its next growth target.',
+  subtitle_hu TEXT NOT NULL DEFAULT 'Kövesd a Klavierhaus következő növekedési céljához vezető vállalati mérföldköveket, projekteket és feladatokat.',
   client_name TEXT,
   client_type TEXT,
   client_contact TEXT,
@@ -681,6 +681,12 @@ CREATE TABLE IF NOT EXISTS milestone_steps (
   completed_at TEXT,
   icon TEXT,
   media_url TEXT,
+  uid TEXT UNIQUE,
+  parent_uid TEXT,
+  step_kind TEXT NOT NULL DEFAULT 'major' CHECK(step_kind IN ('major','minor')),
+  link_view TEXT,
+  link_record_id TEXT,
+  color_key TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
@@ -690,6 +696,7 @@ CREATE TABLE IF NOT EXISTS milestone_steps (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);
+CREATE INDEX IF NOT EXISTS idx_milestone_steps_parent ON milestone_steps(parent_uid,step_kind,sort_order,id);
 
 CREATE TABLE IF NOT EXISTS landing_sections (
   section_key TEXT PRIMARY KEY,

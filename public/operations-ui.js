@@ -36,167 +36,138 @@ async function createOperationalSkillInline(seed="",onSaved=null){
     catch(error){toast(humanError(error),"error");}
   });
 }
-function milestoneDaysRemaining(dashboard){
-  if(!dashboard?.end_date)return null;const end=new Date(dashboard.end_date+"T23:59:59"),diff=Math.ceil((end-Date.now())/86400000);return diff;
-}
-function milestoneIconSvg(kind="piano"){
+const MILESTONE_ICON_LIBRARY=["clipboard","piano","document","tools","flag","target","growth","revenue","calendar","event","meeting","client","partner","institution","phone","email","delivery","transport","workshop","tuning","repair","marketing","website","social","location","check","star","contract","finance","idea"];
+function milestoneIconSvg(kind="target"){
   const icons={
-    dashboard:'<path d="M3 11.5 12 4l9 7.5V21H3z"/><path d="M9 21v-6h6v6"/>',
-    jobs:'<rect x="4" y="6" width="16" height="14" rx="2"/><path d="M9 6V4h6v2M8 11h8M8 15h5"/>',
-    clients:'<circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/>',
-    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
-    inventory:'<path d="M4 7h16v13H4zM7 4h10l3 3H4z"/><path d="M9 12h6"/>',
-    finance:'<path d="M5 20V9M12 20V4M19 20v-7"/><path d="M3 20h18"/>',
-    reports:'<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M8 13h8M8 17h6"/>',
-    settings:'<circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.6a7 7 0 0 0-.8-1.8l1-1.9-2.1-2.1-1.9 1a7 7 0 0 0-1.8-.8L10.5 2h-3l-.6 2.3a7 7 0 0 0-1.8.8l-1.9-1L1.1 6.2l1 1.9a7 7 0 0 0-.8 1.8L0 10.5v3l2.3.6a7 7 0 0 0 .8 1.8l-1 1.9 2.1 2.1 1.9-1a7 7 0 0 0 1.8.8l.6 2.3h3l.6-2.3a7 7 0 0 0 1.8-.8l1.9 1 2.1-2.1-1-1.9a7 7 0 0 0 .8-1.8z" transform="translate(2 -1) scale(.85)"/>',
-    help:'<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.8 2c-1 .7-1.6 1.1-1.6 2.4M12 17h.01"/>',
     clipboard:'<rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6M9 14h6M9 18h4"/>',
     piano:'<path d="M3 15h18M5 15V8l11-4 4 4v7M8 15v5M18 15v5"/><path d="M5 11h14M9 9v6"/>',
     document:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/>',
     tools:'<path d="m5 19 6-6M13 11l5-5M14 5l5 5M4 6l5 5M3 4l2-2 6 6-2 2z"/>',
     flag:'<path d="M6 21V4M6 5h11l-2 4 2 4H6"/>',
-    bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
-    search:'<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
+    target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="m15 9 5-5M17 4h3v3"/>',
+    growth:'<path d="M4 18 10 12l4 3 6-8"/><path d="M16 7h4v4"/>',
+    revenue:'<circle cx="12" cy="12" r="8"/><path d="M15 8.5h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9M12 6v12"/>',
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
+    event:'<path d="m12 3 2.3 4.7 5.2.8-3.8 3.7.9 5.2-4.6-2.5-4.6 2.5.9-5.2-3.8-3.7 5.2-.8z"/>',
+    meeting:'<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M13.5 20a4.5 4.5 0 0 1 7.5-3.3"/>',
+    client:'<circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    partner:'<path d="M3 12 8 7l4 4 4-4 5 5-5 5-4-4-4 4z"/><path d="m8 12 2 2M16 12l-2 2"/>',
+    institution:'<path d="m3 9 9-5 9 5M5 10h14M6 10v8M10 10v8M14 10v8M18 10v8M4 18h16M3 21h18"/>',
+    phone:'<path d="M7 3h3l1.5 4-2 1.5a15 15 0 0 0 6 6l1.5-2 4 1.5v3c0 2-1 4-4 4C9 21 3 15 3 7c0-3 2-4 4-4z"/>',
+    email:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
+    delivery:'<path d="M3 7h11v10H3zM14 10h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
+    transport:'<path d="M5 16V8l2-4h10l2 4v8"/><path d="M4 11h16M8 16v3M16 16v3"/><circle cx="8" cy="12" r="1"/><circle cx="16" cy="12" r="1"/>',
+    workshop:'<path d="M4 21V9l8-6 8 6v12z"/><path d="M8 21v-7h8v7M7 10h10"/>',
+    tuning:'<path d="M6 4v16M12 4v16M18 4v16"/><circle cx="6" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="18" cy="8" r="2"/>',
+    repair:'<path d="m4 20 7-7M13 11l5-5M15 4l5 5M3 6l5 5M2 4l2-2 6 6-2 2z"/>',
+    marketing:'<path d="M3 13h4l10 5V6L7 11H3z"/><path d="M7 13v6M17 9h3M18 5l2-2M18 13l2 2"/>',
+    website:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9c-3-3-4-6-4-9s1-6 4-9z"/>',
+    social:'<path d="M8 12h8M10 8l-4 4 4 4M14 8l4 4-4 4"/>',
     location:'<path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
-    user:'<circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/>'
+    check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    star:'<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    contract:'<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M8 12h8M8 16h5M15 18l2 2 4-4"/>',
+    finance:'<path d="M5 20V9M12 20V4M19 20v-7M3 20h18"/>',
+    idea:'<path d="M9 18h6M10 21h4M8 14c-2-1.5-3-3.5-3-5.5a7 7 0 1 1 14 0c0 2-1 4-3 5.5-1 .8-1 1.5-1 2H9c0-.5 0-1.2-1-2z"/>'
   };
-  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[kind]||icons.piano}</svg>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[kind]||icons.target}</svg>`;
 }
 function milestonePianoArt(kind="grand"){
-  if(kind==="action")return `<svg viewBox="0 0 640 220" aria-hidden="true"><defs><linearGradient id="ma" x1="0" x2="1"><stop stop-color="#1c130a"/><stop offset=".5" stop-color="#bb7b25"/><stop offset="1" stop-color="#f0bf63"/></linearGradient></defs><rect width="640" height="220" rx="18" fill="#120f0c"/><path d="M0 180C150 96 310 86 640 12v208H0z" fill="url(#ma)" opacity=".55"/><g stroke="#f2c36d" stroke-width="4" opacity=".75">${Array.from({length:18},(_,i)=>`<path d="M${16+i*36} 205  ${110+i*26} 65"/>`).join("")}</g><path d="M0 183h640" stroke="#f3c772" stroke-width="8"/></svg>`;
-  return `<svg viewBox="0 0 620 300" aria-hidden="true"><defs><linearGradient id="pg" x1="0" x2="1"><stop stop-color="#090a0a"/><stop offset="1" stop-color="#423120"/></linearGradient></defs><rect width="620" height="300" rx="20" fill="transparent"/><path d="M210 92c105-67 247-79 335-31-42 15-83 36-118 68H256z" fill="url(#pg)"/><path d="M199 126h253c22 0 39 17 39 39v27H174l25-66Z" fill="#121313"/><path d="M188 192h317v21H177z" fill="#23170d"/><path d="M232 212v72M450 212v72" stroke="#171717" stroke-width="12"/><path d="m308 92 192-74" stroke="#b88439" stroke-width="8"/><path d="M505 18v174" stroke="#2f2417" stroke-width="7"/><path d="M205 157h224" stroke="#ead7a6" stroke-width="8"/><g stroke="#222" stroke-width="2">${Array.from({length:18},(_,i)=>`<path d="M${215+i*12} 153v12"/>`).join("")}</g></svg>`;
+  if(kind==="action")return `<svg viewBox="0 0 640 220" aria-hidden="true"><defs><linearGradient id="ma" x1="0" x2="1"><stop stop-color="#1c130a"/><stop offset=".5" stop-color="#bb7b25"/><stop offset="1" stop-color="#f0bf63"/></linearGradient></defs><rect width="640" height="220" fill="#120f0c"/><path d="M0 180C150 96 310 86 640 12v208H0z" fill="url(#ma)" opacity=".55"/><g stroke="#f2c36d" stroke-width="4" opacity=".75">${Array.from({length:18},(_,i)=>`<path d="M${16+i*36} 205 ${110+i*26} 65"/>`).join("")}</g><path d="M0 183h640" stroke="#f3c772" stroke-width="8"/></svg>`;
+  return `<svg viewBox="0 0 620 300" aria-hidden="true"><defs><linearGradient id="pg" x1="0" x2="1"><stop stop-color="#090a0a"/><stop offset="1" stop-color="#423120"/></linearGradient></defs><path d="M210 92c105-67 247-79 335-31-42 15-83 36-118 68H256z" fill="url(#pg)"/><path d="M199 126h253c22 0 39 17 39 39v27H174l25-66Z" fill="#121313"/><path d="M188 192h317v21H177z" fill="#23170d"/><path d="M232 212v72M450 212v72" stroke="#171717" stroke-width="12"/><path d="m308 92 192-74" stroke="#b88439" stroke-width="8"/><path d="M505 18v174" stroke="#2f2417" stroke-width="7"/><path d="M205 157h224" stroke="#ead7a6" stroke-width="8"/></svg>`;
 }
-function milestoneImageMarkup(url,kind,alt=""){
-  return url?`<img src="${esc(url)}" alt="${esc(alt)}" loading="lazy">`:`<div class="milestone-generated-art ${kind}">${milestonePianoArt(kind)}</div>`;
+function milestoneImageMarkup(url,kind,alt=""){return url?`<img src="${esc(url)}" alt="${esc(alt)}" loading="lazy">`:`<div class="milestone-generated-art ${kind}">${milestonePianoArt(kind)}</div>`;}
+function milestoneLocalized(row,key,fallback=""){return state.language==="hu"?(row?.[key+"_hu"]||row?.[key+"_en"]||fallback):(row?.[key+"_en"]||row?.[key+"_hu"]||fallback);}
+function milestoneIconOptions(selected="target"){return MILESTONE_ICON_LIBRARY.map(key=>`<option value="${key}" ${key===selected?"selected":""}>${key}</option>`).join("");}
+function milestoneNyDate(date=new Date()){return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(date);}
+function milestoneNyTime(date=new Date()){return new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:state.language!=="hu"}).format(date);}
+async function milestoneTodayScheduleCount(){
+  try{const now=Date.now(),payload=await api(`/api/calendar?from=${encodeURIComponent(new Date(now-18*3600000).toISOString())}&to=${encodeURIComponent(new Date(now+30*3600000).toISOString())}`,{memoryCacheMs:0}),today=milestoneNyDate();return (payload.jobs||[]).filter(job=>job.scheduled_at&&milestoneNyDate(new Date(job.scheduled_at))===today).length;}catch(_error){return 0;}
 }
-function milestoneLocalized(row,key,fallback=""){
-  return state.language==="hu"?(row?.[key+"_hu"]||row?.[key+"_en"]||fallback):(row?.[key+"_en"]||row?.[key+"_hu"]||fallback);
-}
-function milestoneStepFallback(index){
-  const rows=[
-    ["Intake","Igényfelvétel","Register client, piano details and initial request.","Ügyfél, zongoraadatok és kezdeti igény rögzítése.","clipboard"],
-    ["Assessment","Felmérés","On-site inspection, condition report and measurements.","Helyszíni felmérés, állapotjelentés és mérések.","piano"],
-    ["Quote","Ajánlat","Prepare service plan and send quote to client.","Szervizterv és ajánlat elkészítése az ügyfélnek.","document"],
-    ["Workshop","Műhely","Service, regulation, repairs and quality checks.","Szerviz, szabályozás, javítások és minőségellenőrzés.","tools"],
-    ["Delivery & Follow-up","Átadás és utánkövetés","Return piano, final tuning and follow-up with client.","Zongora átadása, végső hangolás és utánkövetés.","flag"]
-  ];
-  const r=rows[index]||rows[0];return {title_en:r[0],title_hu:r[1],description_en:r[2],description_hu:r[3],icon:r[4],completed:false,sort_order:index};
-}
+function milestoneRoadmapLink(step){if(!step?.link_view)return "";return ` data-roadmap-view="${esc(step.link_view)}" data-roadmap-record="${esc(step.link_record_id||"")}" tabindex="0" role="button"`;}
 async function renderMilestone(){
   if(window.innerWidth<700){state.view="workshop";history.replaceState({},"","#workshop");return renderWorkshop();}
-  const workspace=$("#workspace"),payload=await api("/api/milestone",{memoryCacheMs:0});state.milestone=payload;
-  const d=payload.dashboard||{},raw=payload.steps||[],steps=Array.from({length:5},(_,i)=>({...milestoneStepFallback(i),...(raw[i]||{}),sort_order:i}));
-  const title=milestoneLocalized(d,"title",tr("Steinway B — Concert Grand","Steinway B — koncertzongora"));
-  const subtitle=milestoneLocalized(d,"subtitle",tr("Track the progress of this piano service from intake to completion.","Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig."));
-  const craftTitle=milestoneLocalized(d,"craft_title",tr("Exceptional Pianos. Lasting Legacies.","Kivételes zongorák. Maradandó örökség."));
-  const craftBody=milestoneLocalized(d,"craft_body",tr("Precision service for extraordinary instruments.","Precíz szerviz kivételes hangszerekhez."));
-  const quote=milestoneLocalized(d,"quote",tr("Caring for extraordinary instruments and the people who play them.","Gondoskodás a kivételes hangszerekről és azokról, akik játszanak rajtuk."));
-  const logo=$("#headerBrandLogo")?.src||"/icons/icon-192.png",user=state.user||{},avatar=user.profile_image_url||"";
-  const stepIcons=["clipboard","piano","document","tools","flag"];
-  workspace.innerHTML=`<div class="milestone-showcase">
-    <aside class="ms-sidebar">
-      <button class="ms-brand" type="button" data-ms-nav="milestone"><img src="${esc(logo)}" alt=""><span><strong>KLAVIERHAUS</strong><small>PIANO SERVICE</small></span></button>
-      <nav class="ms-nav" aria-label="Milestone navigation">
-        <button type="button" data-ms-nav="milestone">${milestoneIconSvg("dashboard")}<span>Dashboard</span></button>
-        <button type="button" class="active" data-ms-nav="planned">${milestoneIconSvg("jobs")}<span>Jobs</span></button>
-        <button type="button" data-ms-nav="master">${milestoneIconSvg("clients")}<span>Clients</span></button>
-        <button type="button" data-ms-nav="workshop">${milestoneIconSvg("calendar")}<span>Calendar</span></button>
-        <button type="button" data-ms-nav="settings">${milestoneIconSvg("inventory")}<span>Inventory</span></button>
-        <button type="button" data-ms-nav="finance">${milestoneIconSvg("finance")}<span>Finances</span></button>
-        <button type="button" data-ms-nav="documents">${milestoneIconSvg("reports")}<span>Reports</span></button>
-      </nav>
-      <div class="ms-nav ms-nav-bottom"><button type="button" data-ms-nav="settings">${milestoneIconSvg("settings")}<span>Settings</span></button><button type="button" data-ms-nav="profile">${milestoneIconSvg("help")}<span>Help</span></button></div>
-    </aside>
-    <section class="ms-stage">
-      <header class="ms-topbar">
-        <label class="ms-search">${milestoneIconSvg("search")}<input id="milestoneGlobalSearch" type="search" placeholder="Search clients, jobs, or instruments…"></label>
-        <div class="ms-account"><button class="ms-bell" id="milestoneBell" type="button">${milestoneIconSvg("bell")}<i></i></button><button class="ms-profile" id="milestoneProfileShortcut" type="button">${avatar?`<img src="${esc(avatar)}" alt="">`:`<span>${esc(initials(user.name||"KH"))}</span>`}<b>${esc(user.name||"Admin")}<small>${esc(user.role||"Admin")}</small></b><em>⌄</em></button></div>
-      </header>
-      <main class="ms-content">
-        <section class="ms-job-head">
-          <div class="ms-job-copy"><span class="ms-reference">${esc(d.reference_code||"JOB #1042")}</span><h1>${esc(title)}</h1><div class="ms-meta-row">
-            <div>${milestoneIconSvg("user")}<span><small>Client</small><strong>${esc(d.client_name||"Klavierhaus Client")}</strong></span></div>
-            <div>${milestoneIconSvg("location")}<span><small>Location</small><strong>${esc(d.location_label||"New York")}</strong></span></div>
-            <div>${milestoneIconSvg("calendar")}<span><small>Scheduled</small><strong>${esc(d.scheduled_label||d.start_date||"Not set")}</strong></span></div>
-            <span class="ms-status-dot">● ${esc(d.status_label||"In Progress")}</span>
-          </div></div>
-          <div class="ms-job-art">${milestoneImageMarkup(d.hero_media_url,"grand",title)}</div>
-        </section>
-        <section class="ms-milestone-panel">
-          <div class="ms-panel-head"><div><h2>Service Milestones</h2><p>${esc(subtitle)}</p></div><button type="button" id="milestoneDetailsButton">View Details <span>⌄</span></button></div>
-          <div class="ms-timeline">
-            <div class="ms-timeline-line"></div>
-            ${steps.map((step,index)=>{const st=milestoneLocalized(step,"title",milestoneStepFallback(index).title_en),desc=milestoneLocalized(step,"description",milestoneStepFallback(index).description_en),kind=stepIcons[index];return `<article class="ms-step ms-step-${index+1} ${step.completed?"done":""}"><div class="ms-step-node"><span>${milestoneIconSvg(step.icon&&stepIcons.includes(step.icon)?step.icon:kind)}</span></div><b>${String(index+1).padStart(2,"0")}</b><h3>${esc(st)}</h3><p>${esc(desc)}</p></article>`;}).join("")}
-          </div>
-        </section>
-        <section class="ms-info-grid">
-          <article class="ms-info-card"><header>${milestoneIconSvg("clients")}<strong>Client</strong></header><h3>${esc(d.client_name||"Klavierhaus Client")}</h3><dl><dt>Type</dt><dd>${esc(d.client_type||"Client")}</dd><dt>Contact</dt><dd>${esc(d.client_contact||"—")}</dd></dl><button type="button" data-ms-nav="master">View Client <span>→</span></button></article>
-          <article class="ms-info-card ms-instrument"><header>${milestoneIconSvg("piano")}<strong>Instrument</strong></header><div class="ms-instrument-art">${milestoneImageMarkup(d.instrument_media_url,"grand",d.instrument_name||"Piano")}</div><h3>${esc(d.instrument_name||"Steinway & Sons")}</h3><dl><dt>Serial No.</dt><dd>${esc(d.instrument_serial||"—")}</dd><dt>Year</dt><dd>${esc(d.instrument_year||"—")}</dd></dl></article>
-          <article class="ms-info-card"><header>${milestoneIconSvg("calendar")}<strong>Schedule</strong></header><dl class="ms-schedule-list"><dt>Workshop Slot</dt><dd>${esc(d.schedule_range||[d.start_date,d.end_date].filter(Boolean).join(" – ")||"Not set")}</dd><dt>Delivery (Est.)</dt><dd>${esc(d.delivery_estimate||d.end_date||"Not set")}</dd></dl><button type="button" data-ms-nav="workshop">Open Calendar <span>→</span></button></article>
-          <article class="ms-info-card ms-status-card"><header>${milestoneIconSvg("finance")}<strong>Status</strong></header><ul>${steps.map((step,index)=>`<li class="${step.completed?"complete":(!step.completed&&steps.slice(0,index).every(s=>s.completed)?"current":"pending")}"><i>${step.completed?"✓":""}</i><span>${esc(milestoneLocalized(step,"title",milestoneStepFallback(index).title_en))}</span></li>`).join("")}</ul></article>
-        </section>
-        <section class="ms-footer-grid">
-          <article class="ms-craft"><div class="ms-craft-image">${milestoneImageMarkup(d.craft_media_url,"action",craftTitle)}</div><div><span>OUR CRAFT</span><h2>${esc(craftTitle)}</h2><p>${esc(craftBody)}</p><i></i></div></article>
-          <article class="ms-quote"><div>${milestoneImageMarkup(d.quote_media_url,"grand",quote)}</div><blockquote>“${esc(quote)}”</blockquote></article>
-        </section>
-      </main>
+  const workspace=$("#workspace"),[payload,scheduleCount]=await Promise.all([api("/api/milestone",{memoryCacheMs:0}),milestoneTodayScheduleCount()]);state.milestone=payload;
+  const d=payload.dashboard||{},steps=payload.steps||[],majors=steps.filter(step=>step.step_kind!=="minor"),minors=steps.filter(step=>step.step_kind==="minor"),progress=Math.round(Number(payload.step_progress||0)*100);
+  const title=milestoneLocalized(d,"title",tr("Road to One Million","Út az egymillióhoz")),subtitle=milestoneLocalized(d,"subtitle",tr("The company roadmap from today's priorities to the next major growth milestone.","A vállalat útiterve a mai prioritásoktól a következő nagy növekedési mérföldkőig."));
+  const craftTitle=milestoneLocalized(d,"craft_title",tr("Exceptional Pianos. Lasting Legacies.","Kivételes zongorák. Maradandó örökség.")),craftBody=milestoneLocalized(d,"craft_body",tr("Precision, craft and relationships turn remarkable instruments into lasting value.","A precizitás, a mesterség és a kapcsolatok alakítják a kivételes hangszereket maradandó értékké.")),quote=milestoneLocalized(d,"quote",tr("Caring for extraordinary instruments and the people who play them.","Gondoskodás a kivételes hangszerekről és azokról, akik játszanak rajtuk."));
+  const colorKeys=["gold","cyan","blue","amber","green","red","violet"];
+  workspace.innerHTML=`<div class="milestone-showcase milestone-roadmap-page">
+    <section class="ms-job-head ms-growth-head"><div class="ms-job-copy"><span class="ms-reference">${esc(d.reference_code||"GROWTH ROADMAP")}</span><h1>${esc(title)}</h1><div class="ms-meta-row">
+      <div>${milestoneIconSvg("location")}<span><small>${tr("Location","Helyszín")}</small><strong>${esc(d.location_label||"New York")}</strong></span></div>
+      <div>${milestoneIconSvg("calendar")}<span><small>${tr("Time","Idő")}</small><strong id="milestoneNyClock">${esc(milestoneNyTime())}</strong></span></div>
+      <div>${milestoneIconSvg("event")}<span><small>${tr("Schedule","Naptár")}</small><strong>${scheduleCount} ${tr("events today","mai esemény")}</strong></span></div>
+      <span class="ms-status-dot">${progress}% · ${esc(d.status_label||tr("In Progress","Folyamatban"))}</span>
+    </div></div><div class="ms-job-art">${milestoneImageMarkup(d.hero_media_url,"grand",title)}</div></section>
+    <section class="ms-milestone-panel ms-roadmap-panel"><div class="ms-panel-head"><div><h2>${tr("Service Milestones","Vállalati mérföldkövek")}</h2><p>${esc(subtitle)}</p></div>${["ADMIN","SUPERADMIN"].includes(state.user?.role)?`<button type="button" id="milestoneDetailsButton">${tr("Edit roadmap","Útiterv szerkesztése")} <span>⌄</span></button>`:""}</div>
+      <div class="ms-roadmap-scroll"><div class="ms-roadmap-track" style="--major-count:${Math.max(majors.length,1)}"><div class="ms-timeline-line"></div>${majors.map((step,index)=>{const children=minors.filter(child=>child.parent_uid===step.uid),color=step.color_key||colorKeys[index%colorKeys.length];return `<article class="ms-step roadmap-major color-${esc(color)} ${step.completed?"done":""}"${milestoneRoadmapLink(step)}><div class="ms-step-stem"></div><div class="ms-step-node"><span>${milestoneIconSvg(step.icon||"target")}</span></div><b>${String(index+1).padStart(2,"0")}</b><h3>${esc(milestoneLocalized(step,"title",tr("Milestone","Mérföldkő")))}</h3><p>${esc(milestoneLocalized(step,"description",""))}</p>${children.length?`<div class="roadmap-substeps">${children.map(child=>`<span class="roadmap-substep ${child.completed?"done":""}"${milestoneRoadmapLink(child)}>${milestoneIconSvg(child.icon||"check")}<em>${esc(milestoneLocalized(child,"title",tr("Next step","Következő lépés")))}</em>${child.target_date?`<small>${esc(child.target_date)}</small>`:""}</span>`).join("")}</div>`:""}</article>`;}).join("")}</div></div>
     </section>
+    <section class="ms-info-grid ms-shortcuts-grid">
+      <article class="ms-info-card ms-shortcut" data-milestone-action="clients"><header>${milestoneIconSvg("client")}<strong>${tr("Clients","Ügyfelek")}</strong></header><h3>${tr("Client relationships","Ügyfélkapcsolatok")}</h3><p>${tr("Open the complete client directory and linked history.","A teljes ügyféltörzs és kapcsolódó előzmények megnyitása.")}</p><button type="button">${tr("View Clients","Ügyfelek megnyitása")} <span>→</span></button></article>
+      <article class="ms-info-card ms-instrument ms-shortcut" data-milestone-action="instruments"><header>${milestoneIconSvg("piano")}<strong>${tr("Instrument","Hangszer")}</strong></header><div class="ms-instrument-art">${milestoneImageMarkup(d.instrument_media_url,"grand",d.instrument_name||"Piano")}</div><h3>${esc(d.instrument_name||tr("Piano portfolio","Zongoraállomány"))}</h3><button type="button">${tr("View Pianos","Zongorák megnyitása")} <span>→</span></button></article>
+      <article class="ms-info-card ms-shortcut" data-milestone-action="schedule"><header>${milestoneIconSvg("calendar")}<strong>${tr("Schedule","Naptár")}</strong></header><dl class="ms-schedule-list"><dt>${tr("Today","Ma")}</dt><dd>${scheduleCount} ${tr("scheduled events","ütemezett esemény")}</dd><dt>${tr("New York time","New York-i idő")}</dt><dd>${esc(milestoneNyTime())}</dd></dl><button type="button">${tr("Open Calendar","Naptár megnyitása")} <span>→</span></button></article>
+      <article class="ms-info-card ms-shortcut" data-milestone-action="plans"><header>${milestoneIconSvg("target")}<strong>${tr("Plans","Terveink")}</strong></header><h3>${Number(payload.completed_count||0)} / ${Number(payload.total_count||0)}</h3><p>${tr("Completed roadmap actions and planned work.","Teljesített útiterv-lépések és tervezett munkák.")}</p><button type="button">${tr("Open Planned Jobs","Tervezett munkák")} <span>→</span></button></article>
+    </section>
+    <section class="ms-footer-grid"><article class="ms-craft"><div class="ms-craft-image">${milestoneImageMarkup(d.craft_media_url,"action",craftTitle)}</div><div><span>${tr("OUR CRAFT","MESTERSÉGÜNK")}</span><h2>${esc(craftTitle)}</h2><p>${esc(craftBody)}</p><i></i></div></article><article class="ms-quote"><div>${milestoneImageMarkup(d.quote_media_url,"grand",quote)}</div><blockquote>“${esc(quote)}”</blockquote></article></section>
   </div>`;
-  $$('[data-ms-nav]',workspace).forEach(button=>button.addEventListener('click',()=>navTo(button.dataset.msNav)));
-  $("#milestoneBell")?.addEventListener("click",()=>$("#notificationBell")?.click());
-  $("#milestoneProfileShortcut")?.addEventListener("click",()=>navTo("profile"));
-  $("#milestoneDetailsButton")?.addEventListener("click",()=>["ADMIN","SUPERADMIN"].includes(state.user?.role)?openMilestoneEditor(payload):null);
-  $("#milestoneGlobalSearch")?.addEventListener("keydown",event=>{if(event.key!=="Enter")return;const q=event.currentTarget.value.trim();if(!q)return;state.masterSearch=q;navTo("master");});
+  const clockTimer=setInterval(()=>{const el=$("#milestoneNyClock");if(!el||state.view!=="milestone"){clearInterval(clockTimer);return;}el.textContent=milestoneNyTime();},30000);
+  $("#milestoneDetailsButton")?.addEventListener("click",()=>openMilestoneEditor(payload));
+  $$("[data-milestone-action]",workspace).forEach(card=>card.addEventListener("click",()=>{const action=card.dataset.milestoneAction;if(action==="clients"){state.masterMode="CLIENTS";state.masterSearch="";navTo("master");}else if(action==="instruments"){state.masterMode="PIANOS";state.masterSearch="";navTo("master");}else if(action==="schedule")navTo("workshop");else if(action==="plans")navTo("planned");}));
+  $$("[data-roadmap-view]",workspace).forEach(node=>{const open=()=>{const view=node.dataset.roadmapView;if(!view)return;const record=node.dataset.roadmapRecord;if(view==="master"&&record){state.masterSearch=record;}navTo(view);};node.addEventListener("click",open);node.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();open();}});});
 }
 function operationsMilestoneProfileCard(){
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role))return "";
-  return `<section class="panel milestone-admin-card" id="milestoneAdminCard"><div class="panel-head"><div><span class="eyebrow">${tr("MILESTONE HOME","MÉRFÖLDKŐ KEZDŐOLDAL")}</span><h2>${tr("Service Milestones dashboard","Service Milestones irányítópult")}</h2><p>${tr("The approved layout is fixed. Edit content, status and imagery without changing the five-step design.","A jóváhagyott elrendezés fix. A tartalom, státusz és képek szerkeszthetők az ötlépéses design megváltoztatása nélkül.")}</p></div><button class="secondary-button" id="editMilestoneBtn" type="button">${tr("Edit content","Tartalom szerkesztése")}</button></div><div id="milestoneAdminPreview" class="milestone-admin-preview"></div></section>`;
+  return `<section class="panel milestone-admin-card" id="milestoneAdminCard"><div class="panel-head"><div><span class="eyebrow">${tr("COMPANY ROADMAP","VÁLLALATI ÚTITERV")}</span><h2>${tr("Milestones, imagery & growth plan","Mérföldkövek, képek és növekedési terv")}</h2><p>${tr("Manage the bilingual roadmap, major milestones, smaller actions, icons, links and all dashboard imagery. The visual layout remains consistent.","Kezeld a kétnyelvű útitervet, fő mérföldköveket, kisebb lépéseket, ikonokat, hivatkozásokat és a dashboard összes képét. A vizuális elrendezés egységes marad.")}</p></div><button class="secondary-button" id="editMilestoneBtn" type="button">${tr("Edit roadmap","Útiterv szerkesztése")}</button></div><div id="milestoneAdminPreview" class="milestone-admin-preview"></div></section>`;
 }
 async function bindOperationsMilestoneProfile(){
-  const button=$("#editMilestoneBtn"),preview=$("#milestoneAdminPreview");if(!button&&!preview)return;
-  const payload=await api("/api/milestone",{memoryCacheMs:0});state.milestone=payload;
-  if(preview){const d=payload.dashboard||{};preview.innerHTML='<strong>'+esc(milestoneLocalized(d,"title",tr("Service Milestones","Szerviz mérföldkövek")))+'</strong><span>'+Number(payload.completed_count||0)+' / 5 '+tr("completed","teljesítve")+'</span>';}
+  const button=$("#editMilestoneBtn"),preview=$("#milestoneAdminPreview");if(!button&&!preview)return;const payload=await api("/api/milestone",{memoryCacheMs:0});state.milestone=payload;
+  if(preview){const d=payload.dashboard||{},major=(payload.steps||[]).filter(row=>row.step_kind!=="minor").length,minor=(payload.steps||[]).filter(row=>row.step_kind==="minor").length;preview.innerHTML=`<strong>${esc(milestoneLocalized(d,"title",tr("Company roadmap","Vállalati útiterv")))}</strong><span>${major} ${tr("major milestones","fő mérföldkő")} · ${minor} ${tr("smaller actions","kisebb lépés")} · ${Number(payload.completed_count||0)} ${tr("completed","teljesítve")}</span>`;}
   button?.addEventListener("click",()=>openMilestoneEditor(payload));
 }
 function milestoneStepEditorMarkup(step={},index=0){
-  const base={...milestoneStepFallback(index),...step};
-  return `<article class="milestone-step-editor" data-milestone-step><header><strong>${String(index+1).padStart(2,"0")} · ${tr("Milestone","Mérföldkő")}</strong><span>${esc(base.icon||"")}</span></header><div class="form-grid">
-    <label class="field"><span>Title EN *</span><input name="step_title_en" required value="${esc(base.title_en||"")}"></label><label class="field"><span>Cím HU</span><input name="step_title_hu" value="${esc(base.title_hu||"")}"></label>
-    <label class="field full"><span>Description EN</span><textarea name="step_description_en">${esc(base.description_en||"")}</textarea></label><label class="field full"><span>Leírás HU</span><textarea name="step_description_hu">${esc(base.description_hu||"")}</textarea></label>
-    <label class="field"><span>${tr("Target date","Céldátum")}</span><input name="step_target_date" type="date" value="${esc(base.target_date||"")}"></label><label class="field"><span>${tr("Icon key","Ikonkulcs")}</span><select name="step_icon">${["clipboard","piano","document","tools","flag"].map(k=>`<option value="${k}" ${k===(base.icon||milestoneStepFallback(index).icon)?"selected":""}>${k}</option>`).join("")}</select></label>
-    <label class="field"><span>${tr("Image / GIF","Kép / GIF")}</span><input name="step_media_file" type="file" accept="image/*,.gif"><input name="step_media_url" type="hidden" value="${esc(base.media_url||"")}"></label>
-    <label class="cms-toggle-row"><span><strong>${tr("Completed","Teljesítve")}</strong></span><input name="step_completed" type="checkbox" ${base.completed?"checked":""}></label>
+  const uid=step.uid||`roadmap-${Date.now()}-${index}`,kind=step.step_kind==="minor"?"minor":"major";
+  return `<article class="milestone-step-editor roadmap-editor-row ${kind}" data-milestone-step data-step-uid="${esc(uid)}"><header><strong class="roadmap-editor-label">${kind==="minor"?tr("SMALLER STEP","KISEBB LÉPÉS"):tr("MAJOR MILESTONE","FŐ MÉRFÖLDKŐ")}</strong><div class="roadmap-editor-actions"><button type="button" class="text-button" data-step-up title="Up">↑</button><button type="button" class="text-button" data-step-down title="Down">↓</button><button type="button" class="text-button danger-text" data-remove-milestone-step>${tr("Remove","Törlés")}</button></div></header><div class="form-grid">
+    <input name="step_uid" type="hidden" value="${esc(uid)}"><label class="field"><span>${tr("Type","Típus")}</span><select name="step_kind"><option value="major" ${kind==="major"?"selected":""}>${tr("Major milestone","Fő mérföldkő")}</option><option value="minor" ${kind==="minor"?"selected":""}>${tr("Smaller step","Kisebb lépés")}</option></select></label><label class="field parent-field ${kind==="minor"?"":"hidden"}"><span>${tr("Parent milestone","Szülő mérföldkő")}</span><select name="step_parent_uid" data-parent-select data-current-parent="${esc(step.parent_uid||"")}"></select></label>
+    <label class="field"><span>Title EN *</span><input name="step_title_en" required value="${esc(step.title_en||"")}"></label><label class="field"><span>Cím HU</span><input name="step_title_hu" value="${esc(step.title_hu||"")}"></label>
+    <label class="field full"><span>Description EN</span><textarea name="step_description_en">${esc(step.description_en||"")}</textarea></label><label class="field full"><span>Leírás HU</span><textarea name="step_description_hu">${esc(step.description_hu||"")}</textarea></label>
+    <label class="field"><span>${tr("Target date","Céldátum")}</span><input name="step_target_date" type="date" value="${esc(step.target_date||"")}"></label><label class="field"><span>${tr("Icon","Ikon")}</span><select name="step_icon">${milestoneIconOptions(step.icon||"target")}</select></label>
+    <label class="field"><span>${tr("Open page","Megnyitott oldal")}</span><select name="step_link_view"><option value="">—</option>${[["milestone","Dashboard"],["planned","Planned Jobs"],["master","Master Data"],["workshop","Calendar"],["intake","Intake"],["messenger","Messenger"],["finance","Finance"],["documents","Documents"],["cms","CMS"]].map(([value,label])=>`<option value="${value}" ${step.link_view===value?"selected":""}>${label}</option>`).join("")}</select></label><label class="field"><span>${tr("Record / search reference","Rekord / keresési hivatkozás")}</span><input name="step_link_record_id" value="${esc(step.link_record_id||"")}"></label>
+    <label class="field"><span>${tr("Image / GIF","Kép / GIF")}</span><input name="step_media_file" type="file" accept="image/*,.gif"><input name="step_media_url" type="hidden" value="${esc(step.media_url||"")}">${step.media_url?`<img class="roadmap-media-preview" src="${esc(step.media_url)}" alt="">`:""}</label><label class="cms-toggle-row"><span><strong>${tr("Completed","Teljesítve")}</strong></span><input name="step_completed" type="checkbox" ${step.completed?"checked":""}></label>
   </div></article>`;
 }
 async function uploadMilestoneFile(file){if(!file)return "";const form=new FormData();form.append("file",file);return (await api("/api/milestone/media",{method:"POST",body:form})).url||"";}
 function openMilestoneEditor(payload){
-  const d=payload?.dashboard||{},raw=payload?.steps||[],steps=Array.from({length:5},(_,i)=>({...milestoneStepFallback(i),...(raw[i]||{})}));
-  const mediaField=(label,name,current)=>`<label class="field"><span>${label}</span><input name="${name}_file" type="file" accept="image/*,.gif"><input name="${name}_url" type="hidden" value="${esc(current||"")}"></label>`;
-  openDialog({title:tr("Edit Service Milestones dashboard","Service Milestones irányítópult szerkesztése"),eyebrow:tr("FIXED APPROVED DESIGN · CONTENT ONLY","FIX JÓVÁHAGYOTT DESIGN · CSAK TARTALOM"),variant:"wide",body:`<form id="milestoneEditor" class="form-grid milestone-showcase-editor">
-    <label class="field"><span>Reference</span><input name="reference_code" value="${esc(d.reference_code||"JOB #1042")}"></label><label class="field"><span>Status</span><input name="status_label" value="${esc(d.status_label||"In Progress")}"></label>
-    <label class="field"><span>Title EN *</span><input name="title_en" required value="${esc(d.title_en||"")}"></label><label class="field"><span>Cím HU</span><input name="title_hu" value="${esc(d.title_hu||"")}"></label>
-    <label class="field full"><span>Milestone subtitle EN</span><input name="subtitle_en" value="${esc(d.subtitle_en||"")}"></label><label class="field full"><span>Mérföldkő alcím HU</span><input name="subtitle_hu" value="${esc(d.subtitle_hu||"")}"></label>
-    <label class="field"><span>Client name</span><input name="client_name" value="${esc(d.client_name||"")}"></label><label class="field"><span>Client type</span><input name="client_type" value="${esc(d.client_type||"")}"></label><label class="field"><span>Client contact</span><input name="client_contact" value="${esc(d.client_contact||"")}"></label><label class="field"><span>Location</span><input name="location_label" value="${esc(d.location_label||"")}"></label>
-    <label class="field"><span>Scheduled label</span><input name="scheduled_label" value="${esc(d.scheduled_label||"")}"></label><label class="field"><span>Workshop slot</span><input name="schedule_range" value="${esc(d.schedule_range||"")}"></label><label class="field"><span>Delivery estimate</span><input name="delivery_estimate" value="${esc(d.delivery_estimate||"")}"></label><label class="field"><span>Instrument</span><input name="instrument_name" value="${esc(d.instrument_name||"")}"></label>
-    <label class="field"><span>Serial No.</span><input name="instrument_serial" value="${esc(d.instrument_serial||"")}"></label><label class="field"><span>Year</span><input name="instrument_year" value="${esc(d.instrument_year||"")}"></label>
-    ${mediaField(tr("Header piano image","Fejléc zongorakép"),"hero_media",d.hero_media_url)}${mediaField(tr("Instrument image","Hangszerkép"),"instrument_media",d.instrument_media_url)}${mediaField(tr("Craft image","Műhely kép"),"craft_media",d.craft_media_url)}${mediaField(tr("Quote image","Idézet kép"),"quote_media",d.quote_media_url)}
-    <label class="field"><span>Craft title EN</span><input name="craft_title_en" value="${esc(d.craft_title_en||"")}"></label><label class="field"><span>Craft title HU</span><input name="craft_title_hu" value="${esc(d.craft_title_hu||"")}"></label><label class="field full"><span>Craft copy EN</span><textarea name="craft_body_en">${esc(d.craft_body_en||"")}</textarea></label><label class="field full"><span>Craft copy HU</span><textarea name="craft_body_hu">${esc(d.craft_body_hu||"")}</textarea></label>
-    <label class="field full"><span>Quote EN</span><textarea name="quote_en">${esc(d.quote_en||"")}</textarea></label><label class="field full"><span>Idézet HU</span><textarea name="quote_hu">${esc(d.quote_hu||"")}</textarea></label>
+  const d=payload?.dashboard||{},steps=(payload?.steps||[]).length?payload.steps:[{uid:"roadmap-1",step_kind:"major",title_en:"Revenue foundation",title_hu:"Bevételi alapok",icon:"growth"}];
+  const mediaField=(label,name,current)=>`<label class="field milestone-media-field"><span>${label}</span>${current?`<img src="${esc(current)}" alt="">`:""}<input name="${name}_file" type="file" accept="image/*,.gif"><input name="${name}_url" type="hidden" value="${esc(current||"")}"></label>`;
+  openDialog({title:tr("Edit company roadmap","Vállalati útiterv szerkesztése"),eyebrow:tr("MILESTONES · IMAGERY · LINKS","MÉRFÖLDKÖVEK · KÉPEK · HIVATKOZÁSOK"),variant:"wide",body:`<form id="milestoneEditor" class="form-grid milestone-showcase-editor">
+    <label class="field"><span>${tr("Roadmap reference","Útiterv hivatkozás")}</span><input name="reference_code" value="${esc(d.reference_code||"GROWTH ROADMAP")}"></label><label class="field"><span>${tr("Status","Állapot")}</span><input name="status_label" value="${esc(d.status_label||"In Progress")}"></label>
+    <label class="field"><span>Title EN *</span><input name="title_en" required value="${esc(d.title_en||"")}"></label><label class="field"><span>Cím HU</span><input name="title_hu" value="${esc(d.title_hu||"")}"></label><label class="field full"><span>Subtitle EN</span><input name="subtitle_en" value="${esc(d.subtitle_en||"")}"></label><label class="field full"><span>Alcím HU</span><input name="subtitle_hu" value="${esc(d.subtitle_hu||"")}"></label><label class="field"><span>${tr("Location label","Helyszín")}</span><input name="location_label" value="${esc(d.location_label||"New York")}"></label><label class="field"><span>${tr("Target label","Cél megnevezése")}</span><input name="target_label" value="${esc(d.target_label||"")}"></label>
+    ${mediaField(tr("Header / hero image","Fejléc / hero kép"),"hero_media",d.hero_media_url)}${mediaField(tr("Instrument card image","Hangszerkártya képe"),"instrument_media",d.instrument_media_url)}${mediaField(tr("Our Craft image","Mesterségünk képe"),"craft_media",d.craft_media_url)}${mediaField(tr("Quote background image","Idézet háttérképe"),"quote_media",d.quote_media_url)}
+    <label class="field"><span>${tr("Instrument label EN","Hangszer megnevezés EN")}</span><input name="instrument_name" value="${esc(d.instrument_name||"")}"></label><label class="field"><span>${tr("Serial / note","Gyári szám / megjegyzés")}</span><input name="instrument_serial" value="${esc(d.instrument_serial||"")}"></label>
+    <label class="field"><span>Craft title EN</span><input name="craft_title_en" value="${esc(d.craft_title_en||"")}"></label><label class="field"><span>Craft title HU</span><input name="craft_title_hu" value="${esc(d.craft_title_hu||"")}"></label><label class="field full"><span>Craft copy EN</span><textarea name="craft_body_en">${esc(d.craft_body_en||"")}</textarea></label><label class="field full"><span>Craft copy HU</span><textarea name="craft_body_hu">${esc(d.craft_body_hu||"")}</textarea></label><label class="field full"><span>Quote EN</span><textarea name="quote_en">${esc(d.quote_en||"")}</textarea></label><label class="field full"><span>Idézet HU</span><textarea name="quote_hu">${esc(d.quote_hu||"")}</textarea></label>
+    <div class="full roadmap-editor-toolbar"><div><strong>${tr("Roadmap steps","Útiterv lépései")}</strong><small>${tr("Add any number of major milestones and smaller steps. Choose from 30 consistent icons.","Tetszőleges számú fő mérföldkő és kisebb lépés adható hozzá. 30 egységes ikonból választhatsz.")}</small></div><div><button class="secondary-button" type="button" id="addMajorMilestone">＋ ${tr("Major milestone","Fő mérföldkő")}</button><button class="secondary-button" type="button" id="addMinorMilestone">＋ ${tr("Smaller step","Kisebb lépés")}</button></div></div>
     <section class="full milestone-step-editor-list" id="milestoneStepEditors">${steps.map(milestoneStepEditorMarkup).join("")}</section>
-    <div class="form-actions full"><button class="secondary-button" type="button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Publish content","Tartalom publikálása")}</button></div>
+    <div class="form-actions full"><button class="secondary-button" type="button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Publish roadmap","Útiterv publikálása")}</button></div>
   </form>`});
   const form=$("#milestoneEditor"),host=$("#milestoneStepEditors");
-  form.addEventListener("submit",async event=>{
-    event.preventDefault();const submit=event.currentTarget.querySelector('button[type="submit"]');submit.disabled=true;
-    try{
-      const upload=async name=>{const file=event.currentTarget.elements[name+"_file"]?.files?.[0];return file?await uploadMilestoneFile(file):(event.currentTarget.elements[name+"_url"]?.value||"");};
-      const rows=$$("[data-milestone-step]",host),stepPayload=[];
-      for(let index=0;index<5;index++){const row=rows[index],get=name=>row.querySelector('[name="'+name+'"]'),file=get("step_media_file")?.files?.[0];let media=get("step_media_url")?.value||"";if(file)media=await uploadMilestoneFile(file);stepPayload.push({title_en:get("step_title_en")?.value||"",title_hu:get("step_title_hu")?.value||"",description_en:get("step_description_en")?.value||"",description_hu:get("step_description_hu")?.value||"",target_date:get("step_target_date")?.value||null,icon:get("step_icon")?.value||milestoneStepFallback(index).icon,media_url:media,completed:Boolean(get("step_completed")?.checked),sort_order:index});}
-      const fd=Object.fromEntries(new FormData(event.currentTarget));
-      const body={dashboard:{title_en:fd.title_en,title_hu:fd.title_hu,subtitle_en:fd.subtitle_en,subtitle_hu:fd.subtitle_hu,quote_en:fd.quote_en,quote_hu:fd.quote_hu,reference_code:fd.reference_code,status_label:fd.status_label,client_name:fd.client_name,client_type:fd.client_type,client_contact:fd.client_contact,location_label:fd.location_label,scheduled_label:fd.scheduled_label,schedule_range:fd.schedule_range,delivery_estimate:fd.delivery_estimate,instrument_name:fd.instrument_name,instrument_serial:fd.instrument_serial,instrument_year:fd.instrument_year,craft_title_en:fd.craft_title_en,craft_title_hu:fd.craft_title_hu,craft_body_en:fd.craft_body_en,craft_body_hu:fd.craft_body_hu,hero_media_url:await upload("hero_media"),instrument_media_url:await upload("instrument_media"),craft_media_url:await upload("craft_media"),quote_media_url:await upload("quote_media")},steps:stepPayload};
-      await api("/api/milestone",{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Milestone dashboard published.","Mérföldkő irányítópult publikálva."),"success");await bindOperationsMilestoneProfile();if(state.view==="milestone")await renderMilestone();
-    }catch(error){submit.disabled=false;toast(humanError(error),"error");}
-  });
+  const rows=()=>$$('[data-milestone-step]',host);
+  const refreshParents=()=>{const majors=rows().filter(row=>row.querySelector('[name="step_kind"]')?.value!=="minor").map(row=>({uid:row.querySelector('[name="step_uid"]')?.value,title:row.querySelector('[name="step_title_en"]')?.value||tr("Untitled milestone","Névtelen mérföldkő")}));rows().forEach(row=>{const kind=row.querySelector('[name="step_kind"]')?.value,parentField=row.querySelector('.parent-field'),select=row.querySelector('[data-parent-select]');parentField?.classList.toggle('hidden',kind!=="minor");if(select){const current=select.value||select.dataset.currentParent||"";select.innerHTML='<option value="">—</option>'+majors.filter(item=>item.uid!==row.dataset.stepUid).map(item=>`<option value="${esc(item.uid)}" ${item.uid===current?"selected":""}>${esc(item.title)}</option>`).join("");select.dataset.currentParent=select.value;}});};
+  const bindRows=()=>{rows().forEach(row=>{if(row.dataset.bound)return;row.dataset.bound="1";row.querySelector('[name="step_kind"]')?.addEventListener('change',refreshParents);row.querySelector('[name="step_title_en"]')?.addEventListener('input',refreshParents);row.querySelector('[data-remove-milestone-step]')?.addEventListener('click',()=>{row.remove();refreshParents();});row.querySelector('[data-step-up]')?.addEventListener('click',()=>{const prev=row.previousElementSibling;if(prev)host.insertBefore(row,prev);refreshParents();});row.querySelector('[data-step-down]')?.addEventListener('click',()=>{const next=row.nextElementSibling;if(next)host.insertBefore(next,row);refreshParents();});});refreshParents();};bindRows();
+  const addStep=kind=>{const uid=`roadmap-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,wrap=document.createElement('div');wrap.innerHTML=milestoneStepEditorMarkup({uid,step_kind:kind,icon:kind==="minor"?"check":"target"},rows().length);host.append(wrap.firstElementChild);bindRows();host.lastElementChild?.scrollIntoView({behavior:"smooth",block:"center"});};
+  $("#addMajorMilestone")?.addEventListener("click",()=>addStep("major"));$("#addMinorMilestone")?.addEventListener("click",()=>addStep("minor"));
+  form.addEventListener("submit",async event=>{event.preventDefault();const submit=event.currentTarget.querySelector('button[type="submit"]');submit.disabled=true;try{
+    const upload=async name=>{const file=event.currentTarget.elements[name+"_file"]?.files?.[0];return file?await uploadMilestoneFile(file):(event.currentTarget.elements[name+"_url"]?.value||"");},stepPayload=[];
+    for(const [index,row] of rows().entries()){const get=name=>row.querySelector('[name="'+name+'"]'),file=get("step_media_file")?.files?.[0];let media=get("step_media_url")?.value||"";if(file)media=await uploadMilestoneFile(file);const kind=get("step_kind")?.value==="minor"?"minor":"major";stepPayload.push({uid:get("step_uid")?.value,step_kind:kind,parent_uid:kind==="minor"?(get("step_parent_uid")?.value||null):null,title_en:get("step_title_en")?.value||"",title_hu:get("step_title_hu")?.value||"",description_en:get("step_description_en")?.value||"",description_hu:get("step_description_hu")?.value||"",target_date:get("step_target_date")?.value||null,icon:get("step_icon")?.value||"target",media_url:media,link_view:get("step_link_view")?.value||null,link_record_id:get("step_link_record_id")?.value||null,completed:Boolean(get("step_completed")?.checked),sort_order:index});}
+    const fd=Object.fromEntries(new FormData(event.currentTarget)),body={dashboard:{title_en:fd.title_en,title_hu:fd.title_hu,subtitle_en:fd.subtitle_en,subtitle_hu:fd.subtitle_hu,quote_en:fd.quote_en,quote_hu:fd.quote_hu,reference_code:fd.reference_code,status_label:fd.status_label,location_label:fd.location_label,target_label:fd.target_label,instrument_name:fd.instrument_name,instrument_serial:fd.instrument_serial,craft_title_en:fd.craft_title_en,craft_title_hu:fd.craft_title_hu,craft_body_en:fd.craft_body_en,craft_body_hu:fd.craft_body_hu,hero_media_url:await upload("hero_media"),instrument_media_url:await upload("instrument_media"),craft_media_url:await upload("craft_media"),quote_media_url:await upload("quote_media")},steps:stepPayload};
+    await api("/api/milestone",{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Company roadmap published.","Vállalati útiterv publikálva."),"success");await bindOperationsMilestoneProfile();if(state.view==="milestone")await renderMilestone();
+  }catch(error){submit.disabled=false;toast(humanError(error),"error");}});
+}
+function globalSearchResultIcon(type){return type==="piano"?"piano":type==="job"?"tools":"client";}
+function bindGlobalCommandSearch(){
+  const input=$("#globalSearchInput"),results=$("#globalSearchResults");if(!input||!results||input.dataset.bound)return;input.dataset.bound="1";let timer=0,sequence=0;
+  const close=()=>{results.hidden=true;results.innerHTML="";};
+  const run=async()=>{const q=input.value.trim(),seq=++sequence;if(q.length<2){close();return;}results.hidden=false;results.innerHTML=`<div class="global-search-loading">${tr("Searching…","Keresés…")}</div>`;try{const payload=await api(`/api/global-search?q=${encodeURIComponent(q)}`,{memoryCacheMs:0});if(seq!==sequence)return;const items=payload.results||[];results.innerHTML=items.length?items.map(item=>`<button type="button" class="global-search-result" data-search-type="${esc(item.type)}" data-search-id="${esc(item.id)}" data-search-client="${esc(item.client_id||"")}" data-search-stage="${esc(item.stage||"")}">${milestoneIconSvg(globalSearchResultIcon(item.type))}<span><strong>${esc(item.title)}</strong><small>${esc(item.subtitle||"")}</small></span></button>`).join(""):`<div class="global-search-empty">${tr("No matching clients, pianos or jobs.","Nincs egyező ügyfél, zongora vagy munka.")}</div>`;$$('[data-search-type]',results).forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.searchType,id=button.dataset.searchId;if(type==="client"){state.masterMode="CLIENTS";state.selectedClientId=Number(id);state.masterSearch="";navTo("master");}else if(type==="piano"){state.masterMode="PIANOS";state.selectedPianoId=Number(id);state.masterSearch="";navTo("master");}else{const stage=button.dataset.searchStage||"";state.plannedSearch=button.querySelector('strong')?.textContent||"";navTo(stage==="planned"?"planned":"workshop");}input.value="";close();}));}catch(_error){if(seq===sequence)results.innerHTML=`<div class="global-search-empty">${tr("Search unavailable.","A keresés nem elérhető.")}</div>`;}};
+  input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(run,180);});input.addEventListener('focus',()=>{if(input.value.trim().length>=2)run();});input.addEventListener('keydown',event=>{if(event.key==="Escape"){input.value="";close();input.blur();}});document.addEventListener('click',event=>{if(!event.target.closest('.global-search-shell'))close();});
 }
 function operationsSkillsSettingsCard(users=[]){
   if(!["ADMIN","SUPERADMIN"].includes(state.user?.role))return "";

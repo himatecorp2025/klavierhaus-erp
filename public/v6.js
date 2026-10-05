@@ -1071,4 +1071,5 @@ chromeText.mobile_more=["More","Továbbiak"];
 applyChromeLanguage();
 v6ApplyTheme(localStorage.getItem("kh_login_theme")==="light"?"light":"dark");
 v6BindShell();
+if(typeof bindGlobalCommandSearch==="function")bindGlobalCommandSearch();
 void boot();
