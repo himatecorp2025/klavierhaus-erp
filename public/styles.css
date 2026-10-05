@@ -4051,3 +4051,23 @@ input,textarea,select,
   background:color-mix(in srgb,var(--danger) 14%,var(--surface))!important;
   color:#ff968d!important
 }
+
+
+/* Semantic chips stay meaningful without using light-theme fills in dark mode. */
+:root[data-theme="dark"] .badge.urgent,
+:root[data-theme="dark"] .priority-chip.urgent,
+:root[data-theme="dark"] .invoice-status.void,
+:root[data-theme="dark"] .invoice-status.cancelled{
+  background:color-mix(in srgb,var(--danger) 16%,var(--surface))!important;
+  color:#ff9c94!important;
+}
+:root[data-theme="dark"] .invoice-status.draft,
+:root[data-theme="dark"] .invoice-status.partial{
+  background:color-mix(in srgb,#d89327 16%,var(--surface))!important;
+  color:#edbf72!important;
+}
+:root[data-theme="dark"] .danger-button{
+  background:color-mix(in srgb,var(--danger) 12%,var(--surface))!important;
+  border-color:color-mix(in srgb,var(--danger) 35%,var(--line))!important;
+  color:#ff9c94!important;
+}
