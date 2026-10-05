@@ -72,7 +72,7 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/milestoneIconPickerMarkup/);
   assert.match(ops,/data-add-child-milestone/);
   assert.match(ops,/roadmap-achievement-badge/);
-  assert.match(ops,/MILESTONE_PARENT_REQUIRED/);
+  assert.match(api,/MILESTONE_PARENT_REQUIRED/);
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
