@@ -9,12 +9,12 @@ const state={
   serviceSuspended:false,
   serviceStatusUpdatedAt:"",
   language:localStorage.getItem("kh_language")==="hu"?"hu":"en",
-  view:(location.hash||"#workshop").slice(1)||"workshop",
+  view:(location.hash||"#milestone").slice(1)||"milestone",
   clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,duplicateReviews:[],duplicatePendingCount:0,selectedDuplicateReviewId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
-  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false
+  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false,staffSkills:[],workProfiles:[],milestone:null
 };
-const activeViews=new Set(["workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings"]);
+const activeViews=new Set(["milestone","workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
@@ -69,6 +69,16 @@ function humanError(error){
     PIANO_BRAND_REQUIRED:["Piano brand is required.","A zongora márkája kötelező."],PIANO_DETAILS_REQUIRED:["Piano details are required.","A zongora adatai szükségesek."],MASTER_DATA_INTEGRITY_FAILED:["The import was rolled back because the complete 33-column Master Data contract did not pass.","Az import vissza lett vonva, mert a teljes 33 oszlopos törzsadat-kontraktus ellenőrzése nem ment át."],MASTER_DATA_CSV_FORMAT_UNSUPPORTED:["Use the required Klavierhaus 33-column source CSV.","A kötelező Klavierhaus 33 oszlopos forrás-CSV-t használd."],
     REPORTED_ISSUE_REQUIRED:["Describe the requested service or issue.","A hiba vagy igény leírása kötelező."],INVALID_PIANO_ID:["The selected piano does not belong to this client.","A kiválasztott zongora nem ehhez az ügyfélhez tartozik."],
     PERMISSION_DENIED:["You do not have permission for this action.","Nincs jogosultság ehhez a művelethez."],ADMIN_REQUIRED:["Admin permission is required.","Admin jogosultság szükséges."],
+    STAFF_SKILL_NAME_REQUIRED:["Enter a name for the professional job role.","Add meg a szakmai munkakör nevét."],
+    STAFF_SKILL_EXISTS:["A professional job role with this code already exists.","Ez a szakmai munkakör már létezik."],
+    STAFF_SKILL_NOT_FOUND:["The selected professional job role is no longer available.","A kiválasztott szakmai munkakör már nem elérhető."],
+    INVALID_MANAGER_SCOPE:["Choose Inside Manager or Outside Manager.","Válassz Belső menedzser vagy Külső menedzser típust."],
+    MANAGER_SCOPE_REQUIRED:["Every manager must be assigned as Inside Manager or Outside Manager.","Minden menedzsernél kötelező megadni, hogy Belső vagy Külső menedzser."],
+    MILESTONE_TITLE_REQUIRED:["Enter the milestone title.","Add meg a mérföldkő címét."],
+    MILESTONE_STEP_TITLE_REQUIRED:["Every milestone step needs a title.","Minden mérföldkőlépéshez adj címet."],
+    MILESTONE_MEDIA_REQUIRED:["Choose an image or GIF to upload.","Válassz feltöltendő képet vagy GIF-et."],
+    INVALID_MILESTONE_MEDIA:["Use a supported image or GIF file.","Támogatott kép- vagy GIF-fájlt használj."],
+    DATABASE_EXPORT_FAILED:["The full database export could not be generated.","A teljes adatbázis-export nem készíthető el."],
     JOB_TITLE_REQUIRED:["Job title is required.","A munka megnevezése kötelező."],JOB_MUST_BE_ACTIVATED:["Activate and schedule this job first.","A munkát előbb aktiválni és ütemezni kell."],
     TECHNICIAN_REQUIRED_FOR_SCHEDULE:["Choose a technician before scheduling.","Ütemezéshez technikust kell választani."],SCHEDULE_CONFLICT:["This technician already has an overlapping job.","A technikusnak ebben az időpontban már van másik munkája."],
     INTAKE_JOB_ALREADY_EXISTS:["A planned job already exists for this intake.","Ehhez az igényhez már tartozik tervezett munka."],
@@ -208,6 +218,11 @@ function setSession(payload){
   if(payload.service_suspended!==undefined)applyServiceStatus({suspended:Boolean(payload.service_suspended),status:payload.service_suspended?"SUSPENDED":"ACTIVE"});
   if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1)){state.view="profile";history.replaceState({},"","#profile");}
   sessionStorage.setItem("kh_token",state.token);sessionStorage.setItem("kh_user",JSON.stringify(state.user));
+}
+function routeFreshSessionHome(){
+  if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1))return;
+  state.view=window.innerWidth<700?"workshop":"milestone";
+  history.replaceState({},"","#"+state.view);
 }
 function clearSession(){
   clearApiMemoryCache();apiInflightGets.clear();
@@ -475,6 +490,7 @@ async function masterConfirmDiscard(){
   return false;
 }
 async function navTo(view){
+  if(view==="milestone"&&window.innerWidth<700)view="workshop";
   if(!activeViews.has(view))return;
   if(state.view==="master"&&view!=="master"&&!(await masterConfirmDiscard()))return;
   state.view=view;history.replaceState({},"",`#${view}`);
@@ -581,7 +597,8 @@ async function renderView(){
   $("#appShell")?.classList.toggle("messenger-mode",state.view==="messenger");
   const workspace=$("#workspace");workspace.classList.toggle("messenger-workspace",state.view==="messenger");workspace.innerHTML=loading();
   try{
-    if(state.view==="workshop")await renderWorkshop();
+    if(state.view==="milestone")await renderMilestone();
+    else if(state.view==="workshop")await renderWorkshop();
     else if(state.view==="messenger")await renderMessenger();
     else if(state.view==="planned")await renderPlanned();
     else if(state.view==="master")await renderMaster();
@@ -680,6 +697,7 @@ function clientStructuredFields(client={}){
     <label class="field full"><span>${tr("Notes","Megjegyzés")}</span><textarea name="notes" placeholder="${esc(masterPendingText())}">${esc(client.notes||"")}</textarea></label>
     <label class="field full"><span>${tr("Short memo to name","Rövid név-memó")}</span><textarea name="short_memo_to_name" placeholder="${esc(masterPendingText())}">${esc(client.short_memo_to_name||"")}</textarea></label>
     <label class="field"><span>${tr("Client type","Ügyféltípus")}</span><select name="client_type"><option value="INDIVIDUAL" ${String(client.client_type||"INDIVIDUAL")==="INDIVIDUAL"?"selected":""}>${tr("Individual","Magánszemély")}</option><option value="PARTNER" ${client.client_type==="PARTNER"?"selected":""}>${tr("Professional partner","Szakmai partner")}</option><option value="BUSINESS" ${client.client_type==="BUSINESS"?"selected":""}>${tr("Business","Vállalkozás")}</option><option value="INSTITUTION" ${client.client_type==="INSTITUTION"?"selected":""}>${tr("Institution","Intézmény")}</option></select></label>
+    <label class="field"><span>${tr("Last contacted","Legutóbb keresett")}</span><input name="last_contacted_at" type="date" value="${esc(masterDateInputValue(client.last_contacted_at))}"></label>
     <label class="cms-toggle-row full vip-toggle-row"><span><strong>★ VIP</strong></span><input name="is_vip" type="checkbox" ${Number(client.is_vip||0)===1?"checked":""}></label>`;
 }
 function pianoStructuredFields(piano={},ownerId=null,{includeReview=false}={}){
@@ -801,7 +819,7 @@ function masterSearchMatch(values,q){
   return (tokens.length?tokens:[normalized]).every(token=>haystack.includes(token));
 }
 function masterClientSearchValues(client={}){
-  return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name,client.last_visit,client.source_client_id,client.source_client_ids,client.source_row_numbers];
+  return [client.name,client.first_name,client.last_name,client.company_name,client.contact_name,client.email,client.phone,client.mobile_phone,client.line_phone,client.address,client.street,client.city,client.district,client.postcode,client.country,client.notes,client.short_memo_to_name,client.last_visit,client.last_contacted_at,client.source_client_id,client.source_client_ids,client.source_row_numbers];
 }
 function masterPianoSearchValues(piano={}){
   return [piano.category,piano.brand,piano.model,piano.serial_number,piano.finish,piano.effective_location,piano.location_notes,piano.size_display,piano.color,piano.build_year,piano.notes,piano.date_of_purchase,piano.warranty,piano.last_serviced_at,piano.last_service_title,piano.last_service_description,piano.next_service_date,piano.latest_info_frequency,piano.latest_info_humidity,piano.latest_info_temperature,piano.source_instrument_id,piano.source_client_id,piano.source_row_number,piano.source_name];
@@ -898,12 +916,18 @@ function contactActionButton(client,kind){
   const icon=isEmail?'<path d="M3 6h18v12H3z"></path><path d="m4 7 8 6 8-6"></path>':kind==="message"?'<path d="M4 5h16v11H9l-5 4V5Z"></path>':'<path d="M7 3h3l1.5 4-2 1.5a15 15 0 0 0 6 6L17 12.5l4 1.5v3c0 2-1 4-4 4C9 20 4 15 3 7c0-3 2-4 4-4Z"></path>';
   return `<button class="client-contact-action ${available?"":"is-unavailable"}" type="button" data-client-contact="${kind}" data-client-id="${client.id}" aria-label="${esc(label)}" title="${esc(label)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></button>`;
 }
+function vipFollowupWarning(client){
+  return Number(client?.is_vip||0)===1&&Boolean(client?.vip_followup_due);
+}
+function vipFollowupMarkup(client){
+  return vipFollowupWarning(client)?`<span class="vip-followup-warning" title="${esc(tr("VIP follow-up overdue: contact this client.","VIP utánkövetés esedékes: keresd meg az ügyfelet."))}" aria-label="${esc(tr("VIP follow-up overdue","VIP utánkövetés esedékes"))}">!</span>`:"";
+}
 function renderClientList(){
   const host=$("#masterList");if(!host)return;const rows=filteredMasterClients();
   if(!rows.length){host.innerHTML=`<div class="empty-state">${tr("No clients match this view.","Nincs a nézetnek megfelelő ügyfél.")}</div>`;return;}
   host.innerHTML=rows.map(client=>`<article class="client-row ${Number(client.id)===Number(state.selectedClientId)&&state.masterDetailKind==="CLIENT"?"active":""}">
     <button type="button" class="client-row-select" data-client-id="${client.id}">
-      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))} · ${esc(masterValue(client.address))}</small><small>${tr("Last visit","Utolsó látogatás")}: ${esc(masterValue(client.last_visit))}</small></span>
+      <span><strong>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${vipFollowupMarkup(client)} ${masterReviewBadge(client)}</strong><small>${esc(clientTypeLabel(client.client_type))} · ${esc(masterValue(client.address))}</small><small>${tr("Last contacted","Legutóbb keresett")}: ${esc(masterValue(client.last_contacted_at))}</small></span>
       <span class="count">${Number(client.piano_count||0)}</span>
     </button>
     <div class="client-quick-actions" aria-label="${tr("Customer communication","Ügyfél kommunikáció")}">${contactActionButton(client,"email")}${contactActionButton(client,"message")}${contactActionButton(client,"phone")}</div>
@@ -975,9 +999,10 @@ async function renderClientDetail(){
     ${masterReadonlyItem(tr("Notes","Megjegyzés"),client.notes,{full:true})}
     ${masterReadonlyItem(tr("Short memo to name","Rövid név-memó"),client.short_memo_to_name,{full:true})}
     ${masterReadonlyItem(tr("Last visit","Utolsó látogatás"),client.last_visit)}
+    ${masterReadonlyItem(tr("Last contacted","Legutóbb keresett"),client.last_contacted_at)}
   </div>`;
   host.innerHTML=`<button class="master-back-button" type="button" data-master-back>← ${tr("Back","Vissza")}</button>
-    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button>${canDeleteClient?`<button id="deleteClientBtn" class="danger-button" type="button">${tr("Delete client","Ügyfél törlése")}</button>`:""}</div></div>
+    <div class="detail-title"><div><span class="eyebrow">${tr("CLIENT","ÜGYFÉL")} #${client.id}</span><h2>${Number(client.is_vip||0)===1?'<span class="vip-client-star" title="VIP">★</span> ':""}${esc(masterValue(client.name))} ${vipFollowupMarkup(client)} ${masterReviewBadge(client)}</h2></div><div class="page-actions">${inline?`<button id="saveClientBtn" class="primary-button" type="button">${tr("Save","Mentés")}</button>`:`<button id="editClientBtn" class="secondary-button" type="button">${tr("Edit","Szerkesztés")}</button>`}<button id="addPianoBtn" class="secondary-button" type="button">＋ ${tr("Piano","Zongora")}</button>${canDeleteClient?`<button id="deleteClientBtn" class="danger-button" type="button">${tr("Delete client","Ügyfél törlése")}</button>`:""}</div></div>
     ${inline?editable:readonly}
     ${client.address?`<button class="secondary-button master-address-route" type="button" data-open-map>↗ ${tr("Open route","Útvonal megnyitása")} · ${esc(client.address)}</button>`:""}
     ${reviewMarkup}
@@ -1287,6 +1312,8 @@ async function renderProfile(){
 }
 async function openUserDialog(user=null){
   const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
+  const workProfile=editing?await api("/api/users/"+encodeURIComponent(user.id)+"/work-profile").catch(()=>null):null;
   let notificationDelivery=true;
   if(editing&&canManageNotifications){
     try{const pref=await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery");notificationDelivery=Boolean(pref.notifications_enabled);}
@@ -1295,27 +1322,33 @@ async function openUserDialog(user=null){
   openDialog({title:editing?tr("Edit team member","Csapattag szerkesztése"):tr("New user","Új felhasználó"),eyebrow:tr("USER MANAGEMENT","FELHASZNÁLÓKEZELÉS"),body:`<form id="userEditor" class="form-grid">
     <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user?.name||"")}" required autofocus></label>
     <label class="field"><span>${tr("Role","Szerepkör")} *</span><select name="role"><option value="WORKER" ${user?.role==="WORKER"?"selected":""}>${tr("Technician","Technikus")}</option><option value="MANAGER" ${user?.role==="MANAGER"?"selected":""}>${tr("Manager","Menedzser")}</option><option value="ADMIN" ${user?.role==="ADMIN"?"selected":""}>${tr("Admin","Admin")}</option></select></label>
+    <label class="field" id="managerScopeField"><span>${tr("Manager type","Menedzser típusa")}</span><select name="manager_scope"><option value="">—</option><option value="INSIDE" ${workProfile?.manager_scope==="INSIDE"?"selected":""}>${tr("Inside Manager","Belső menedzser")}</option><option value="OUTSIDE" ${workProfile?.manager_scope==="OUTSIDE"?"selected":""}>${tr("Outside Manager","Külső menedzser")}</option></select></label>
     <label class="field"><span>${tr("Login email","Belépési e-mail")} *</span><input name="email" type="email" value="${esc(user?.email||"")}" required></label>
     <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")} ${editing?"":"*"}</span><input name="contact_email" type="email" value="${esc(user?.contact_email||"")}" ${editing?"":"required"}></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user?.phone||"")}"></label>
     <label class="field"><span>${tr("Status","Státusz")}</span><select name="status" ${isSelf?"disabled":""}><option value="Active" ${user?.status!=="Inactive"?"selected":""}>${tr("Active","Aktív")}</option><option value="Inactive" ${user?.status==="Inactive"?"selected":""}>${tr("Inactive","Inaktív")}</option></select></label>
     ${editing&&canManageNotifications?`<label class="cms-toggle-row full notification-delivery-admin"><span><strong>${tr("Notifications","Értesítések")}</strong><small>${tr("Only an administrator can disable notification delivery for this employee.","Az értesítések kézbesítését csak adminisztrátor tilthatja le ennél a munkavállalónál.")}</small></span><input name="notifications_enabled" type="checkbox" ${notificationDelivery?"checked":""}></label>`:""}
     <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user?.address||"")}"></label>
+    <section class="full user-skill-assignment"><div><strong>${tr("Professional roles & competencies","Szakmai munkakörök és kompetenciák")}</strong><small>${tr("Choose every type of work this person can perform. These are independent from System permissions.","Jelöld ki, milyen munkákat végezhet. Ez független a rendszerjogosultságtól.")}</small></div><div class="user-skill-choice-grid">${(state.staffSkills||[]).filter(skill=>Number(skill.active)!==0).map(skill=>`<label class="user-skill-choice"><input type="checkbox" name="skill_ids" value="${skill.id}" ${workProfile?.skill_ids?.includes(skill.id)?"checked":""}><span>${esc(operationalSkillLabel(skill))}</span></label>`).join("")}</div></section>
     <label class="field"><span>${editing?tr("New password (optional)","Új jelszó (opcionális)"):tr("Temporary password","Ideiglenes jelszó")} ${editing?"":"*"}</span><input name="password" type="password" minlength="8" ${editing?"":"required"}></label>
     <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
+  const roleSelect=$("#userEditor")?.elements?.role,scopeField=$("#managerScopeField");
+  const syncManagerScope=()=>{const manager=roleSelect?.value==="MANAGER";scopeField?.classList.toggle("hidden",!manager);const select=scopeField?.querySelector("select");if(select)select.required=manager;};roleSelect?.addEventListener("change",syncManagerScope);syncManagerScope();
   $("#userEditor").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     if(editing&&!body.password){delete body.password;delete body.password_confirmation;}
     if(editing&&isSelf)delete body.status;
     const notificationsEnabled=editing&&canManageNotifications?Boolean(event.currentTarget.elements.notifications_enabled?.checked):null;
-    delete body.notifications_enabled;
+    const skillIds=[...event.currentTarget.querySelectorAll('[name="skill_ids"]:checked')].map(input=>Number(input.value)).filter(Boolean),managerScope=body.role==="MANAGER"?(body.manager_scope||null):null;
+    delete body.notifications_enabled;delete body.skill_ids;delete body.manager_scope;
     try{
       const updated=await api(editing?`/api/users/${encodeURIComponent(user.id)}`:"/api/users",{method:editing?"PUT":"POST",body:JSON.stringify(body)});
+      await api("/api/users/"+encodeURIComponent(updated.id)+"/work-profile",{method:"PUT",body:JSON.stringify({manager_scope:managerScope,skill_ids:skillIds})});await loadOperationalProfiles({refresh:true});
       if(editing&&canManageNotifications)await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery",{method:"PUT",body:JSON.stringify({notifications_enabled:notificationsEnabled})});
       closeDialog();toast(editing?tr("Team member updated.","Csapattag frissítve."):tr("User created.","Felhasználó létrehozva."),"success");
       if(editing&&isSelf){state.user={...state.user,...updated};$("#profileInitials").textContent=initials(state.user.name);}
-      await renderProfile();
+      await renderSettings();
     }catch(error){toast(humanError(error),"error");}
   });
 }
@@ -1330,12 +1363,12 @@ $("#loginForm").addEventListener("submit",async event=>{
       sessionStorage.setItem("kh_activation_token",payload.activation_token);$("#loginForm").classList.add("hidden");$("#activationForm").classList.remove("hidden");
       $("#activationHint").textContent=tr(`We sent the code to ${payload.contact_email_masked||"your contact email"}.`,`A kódot ide küldtük: ${payload.contact_email_masked||"a kapcsolati e-mail címre"}.`);$("#activationCode").focus();return;
     }
-    setSession(payload);showApp();await renderView();
+    setSession(payload);routeFreshSessionHome();showApp();await renderView();
   }catch(error){toast(humanError(error),"error");}finally{button.disabled=false;}
 });
 $("#activationForm").addEventListener("submit",async event=>{
   event.preventDefault();
-  try{const payload=await api("/api/account-activation/verify",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token"),activation_code:$("#activationCode").value})});sessionStorage.removeItem("kh_activation_token");setSession(payload);showApp();await renderView();}
+  try{const payload=await api("/api/account-activation/verify",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token"),activation_code:$("#activationCode").value})});sessionStorage.removeItem("kh_activation_token");setSession(payload);routeFreshSessionHome();showApp();await renderView();}
   catch(error){toast(humanError(error),"error");}
 });
 $("#resendActivationBtn").addEventListener("click",async()=>{try{const payload=await api("/api/account-activation/resend",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token")})});sessionStorage.setItem("kh_activation_token",payload.activation_token);toast(tr("A new activation code was sent.","Új aktiváló kód elküldve."),"success");}catch(error){toast(humanError(error),"error");}});
@@ -1347,7 +1380,7 @@ async function boot(){
   try{
     state.user=await api("/api/me");
     if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1)){state.view="profile";history.replaceState({},"","#profile");}
-    showApp();if(!activeViews.has(state.view))state.view="workshop";await renderView();
+    showApp();if(!activeViews.has(state.view))state.view="milestone";if(state.view==="milestone"&&window.innerWidth<700)state.view="workshop";await renderView();
   }catch(_error){clearSession();showLogin();}
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(()=>{}),{once:true});
 }

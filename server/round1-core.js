@@ -22,6 +22,7 @@ function clientBody(body={},before={}){
   fields.phone=text(body.phone??"",120)||structuredClientPhone({...before,...fields});
   fields.address=text(body.address??"",1000)||structuredClientAddress({...before,...fields});
   fields.client_type=text(body.client_type??before.client_type??"INDIVIDUAL",40).toUpperCase();
+  fields.last_contacted_at=text(body.last_contacted_at??before.last_contacted_at,60);
   fields.is_vip=body.is_vip===undefined?Number(before.is_vip||0):(body.is_vip===true||body.is_vip===1||String(body.is_vip||"").toLowerCase()==="true"?1:0);
   return fields;
 }
@@ -133,7 +134,7 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
         OR lower(COALESCE(c.phone,'')) LIKE @like OR lower(COALESCE(c.mobile_phone,'')) LIKE @like OR lower(COALESCE(c.line_phone,'')) LIKE @like
         OR lower(COALESCE(c.address,'')) LIKE @like OR lower(COALESCE(c.street,'')) LIKE @like OR lower(COALESCE(c.city,'')) LIKE @like
         OR lower(COALESCE(c.district,'')) LIKE @like OR lower(COALESCE(c.postcode,'')) LIKE @like OR lower(COALESCE(c.country,'')) LIKE @like
-        OR lower(COALESCE(c.notes,'')) LIKE @like OR lower(COALESCE(c.short_memo_to_name,'')) LIKE @like OR lower(COALESCE(c.last_visit,'')) LIKE @like
+        OR lower(COALESCE(c.notes,'')) LIKE @like OR lower(COALESCE(c.short_memo_to_name,'')) LIKE @like OR lower(COALESCE(c.last_visit,'')) LIKE @like OR lower(COALESCE(c.last_contacted_at,'')) LIKE @like
         OR EXISTS(SELECT 1 FROM master_data_client_source_map sm WHERE sm.client_id=c.id AND lower(sm.source_client_id) LIKE @like)
         OR EXISTS(
           SELECT 1 FROM pianos p WHERE p.client_id=c.id AND (
@@ -149,17 +150,17 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
         )
       )
       ORDER BY lower(c.name),c.id`).all({q,like});
-    res.json(rows);
+    res.json(rows.map(row=>({...row,vip_followup_due:Number(row.is_vip||0)===1&&(!row.last_contacted_at||new Date(row.last_contacted_at).getTime()<new Date(new Date().setMonth(new Date().getMonth()-3)).getTime())})));
   });
 
   app.post("/api/clients",auth,staff,(req,res)=>{
     const next=clientBody(req.body||{});
     if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
     if(!CLIENT_TYPES.has(next.client_type))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
-    const info=db.prepare(`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+    const info=db.prepare(`INSERT INTO clients(name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,last_contacted_at,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
       next.name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,next.phone||null,
-      next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.client_type,next.is_vip,next.is_vip?req.user.id:null,next.is_vip?new Date().toISOString():null
+      next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.last_contacted_at||null,next.client_type,next.is_vip,next.is_vip?req.user.id:null,next.is_vip?new Date().toISOString():null
     );
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(Number(info.lastInsertRowid));
     audit(req,"CREATE","clients",String(row.id),null,row);res.status(201).json(row);
@@ -172,9 +173,9 @@ function registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,ma
     if(!validEmail(next.email))return res.status(400).json({error:"INVALID_CLIENT_EMAIL"});
     if(!CLIENT_TYPES.has(next.client_type))return res.status(400).json({error:"INVALID_CLIENT_TYPE"});
     const vipChanged=Number(before.is_vip||0)!==next.is_vip;
-    db.prepare(`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,client_type=?,is_vip=?,
+    db.prepare(`UPDATE clients SET name=?,first_name=?,last_name=?,company_name=?,contact_name=?,email=?,mobile_phone=?,line_phone=?,phone=?,street=?,city=?,district=?,postcode=?,country=?,address=?,notes=?,short_memo_to_name=?,last_contacted_at=?,client_type=?,is_vip=?,
       vip_updated_by_user_id=CASE WHEN ?=1 THEN ? ELSE vip_updated_by_user_id END,vip_updated_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE vip_updated_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .run(next.name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,next.phone||null,next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.client_type,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
+      .run(next.name,next.first_name||null,next.last_name||null,next.company_name||null,next.contact_name||null,next.email||null,next.mobile_phone||null,next.line_phone||null,next.phone||null,next.street||null,next.city||null,next.district||null,next.postcode||null,next.country||null,next.address||null,next.notes||null,next.short_memo_to_name||null,next.last_contacted_at||null,next.client_type,next.is_vip,vipChanged?1:0,req.user.id,vipChanged?1:0,id);
     const row=db.prepare("SELECT * FROM clients WHERE id=?").get(id);
     audit(req,"UPDATE","clients",String(id),before,row);res.json(row);
   });

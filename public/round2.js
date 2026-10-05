@@ -229,6 +229,10 @@ function r2BindWorkflowCards(form,{defaultTechnicianId="",defaultTechnicianName=
     row.querySelector("[data-phase-select]")?.addEventListener("click",select);
     box?.addEventListener("change",()=>row.classList.toggle("selected",box.checked));
     row.querySelector("[data-phase-detail]")?.addEventListener("click",()=>{const details=row.querySelector("[data-phase-details]"),open=details?.classList.toggle("hidden")===false;row.querySelector("[data-phase-detail]")?.setAttribute("aria-expanded",String(open));});
+    const skillSelect=row.querySelector("[data-phase-skill]"),responsibleSelect=row.querySelector("[data-phase-responsible]");
+    const refreshResponsible=()=>{if(!responsibleSelect)return;const selected=responsibleSelect.value;responsibleSelect.innerHTML='<option value="">'+tr("Use job technician","Munka technikusa")+'</option>'+r2ResponsibleOptions(selected,skillSelect?.value||"");responsibleSelect.value=selected;};
+    skillSelect?.addEventListener("change",refreshResponsible);
+    row.querySelector("[data-add-phase-skill]")?.addEventListener("click",()=>{if(typeof createOperationalSkillInline!=="function")return;createOperationalSkillInline("",saved=>{if(skillSelect){skillSelect.innerHTML=r2SkillOptions(saved.id);skillSelect.value=String(saved.id);refreshResponsible();}});});
     row.querySelector("[data-add-cost]")?.addEventListener("click",()=>{
       const host=row.querySelector("[data-phase-costs]"),wrap=document.createElement("div");wrap.innerHTML=r2PhaseCostRows([{category:"material",title:"",amount:0}],key);const cost=wrap.firstElementChild;if(host&&cost){host.append(cost);cost.querySelector("[data-cost-title]")?.focus();cost.querySelector("[data-cost-remove]")?.addEventListener("click",()=>{cost.remove();r2RefreshWorkflowFinancialSummary(form);});}
     });
@@ -267,8 +271,16 @@ function r2DefaultInput(dateKey=null){
 function r2TechnicianOptions(selected=""){
   return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
 }
-function r2ResponsibleOptions(selected=""){
-  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
+function r2ResponsibleOptions(selected="",skillId=""){
+  const target=Number(skillId||0),users=(state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role));
+  const hasSkill=user=>target&&Boolean((typeof operationalProfileFor==="function"?operationalProfileFor(user.id):null)?.skill_ids?.includes(target));
+  return users.sort((a,b)=>Number(hasSkill(b))-Number(hasSkill(a))||String(a.name||"").localeCompare(String(b.name||""))).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${hasSkill(user)?"★ ":""}${esc(user.name)}</option>`).join("");
+}
+function r2SkillOptions(selected=""){
+  return typeof operationalSkillOptions==="function"?operationalSkillOptions(selected,true):'<option value="">'+tr("No specific job role","Nincs külön munkakör")+'</option>';
+}
+function r2PhaseSkillLabel(phase){
+  return state.language==="hu"?(phase?.responsibility_skill_name_hu||phase?.responsibility_skill_name_en||""):(phase?.responsibility_skill_name_en||phase?.responsibility_skill_name_hu||"");
 }
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
@@ -307,7 +319,7 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
   return r2WorkflowDefinitions(source).map(stage=>{
     const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):false);
     const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
-    const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||"",status=existing?.visual_status||"";
+    const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||"",responsibilitySkill=existing?.responsibility_skill_id||"",status=existing?.visual_status||"";
     const labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||labelEn;
     const jobSpecific=Boolean(existing?.job_specific||stage.job_specific),logistics=r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu}),customerPrice=Math.max(0,Number(existing?.customer_price||0)),costs=Array.isArray(existing?.costs)?existing.costs:[];
     return `<article class="workflow-phase-card ${enabled?"selected":""} ${status?"phase-status-"+status:""}" data-workflow-phase="${esc(stage.key)}" data-phase-position="${Number(existing?.position||stage.position||0)}" data-phase-label-en="${esc(labelEn)}" data-phase-label-hu="${esc(labelHu)}" data-job-specific="${jobSpecific?"1":"0"}">
@@ -323,7 +335,11 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
         <button class="workflow-phase-detail-button" type="button" data-phase-detail aria-expanded="false" title="${esc(tr("Phase details, responsibility and costs","Fázisrészletek, felelős és költségek"))}">＋</button>
       </div>
       <div class="workflow-phase-details hidden" data-phase-details>
-        <label class="field"><span>${tr("Responsible override","Egyedi felelős")}</span><select name="responsible_${esc(stage.key)}"><option value="">${tr("Use job technician","Munka technikusa")}</option>${r2ResponsibleOptions(responsible)}</select><small data-default-responsible-label></small></label>
+        <div class="workflow-phase-assignment">
+          <label class="field"><span>${tr("Job role / task","Munkakör / feladat")}</span><select name="skill_${esc(stage.key)}" data-phase-skill><option value="">${tr("No specific job role","Nincs külön munkakör")}</option>${r2SkillOptions(responsibilitySkill).replace(/^<option[^>]*>.*?<\/option>/,"")}</select></label>
+          ${r2IsAdmin()?`<button type="button" class="entity-picker-add workflow-skill-add" data-add-phase-skill title="${esc(tr("Create a new job role","Új munkakör létrehozása"))}">＋</button>`:""}
+          <label class="field"><span>${tr("Responsible override","Egyedi felelős")}</span><select name="responsible_${esc(stage.key)}" data-phase-responsible><option value="">${tr("Use job technician","Munka technikusa")}</option>${r2ResponsibleOptions(responsible,responsibilitySkill)}</select><small data-default-responsible-label></small></label>
+        </div>
         <div class="workflow-phase-cost-editor"><div class="workflow-phase-cost-head"><div><strong>${tr("Internal / material costs","Belső / anyagköltségek")}</strong><small>${tr("These do not change the customer price.","Ezek nem módosítják az ügyfélárat.")}</small></div><button type="button" class="workflow-cost-add" data-add-cost>＋ ${tr("Cost","Költség")}</button></div><div class="workflow-phase-cost-list" data-phase-costs>${r2PhaseCostRows(costs,stage.key)}</div></div>
       </div>
     </article>`;
@@ -332,14 +348,14 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
 function r2ReadWorkflowPlan(form){
   return $$("[data-workflow-phase]",form).map(row=>{
     const key=String(row.dataset.workflowPhase||""),enabled=r2FixedStage(key)?true:Boolean(row.querySelector(`[name="phase_${CSS.escape(key)}"]`)?.checked);
-    const startValue=enabled?r2ReadDateTime(row,"start_"+key):"",dueValue=enabled?r2ReadDateTime(row,"due_"+key):"",responsible=row.querySelector(`[name="responsible_${CSS.escape(key)}"]`)?.value||"";
+    const startValue=enabled?r2ReadDateTime(row,"start_"+key):"",dueValue=enabled?r2ReadDateTime(row,"due_"+key):"",responsible=row.querySelector(`[name="responsible_${CSS.escape(key)}"]`)?.value||"",responsibilitySkillId=Number(row.querySelector(`[name="skill_${CSS.escape(key)}"]`)?.value||0)||null;
     const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||labelEn,jobSpecific=row.dataset.jobSpecific==="1",customerPrice=Math.max(0,Number(row.querySelector(`[name="price_${CSS.escape(key)}"]`)?.value||0)),costs=r2ReadPhaseCosts(row);
     const startsAt=startValue?r2NyInputToIso(startValue):null,dueAt=dueValue?r2NyInputToIso(dueValue):null;
     if(startsAt&&dueAt){
       const duration=(new Date(dueAt).getTime()-new Date(startsAt).getTime())/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");
       if(r2IsLogisticsStage({key,label_en:labelEn,label_hu:labelHu})&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
     }
-    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,customer_price:customerPrice,responsible_user_id:responsible||null,costs,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
+    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,customer_price:customerPrice,responsible_user_id:responsible||null,responsibility_skill_id:responsibilitySkillId,costs,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
   });
 }
 
@@ -377,7 +393,7 @@ function r2RenderPlannedList(){
 }
 
 async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
-  const [,settings]=await Promise.all([loadUsers(),api("/api/workflow/settings")]);
+  const [,settings]=await Promise.all([loadUsers(),api("/api/workflow/settings"),typeof loadOperationalProfiles==="function"?loadOperationalProfiles({refresh:true}):Promise.resolve(null)]);
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages,max_stages:settings.max_stages,active_stage_count:settings.active_stage_count,can_add_stage:settings.can_add_stage};
   const workflowEntry=Boolean(defaults.workflow),calendarEntry=Boolean(defaults.date),scheduledSeed=(workflowEntry||calendarEntry)?(defaults.datetime||r2DefaultInput(defaults.date)):"";let draftPhaseCounter=0;
   const dialogTitle=workflowEntry?tr("New Workflow Job","Új workflow munka"):calendarEntry?tr("New scheduled job","Új naptári munka"):tr("New Planned Job","Új tervezett munka");
@@ -495,8 +511,9 @@ async function r2OpenSchedule(job,refresh=renderWorkshop){
     catch(error){toast(humanError(error),"error");}
   });
 }
-function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
+async function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
   if(!r2IsAdmin())return;
+  if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
   const currentCount=r2WorkflowDefinitions(job.workflow_phases||[]).length,max=Number(state.r2Workflow?.max_stages||7),assignedName=(state.users||[]).find(user=>String(user.id)===String(job.assigned_technician_id||""))?.name||job.assigned_technician_name||"";
   openDialog({title:tr("Workflow configuration","Munkafolyamat beállítása"),eyebrow:job.job_code||tr("WORKFLOW","MUNKAFOLYAMAT"),variant:"wide",body:`<form id="workflowPlanForm">
     <div class="workflow-editor-finance-head"><div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Click a phase card to include it. Use + for responsibility overrides and internal/material costs.","Kattints a fáziskártyára a kiválasztáshoz. A + az egyedi felelőshöz és belső/anyagköltségekhez kell.")}</div><div class="workflow-finance-inputs"><label class="field"><span>${tr("Planned total","Tervezett teljes ár")} (USD)</span><input name="estimated_revenue" type="number" min="0" step="0.01" value="${Number(job.estimated_revenue||0).toFixed(2)}"></label><label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(job.deposit_amount||0).toFixed(2)}"></label><div class="field workflow-balance-display"><span>${tr("Remaining to invoice","Még számlázandó")} (USD)</span><output data-workflow-balance-output aria-live="polite">${r2Money(0)}</output></div></div></div>
@@ -526,11 +543,13 @@ function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
   });
 }
 
-function r2OpenBlocker(job,refresh=renderWorkshop){
+async function r2OpenBlocker(job,refresh=renderWorkshop){
+  if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
   const phase=job.current_phase||{};
   openDialog({title:tr("Phase timing & responsibility","Fázis időzítése és felelőse"),eyebrow:r2StageLabel(job.stage),body:`<form id="blockerForm" class="form-grid">
     <div class="detail-note full">${tr("Start and finish times may always be moved backward or forward. The card color is recalculated from the saved times every time the workflow renders.","A kezdési és befejezési idő mindig vissza- vagy előre módosítható. A kártya színe minden megjelenítéskor a mentett időkből újraszámolódik.")}</div>
-    <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
+    <div class="field"><span>${tr("Job role / task","Munkakör / feladat")}</span><div class="inline-skill-picker"><select name="responsibility_skill_id" id="blockerSkillSelect">${r2SkillOptions(phase.responsibility_skill_id||"")}</select>${r2IsAdmin()?`<button type="button" class="entity-picker-add" id="blockerAddSkill" title="${esc(tr("Create a new job role","Új munkakör létrehozása"))}">＋</button>`:""}</div></div>
+    <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id,phase.responsibility_skill_id||"")}</select></label>
     <label class="field"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="customer_price" type="number" min="0" step="0.01" value="${Number(phase.customer_price||0).toFixed(2)}"></label>
     <div class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"",{endMinutes:r2IsLogisticsStage(phase)?17*60:R2_DAY_END})}</div>
     <div class="field full"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage(phase)?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_at",phase.due_at?r2IsoToNyInput(phase.due_at):"")}</div>
@@ -538,6 +557,7 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
   r2BindStandaloneLogisticsTiming($("#blockerForm"),phase,"starts_at","due_at");
+  $("#blockerAddSkill")?.addEventListener("click",()=>{if(typeof createOperationalSkillInline!=="function")return;createOperationalSkillInline("",saved=>{const select=$("#blockerSkillSelect");if(select){select.innerHTML=r2SkillOptions(saved.id);select.value=String(saved.id);}});});
   $("#blockerForm").addEventListener("submit",async event=>{
     event.preventDefault();
     try{const form=Object.fromEntries(new FormData(event.currentTarget)),startLocal=r2ReadDateTime(event.currentTarget,"starts_at"),dueLocal=r2ReadDateTime(event.currentTarget,"due_at"),body={
@@ -545,6 +565,7 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
       due_at:dueLocal?r2NyInputToIso(dueLocal):null,
       customer_price:Math.max(0,Number(form.customer_price||0)),
       responsible_user_id:form.responsible_user_id||null,
+      responsibility_skill_id:Number(form.responsibility_skill_id||0)||null,
       blocker_code:form.blocker_code||null,blocker_note:form.blocker_note||null
     };if(body.starts_at&&body.due_at){const duration=(new Date(body.due_at)-new Date(body.starts_at))/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");if(r2IsLogisticsStage(phase)&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");}await api(`/api/jobs/${job.id}/workflow-phases/${encodeURIComponent(job.stage)}`,{method:"PATCH",body:JSON.stringify(body)});closeDialog();toast(tr("Workflow status updated.","Munkafolyamat állapota frissítve."),"success");await refresh();}catch(error){toast(humanError(error),"error");}
   });
@@ -602,7 +623,7 @@ function r2WorkflowCard(job){
   return `<article class="job-card stage-card status-${esc(status)}" draggable="true" data-job-id="${job.id}" data-job-draggable="${job.id}" title="${tr("Drag this card to another phase","Húzd a teljes kártyát egy másik fázisba")}">
     <div class="job-card-top job-drag-handle" draggable="false" data-job-drag-handle="${job.id}"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip status-chip status-${esc(status)}">${esc(r2StatusLabel(status))}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
-    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>👤 ${esc(phase.responsible_name||job.assigned_technician_name||tr("Unassigned","Nincs felelős"))}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
+    <div class="job-meta"><span>🗓 ${esc(r2FormatDateTime(job.scheduled_at))}</span><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>👤 ${esc(phase.responsible_name||job.assigned_technician_name||tr("Unassigned","Nincs felelős"))}${r2PhaseSkillLabel(phase)?` · ${esc(r2PhaseSkillLabel(phase))}`:""}</span><span>💵 ${esc(r2Money(Number(job.total_labor_cost||0)+Number(job.total_material_cost||0)))}</span></div>
     ${phase.starts_at?`<div class="workflow-start">${tr("Start","Kezdés")}: ${esc(r2FormatDateTime(phase.starts_at))}</div>`:""}
     ${phase.due_at?`<div class="workflow-due ${status==="overdue"?"overdue":""}">${tr("Due","Határidő")}: ${esc(r2FormatDateTime(phase.due_at))}</div>`:""}
     ${phase.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(phase.blocker_code))}${phase.blocker_note?` · ${esc(phase.blocker_note)}`:""}</div>`:""}
@@ -750,7 +771,7 @@ async function r2OpenWorkflowHistory(jobId){
   try{
     const data=await api(`/api/jobs/${jobId}/history`),job=data.job,locale=state.language==="hu"?"hu-HU":"en-US";
     const date=value=>value?new Intl.DateTimeFormat(locale,{timeZone:R2_TZ,dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"—";
-    const phases=(data.phases||[]).map(phase=>`<div class="workflow-history-row"><span class="history-status ${phase.completed_at?"done":phase.activated_at?"active":""}">${phase.completed_at?"✓":phase.activated_at?"●":"○"}</span><div><strong>${esc(state.language==="hu"?phase.label_hu:phase.label_en)}</strong><small>${tr("Responsible","Felelős")}: ${esc(phase.responsible_name||"—")} · ${tr("Planned start","Tervezett kezdés")}: ${esc(date(phase.starts_at))} · ${tr("Expected finish","Várható befejezés")}: ${esc(date(phase.due_at))}</small><small>${tr("Activated","Aktiválva")}: ${esc(date(phase.activated_at))} · ${tr("Completed","Lezárva")}: ${esc(date(phase.completed_at))}</small>${phase.blocker_note?`<p>${esc(phase.blocker_note)}</p>`:""}</div></div>`).join("");
+    const phases=(data.phases||[]).map(phase=>`<div class="workflow-history-row"><span class="history-status ${phase.completed_at?"done":phase.activated_at?"active":""}">${phase.completed_at?"✓":phase.activated_at?"●":"○"}</span><div><strong>${esc(state.language==="hu"?phase.label_hu:phase.label_en)}</strong><small>${tr("Responsible","Felelős")}: ${esc(phase.responsible_name||"—")}${r2PhaseSkillLabel(phase)?` · ${esc(r2PhaseSkillLabel(phase))}`:""} · ${tr("Planned start","Tervezett kezdés")}: ${esc(date(phase.starts_at))} · ${tr("Expected finish","Várható befejezés")}: ${esc(date(phase.due_at))}</small><small>${tr("Activated","Aktiválva")}: ${esc(date(phase.activated_at))} · ${tr("Completed","Lezárva")}: ${esc(date(phase.completed_at))}</small>${phase.blocker_note?`<p>${esc(phase.blocker_note)}</p>`:""}</div></div>`).join("");
     const handoffs=(data.handoffs||[]).map(row=>`<div class="workflow-history-row"><span class="history-status done">↪</span><div><strong>${esc(r2StageLabel(row.from_stage))} → ${esc(r2StageLabel(row.to_stage))}</strong><small>${esc(date(row.created_at))} · ${esc(row.performed_by||"—")} → ${esc(row.assigned_to||"—")}</small>${row.phase_note?`<p>${esc(row.phase_note)}</p>`:""}<small>${esc(r2Money(Number(row.phase_labor_cost||0)+Number(row.phase_material_cost||0)))}</small></div></div>`).join("");
     const invoices=(data.invoices||[]).map(row=>`<div class="workflow-history-row"><span class="history-status">＄</span><div><strong>${esc(row.invoice_number)} · ${esc(String(row.status||"").toUpperCase())}</strong><small>${esc(r2Money(row.total_amount))} · ${esc(row.issue_date||"")}</small></div></div>`).join("");
     const events=(data.events||[]).map(row=>`<div class="workflow-history-row"><span class="history-status">i</span><div><strong>${esc(String(row.action||"").replaceAll("_"," "))}</strong><small>${esc(date(row.event_time))} · ${esc(row.user_name||row.user_id||"SYSTEM")}</small>${row.details?`<p>${esc(row.details)}</p>`:""}</div></div>`).join("");
@@ -1049,7 +1070,7 @@ async function r2RenderWorkflow(data){
 function r2OverviewRows(key,overview){
   const rows=overview?.details?.[key]||[];
   if(!rows.length)return `<div class="empty-state">${tr("No records in this category.","Nincs tétel ebben a kategóriában.")}</div>`;
-  return `<div class="overview-table-wrap"><table class="overview-table"><thead><tr><th>${tr("Job","Munka")}</th><th>${tr("Client / Piano","Ügyfél / Zongora")}</th><th>${tr("Phase","Fázis")}</th><th>${tr("Responsible","Felelős")}</th><th>${tr("Schedule / Due","Időpont / Határidő")}</th><th>${tr("Financial","Pénzügy")}</th><th>${tr("Issue","Probléma")}</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${esc(row.job_code||("#"+row.id))}</strong><small>${esc(row.title)}</small></td><td>${esc(row.client_name)}<small>${esc(r2JobPiano(row))}</small></td><td>${esc(r2StageLabel(row.stage))}</td><td>${esc(row.current_phase?.responsible_name||row.workflow_owner_name||row.assigned_technician_name||"—")}</td><td>${esc(r2FormatDateTime(row.scheduled_at))}<small>${row.current_phase?.due_at?esc(r2FormatDateTime(row.current_phase.due_at)):"—"}</small></td><td>${esc(r2Money(row.financial_total??(Number(row.total_labor_cost||0)+Number(row.total_material_cost||0))))}</td><td>${row.invoice_issue?esc(row.invoice_issue==="awaiting_closeout"?tr("Waiting for admin closeout","Admin lezárásra vár"):row.invoice_issue==="invoice_draft"?tr("Invoice draft not sent","Piszkozat számla nincs kiküldve"):tr("Sent invoice open","Kiküldött számla nyitott")):esc(r2BlockerLabel(row.current_phase?.blocker_code))}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="overview-table-wrap"><table class="overview-table"><thead><tr><th>${tr("Job","Munka")}</th><th>${tr("Client / Piano","Ügyfél / Zongora")}</th><th>${tr("Phase","Fázis")}</th><th>${tr("Responsible","Felelős")}</th><th>${tr("Schedule / Due","Időpont / Határidő")}</th><th>${tr("Financial","Pénzügy")}</th><th>${tr("Issue","Probléma")}</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${esc(row.job_code||("#"+row.id))}</strong><small>${esc(row.title)}</small></td><td>${esc(row.client_name)}<small>${esc(r2JobPiano(row))}</small></td><td>${esc(r2StageLabel(row.stage))}</td><td>${esc(row.current_phase?.responsible_name||row.workflow_owner_name||row.assigned_technician_name||"—")}${r2PhaseSkillLabel(row.current_phase)?`<small>${esc(r2PhaseSkillLabel(row.current_phase))}</small>`:""}</td><td>${esc(r2FormatDateTime(row.scheduled_at))}<small>${row.current_phase?.due_at?esc(r2FormatDateTime(row.current_phase.due_at)):"—"}</small></td><td>${esc(r2Money(row.financial_total??(Number(row.total_labor_cost||0)+Number(row.total_material_cost||0))))}</td><td>${row.invoice_issue?esc(row.invoice_issue==="awaiting_closeout"?tr("Waiting for admin closeout","Admin lezárásra vár"):row.invoice_issue==="invoice_draft"?tr("Invoice draft not sent","Piszkozat számla nincs kiküldve"):tr("Sent invoice open","Kiküldött számla nyitott")):esc(r2BlockerLabel(row.current_phase?.blocker_code))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function r2OpenOverview(key,overview){
   const labels={
