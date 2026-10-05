@@ -4013,3 +4013,41 @@ input,textarea,select,
 @media(max-width:699px){
   .milestone-view{display:none!important}
 }
+
+
+/* Theme audit completion — legacy admin surfaces that still declared fixed light fills. */
+.column-count,
+.calendar-day>header,
+.calendar-job,
+.cms-toggle-row,
+.time-calendar-head,
+.month-event-pill,
+.outstanding-card{
+  background:var(--surface)!important;
+  color:var(--ink)!important;
+  border-color:var(--line)!important;
+}
+.calendar-day>header,
+.calendar-drag-help,
+.month-event-pill{
+  background:var(--surface-2)!important;
+  color:var(--ink)!important;
+}
+.time-day-head:hover{background:var(--surface-2)!important}
+.cms-fieldset .cms-fieldset{background:var(--surface)!important}
+.outstanding-card{
+  border-color:color-mix(in srgb,var(--accent) 45%,var(--line))!important;
+  background:color-mix(in srgb,var(--accent) 7%,var(--surface))!important
+}
+:root[data-theme="dark"] .phase-chip{
+  background:color-mix(in srgb,var(--accent) 14%,var(--surface))!important;
+  color:color-mix(in srgb,var(--accent) 75%,#fff)!important
+}
+:root[data-theme="dark"] .blocked-note{
+  background:color-mix(in srgb,#d89327 14%,var(--surface))!important;
+  color:#e9bd75!important
+}
+:root[data-theme="dark"] .workflow-due.overdue{
+  background:color-mix(in srgb,var(--danger) 14%,var(--surface))!important;
+  color:#ff968d!important
+}
