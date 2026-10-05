@@ -500,8 +500,20 @@ CREATE INDEX IF NOT EXISTS idx_job_workflow_phase_costs_job_stage ON job_workflo
 ensureColumn("job_handoffs","phase_duration_min","INTEGER NOT NULL DEFAULT 0 CHECK(phase_duration_min >= 0)");
 ensureColumn("job_handoffs","billing_description","TEXT");
 db.prepare("UPDATE jobs SET workflow_owner_user_id=COALESCE(workflow_owner_user_id,created_by_user_id) WHERE workflow_owner_user_id IS NULL").run();
-db.prepare(`UPDATE job_workflow_phases SET responsible_user_id=COALESCE(responsible_user_id,(SELECT created_by_user_id FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
-  WHERE responsible_user_id IS NULL`).run();
+if(setting("workflow_phase_responsibility_inheritance_version")!=="1"){
+  db.prepare(`UPDATE job_workflow_phases
+    SET responsible_user_id=NULL
+    WHERE responsible_user_id IS NOT NULL
+      AND EXISTS(
+        SELECT 1 FROM jobs j
+        WHERE j.id=job_workflow_phases.job_id
+          AND (
+            job_workflow_phases.responsible_user_id=j.created_by_user_id
+            OR job_workflow_phases.responsible_user_id=j.workflow_owner_user_id
+          )
+      )`).run();
+  setSetting("workflow_phase_responsibility_inheritance_version","1");
+}
 db.prepare(`UPDATE job_workflow_phases SET starts_at=COALESCE(starts_at,(SELECT scheduled_at FROM jobs WHERE jobs.id=job_workflow_phases.job_id))
   WHERE stage_key='received' AND starts_at IS NULL`).run();
 if(tableExists("handoff_presets")&&Number(db.prepare("SELECT COUNT(*) count FROM handoff_presets").get()?.count||0)===0){
