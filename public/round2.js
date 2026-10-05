@@ -209,7 +209,7 @@ function r2ReadWorkflowPlan(form){
   });
 }
 
-function r2PlannedCard(job){function r2PlannedCard(job){
+function r2PlannedCard(job){
   return `<article class="job-card planned-card" data-job-id="${job.id}">
     <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${tr("PLANNED","TERVEZETT")}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
