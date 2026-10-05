@@ -3731,3 +3731,284 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
 @media(max-width:640px){
   .workflow-finance-inputs{grid-template-columns:1fr}
 }
+
+
+/* OPERATIONS V37 — canonical light/dark rendering + Milestone + staff skills */
+
+/* Final theme normalization: this block intentionally comes last so legacy fixed-light
+   component declarations cannot override the active user theme. */
+.dialog-card,
+.mini-dialog-card,
+.client-row .count,
+.detail-note,
+.piano-card,
+.cms-upload,
+.cms-repeat-item,
+.cms-fieldset,
+.workflow-column,
+.workflow-empty,
+.job-card,
+.calendar-day,
+.calendar-panel,
+.calendar-toolbar,
+.time-day-head,
+.month-day-cell,
+.invoice-row,
+.invoice-line,
+.invoice-detail-kpis>div,
+.invoice-item-list>div,
+.invoice-editor-summary,
+.expense-row,
+.history-row,
+.typeahead-menu,
+.typeahead-option,
+.segmented-control button.active,
+.partner-manager-row,
+.ledger-row,
+.backup-row,
+.recovery-scope-card,
+.settings-choice,
+.team-row,
+.workflow-history-row,
+.workflow-phase-card,
+.workflow-phase-cost-editor,
+.workflow-cost-row input,
+.workflow-cost-row select,
+.mini-dialog-card>header{
+  background:var(--surface)!important;
+  color:var(--ink)!important;
+  border-color:var(--line)!important;
+}
+.workflow-column,
+.workflow-empty,
+.cms-upload,
+.cms-repeat-item,
+.invoice-detail-kpis>div,
+.invoice-item-list>div,
+.invoice-editor-summary,
+.expense-row,
+.detail-note,
+.history-row,
+.settings-choice{
+  background:var(--surface-2)!important;
+}
+input,textarea,select,
+.invoice-line .field input,
+.workflow-cost-row input,
+.workflow-cost-row select{
+  background-color:var(--input-bg)!important;
+  color:var(--ink)!important;
+  border-color:var(--line)!important;
+}
+.typeahead-option:hover,
+.typeahead-option:focus,
+.segmented-control button.active,
+.secondary-button:hover,
+.icon-button:hover{
+  background:var(--surface-3)!important;
+  color:var(--ink)!important;
+}
+.invoice-row.status-void{background:var(--surface-2)!important}
+.invoice-row-actions,.ledger-row{border-color:var(--line)!important}
+.language-toggle,.dialog-close-button{background:var(--surface-2)!important;color:var(--ink)!important}
+.dialog-close-button:hover{background:var(--surface-3)!important}
+.ny-clock strong{color:var(--ink)!important}
+.ny-clock span{color:var(--muted)!important}
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="datetime-local"],
+:root[data-theme="dark"] input[type="time"]{color-scheme:dark}
+:root[data-theme="light"] input[type="date"],
+:root[data-theme="light"] input[type="datetime-local"],
+:root[data-theme="light"] input[type="time"]{color-scheme:light}
+
+/* Closeout editor: quantity is intentionally narrow; description and money get priority. */
+.invoice-line{
+  grid-template-columns:minmax(105px,.62fr) minmax(240px,1.65fr) 72px minmax(145px,.8fr) 42px!important;
+  gap:8px!important;
+}
+.invoice-line [data-line-quantity]{
+  max-width:72px!important;
+  text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+.invoice-line [data-line-price]{
+  min-width:0;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  font-weight:750;
+}
+.invoice-line-description{min-width:0}
+.invoice-line-description input{width:100%}
+.invoice-line-tools{align-items:center}
+@media(max-width:920px){
+  .invoice-line{grid-template-columns:minmax(90px,.55fr) minmax(180px,1.35fr) 66px minmax(120px,.75fr) 38px!important}
+}
+@media(max-width:700px){
+  .invoice-line{grid-template-columns:1fr 72px!important}
+  .invoice-line>.field:first-child{grid-column:1/-1}
+  .invoice-line-description{grid-column:1/-1!important}
+  .invoice-line>.field:has([data-line-price]){grid-column:1}
+  .invoice-line-remove{grid-column:2!important;width:100%!important}
+}
+
+/* Work profiles / competencies */
+.work-profile-chips{display:flex;gap:5px;flex-wrap:wrap;min-width:0}
+.work-profile-chip{
+  display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface-2);
+  color:var(--ink);font-size:9px;font-weight:780;line-height:1.2
+}
+.work-profile-chip.manager{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--accent-soft);color:var(--accent)}
+.team-row{grid-template-columns:minmax(190px,1.2fr) auto minmax(160px,1fr) auto!important}
+.staff-skill-center{grid-column:1/-1}
+.staff-skill-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.staff-skill-card{
+  display:grid;gap:4px;min-height:76px;padding:11px 12px;border:1px solid var(--line);
+  border-radius:12px;background:var(--surface-2);color:var(--ink);text-align:left;cursor:pointer
+}
+.staff-skill-card:hover{border-color:var(--accent);background:var(--accent-soft)}
+.staff-skill-card small{color:var(--muted);font-size:9px}
+.staff-profile-overview{display:grid;gap:7px;margin-top:14px}
+.staff-profile-overview>div{
+  display:grid;grid-template-columns:minmax(140px,.55fr) minmax(0,1.45fr);gap:10px;
+  align-items:center;padding:9px 10px;border-top:1px solid var(--line)
+}
+.user-skill-assignment{
+  display:grid;gap:9px;padding:12px;border:1px solid var(--line);
+  border-radius:13px;background:var(--surface-2)
+}
+.user-skill-assignment>div:first-child{display:grid;gap:3px}
+.user-skill-assignment small{color:var(--muted);font-size:10px}
+.user-skill-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.user-skill-choice{
+  display:flex!important;align-items:center;gap:8px;min-height:38px;padding:6px 9px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:10px
+}
+.user-skill-choice input{width:16px;height:16px;flex:0 0 16px}
+.workflow-phase-assignment{display:grid;grid-template-columns:minmax(170px,.9fr) 40px minmax(190px,1.1fr);gap:7px;align-items:end}
+.workflow-skill-add{align-self:end}
+.inline-skill-picker{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:6px}
+@media(max-width:900px){
+  .team-row{grid-template-columns:1fr auto!important}
+  .team-row .work-profile-chips{grid-column:1/-1}
+  .staff-skill-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .staff-skill-grid,.user-skill-choice-grid{grid-template-columns:1fr}
+  .workflow-phase-assignment{grid-template-columns:1fr 40px}
+  .workflow-phase-assignment>.field:last-child{grid-column:1/-1}
+}
+
+/* VIP proactive relationship management */
+.vip-followup-warning{
+  display:inline-grid;place-items:center;width:20px;height:20px;min-width:20px;
+  margin-left:4px;border-radius:50%;background:var(--danger);color:#fff;
+  font-size:12px;font-weight:950;line-height:1;box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 14%,transparent)
+}
+.client-row:has(.vip-followup-warning){border-color:color-mix(in srgb,var(--danger) 40%,var(--line))}
+.vip-toggle-row{border-color:color-mix(in srgb,var(--accent) 34%,var(--line))}
+
+/* Complete operational database export */
+.database-export-card{
+  border-color:color-mix(in srgb,var(--accent) 40%,var(--line))!important;
+  background:
+    radial-gradient(circle at 100% 0,color-mix(in srgb,var(--accent) 12%,transparent),transparent 50%),
+    var(--surface)!important
+}
+.database-export-card .primary-button{justify-self:start}
+
+/* Milestone — tablet/desktop motivational home */
+.milestone-view{
+  --milestone-gold:var(--accent);
+  display:grid;gap:18px;max-width:1500px;margin:0 auto;padding-bottom:30px
+}
+.milestone-hero{
+  position:relative;isolation:isolate;min-height:clamp(330px,46vw,560px);overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:28px;
+  background:
+    radial-gradient(circle at 15% 10%,color-mix(in srgb,var(--accent) 30%,transparent),transparent 38%),
+    linear-gradient(135deg,#101216,#26282d);
+  box-shadow:0 28px 80px rgba(0,0,0,.24)
+}
+.milestone-hero-media{position:absolute;inset:0;z-index:-3}
+.milestone-hero-media img{width:100%;height:100%;object-fit:cover;filter:saturate(.9) contrast(1.04)}
+.milestone-fallback-icon{position:absolute;right:5%;bottom:-12%;font-size:clamp(180px,30vw,460px);line-height:1;color:rgba(255,255,255,.055);transform:rotate(-8deg)}
+.milestone-hero-overlay{
+  position:absolute;inset:0;z-index:-2;
+  background:linear-gradient(90deg,rgba(8,10,14,.94) 0%,rgba(8,10,14,.74) 45%,rgba(8,10,14,.28) 100%)
+}
+.milestone-hero-content{
+  display:grid;align-content:center;gap:15px;max-width:850px;min-height:inherit;
+  padding:clamp(34px,6vw,82px);color:#fff
+}
+.milestone-hero-content .eyebrow{color:#e1c485}
+.milestone-hero h1{
+  max-width:12ch;margin:0;font-family:Georgia,"Times New Roman",serif;
+  font-size:clamp(42px,6vw,86px);font-weight:500;line-height:.96;letter-spacing:-.045em
+}
+.milestone-hero blockquote{
+  max-width:720px;margin:0;padding-left:16px;border-left:2px solid var(--milestone-gold);
+  color:rgba(255,255,255,.78);font-family:Georgia,"Times New Roman",serif;font-size:clamp(16px,2vw,24px);font-style:italic;line-height:1.45
+}
+.milestone-target-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:rgba(255,255,255,.7)}
+.milestone-target-row>span{padding:7px 11px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(255,255,255,.06);color:#f2d79e;font-weight:850}
+.milestone-celebration{
+  position:absolute;right:24px;top:24px;display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border:1px solid rgba(255,220,145,.55);border-radius:999px;background:rgba(12,14,18,.72);
+  color:#f6d99a;box-shadow:0 0 45px rgba(184,145,74,.35);backdrop-filter:blur(14px)
+}
+.milestone-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.milestone-status-grid>article{
+  display:grid;gap:8px;min-height:130px;padding:18px;border:1px solid var(--line);
+  border-radius:18px;background:var(--surface);box-shadow:var(--shadow)
+}
+.milestone-status-grid span{color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.milestone-status-grid strong{font-size:clamp(20px,2.5vw,34px);line-height:1.05}
+.milestone-status-grid small{color:var(--muted)}
+.milestone-progress{height:7px;overflow:hidden;border-radius:999px;background:var(--surface-3)}
+.milestone-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#e4c171)}
+.milestone-progress.time i{background:linear-gradient(90deg,#5d83d4,var(--accent))}
+.milestone-next{background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--surface)),var(--surface))!important}
+.milestone-roadmap{position:relative;display:grid;gap:0;padding:26px 10px 16px}
+.milestone-road-line{
+  position:absolute;left:36px;right:36px;top:51px;height:3px;border-radius:99px;background:var(--surface-3)
+}
+.milestone-road-line i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#e4c171)}
+.milestone-step{
+  position:relative;display:grid;grid-template-columns:52px minmax(0,1fr);gap:14px;
+  padding:0 0 22px;z-index:1
+}
+.milestone-step-marker{
+  display:grid;place-items:center;width:42px;height:42px;margin-top:4px;border:4px solid var(--bg);
+  border-radius:50%;background:var(--surface-3);color:var(--muted);font-weight:900;box-shadow:0 0 0 1px var(--line)
+}
+.milestone-step.done .milestone-step-marker{background:var(--accent);color:#fff;box-shadow:0 0 0 1px var(--accent),0 0 28px color-mix(in srgb,var(--accent) 28%,transparent)}
+.milestone-step.current .milestone-step-marker{background:#fff;color:#151618;box-shadow:0 0 0 2px var(--accent),0 0 32px color-mix(in srgb,var(--accent) 30%,transparent)}
+.milestone-step-card{
+  display:grid;grid-template-columns:150px minmax(0,1fr);gap:18px;min-height:145px;padding:13px;
+  border:1px solid var(--line);border-radius:18px;background:var(--surface);box-shadow:var(--shadow)
+}
+.milestone-step.current .milestone-step-card{border-color:color-mix(in srgb,var(--accent) 62%,var(--line));transform:translateY(-2px)}
+.milestone-step.done .milestone-step-card{background:color-mix(in srgb,var(--accent) 4%,var(--surface))}
+.milestone-step-media{position:relative;min-height:118px;overflow:hidden;border-radius:13px;background:var(--surface-2)}
+.milestone-step-media img{width:100%;height:100%;object-fit:cover}
+.milestone-step-media .milestone-fallback-icon{right:10%;bottom:-20%;font-size:100px;color:color-mix(in srgb,var(--accent) 18%,transparent)}
+.milestone-step-card>div:last-child{align-self:center}
+.milestone-step-card h3{margin:4px 0 7px;font-size:20px}
+.milestone-step-card p{margin:0 0 9px;color:var(--muted);line-height:1.5}
+.milestone-step-card small{color:var(--accent);font-weight:750}
+.milestone-empty{padding:28px;border:1px dashed var(--line);border-radius:18px;text-align:center;color:var(--muted)}
+.milestone-complete .milestone-hero{box-shadow:0 25px 90px color-mix(in srgb,var(--accent) 24%,rgba(0,0,0,.2))}
+.milestone-admin-card{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+.milestone-admin-preview{display:flex;justify-content:space-between;gap:12px;margin-top:10px;padding:11px 12px;border-radius:12px;background:var(--surface-2)}
+.milestone-step-editor-list{display:grid;gap:10px}
+.milestone-step-editor{padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
+.milestone-step-editor>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+@media(max-width:900px){
+  .milestone-status-grid{grid-template-columns:1fr 1fr}
+  .milestone-next{grid-column:1/-1}
+  .milestone-step-card{grid-template-columns:120px minmax(0,1fr)}
+}
+@media(max-width:699px){
+  .milestone-view{display:none!important}
+}
