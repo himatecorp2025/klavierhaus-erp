@@ -134,7 +134,7 @@ function prepareClientSegmentationCompatibility() {
   for(const [name,definition] of [
     ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],
     ["mobile_phone","TEXT"],["line_phone","TEXT"],["street","TEXT"],["city","TEXT"],["district","TEXT"],
-    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
+    ["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit","TEXT"],["last_contacted_at","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
     ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL'"],
     ["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"]
   ])ensureColumn("clients",name,definition);
@@ -163,6 +163,7 @@ function prepareClientSegmentationCompatibility() {
       notes TEXT,
       short_memo_to_name TEXT,
       last_visit TEXT,
+      last_contacted_at TEXT,
       preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
       client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
       is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
@@ -177,12 +178,12 @@ function prepareClientSegmentationCompatibility() {
     )`);
     const legacyType=existing.has("client_type")?quoteName("client_type"):(existing.has("customer_type")?quoteName("customer_type"):"'INDIVIDUAL'");
     db.exec(`INSERT INTO "_clients_segment_v2"(
-      id,name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,last_visit,
+      id,name,first_name,last_name,company_name,contact_name,email,mobile_phone,line_phone,phone,street,city,district,postcode,country,address,notes,short_memo_to_name,last_visit,last_contacted_at,
       preferred_language,client_type,is_vip,vip_updated_by_user_id,vip_updated_at,deleted_at,deleted_by_user_id,archive_document_id,deletion_reason,created_at,updated_at)
       SELECT
       ${value("id")},COALESCE(NULLIF(TRIM(${value("name","''")}),''),'Data pending'),${value("first_name")},${value("last_name")},${value("company_name")},${value("contact_name")},
       ${value("email")},${value("mobile_phone")},${value("line_phone")},${value("phone")},${value("street")},${value("city")},${value("district")},${value("postcode")},${value("country")},
-      ${value("address")},${value("notes")},${value("short_memo_to_name")},${value("last_visit")},COALESCE(${value("preferred_language","'en'")},'en'),
+      ${value("address")},${value("notes")},${value("short_memo_to_name")},${value("last_visit")},${value("last_contacted_at")},COALESCE(${value("preferred_language","'en'")},'en'),
       CASE UPPER(COALESCE(${legacyType},'INDIVIDUAL'))
         WHEN 'PRIVATE' THEN 'INDIVIDUAL'
         WHEN 'INDIVIDUAL' THEN 'INDIVIDUAL'
@@ -443,7 +444,7 @@ db.pragma("foreign_keys = OFF");
 ensureColumn("clients","preferred_language","TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu'))");
 for(const [name,definition] of [
   ["first_name","TEXT"],["last_name","TEXT"],["company_name","TEXT"],["contact_name","TEXT"],["mobile_phone","TEXT"],["line_phone","TEXT"],
-  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
+  ["street","TEXT"],["city","TEXT"],["district","TEXT"],["postcode","TEXT"],["country","TEXT"],["short_memo_to_name","TEXT"],["last_visit","TEXT"],["last_contacted_at","TEXT"],["deleted_at","TEXT"],["deleted_by_user_id","TEXT"],["archive_document_id","INTEGER"],["deletion_reason","TEXT"],
   ["client_type","TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION'))"],["is_vip","INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1))"],
   ["vip_updated_by_user_id","TEXT"],["vip_updated_at","TEXT"]
 ])ensureColumn("clients",name,definition);
@@ -455,6 +456,7 @@ for(const [name,definition] of [
 ensureColumn("users","theme_preference","TEXT NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light'))");
 ensureColumn("users","language_preference","TEXT NOT NULL DEFAULT 'en' CHECK(language_preference IN ('en','hu'))");
 ensureColumn("users","profile_image_url","TEXT");
+ensureColumn("users","manager_scope","TEXT CHECK(manager_scope IS NULL OR manager_scope IN ('INSIDE','OUTSIDE'))");
 ensureColumn("intake_leads","estimated_total","REAL NOT NULL DEFAULT 0 CHECK(estimated_total >= 0)");
 ensureColumn("intake_leads","source_conversation_id","TEXT");
 ensureColumn("customer_conversations","client_id","INTEGER");
@@ -482,6 +484,7 @@ ensureColumn("jobs","completion_document_id","INTEGER");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","customer_price","REAL NOT NULL DEFAULT 0 CHECK(customer_price >= 0)");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
+ensureColumn("job_workflow_phases","responsibility_skill_id","INTEGER");
 db.exec(`CREATE TABLE IF NOT EXISTS job_workflow_phase_costs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,
