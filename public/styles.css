@@ -2538,6 +2538,19 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
 }
 
 
+/* Quarter-hour date/time controls: date picker + explicit 15-minute time choices. */
+.r2-quarter-datetime{
+  display:grid;
+  grid-template-columns:minmax(0,1.35fr) minmax(92px,.65fr);
+  gap:8px;
+  width:100%;
+}
+.r2-quarter-datetime>input,
+.r2-quarter-datetime>select{width:100%;min-width:0;font-variant-numeric:tabular-nums}
+@media(max-width:560px){
+  .r2-quarter-datetime{grid-template-columns:1fr}
+}
+
 /* Calendar/date UX + wide Planned Job dialog */
 .field input[type="date"],
 .field input[type="datetime-local"],
