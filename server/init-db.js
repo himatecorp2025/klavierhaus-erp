@@ -485,6 +485,76 @@ ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","customer_price","REAL NOT NULL DEFAULT 0 CHECK(customer_price >= 0)");
 ensureColumn("job_workflow_phases","responsible_user_id","TEXT");
 ensureColumn("job_workflow_phases","responsibility_skill_id","INTEGER");
+db.exec(`CREATE TABLE IF NOT EXISTS staff_skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  name_en TEXT NOT NULL,
+  name_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_staff_skills_active_order ON staff_skills(active,sort_order,lower(name_en),id);
+CREATE TABLE IF NOT EXISTS user_staff_skills (
+  user_id TEXT NOT NULL,
+  skill_id INTEGER NOT NULL,
+  assigned_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(user_id,skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_staff_skills_skill ON user_staff_skills(skill_id,user_id);
+CREATE TABLE IF NOT EXISTS milestone_dashboard (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  title_en TEXT NOT NULL DEFAULT 'Our next milestone',
+  title_hu TEXT NOT NULL DEFAULT 'A következő mérföldkő',
+  quote_en TEXT,
+  quote_hu TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  target_label TEXT,
+  hero_media_url TEXT,
+  hero_icon TEXT,
+  updated_by_user_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS milestone_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title_en TEXT NOT NULL,
+  title_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  target_date TEXT,
+  completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),
+  completed_at TEXT,
+  icon TEXT,
+  media_url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);`);
+db.prepare(`INSERT OR IGNORE INTO milestone_dashboard(id,title_en,title_hu,quote_en,quote_hu,target_label) VALUES(1,?,?,?,?,?)`).run('Our next milestone','A következő mérföldkő','Progress is built one completed step at a time.','A fejlődés minden teljesített lépéssel közelebb visz.','Klavierhaus');
+if(Number(db.prepare('SELECT COUNT(*) count FROM staff_skills').get()?.count||0)===0){
+  const seedSkill=db.prepare('INSERT INTO staff_skills(code,name_en,name_hu,sort_order,active) VALUES(?,?,?,?,1)');
+  [
+    ['TUNING','Piano Tuning','Zongorahangolás',10],
+    ['OUTSIDE_TUNING','Outside Tuning','Külső hangolás',20],
+    ['REGULATION','Action Regulation','Mechanika szabályozás',30],
+    ['REPAIR','Piano Repair','Zongorajavítás',40],
+    ['REFINISHING','Refinishing','Felületkezelés',50],
+    ['VOICING','Voicing','Intonálás',60],
+    ['DELIVERY_COORDINATION','Delivery Coordination','Szállítás koordináció',70],
+    ['WORKSHOP_COORDINATION','Workshop Coordination','Műhelykoordináció',80],
+    ['ON_SITE_COORDINATION','On-site Coordination','Helyszíni koordináció',90]
+  ].forEach(row=>seedSkill.run(...row));
+}
 db.exec(`CREATE TABLE IF NOT EXISTS job_workflow_phase_costs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,
