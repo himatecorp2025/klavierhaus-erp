@@ -7,14 +7,32 @@ const path=require("node:path");
 const root=path.join(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 
-test("job scheduling uses explicit 15-minute time choices instead of datetime-local step validation",()=>{
-  const ui=read("public/round2.js"),css=read("public/styles.css");
-  assert.match(ui,/function r2QuarterTimeOptions/);
-  assert.match(ui,/minutes<24\*60/);
-  assert.match(ui,/minutes\+=R2_SLOT_MIN/);
-  assert.match(ui,/r2DateTimeFields\("scheduled_at"/);
+test("job scheduling uses hidden year, compact month/day and 30-minute New York business-time choices",()=>{
+  const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css");
+  assert.match(ui,/const R2_JOB_SLOT_MIN=30/);
+  assert.match(ui,/class="r2-date-month"/);
+  assert.match(ui,/class="r2-date-day"/);
+  assert.match(ui,/type="hidden" name="'\+esc\(name\)\+'_year"/);
+  assert.match(ui,/minutes\+=slotMinutes/);
+  assert.match(ui,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
+  assert.match(ui,/r2SnapJobMinutes/);
   assert.doesNotMatch(ui,/type="datetime-local"/);
-  assert.match(css,/\.r2-quarter-datetime/);
+  assert.match(api,/minute%30!==0/);
+  assert.match(api,/clock<7\*60\|\|clock>20\*60/);
+  assert.match(css,/\.r2-compact-datetime/);
+});
+
+test("workflow jobs persist customer phase prices and deposit finance",()=>{
+  const schema=read("server/schema.sql"),api=read("server/round2-workflow.js"),finance=read("server/round3-finance.js"),ui=read("public/round2.js");
+  assert.match(schema,/deposit_amount REAL NOT NULL DEFAULT 0/);
+  assert.match(schema,/customer_price REAL NOT NULL DEFAULT 0/);
+  assert.match(api,/phase_customer_total/);
+  assert.match(api,/balance_due/);
+  assert.match(ui,/Customer price/);
+  assert.match(ui,/Deposit received/);
+  assert.match(ui,/data-workflow-finance-summary/);
+  assert.match(finance,/Deposit received/);
+  assert.match(finance,/customer_price/);
 });
 
 test("planned, calendar and workflow job creation expose job-specific add-phase controls",()=>{
