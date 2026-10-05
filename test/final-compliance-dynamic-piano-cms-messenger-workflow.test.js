@@ -156,14 +156,16 @@ test("archive category migration rebuilds FKs retargeted to the temporary legacy
   migrated.close();fs.rmSync(dir,{recursive:true,force:true});
 });
 
-test("New Workflow Job has an inline add-phase card that does not mutate existing workflows",()=>{
+test("Planned, calendar and workflow jobs have an inline job-specific add-phase card",()=>{
   const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css");
   assert.match(ui,/id="workflowJobAddPhase"/);
-  assert.match(ui,/Add phase to this workflow/);
-  assert.match(ui,/apply_to_existing:false/);
+  assert.match(ui,/Add phase to this job/);
+  assert.doesNotMatch(ui,/workflowEntry&&r2IsAdmin\(\)/);
+  assert.match(ui,/job_specific:true/);
   assert.match(ui,/id="jobWorkflowPlanRows"/);
-  assert.match(api,/req\.body\?\.apply_to_existing!==false/);
-  assert.match(ui,/existing\?Boolean\(existing\.enabled\):!stage\.removable/);
+  assert.match(ui,/workflow-phases\/custom/);
+  assert.match(api,/app\.post\("\/api\/jobs\/\:id\/workflow-phases\/custom"/);
+  assert.match(api,/active,removable,updated_by_user_id,updated_at/);
   assert.match(css,/\.workflow-add-phase-card/);
 });
 
