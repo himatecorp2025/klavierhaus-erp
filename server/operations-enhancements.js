@@ -108,6 +108,10 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
       const after=decorateSkill(skillRow(id));audit(req,"UPDATE","staff_skills",String(id),before,after);res.json(after);
     }catch(error){res.status(error.status||400).json({error:error.message});}
   });
+  app.get("/api/work-profiles",auth,staff,(_req,res)=>{
+    const users=db.prepare("SELECT id FROM users WHERE COALESCE(hidden_user,0)=0 AND status='Active' ORDER BY lower(name)").all();
+    res.json(users.map(row=>workProfile(row.id)).filter(Boolean));
+  });
   app.get("/api/users/:id/work-profile",auth,staff,(req,res)=>{
     const profile=workProfile(req.params.id);if(!profile)return res.status(404).json({error:"USER_NOT_FOUND"});res.json(profile);
   });
