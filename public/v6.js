@@ -914,7 +914,7 @@ openConvertToJobDialog=async function(lead){
     <label class="field"><span>${tr("Estimated duration","Becsült időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
     <label class="field"><span>${tr("Planned total","Tervezett teljes ár")} (USD)</span><input name="estimated_revenue" type="number" min="0" step="0.01" value="${Number(assessment.estimated_total||0).toFixed(2)}"></label>
     <label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="0.00"></label>
-    <label class="field"><span>${tr("Start · New York (optional)","Kezdés · New York (opcionális)")}</span>${r2DateTimeFields("scheduled_at","")}</label>
+    <div class="field"><span>${tr("Start · New York (optional)","Kezdés · New York (opcionális)")}</span>${r2DateTimeFields("scheduled_at","")}</div>
     <label class="field"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Choose when scheduling","Ütemezéskor választom")}</option>${r2TechnicianOptions(lead.assigned_technician_id)}</select></label>
     <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select></label>
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><h3>${tr("Workflow phases","Munkafázisok")}</h3></div><div class="workflow-phase-card-grid">${r2WorkflowPlanRows(null)}</div><section class="workflow-finance-summary" data-workflow-finance-summary></section></section>
