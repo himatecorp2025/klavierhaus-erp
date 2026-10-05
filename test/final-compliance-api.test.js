@@ -717,7 +717,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(movedOwner.payload.workflow_owner_user_id,"U-F-MANAGER");
   assert.equal(movedOwner.payload.assigned_technician_id,"U-F-WORKER");
 
-  const pastStart=new Date(Date.now()-2*60*60*1000).toISOString();
+  const pastStartDate=new Date(Date.now()-5*60*60*1000);pastStartDate.setUTCMinutes(Math.floor(pastStartDate.getUTCMinutes()/15)*15,0,0);const pastStart=pastStartDate.toISOString();
   const farFuture=futureIso(31,18);
   const started=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
     starts_at:pastStart,due_at:farFuture,responsible_user_id:"U-F-MANAGER",blocker_code:null,blocker_note:null
@@ -728,7 +728,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(started.payload.scheduled_at,pastStart);
 
   const overdue=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
-    due_at:new Date(Date.now()-60*60*1000).toISOString()
+    due_at:(()=>{const d=new Date(Date.now()-60*60*1000);d.setUTCMinutes(Math.floor(d.getUTCMinutes()/15)*15,0,0);return d.toISOString();})()
   }});
   assert.equal(overdue.status,200,JSON.stringify(overdue.payload));
   assert.equal(overdue.payload.workflow_status,"overdue");
