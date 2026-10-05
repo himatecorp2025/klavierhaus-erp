@@ -39,6 +39,38 @@ const validTime=(value,language="en")=>{const raw=clean(value,80);if(!raw)return
 
 function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notifications,transactionalEmail=null,websiteBaseUrl="https://klavierhaus-home.onrender.com",env=process.env}){
   const staff=permit("ADMIN","MANAGER","WORKER"),admin=permit("ADMIN"),tokenKey=encryptionKey(env);
+  const PRIVATE_EMAIL_TEMPLATE_KEY="private_appointment_email_template";
+  const DEFAULT_PRIVATE_EMAIL_TEMPLATE={
+    subject_en:"Klavierhaus · Private appointment confirmed",
+    body_en:"Dear {{name}},\n\nYour private appointment has been confirmed for {{date}} at {{time}} (New York time). The appointment duration is {{duration}} minutes.\n\nWe look forward to welcoming you at Klavierhaus.",
+    subject_hu:"Klavierhaus · Privát időpont visszaigazolása",
+    body_hu:"Kedves {{name}}!\n\nPrivát időpontját visszaigazoltuk: {{date}}, {{time}} (New York-i idő szerint). Az időpont időtartama {{duration}} perc.\n\nSzeretettel várjuk a Klavierhausban."
+  };
+  function privateEmailTemplate(){
+    try{
+      const raw=db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(PRIVATE_EMAIL_TEMPLATE_KEY)?.setting_value;
+      const parsed=raw?JSON.parse(raw):{};
+      return {
+        subject_en:clean(parsed?.subject_en,240)||DEFAULT_PRIVATE_EMAIL_TEMPLATE.subject_en,
+        body_en:clean(parsed?.body_en,6000)||DEFAULT_PRIVATE_EMAIL_TEMPLATE.body_en,
+        subject_hu:clean(parsed?.subject_hu,240)||DEFAULT_PRIVATE_EMAIL_TEMPLATE.subject_hu,
+        body_hu:clean(parsed?.body_hu,6000)||DEFAULT_PRIVATE_EMAIL_TEMPLATE.body_hu
+      };
+    }catch(_error){return {...DEFAULT_PRIVATE_EMAIL_TEMPLATE};}
+  }
+  function savePrivateEmailTemplate(input,user){
+    const next={
+      subject_en:clean(input?.subject_en,240),
+      body_en:clean(input?.body_en,6000),
+      subject_hu:clean(input?.subject_hu,240),
+      body_hu:clean(input?.body_hu,6000)
+    };
+    if(Object.values(next).some(value=>!value))throw Object.assign(new Error("PRIVATE_APPOINTMENT_EMAIL_TEMPLATE_REQUIRED"),{status:400});
+    db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
+      .run(PRIVATE_EMAIL_TEMPLATE_KEY,JSON.stringify(next),user?.id||user?.name||"SYSTEM");
+    return next;
+  }
   const rate=new Map();
   const limited=key=>{
     const now=Date.now(),windowMs=10*60*1000,limit=8,rows=(rate.get(key)||[]).filter(ts=>now-ts<windowMs);
@@ -138,8 +170,9 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
     if(!transactionalEmail?.configured||!validEmail(row.email))return {status:"NOT_CONFIGURED"};
     try{
       const result=await transactionalEmail.sendPrivateAppointmentDecision({
-        to:row.email,name:row.name,decision,startsAt:row.scheduled_at||row.requested_at,endsAt:row.scheduled_end_at||null,
+        to:row.email,name:row.name,email:row.email||"",phone:row.phone||"",decision,startsAt:row.scheduled_at||row.requested_at,endsAt:row.scheduled_end_at||null,
         durationMin:Number(row.duration_min||row.requested_duration_min||DEFAULT_DURATION_MIN),language:row.language||"en",conversationUrl,
+        template:String(decision||"").toUpperCase()==="APPROVED"?privateEmailTemplate():null,
         idempotencyKey:`private-appointment-${decision.toLowerCase()}-${row.id}`
       });
       return {status:"SENT",provider_message_id:result.providerMessageId};
@@ -308,6 +341,13 @@ function registerPrivateAppointmentRoutes({app,db,auth,permit,audit,notification
   app.post("/api/private-appointments",auth,staff,(req,res)=>{
     const result=db.transaction(()=>makeScheduled(req.body,{actor:req.user,source:"ERP"}))();if(result.error)return res.status(result.status).json({error:result.error,details:result.details});
     notify(result.row,{kind:"created",actor:req.user});audit(req,"CREATE","private_appointments",result.row.id,null,result.row);res.status(201).json(result.row);
+  });
+  app.get("/api/private-appointments/email-template",auth,admin,(_req,res)=>res.json(privateEmailTemplate()));
+  app.put("/api/private-appointments/email-template",auth,admin,(req,res)=>{
+    try{
+      const before=privateEmailTemplate(),after=savePrivateEmailTemplate(req.body,req.user);
+      audit(req,"UPDATE","app_settings",PRIVATE_EMAIL_TEMPLATE_KEY,before,after);res.json(after);
+    }catch(error){res.status(error.status||400).json({error:error.message||"PRIVATE_APPOINTMENT_EMAIL_TEMPLATE_INVALID"});}
   });
   app.get("/api/private-appointments",auth,staff,(req,res)=>{
     const from=clean(req.query.from,80),to=clean(req.query.to,80),status=clean(req.query.status,30).toUpperCase(),type=clean(req.query.type,40).toUpperCase();
