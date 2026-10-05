@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('ADMIN','MANAGER','WORKER')),
+  manager_scope TEXT CHECK(manager_scope IS NULL OR manager_scope IN ('INSIDE','OUTSIDE')),
   status TEXT DEFAULT 'Active',
   phone TEXT,
   address_line1 TEXT,
@@ -34,6 +35,36 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS staff_skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  name_en TEXT NOT NULL,
+  name_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_staff_skills_active_order ON staff_skills(active,sort_order,lower(name_en),id);
+
+CREATE TABLE IF NOT EXISTS user_staff_skills (
+  user_id TEXT NOT NULL,
+  skill_id INTEGER NOT NULL,
+  assigned_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(user_id,skill_id),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(skill_id) REFERENCES staff_skills(id) ON DELETE CASCADE,
+  FOREIGN KEY(assigned_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_staff_skills_skill ON user_staff_skills(skill_id,user_id);
 
 CREATE TABLE IF NOT EXISTS account_activations (
   user_id TEXT PRIMARY KEY,
@@ -602,6 +633,43 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS milestone_dashboard (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  title_en TEXT NOT NULL DEFAULT 'Our next milestone',
+  title_hu TEXT NOT NULL DEFAULT 'A következő mérföldkő',
+  quote_en TEXT,
+  quote_hu TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  target_label TEXT,
+  hero_media_url TEXT,
+  hero_icon TEXT,
+  updated_by_user_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS milestone_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title_en TEXT NOT NULL,
+  title_hu TEXT,
+  description_en TEXT,
+  description_hu TEXT,
+  target_date TEXT,
+  completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),
+  completed_at TEXT,
+  icon TEXT,
+  media_url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by_user_id TEXT,
+  updated_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);
+
 CREATE TABLE IF NOT EXISTS landing_sections (
   section_key TEXT PRIMARY KEY,
   is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
@@ -1110,6 +1178,7 @@ CREATE TABLE IF NOT EXISTS clients (
   notes TEXT,
   short_memo_to_name TEXT,
   last_visit TEXT,
+  last_contacted_at TEXT,
   preferred_language TEXT NOT NULL DEFAULT 'en' CHECK(preferred_language IN ('en','hu')),
   client_type TEXT NOT NULL DEFAULT 'INDIVIDUAL' CHECK(client_type IN ('INDIVIDUAL','PARTNER','BUSINESS','INSTITUTION')),
   is_vip INTEGER NOT NULL DEFAULT 0 CHECK(is_vip IN (0,1)),
@@ -1479,6 +1548,7 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   due_at TEXT,
   customer_price REAL NOT NULL DEFAULT 0 CHECK(customer_price >= 0),
   responsible_user_id TEXT,
+  responsibility_skill_id INTEGER,
   blocker_code TEXT CHECK(blocker_code IS NULL OR blocker_code IN ('material_procurement','parts_procurement','material_issue','waiting_client','waiting_technician','waiting_admin','waiting_invoice','other')),
   blocker_note TEXT,
   activated_at TEXT,
@@ -1487,7 +1557,8 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(job_id,stage_key),
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-  FOREIGN KEY (responsible_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY (responsible_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (responsibility_skill_id) REFERENCES staff_skills(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS job_workflow_phase_costs (
