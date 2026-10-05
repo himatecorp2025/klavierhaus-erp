@@ -120,19 +120,26 @@ test("intake checklist prices are snapshotted and summed into an estimated quote
 
   const assessment=await request(`/api/intake/${ids.intake}/assessment`,{token:ids.admin,method:"PUT",body:{items:[
     {catalog_item_id:ids.tuning,price:350},
-    {catalog_item_id:ids.action,price:800}
+    {catalog_item_id:ids.action,price:800},
+    {catalog_item_id:null,item_title_en:"One-off voicing",price:125}
   ]}});
   assert.equal(assessment.status,200,JSON.stringify(assessment.payload));
-  assert.equal(assessment.payload.estimated_total,1150);
-  assert.equal(assessment.payload.items.length,2);
-  assert.equal(db.prepare("SELECT estimated_total FROM intake_leads WHERE id=?").get(ids.intake).estimated_total,1150);
+  assert.equal(assessment.payload.estimated_total,1275);
+  assert.equal(assessment.payload.items.length,3);
+  const custom=assessment.payload.items.find(item=>!item.catalog_item_id);
+  assert.ok(custom);
+  assert.equal(custom.item_title_en,"One-off voicing");
+  assert.equal(custom.item_title_hu,"One-off voicing");
+  assert.equal(custom.price,125);
+  assert.equal(db.prepare("SELECT estimated_total FROM intake_leads WHERE id=?").get(ids.intake).estimated_total,1275);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM intake_catalog_items").get().count,2);
 });
 
 test("approved intake can create a scheduled active calendar/workflow job with quoted revenue in one action",async()=>{
   const converted=await request(`/api/intake/${ids.intake}/convert-to-job`,{token:ids.admin,method:"POST",body:{
     title:"Concert prep approved",
     estimated_duration_min:180,
-    estimated_revenue:1150,
+    estimated_revenue:1275,
     scheduled_at:futureIso(0,15,30),
     assigned_technician_id:"V6-T",
     workflow_phases:[
@@ -145,12 +152,12 @@ test("approved intake can create a scheduled active calendar/workflow job with q
   }});
   assert.equal(converted.status,201,JSON.stringify(converted.payload));
   assert.equal(converted.payload.job.stage,"received");
-  assert.equal(converted.payload.job.estimated_revenue,1150);
+  assert.equal(converted.payload.job.estimated_revenue,1275);
   assert.equal(converted.payload.job.scheduled_at,futureIso(0,15,30));
   ids.job=converted.payload.job.id;
 
   const workflow=await request("/api/jobs/workflow",{token:ids.admin});
-  assert.ok(workflow.payload.jobs.some(row=>row.id===ids.job&&row.estimated_revenue===1150));
+  assert.ok(workflow.payload.jobs.some(row=>row.id===ids.job&&row.estimated_revenue===1275));
   const calendar=await request("/api/calendar?from="+encodeURIComponent(futureIso(0,0,0))+"&to="+encodeURIComponent(futureIso(1,0,0)),{token:ids.admin});
   assert.ok(calendar.payload.jobs.some(row=>row.id===ids.job));
 });
