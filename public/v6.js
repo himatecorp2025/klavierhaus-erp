@@ -692,36 +692,53 @@ renderCms=async function(){
 
 function v6CatalogLabel(item){return state.language==="hu"?item.title_hu:item.title_en;}
 function v6CatalogDescription(item){return state.language==="hu"?item.description_hu:item.description_en;}
-function v6AssessmentIcon(item){
-  const text=`${item?.category||""} ${item?.title_en||""} ${item?.title_hu||""}`.toLowerCase();
-  if(text.includes("tuning")||text.includes("hangol"))return "◉";
-  if(text.includes("mechan")||text.includes("regulat")||text.includes("mechanika"))return "⚙";
-  if(text.includes("string")||text.includes("húr"))return "≋";
-  if(text.includes("voic")||text.includes("inton"))return "◌";
-  if(text.includes("clean")||text.includes("tiszt"))return "✦";
-  return "◇";
+let v6AssessmentCustomCounter=0;
+function v6CustomAssessmentCard(item={},key=null){
+  const token=key||("custom_"+(++v6AssessmentCustomCounter)),title=state.language==="hu"?(item.item_title_hu||item.item_title_en||""):(item.item_title_en||item.item_title_hu||""),price=Number(item.price||0);
+  return `<article class="assessment-option assessment-custom-item selected" data-assessment-custom="${esc(token)}">
+    <span class="assessment-option-head"><span class="assessment-option-category">${tr("ONE-OFF ITEM","EGYEDI TÉTEL")}</span><button class="assessment-custom-remove" type="button" data-assessment-custom-remove="${esc(token)}" aria-label="${esc(tr("Remove item","Tétel eltávolítása"))}">×</button></span>
+    <label class="assessment-custom-title"><span>${tr("Work item","Munkatétel")}</span><input data-assessment-custom-title type="text" maxlength="240" value="${esc(title)}" placeholder="${esc(tr("Enter work item","Munkatétel megnevezése"))}"></label>
+    <span class="assessment-price"><span class="assessment-price-currency">$</span><input data-assessment-custom-price type="number" min="0" step="0.01" value="${price.toFixed(2)}" aria-label="${esc(tr("Price","Ár"))}"></span>
+  </article>`;
 }
 function v6AssessmentRows(catalog,selectedItems=[]){
-  const selected=new Map((selectedItems||[]).map(item=>[Number(item.catalog_item_id),item]));
-  return `<div class="assessment-grid assessment-grid--continuous">${(catalog||[]).map(item=>{
+  const selected=new Map((selectedItems||[]).filter(item=>item.catalog_item_id).map(item=>[Number(item.catalog_item_id),item]));
+  const custom=(selectedItems||[]).filter(item=>!item.catalog_item_id);
+  const catalogCards=(catalog||[]).map(item=>{
     const chosen=selected.get(Number(item.id)),checked=Boolean(chosen),price=Number(chosen?.price??item.default_price??0);
     return `<label class="assessment-option ${checked?"selected":""}">
-      <span class="assessment-option-head">
-        <span class="assessment-option-category">${esc(item.category||"")}</span>
-        <input type="checkbox" data-assessment-check="${item.id}" ${checked?"checked":""}>
-      </span>
-      <span class="assessment-option-icon" aria-hidden="true">${v6AssessmentIcon(item)}</span>
+      <span class="assessment-option-head"><span class="assessment-option-category">${esc(item.category||"")}</span><input type="checkbox" data-assessment-check="${item.id}" ${checked?"checked":""}></span>
       <strong>${esc(v6CatalogLabel(item))}</strong>
       <small>${esc(v6CatalogDescription(item)||"")}</small>
-      <span class="assessment-price"><span class="assessment-price-currency">$</span><input data-assessment-price="${item.id}" type="number" min="0" step="0.01" value="${price.toFixed(2)}" ${checked?"":"disabled"} aria-label="${esc(tr("Price","Ár"))}"></span>
+      <span class="assessment-price" title="${esc(tr("Click the price to override it for this intake only.","Kattints az árra, ha csak ennél az igénynél szeretnéd módosítani."))}"><span class="assessment-price-currency">$</span><input data-assessment-price="${item.id}" type="number" min="0" step="0.01" value="${price.toFixed(2)}" aria-label="${esc(tr("Price","Ár"))}"></span>
     </label>`;
-  }).join("")}</div>`;
+  }).join("");
+  return `<div class="assessment-grid assessment-grid--continuous" id="intakeAssessmentGrid">${catalogCards}${custom.map((item,index)=>v6CustomAssessmentCard(item,"saved_"+(item.id||index))).join("")}<button class="assessment-add-card" id="assessmentAddCustom" type="button"><span>＋</span><strong>${tr("Add one-off item","Új egyedi igénytétel")}</strong><small>${tr("Only for this intake; the central catalog stays unchanged.","Csak ehhez az igényhez; a központi katalógus nem változik.")}</small></button></div>`;
 }
 function v6AssessmentCollect(){
-  return $$("[data-assessment-check]:checked").map(box=>({catalog_item_id:Number(box.dataset.assessmentCheck),price:Number($(`[data-assessment-price="${box.dataset.assessmentCheck}"]`)?.value||0)}));
+  const catalog=$$("[data-assessment-check]:checked").map(box=>({catalog_item_id:Number(box.dataset.assessmentCheck),price:Number($(`[data-assessment-price="${box.dataset.assessmentCheck}"]`)?.value||0)}));
+  const custom=$$("[data-assessment-custom]").map(card=>{const title=String(card.querySelector("[data-assessment-custom-title]")?.value||"").trim();if(!title)return null;return {catalog_item_id:null,item_title_en:title,item_title_hu:title,price:Number(card.querySelector("[data-assessment-custom-price]")?.value||0)};}).filter(Boolean);
+  return [...catalog,...custom];
 }
 function v6AssessmentTotal(){return v6AssessmentCollect().reduce((sum,row)=>sum+Number(row.price||0),0);}
 function v6AssessmentRefreshTotal(){const node=$("#assessmentTotal");if(node)node.textContent=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(v6AssessmentTotal());}
+function v6BindAssessmentControls(){
+  $$("[data-assessment-check]").forEach(box=>box.addEventListener("change",()=>{box.closest(".assessment-option")?.classList.toggle("selected",box.checked);v6AssessmentRefreshTotal();}));
+  $$("[data-assessment-price]").forEach(input=>{
+    const selectItem=()=>{const id=input.dataset.assessmentPrice,box=$(`[data-assessment-check="${id}"]`);if(box&&!box.checked){box.checked=true;box.closest(".assessment-option")?.classList.add("selected");v6AssessmentRefreshTotal();}};
+    input.addEventListener("focus",selectItem);input.addEventListener("click",event=>{event.stopPropagation();selectItem();});input.addEventListener("input",v6AssessmentRefreshTotal);
+  });
+  const bindCustom=card=>{
+    card.querySelector("[data-assessment-custom-price]")?.addEventListener("input",v6AssessmentRefreshTotal);
+    card.querySelector("[data-assessment-custom-title]")?.addEventListener("input",v6AssessmentRefreshTotal);
+    card.querySelector("[data-assessment-custom-remove]")?.addEventListener("click",()=>{card.remove();v6AssessmentRefreshTotal();});
+  };
+  $$("[data-assessment-custom]").forEach(bindCustom);
+  $("#assessmentAddCustom")?.addEventListener("click",()=>{
+    const grid=$("#intakeAssessmentGrid"),button=$("#assessmentAddCustom"),wrap=document.createElement("div");wrap.innerHTML=v6CustomAssessmentCard();const card=wrap.firstElementChild;if(!grid||!button||!card)return;grid.insertBefore(card,button);bindCustom(card);card.querySelector("[data-assessment-custom-title]")?.focus();v6AssessmentRefreshTotal();
+  });
+  v6AssessmentRefreshTotal();
+}
 async function v6OpenIntakeCenter(){
   const rows=await api("/api/intake-catalog?include_inactive=1");
   openDialog({title:tr("Intake Center","Igényközpont"),eyebrow:tr("ASSESSMENT CATALOG","IGÉNYFELMÉRÉSI KATALÓGUS"),body:`<div class="intake-center"><div class="panel-head inline-panel-head"><p>${tr("Create reusable piano issue/work items with a default quoted price.","Hozz létre újrahasználható zongorahiba-/munkatételeket alapértelmezett ajánlati árral.")}</p><div class="page-actions"><button id="handoffPresetCenterBtn" class="secondary-button" type="button">⚙ ${tr("Handoff presets","Átadási presetek")}</button><button id="newCatalogItem" class="primary-button" type="button">＋ ${tr("New item","Új tétel")}</button></div></div><div class="catalog-admin-list">${rows.map(row=>`<button class="catalog-admin-row ${Number(row.active)?"":"inactive"}" type="button" data-catalog-edit="${row.id}"><span><strong>${esc(state.language==="hu"?row.title_hu:row.title_en)}</strong><small>${esc(row.category)} · ${r3Money(row.default_price)} · ${Number(row.active)?tr("Active","Aktív"):tr("Inactive","Inaktív")}</small></span><span>›</span></button>`).join("")||`<div class="empty-state">${tr("No catalog items yet.","Még nincs katalógustétel.")}</div>`}</div></div>`});
@@ -855,8 +872,7 @@ openIntakeDialog=async function(options={}){
   async function selectClient(client,selectedPianoId=null){clientId.value=client.id;search.value=client.name;suggestions.classList.add("hidden");$("#rawClientName").value=client.name;$("#rawContact").value=client.email||client.phone||"";await populatePianos(client,selectedPianoId);}
   if(base.client_id){const client=(await loadClients()).find(row=>Number(row.id)===Number(base.client_id));if(client)await selectClient(client,base.piano_id);}
   search.addEventListener("input",debounce(async event=>{const q=event.target.value.trim();clientId.value="";pianoField.classList.add("hidden");if(q.length<2){suggestions.classList.add("hidden");return;}const clients=await loadClients(q);suggestions.innerHTML=clientSuggestionMarkup(clients);suggestions.classList.toggle("hidden",!clients.length);$$("[data-intake-client]",suggestions).forEach(button=>button.addEventListener("click",()=>selectClient(clients.find(c=>Number(c.id)===Number(button.dataset.intakeClient)))));},160));
-  $$("[data-assessment-check]").forEach(box=>box.addEventListener("change",()=>{const price=$(`[data-assessment-price="${box.dataset.assessmentCheck}"]`);if(price)price.disabled=!box.checked;box.closest(".assessment-option")?.classList.toggle("selected",box.checked);v6AssessmentRefreshTotal();}));
-  $$("[data-assessment-price]").forEach(input=>input.addEventListener("input",v6AssessmentRefreshTotal));v6AssessmentRefreshTotal();
+  v6BindAssessmentControls();
   $("#intakeMediaFiles").addEventListener("change",event=>{$("#intakeMediaCount").textContent=`${existingMedia.length+event.currentTarget.files.length} ${tr("files total","fájl összesen")}`;});
   if(canDeleteIntake){
     $("#intakeDeleteButton")?.addEventListener("click",async event=>{
@@ -885,22 +901,27 @@ openIntakeDialog=async function(options={}){
 openConvertToJobDialog=async function(lead){
   const [assessment,settings]=await Promise.all([api(`/api/intake/${lead.id}/assessment`),api("/api/workflow/settings"),loadUsers()]);
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages};const pianos=lead.client_id?await api(`/api/clients/${lead.client_id}/pianos`):[],pianoOptions=pianos.map(p=>`<option value="${p.id}">${esc([p.brand,p.model,p.serial_number].filter(Boolean).join(" · "))}</option>`).join("");
-  openDialog({title:tr("Approve intake & create job","Igény jóváhagyása és munka létrehozása"),eyebrow:tr("ONE-STEP CONVERSION","EGYLÉPÉSES KONVERZIÓ"),body:`<form id="convertJobEditor" class="form-grid">
+  openDialog({title:tr("Approve intake & create job","Igény jóváhagyása és munka létrehozása"),eyebrow:tr("ONE-STEP CONVERSION","EGYLÉPÉSES KONVERZIÓ"),variant:"wide",body:`<form id="convertJobEditor" class="form-grid">
     <div class="full intake-quote-summary"><span>${tr("Estimated quoted work","Becsült ajánlati munka")}</span><strong>${r3Money(assessment.estimated_total||0)}</strong><div>${assessment.items.map(item=>`<small>${esc(state.language==="hu"?item.item_title_hu:item.item_title_en)} · ${r3Money(item.price)}</small>`).join("")}</div></div>
     ${lead.client_id?`<div class="full detail-note"><strong>${tr("Client","Ügyfél")}:</strong> ${esc(lead.client_name||lead.raw_client_name||lead.client_id)}</div>`:`<label class="field"><span>${tr("Client name","Ügyfél neve")} *</span><input name="client_name" value="${esc(lead.raw_client_name||"")}" required></label><label class="field"><span>${tr("Piano location / address","Zongora helye / cím")} *</span><input name="client_address" required></label><label class="field"><span>Email</span><input name="client_email" type="email"></label><label class="field"><span>${tr("Phone","Telefon")}</span><input name="client_phone"></label>`}
     ${lead.piano_id?`<div class="full detail-note">${tr("Piano already linked.","A zongora már kapcsolva van.")}</div>`:`${pianos.length?`<label class="field full"><span>${tr("Existing piano","Meglévő zongora")}</span><select name="piano_id"><option value="">${tr("Create new piano","Új zongora létrehozása")}</option>${pianoOptions}</select></label>`:""}<label class="field"><span>${tr("Piano brand","Zongora márkája")} *</span><input name="brand"></label><label class="field"><span>${tr("Model","Modell")}</span><input name="model"></label><label class="field"><span>${tr("Serial","Gyári szám")}</span><input name="serial_number"></label><label class="field"><span>${tr("Piano location","Zongora helye")}</span><input name="location_notes"></label>`}
-    <label class="field full"><span>${tr("Job title","Munka címe")}</span><input name="title" value="${esc(lead.reported_issue)}"></label><label class="field"><span>${tr("Estimated duration","Becsült időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label><label class="field"><span>${tr("Estimated revenue","Becsült bevétel")} (USD)</span><input name="estimated_revenue" type="number" min="0" step="0.01" value="${Number(assessment.estimated_total||0).toFixed(2)}"></label>
-    <label class="field"><span>${tr("Start · New York (optional)","Kezdés · New York (opcionális)")}</span><input name="scheduled_at" type="datetime-local" step="900"></label><label class="field"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Choose when scheduling","Ütemezéskor választom")}</option>${r2TechnicianOptions(lead.assigned_technician_id)}</select></label>
+    <label class="field full"><span>${tr("Job title","Munka címe")}</span><input name="title" value="${esc(lead.reported_issue)}"></label>
+    <label class="field"><span>${tr("Estimated duration","Becsült időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
+    <label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="0.00"></label>
+    <label class="field"><span>${tr("Start · New York (optional)","Kezdés · New York (opcionális)")}</span>${r2DateTimeFields("scheduled_at","")}</label>
+    <label class="field"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Choose when scheduling","Ütemezéskor választom")}</option>${r2TechnicianOptions(lead.assigned_technician_id)}</select></label>
     <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select></label>
-    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><h3>${tr("Workflow phases","Munkafázisok")}</h3></div>${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id})}</section>
+    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><h3>${tr("Workflow phases","Munkafázisok")}</h3></div>${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id})}<section class="workflow-finance-summary" data-workflow-finance-summary></section></section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Approve & create job","Jóváhagyás és munka létrehozása")}</button></div></form>`});
-  $("#convertJobEditor").addEventListener("submit",async event=>{
-    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={title:form.title,estimated_duration_min:Number(form.estimated_duration_min||120),estimated_revenue:Number(form.estimated_revenue||0),workflow_owner_user_id:form.workflow_owner_user_id||state.user?.id,workflow_phases:r2ReadWorkflowPlan(event.currentTarget)};
-    if(form.scheduled_at){if(!form.assigned_technician_id){toast(tr("Choose a technician for a scheduled job.","Ütemezett munkához válassz technikust."),"error");return;}body.scheduled_at=r2NyInputToIso(form.scheduled_at);body.assigned_technician_id=form.assigned_technician_id;const received=body.workflow_phases.find(phase=>phase.stage_key==="received");if(received&&!received.starts_at)received.starts_at=body.scheduled_at;}
+  const editor=$("#convertJobEditor");r2BindWorkflowTiming(editor);r2BindWorkflowFinance(editor);
+  editor.addEventListener("submit",async event=>{
+    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={title:form.title,estimated_duration_min:Number(form.estimated_duration_min||120),estimated_revenue:Number(assessment.estimated_total||0),deposit_amount:Math.max(0,Number(form.deposit_amount||0)),workflow_owner_user_id:form.workflow_owner_user_id||state.user?.id,workflow_phases:r2ReadWorkflowPlan(event.currentTarget)};
+    const scheduledLocal=r2ReadDateTime(event.currentTarget,"scheduled_at");
+    if(scheduledLocal){if(!form.assigned_technician_id){toast(tr("Choose a technician for a scheduled job.","Ütemezett munkához válassz technikust."),"error");return;}body.scheduled_at=r2NyInputToIso(scheduledLocal);body.assigned_technician_id=form.assigned_technician_id;const received=body.workflow_phases.find(phase=>phase.stage_key==="received");if(received&&!received.starts_at)received.starts_at=body.scheduled_at;}
     else if(form.assigned_technician_id)body.assigned_technician_id=form.assigned_technician_id;
     if(!lead.client_id)body.client={name:form.client_name,email:form.client_email,phone:form.client_phone,address:form.client_address};
     if(!lead.piano_id){if(form.piano_id)body.piano_id=Number(form.piano_id);else body.piano={brand:form.brand,model:form.model,serial_number:form.serial_number,location_notes:form.location_notes||form.client_address};}
-    try{const result=await api(`/api/intake/${lead.id}/convert-to-job`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Job created from approved intake.","Munka létrehozva a jóváhagyott igényből."),"success");navTo(body.scheduled_at?"workshop":"planned");}catch(error){toast(humanError(error),"error");}
+    try{await api(`/api/intake/${lead.id}/convert-to-job`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Job created from approved intake.","Munka létrehozva a jóváhagyott igényből."),"success");navTo(body.scheduled_at?"workshop":"planned");}catch(error){toast(humanError(error),"error");}
   });
 };
 
