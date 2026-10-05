@@ -22,15 +22,15 @@
     "check:schema": "node test/helpers/check-schema.js"
   },
   "dependencies": {
-    "adm-zip": "0.6.0",
+    "adm-zip": "0.6.1",
     "bcryptjs": "2.4.3",
     "better-sqlite3": "11.10.0",
     "compression": "1.8.1",
     "cors": "2.8.5",
     "dotenv": "16.4.7",
-    "express": "4.22.2",
+    "express": "4.22.3",
     "jsonwebtoken": "9.0.2",
-    "multer": "2.2.0",
+    "multer": "2.4.0",
     "resend": "6.19.0",
     "stripe": "22.5.0",
     "web-push": "3.6.7"
