@@ -117,6 +117,7 @@ function humanError(error){
     WORKFLOW_LOGISTICS_MINIMUM_WINDOW:["Arrival and delivery phases require at least a three-hour time window.","A beérkezési és kiszállítási fázisokhoz legalább háromórás időablak szükséges."],
     WORK_TIME_HALF_HOUR_REQUIRED:["Choose a time on a 30-minute boundary.","Válassz félórás időpontot (:00 vagy :30)."],
     WORK_TIME_OUTSIDE_BUSINESS_HOURS:["Choose a work time between 07:00 and 20:00.","Munkaidőként 07:00 és 20:00 közötti időpont választható."],
+    INVALID_SCHEDULE_TIME:["Choose both a valid date and time for the scheduled job.","A naptári munkához válassz érvényes dátumot és időpontot is."],
     INVALID_WORKFLOW_TIME:["Choose a valid workflow date and time.","Adj meg érvényes munkafázis-dátumot és időpontot."],
     INVALID_WORKFLOW_CUSTOMER_PRICE:["The customer price must be zero or a positive amount.","Az ügyfélár csak nulla vagy pozitív összeg lehet."],
     INVALID_JOB_DEPOSIT:["The deposit must be zero or a positive amount.","Az előleg csak nulla vagy pozitív összeg lehet."],
