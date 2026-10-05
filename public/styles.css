@@ -4071,3 +4071,94 @@ input,textarea,select,
   border-color:color-mix(in srgb,var(--danger) 35%,var(--line))!important;
   color:#ff9c94!important;
 }
+
+
+/* OPERATIONS V38 — final cross-admin theme audit
+   Canonical overrides for remaining legacy light-only navigation, calendar,
+   overview and CMS surfaces. Semantic status colors remain intentional. */
+.nav-item,
+.mobile-nav button,
+.cms-page-button,
+.contact-pill,
+.job-party,
+.job-meta,
+.invoice-row-meta,
+.stage-setting-row>strong,
+.workshop-kpi span,
+.time-gutter span,
+.month-weekdays div,
+.overview-table th{
+  color:var(--muted)!important;
+}
+.nav-item:hover:not(:disabled),
+.nav-item.active,
+.mobile-nav button.active,
+.cms-page-button:hover,
+.cms-page-button.active{
+  background:var(--surface-2)!important;
+  color:var(--ink)!important;
+}
+.mobile-nav button.active,
+.cms-page-button.active{
+  border-color:color-mix(in srgb,var(--accent) 35%,var(--line))!important;
+  color:var(--accent)!important;
+}
+.calendar-job:hover,
+.time-day-head:hover{
+  background:var(--surface-2)!important;
+}
+.time-calendar-head,
+.time-gutter,
+.month-weekdays,
+.month-day-cell,
+.month-day-cell.outside-month,
+.overview-table th,
+.stage-setting-row,
+.workflow-plan-row{
+  background:var(--surface)!important;
+  color:var(--ink)!important;
+  border-color:var(--line)!important;
+}
+.time-gutter,
+.month-weekdays,
+.month-day-cell.outside-month,
+.overview-table th{
+  background:var(--surface-2)!important;
+}
+.month-day-cell.outside-month{color:var(--muted)!important}
+.calendar-event-block{
+  color:var(--ink)!important;
+  border-color:color-mix(in srgb,var(--tech-color) 38%,var(--line))!important;
+  background:color-mix(in srgb,var(--tech-color) 11%,var(--surface))!important;
+}
+.calendar-event-block span,
+.calendar-event-block small{
+  color:color-mix(in srgb,var(--ink) 72%,var(--muted))!important;
+}
+.month-event-pill{
+  color:var(--ink)!important;
+  background:var(--surface-2)!important;
+}
+.cms-upload code{
+  background:var(--surface-3)!important;
+  color:var(--ink)!important;
+}
+.completed-note{
+  background:color-mix(in srgb,#2f9b68 13%,var(--surface))!important;
+  color:#2f9b68!important;
+}
+:root[data-theme="dark"] .priority-chip.low,
+:root[data-theme="dark"] .badge.converted,
+:root[data-theme="dark"] .invoice-status.paid,
+:root[data-theme="dark"] .invoice-status.sent{
+  background:color-mix(in srgb,#2f9b68 14%,var(--surface))!important;
+  color:#78d9a8!important;
+}
+:root[data-theme="dark"] .invoice-status.issued,
+:root[data-theme="dark"] .mobile-nav button.active{
+  background:color-mix(in srgb,#2f7cff 14%,var(--surface))!important;
+  color:#82afff!important;
+}
+:root[data-theme="dark"] .sidebar-brand img{
+  background:var(--surface-2)!important;
+}
