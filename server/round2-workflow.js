@@ -62,6 +62,16 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   function stageByKey(key,{includeInactive=false}={}){
     return stageDefinitions({includeInactive}).find(stage=>stage.key===key)||null;
   }
+  function isLogisticsStage(stage){
+    const key=String(stage?.key||stage?.stage_key||"").toLowerCase(),labels=[stage?.label_en,stage?.label_hu].filter(Boolean).join(" ").toLowerCase();
+    return key==="received"||/(arrival|inbound|receiv|beérkez|érkez)/i.test(key+" "+labels)||/(delivery|dispatch|final handover|kiszáll|elszáll|szállítás)/i.test(key+" "+labels);
+  }
+  function assertPhaseWindow(stage,row){
+    if(!row?.starts_at||!row?.due_at)return;
+    const start=new Date(row.starts_at).getTime(),due=new Date(row.due_at).getTime(),minutes=(due-start)/60000;
+    if(!Number.isFinite(minutes)||minutes<=0)throw problem("WORKFLOW_PHASE_END_BEFORE_START");
+    if(isLogisticsStage(stage)&&minutes<180)throw problem("WORKFLOW_LOGISTICS_MINIMUM_WINDOW",400,{minimum_minutes:180,stage_key:stage?.key||stage?.stage_key});
+  }
   function logicalStage(row){return row?.workflow_stage_key||row?.stage||PIPELINE_STAGE;}
   function storageStage(stageKey){
     if(["planned","received","in_progress","qa_review","admin_approval","completed"].includes(stageKey))return stageKey;
@@ -69,11 +79,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   }
   function phasesForJob(jobId){
     const rows=db.prepare(`SELECT p.id,p.job_id,p.stage_key,p.position,p.enabled,p.starts_at,p.due_at,p.responsible_user_id,
-      ru.name AS responsible_name,p.blocker_code,p.blocker_note,p.activated_at,p.completed_at,p.created_at,p.updated_at
-      FROM job_workflow_phases p LEFT JOIN users ru ON ru.id=p.responsible_user_id
+      ru.name AS responsible_name,p.blocker_code,p.blocker_note,p.activated_at,p.completed_at,p.created_at,p.updated_at,
+      d.label_en,d.label_hu,d.stage_type,d.active AS definition_active,d.removable AS definition_removable
+      FROM job_workflow_phases p
+      LEFT JOIN users ru ON ru.id=p.responsible_user_id
+      LEFT JOIN workflow_stage_definitions d ON d.stage_key=p.stage_key
       WHERE p.job_id=? ORDER BY p.position,p.id`).all(jobId);
-    if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled)}));
-    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,responsible_user_id:null,responsible_name:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null}));
+    if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled),job_specific:Number(row.definition_active)===0,removable:Boolean(row.definition_removable)}));
+    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,responsible_user_id:null,responsible_name:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable)}));
   }
   function phaseVisualStatus(job,phase,now=Date.now()){
     if(job?.cancelled_at)return "cancelled";
@@ -145,16 +158,24 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       return rowStart<wantedEnd&&rowEnd>wantedStart;
     })||null;
   }
-  function normalizePlan(input,{defaultResponsibleId=null,defaultStartAt=null}={}){
+  function normalizePlan(input,{defaultResponsibleId=null,defaultStartAt=null,extraDefinitions=[]}={}){
     const supplied=Array.isArray(input)?input:null;
+    const definitions=stageDefinitions().map(stage=>({...stage}));
+    const keys=new Set(definitions.map(stage=>stage.key));
+    for(const extra of Array.isArray(extraDefinitions)?extraDefinitions:[]){
+      const key=String(extra?.key||extra?.stage_key||"");if(!key||keys.has(key))continue;
+      definitions.push({key,position:Number(extra.position||definitions.length+1),label_en:extra.label_en||key,label_hu:extra.label_hu||key,stage_type:extra.stage_type||"intermediate",active:false,removable:true});keys.add(key);
+    }
+    definitions.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
-    const plan=stageDefinitions().map(stage=>{
+    const plan=definitions.map(stage=>{
       const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
-      return {stage_key:stage.key,position:stage.position,enabled,
+      const row={stage_key:stage.key,position:stage.position,enabled,
         starts_at:item?.starts_at?optionalIso(item.starts_at):(stage.key==="received"&&defaultStartAt?optionalIso(defaultStartAt):null),
         due_at:item?.due_at?optionalIso(item.due_at):null,responsible_user_id:responsibleId};
+      assertPhaseWindow(stage,row);return row;
     });
     for(const key of ["received","admin_approval","completed"])if(!plan.find(row=>row.stage_key===key)?.enabled)throw problem("WORKFLOW_FIXED_STAGE_REQUIRED");
     return plan;
@@ -172,6 +193,22 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.starts_at,row.due_at,row.responsible_user_id,
         preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
     }
+  }
+  function addJobSpecificPhase(jobId,input,userId,{defaultResponsibleId=null}={}){
+    const phases=phasesForJob(jobId);if(phases.length>=MAX_WORKFLOW_STAGES+1)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});
+    const labelEn=text(input?.label_en??input?.custom_label_en,80),labelHu=text(input?.label_hu??input?.custom_label_hu,80);if(!labelEn||!labelHu)throw problem("WORKFLOW_LABEL_REQUIRED");
+    const key=stageKeyFromLabels(labelEn,labelHu),adminPhase=phases.find(row=>row.stage_key==="admin_approval"),position=Number(adminPhase?.position||Math.max(2,phases.length));
+    const responsibleId=text(input?.responsible_user_id||defaultResponsibleId,160)||null;if(responsibleId)responsibleUser(responsibleId,{optional:false});
+    const startsAt=input?.starts_at?optionalIso(input.starts_at):null,dueAt=input?.due_at?optionalIso(input.due_at):null;
+    const definition={key,stage_key:key,label_en:labelEn,label_hu:labelHu,position,stage_type:"intermediate",active:false,removable:true};
+    assertPhaseWindow(definition,{starts_at:startsAt,due_at:dueAt});
+    const shifts=db.prepare("SELECT id,position FROM job_workflow_phases WHERE job_id=? AND position>=? ORDER BY position DESC,id DESC").all(jobId,position);
+    for(const row of shifts){const next=Number(row.position)+1;if(next>MAX_WORKFLOW_STAGES+1)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});db.prepare("UPDATE job_workflow_phases SET position=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next,row.id);}
+    db.prepare(`INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,updated_by_user_id,updated_at)
+      VALUES(?,?,?,?,'intermediate',0,1,?,CURRENT_TIMESTAMP)`).run(key,Math.min(MAX_WORKFLOW_STAGES+1,position),labelEn,labelHu,userId);
+    db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,responsible_user_id,created_at,updated_at)
+      VALUES(?,?,?,1,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(jobId,key,position,startsAt,dueAt,responsibleId);
+    return key;
   }
   function firstEnabledStage(jobId){
     return phasesForJob(jobId).find(row=>row.enabled&&row.stage_key==="received")?.stage_key||null;
@@ -208,7 +245,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const conflict=findConflict(0,assigned.id,scheduledAt,duration);
       if(conflict)throw problem("SCHEDULE_CONFLICT",409,{conflict});
     }
-    const plan=normalizePlan(body?.workflow_phases??defaults.workflow_phases,{defaultResponsibleId:req.user.id,defaultStartAt:scheduledAt});
+    const suppliedPhases=Array.isArray(body?.workflow_phases??defaults.workflow_phases)?(body?.workflow_phases??defaults.workflow_phases):null;
+    const customPhases=(suppliedPhases||[]).filter(row=>Boolean(row?.job_specific)&&text(row?.custom_label_en||row?.label_en,80)&&text(row?.custom_label_hu||row?.label_hu,80));
+    const standardPhases=suppliedPhases?suppliedPhases.filter(row=>!customPhases.includes(row)):suppliedPhases;
+    const plan=normalizePlan(standardPhases,{defaultResponsibleId:req.user.id,defaultStartAt:scheduledAt});
+    if(plan.length+customPhases.length>MAX_WORKFLOW_STAGES+1)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});
     if(scheduledAt)stage=plan.find(row=>row.enabled&&row.stage_key!=="completed")?.stage_key||"received";
     const siteAddress=text(body?.site_address??body?.service_address??defaults.site_address??(locationType==="on_site"?client.address:""),1200)||null;
     const info=db.prepare(`INSERT INTO jobs(
@@ -221,6 +262,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const id=Number(info.lastInsertRowid);
     db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${newYorkYear()}-${String(id).padStart(5,"0")}`,id);
     writePlan(id,plan);
+    for(const custom of customPhases)addJobSpecificPhase(id,custom,req.user.id,{defaultResponsibleId:custom.responsible_user_id||owner.id});
     if(stage!==PIPELINE_STAGE)activatePhase(id,stage);
     const created=jobById(id);audit(req,"CREATE","jobs",String(id),null,created);return created;
   }
@@ -459,11 +501,20 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const id=integerId(req.params.id),job=id&&jobById(id);if(!job)return res.status(404).json({error:"JOB_NOT_FOUND"});
     res.json({job_id:id,current_stage:job.stage,ready_for_closeout:job.ready_for_closeout,phases:job.workflow_phases,definitions:stageDefinitions()});
   });
+  app.post("/api/jobs/:id/workflow-phases/custom",auth,admin,(req,res)=>{
+    const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
+    if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
+    try{
+      db.transaction(()=>addJobSpecificPhase(id,req.body||{},req.user.id,{defaultResponsibleId:before.workflow_owner_user_id||before.created_by_user_id||req.user.id}))();
+      const after=jobById(id);audit(req,"ADD_JOB_WORKFLOW_PHASE","jobs",String(id),before,after);res.status(201).json(after);
+    }catch(error){respondError(res,error);}
+  });
   app.put("/api/jobs/:id/workflow-phases",auth,admin,(req,res)=>{
     const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
     if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
     try{
-      const incoming=normalizePlan(req.body?.phases,{defaultResponsibleId:before.created_by_user_id||before.workflow_owner_user_id||req.user.id}),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
+      const jobSpecificDefinitions=before.workflow_phases.filter(row=>row.job_specific).map(row=>({key:row.stage_key,position:row.position,label_en:row.label_en||row.stage_key,label_hu:row.label_hu||row.stage_key,stage_type:row.stage_type||"intermediate"}));
+      const incoming=normalizePlan(req.body?.phases,{defaultResponsibleId:before.created_by_user_id||before.workflow_owner_user_id||req.user.id,extraDefinitions:jobSpecificDefinitions}),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
       const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
       const safe=incoming.map(row=>{
         const old=oldByKey.get(row.stage_key);
@@ -493,6 +544,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     try{
       const startsAt=req.body?.starts_at===undefined?phase.starts_at:optionalIso(req.body.starts_at);
       const dueAt=req.body?.due_at===undefined?phase.due_at:optionalIso(req.body.due_at);
+      assertPhaseWindow(stageByKey(stage,{includeInactive:true})||phase,{starts_at:startsAt,due_at:dueAt});
       const responsibleId=req.body?.responsible_user_id===undefined?phase.responsible_user_id:(text(req.body.responsible_user_id,160)||null);
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
