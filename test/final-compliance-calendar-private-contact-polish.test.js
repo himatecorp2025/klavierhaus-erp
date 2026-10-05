@@ -14,13 +14,14 @@ test("calendar keeps existing events separate from empty-slot creation",()=>{
   assert.match(source,/job\.stage==="completed"[\s\S]{0,260}r2OpenWorkflowHistory/);
 });
 
-test("New York job datetime conversion uses compact half-hour business controls while private appointments keep 15-minute precision",()=>{
-  const source=read("public/round2.js");
+test("New York job datetime conversion uses visible native date controls while private appointments keep 15-minute precision",()=>{
+  const source=read("public/round2.js"),css=read("public/styles.css");
   assert.match(source,/function r2NyInputToIso\(value\)[\s\S]{0,1800}rendered=r2NyParts\(result\)/);
   assert.match(source,/const R2_JOB_SLOT_MIN=30/);
-  assert.match(source,/type="date" name="'\+esc\(name\)\+'_date"/);
-  assert.match(source,/function r2CompactDateLabel/);
-  assert.match(source,/year===currentYear\?\`\$\{month\}\/\$\{day\}\`/);
+  assert.match(source,/class="r2-native-date-picker" type="date" name="'\+esc\(name\)\+'_date"/);
+  assert.doesNotMatch(source,/r2-date-picker-shell/);
+  assert.match(source,/required\?"required ":""/);
+  assert.match(css,/\.r2-native-date-picker\{[\s\S]{0,700}position:static!important;[\s\S]{0,500}opacity:1!important;[\s\S]{0,300}pointer-events:auto!important/);
   assert.match(source,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
   assert.match(source,/const scheduledLocal=r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:workflowEntry\|\|calendarEntry\}\)/);
   assert.match(source,/body\.scheduled_at=r2NyInputToIso\(scheduledLocal\)/);

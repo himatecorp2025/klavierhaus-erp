@@ -7,13 +7,11 @@ const path=require("node:path");
 const root=path.join(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 
-test("job scheduling uses a native calendar picker, compact MM/DD display and 30-minute New York business-time choices",()=>{
-  const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css");
+test("job scheduling uses directly visible native date pickers and 30-minute New York business-time choices",()=>{
+  const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css"),v6=read("public/v6.js");
   assert.match(ui,/const R2_JOB_SLOT_MIN=30/);
-  assert.match(ui,/type="date" name="'\+esc\(name\)\+'_date"/);
-  assert.match(ui,/function r2CompactDateLabel/);
-  assert.match(ui,/year===currentYear/);
-  assert.match(ui,/r2CalendarSvg/);
+  assert.match(ui,/class="r2-native-date-picker" type="date" name="'\+esc\(name\)\+'_date"/);
+  assert.doesNotMatch(ui,/r2-date-picker-shell/);
   assert.match(ui,/minutes\+=slotMinutes/);
   assert.match(ui,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
   assert.match(ui,/r2SnapJobMinutes/);
@@ -21,7 +19,12 @@ test("job scheduling uses a native calendar picker, compact MM/DD display and 30
   assert.match(api,/minute%30!==0/);
   assert.match(api,/clock<7\*60\|\|clock>20\*60/);
   assert.match(css,/\.r2-calendar-datetime/);
-  assert.match(css,/\.r2-native-date-picker/);
+  assert.match(css,/\.r2-native-date-picker\{[\s\S]{0,700}opacity:1!important/);
+  assert.match(css,/\.r2-native-date-picker::\-webkit-calendar-picker-indicator/);
+  assert.doesNotMatch(css,/\.r2-native-date-picker\{[\s\S]{0,700}opacity:0!important/);
+  assert.match(ui,/<div class="field"><span>\$\{tr\("Start","Kezdés"\)\}<\/span>\$\{r2DateTimeFields\("start_"/);
+  assert.match(ui,/<div class="field"><span>\$\{tr\("Start · New York","Kezdés · New York"\)/);
+  assert.match(v6,/<div class="field"><span>\$\{tr\("Start · New York \(optional\)","Kezdés · New York \(opcionális\)"\)/);
 });
 
 test("workflow jobs separate planned total, customer phase prices, deposits and internal phase costs",()=>{
