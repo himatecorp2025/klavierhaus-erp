@@ -1312,7 +1312,7 @@ async function renderProfile(){
   $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>void openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
 }
 async function openUserDialog(user=null){
-  const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role),canCreateProfessionalRole=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
   const workProfile=editing?await api("/api/users/"+encodeURIComponent(user.id)+"/work-profile").catch(()=>null):null;
   let notificationDelivery=true;
@@ -1330,12 +1330,19 @@ async function openUserDialog(user=null){
     <label class="field"><span>${tr("Status","Státusz")}</span><select name="status" ${isSelf?"disabled":""}><option value="Active" ${user?.status!=="Inactive"?"selected":""}>${tr("Active","Aktív")}</option><option value="Inactive" ${user?.status==="Inactive"?"selected":""}>${tr("Inactive","Inaktív")}</option></select></label>
     ${editing&&canManageNotifications?`<label class="cms-toggle-row full notification-delivery-admin"><span><strong>${tr("Notifications","Értesítések")}</strong><small>${tr("Only an administrator can disable notification delivery for this employee.","Az értesítések kézbesítését csak adminisztrátor tilthatja le ennél a munkavállalónál.")}</small></span><input name="notifications_enabled" type="checkbox" ${notificationDelivery?"checked":""}></label>`:""}
     <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user?.address||"")}"></label>
-    <section class="full user-skill-assignment"><div><strong>${tr("Professional roles & competencies","Szakmai munkakörök és kompetenciák")}</strong><small>${tr("Choose every type of work this person can perform. These are independent from System permissions.","Jelöld ki, milyen munkákat végezhet. Ez független a rendszerjogosultságtól.")}</small></div><div class="user-skill-choice-grid">${(state.staffSkills||[]).filter(skill=>Number(skill.active)!==0).map(skill=>`<label class="user-skill-choice"><input type="checkbox" name="skill_ids" value="${skill.id}" ${workProfile?.skill_ids?.includes(skill.id)?"checked":""}><span>${esc(operationalSkillLabel(skill))}</span></label>`).join("")}</div></section>
+    <section class="full user-skill-assignment"><div class="user-skill-assignment-head"><div><strong>${tr("Professional roles & competencies","Szakmai munkakörök és kompetenciák")}</strong><small>${tr("Choose every type of work this person can perform. These are independent from System permissions.","Jelöld ki, milyen munkákat végezhet. Ez független a rendszerjogosultságtól.")}</small></div>${canCreateProfessionalRole?`<button class="secondary-button user-skill-add-role" id="addUserProfessionalRole" type="button">＋ ${tr("Add job role","Új munkakör")}</button>`:""}</div><div class="user-skill-choice-grid" id="userSkillChoiceGrid">${(state.staffSkills||[]).filter(skill=>Number(skill.active)!==0).map(skill=>`<label class="user-skill-choice"><input type="checkbox" name="skill_ids" value="${skill.id}" ${workProfile?.skill_ids?.includes(skill.id)?"checked":""}><span>${esc(operationalSkillLabel(skill))}</span></label>`).join("")}</div></section>
     <label class="field"><span>${editing?tr("New password (optional)","Új jelszó (opcionális)"):tr("Temporary password","Ideiglenes jelszó")} ${editing?"":"*"}</span><input name="password" type="password" minlength="8" ${editing?"":"required"}></label>
     <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
   const roleSelect=$("#userEditor")?.elements?.role,scopeField=$("#managerScopeField");
   const syncManagerScope=()=>{const manager=roleSelect?.value==="MANAGER";scopeField?.classList.toggle("hidden",!manager);const select=scopeField?.querySelector("select");if(select)select.required=manager;};roleSelect?.addEventListener("change",syncManagerScope);syncManagerScope();
+  $("#addUserProfessionalRole")?.addEventListener("click",()=>{
+    if(typeof createOperationalSkillInline!=="function"){toast(tr("Job-role editor is unavailable.","A munkakörszerkesztő nem érhető el."),"error");return;}
+    createOperationalSkillInline("",saved=>{
+      if(!saved?.id)return;const grid=$("#userSkillChoiceGrid");if(!grid||grid.querySelector(`[name="skill_ids"][value="${CSS.escape(String(saved.id))}"]`))return;
+      const label=document.createElement("label");label.className="user-skill-choice new-role";label.innerHTML=`<input type="checkbox" name="skill_ids" value="${esc(saved.id)}" checked><span>${esc(operationalSkillLabel(saved))}</span>`;grid.append(label);label.scrollIntoView({behavior:"smooth",block:"nearest"});
+    });
+  });
   $("#userEditor").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     if(editing&&!body.password){delete body.password;delete body.password_confirmation;}

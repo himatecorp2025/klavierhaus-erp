@@ -14,7 +14,7 @@ const root=path.join(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 
 test("staff professional roles are separate from system permissions and persist on workflow phases",()=>{
-  const schema=read("server/schema.sql"),init=read("server/init-db.js"),api=read("server/operations-enhancements.js"),workflow=read("server/round2-workflow.js"),ui=read("public/round2.js"),app=read("public/app.js"),v6=read("public/v6.js");
+  const schema=read("server/schema.sql"),init=read("server/init-db.js"),api=read("server/operations-enhancements.js"),workflow=read("server/round2-workflow.js"),ui=read("public/round2.js"),app=read("public/app.js"),v6=read("public/v6.js"),css=read("public/styles.css");
   assert.match(schema,/manager_scope TEXT CHECK\(manager_scope IS NULL OR manager_scope IN \('INSIDE','OUTSIDE'\)\)/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS staff_skills\s*\(/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS user_staff_skills\s*\(/);
@@ -38,8 +38,18 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(app,/Inside Manager/);
   assert.match(app,/Outside Manager/);
   assert.match(app,/skill_ids/);
+  assert.match(app,/addUserProfessionalRole/);
+  assert.match(app,/createOperationalSkillInline/);
+  assert.match(app,/userSkillChoiceGrid/);
+  assert.match(ui,/workflow-phase-assignment/);
+  assert.match(ui,/workflow-phase-cost-editor/);
+  assert.match(ui,/data-cost-title/);
   assert.doesNotMatch(v6,/operationsSkillsSettingsCard\(users\)/);
   assert.match(v6,/primary_skill_id/);
+  assert.match(css,/user-skill-assignment-head/);
+  assert.match(css,/grid-template-columns:minmax\(0,1\.18fr\) minmax\(360px,\.82fr\)/);
+  assert.match(css,/workflow-cost-row[\s\S]{0,200}108px minmax\(130px,190px\) 88px 30px/);
+  assert.match(css,/workflow-phase-assignment[\s\S]{0,260}grid-template-rows:22px 42px minmax\(14px,auto\)/);
 });
 
 test("Milestone is the desktop and tablet home while phone stays on Workshop",()=>{

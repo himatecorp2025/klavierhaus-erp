@@ -4704,3 +4704,105 @@ input,textarea,select,
   color:var(--kh-gold)!important;
 }
 @media(max-width:760px){.milestone-icon-picker-grid{grid-template-columns:1fr 1fr}}
+
+/* Team member professional-role creation + workflow phase horizontal alignment */
+.user-skill-assignment-head{
+  display:flex!important;
+  align-items:flex-start!important;
+  justify-content:space-between!important;
+  gap:12px!important;
+}
+.user-skill-assignment-head>div{
+  display:grid!important;
+  gap:3px!important;
+  min-width:0;
+}
+.user-skill-add-role{
+  flex:0 0 auto;
+  min-height:34px!important;
+  padding:6px 10px!important;
+  white-space:nowrap;
+}
+.user-skill-choice.new-role{
+  border-color:color-mix(in srgb,var(--accent) 48%,var(--line))!important;
+  background:color-mix(in srgb,var(--accent) 7%,var(--surface))!important;
+}
+
+.workflow-phase-details{
+  grid-template-columns:minmax(0,1.18fr) minmax(360px,.82fr)!important;
+  align-items:start!important;
+  gap:12px!important;
+}
+.workflow-phase-assignment{
+  grid-template-columns:minmax(190px,1fr) 40px minmax(220px,1fr)!important;
+  gap:8px!important;
+  align-items:start!important;
+  min-width:0!important;
+}
+.workflow-phase-assignment>.field{
+  display:grid!important;
+  grid-template-rows:22px 42px minmax(14px,auto)!important;
+  align-content:start!important;
+  min-width:0!important;
+  margin:0!important;
+}
+.workflow-phase-assignment>.field>span{
+  display:flex!important;
+  align-items:flex-start!important;
+  min-height:22px!important;
+  margin:0!important;
+}
+.workflow-phase-assignment>.field select{
+  width:100%!important;
+  min-width:0!important;
+  height:42px!important;
+  min-height:42px!important;
+}
+.workflow-phase-assignment>.field small{
+  min-height:14px!important;
+  margin:4px 0 0!important;
+  line-height:1.25!important;
+}
+.workflow-skill-add{
+  align-self:start!important;
+  width:40px!important;
+  height:42px!important;
+  min-width:40px!important;
+  min-height:42px!important;
+  margin-top:22px!important;
+}
+.workflow-phase-cost-editor{
+  align-self:start!important;
+  min-width:0!important;
+}
+.workflow-phase-cost-list{
+  justify-items:start!important;
+}
+.workflow-cost-row{
+  grid-template-columns:108px minmax(130px,190px) 88px 30px!important;
+  justify-content:start!important;
+  width:auto!important;
+  max-width:100%!important;
+}
+.workflow-cost-row [data-cost-title]{
+  width:190px!important;
+  max-width:190px!important;
+}
+.workflow-cost-row [data-cost-amount]{
+  width:88px!important;
+}
+@media(max-width:1180px){
+  .workflow-phase-details{grid-template-columns:1fr!important}
+  .workflow-phase-assignment{grid-template-columns:minmax(180px,1fr) 40px minmax(210px,1fr)!important}
+}
+@media(max-width:720px){
+  .user-skill-assignment-head{display:grid!important}
+  .user-skill-add-role{justify-self:start}
+  .workflow-phase-assignment{grid-template-columns:minmax(0,1fr) 40px!important}
+  .workflow-phase-assignment>.field:last-child{grid-column:1/-1!important}
+  .workflow-phase-cost-list{justify-items:stretch!important}
+  .workflow-cost-row{grid-template-columns:1fr 82px 30px!important;width:100%!important}
+  .workflow-cost-row select{grid-column:1/-1!important}
+  .workflow-cost-row [data-cost-title]{width:auto!important;max-width:none!important}
+  .workflow-cost-row [data-cost-amount]{width:auto!important}
+}
