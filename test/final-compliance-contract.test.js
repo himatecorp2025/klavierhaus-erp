@@ -147,7 +147,7 @@ test("Round J connects preset material recipes to the mobile handoff and Admin c
 
 
 test("frontend collection selectors never use the single-element $ helper",()=>{
-  const files=["public/app.js","public/finance-tools.js","public/master-data.js","public/round2.js","public/round3.js","public/v6.js","public/workshop-shell.js","public/workshop-v2.js"];
+  const files=["public/app.js","public/finance-tools.js","public/master-data.js","public/operations-ui.js","public/round2.js","public/round3.js","public/v6.js","public/workshop-shell.js","public/workshop-v2.js"];
   const collectionMethod=/(^|[^$])\$\([^)]*\)\s*\.(forEach|map|filter|some|every|reduce)\s*\(/;
   const violations=[];
   for(const file of files){
