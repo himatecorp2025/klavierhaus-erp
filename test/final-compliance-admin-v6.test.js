@@ -133,7 +133,7 @@ test("approved intake can create a scheduled active calendar/workflow job with q
     title:"Concert prep approved",
     estimated_duration_min:180,
     estimated_revenue:1150,
-    scheduled_at:futureIso(0,15,15),
+    scheduled_at:futureIso(0,15,30),
     assigned_technician_id:"V6-T",
     workflow_phases:[
       {stage_key:"received",enabled:true},
@@ -146,7 +146,7 @@ test("approved intake can create a scheduled active calendar/workflow job with q
   assert.equal(converted.status,201,JSON.stringify(converted.payload));
   assert.equal(converted.payload.job.stage,"received");
   assert.equal(converted.payload.job.estimated_revenue,1150);
-  assert.equal(converted.payload.job.scheduled_at,futureIso(0,15,15));
+  assert.equal(converted.payload.job.scheduled_at,futureIso(0,15,30));
   ids.job=converted.payload.job.id;
 
   const workflow=await request("/api/jobs/workflow",{token:ids.admin});
