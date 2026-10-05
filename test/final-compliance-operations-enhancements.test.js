@@ -197,16 +197,17 @@ test("final theme normalization covers legacy fixed-light admin surfaces and nar
   assert.match(round3,/data-line-price/);
 });
 
-test("admin surfaces wire Milestone editing, skills management and complete export into existing Profile, Settings and CMS recovery",()=>{
-  const v6=read("public/v6.js"),ops=read("public/operations-ui.js");
+test("admin surfaces wire Milestone editing into Settings, retain user-level skill editing and keep complete export recovery",()=>{
+  const v6=read("public/v6.js"),ops=read("public/operations-ui.js"),app=read("public/app.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
-  assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.match(v6,/admin&&typeof operationsMilestoneProfileCard/);
+  assert.doesNotMatch(v6,/operationsSkillsSettingsCard\(users\)/);
+  assert.doesNotMatch(v6,/bindOperationsSkillsSettings\(\)/);
   assert.match(v6,/primary_skill_id/);
-  assert.match(v6,/bindOperationsSkillsSettings/);
+  assert.match(app,/skill_ids/);
   assert.match(v6,/operationsExportRecoveryCard/);
   assert.match(v6,/bindOperationsExportRecovery/);
   assert.match(ops,/function operationsMilestoneProfileCard/);
-  assert.match(ops,/function operationsSkillsSettingsCard/);
   assert.match(ops,/function operationsExportRecoveryCard/);
 });
