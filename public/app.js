@@ -524,15 +524,14 @@ function openDialog({title,eyebrow="",body,variant=""}){
 }
 function closeDialog(){const dialog=$("#appDialog");if(dialog?.open)dialog.close();}
 function openMiniDialog({title,eyebrow="",body}){
-  document.querySelector(".mini-dialog-backdrop")?.remove();
-  const overlay=document.createElement("div");overlay.className="mini-dialog-backdrop";overlay.innerHTML=`<section class="mini-dialog-card" role="dialog" aria-modal="true"><header><div><span class="eyebrow">${esc(eyebrow)}</span><h3>${esc(title)}</h3></div><button type="button" class="icon-button" data-mini-close aria-label="${esc(tr("Close","Bezárás"))}">×</button></header><div class="mini-dialog-body">${body}</div></section>`;
-  document.body.append(overlay);
-  const close=()=>overlay.remove();
-  overlay.addEventListener("click",event=>{if(event.target===overlay||event.target.closest("[data-mini-close]")){event.preventDefault();close();}});
-  const onKey=event=>{if(event.key==="Escape"&&document.body.contains(overlay)){event.preventDefault();close();document.removeEventListener("keydown",onKey);}};
-  document.addEventListener("keydown",onKey);
-  queueMicrotask(()=>overlay.querySelector("input,select,textarea,button")?.focus());
-  return {root:overlay,close};
+  document.querySelector(".mini-dialog")?.remove();
+  const dialog=document.createElement("dialog");dialog.className="mini-dialog";dialog.innerHTML=`<section class="mini-dialog-card"><header><div><span class="eyebrow">${esc(eyebrow)}</span><h3>${esc(title)}</h3></div><button type="button" class="icon-button" data-mini-close aria-label="${esc(tr("Close","Bezárás"))}">×</button></header><div class="mini-dialog-body">${body}</div></section>`;
+  document.body.append(dialog);
+  const close=()=>{if(dialog.open)dialog.close();dialog.remove();};
+  dialog.addEventListener("click",event=>{if(event.target===dialog||event.target.closest("[data-mini-close]")){event.preventDefault();close();}});
+  dialog.addEventListener("cancel",event=>{event.preventDefault();close();});
+  dialog.showModal();queueMicrotask(()=>dialog.querySelector("input,select,textarea,button")?.focus());
+  return {root:dialog,close};
 }
 function openQuickClientCreate({seedName="",onSaved}={}){
   const mini=openMiniDialog({title:tr("New client","Új ügyfél"),eyebrow:tr("QUICK MASTER DATA","GYORS TÖRZSADAT"),body:`<form id="quickClientForm" class="form-grid">
