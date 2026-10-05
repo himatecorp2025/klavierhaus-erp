@@ -1297,6 +1297,8 @@ async function renderProfile(){
 }
 async function openUserDialog(user=null){
   const editing=Boolean(user),isSelf=editing&&String(user.id)===String(state.user?.id),canManageNotifications=["ADMIN","SUPERADMIN"].includes(state.user?.role);
+  if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
+  const workProfile=editing?await api("/api/users/"+encodeURIComponent(user.id)+"/work-profile").catch(()=>null):null;
   let notificationDelivery=true;
   if(editing&&canManageNotifications){
     try{const pref=await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery");notificationDelivery=Boolean(pref.notifications_enabled);}
@@ -1305,27 +1307,33 @@ async function openUserDialog(user=null){
   openDialog({title:editing?tr("Edit team member","Csapattag szerkesztése"):tr("New user","Új felhasználó"),eyebrow:tr("USER MANAGEMENT","FELHASZNÁLÓKEZELÉS"),body:`<form id="userEditor" class="form-grid">
     <label class="field"><span>${tr("Name","Név")} *</span><input name="name" value="${esc(user?.name||"")}" required autofocus></label>
     <label class="field"><span>${tr("Role","Szerepkör")} *</span><select name="role"><option value="WORKER" ${user?.role==="WORKER"?"selected":""}>${tr("Technician","Technikus")}</option><option value="MANAGER" ${user?.role==="MANAGER"?"selected":""}>${tr("Manager","Menedzser")}</option><option value="ADMIN" ${user?.role==="ADMIN"?"selected":""}>${tr("Admin","Admin")}</option></select></label>
+    <label class="field" id="managerScopeField"><span>${tr("Manager type","Menedzser típusa")}</span><select name="manager_scope"><option value="">—</option><option value="INSIDE" ${workProfile?.manager_scope==="INSIDE"?"selected":""}>${tr("Inside Manager","Belső menedzser")}</option><option value="OUTSIDE" ${workProfile?.manager_scope==="OUTSIDE"?"selected":""}>${tr("Outside Manager","Külső menedzser")}</option></select></label>
     <label class="field"><span>${tr("Login email","Belépési e-mail")} *</span><input name="email" type="email" value="${esc(user?.email||"")}" required></label>
     <label class="field"><span>${tr("Contact email","Kapcsolati e-mail")} ${editing?"":"*"}</span><input name="contact_email" type="email" value="${esc(user?.contact_email||"")}" ${editing?"":"required"}></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(user?.phone||"")}"></label>
     <label class="field"><span>${tr("Status","Státusz")}</span><select name="status" ${isSelf?"disabled":""}><option value="Active" ${user?.status!=="Inactive"?"selected":""}>${tr("Active","Aktív")}</option><option value="Inactive" ${user?.status==="Inactive"?"selected":""}>${tr("Inactive","Inaktív")}</option></select></label>
     ${editing&&canManageNotifications?`<label class="cms-toggle-row full notification-delivery-admin"><span><strong>${tr("Notifications","Értesítések")}</strong><small>${tr("Only an administrator can disable notification delivery for this employee.","Az értesítések kézbesítését csak adminisztrátor tilthatja le ennél a munkavállalónál.")}</small></span><input name="notifications_enabled" type="checkbox" ${notificationDelivery?"checked":""}></label>`:""}
     <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" value="${esc(user?.address||"")}"></label>
+    <section class="full user-skill-assignment"><div><strong>${tr("Professional roles & competencies","Szakmai munkakörök és kompetenciák")}</strong><small>${tr("Choose every type of work this person can perform. These are independent from System permissions.","Jelöld ki, milyen munkákat végezhet. Ez független a rendszerjogosultságtól.")}</small></div><div class="user-skill-choice-grid">${(state.staffSkills||[]).filter(skill=>Number(skill.active)!==0).map(skill=>`<label class="user-skill-choice"><input type="checkbox" name="skill_ids" value="${skill.id}" ${workProfile?.skill_ids?.includes(skill.id)?"checked":""}><span>${esc(operationalSkillLabel(skill))}</span></label>`).join("")}</div></section>
     <label class="field"><span>${editing?tr("New password (optional)","Új jelszó (opcionális)"):tr("Temporary password","Ideiglenes jelszó")} ${editing?"":"*"}</span><input name="password" type="password" minlength="8" ${editing?"":"required"}></label>
     <label class="field"><span>${editing?tr("Confirm new password","Új jelszó újra"):tr("Confirm password","Jelszó újra")} ${editing?"":"*"}</span><input name="password_confirmation" type="password" minlength="8" ${editing?"":"required"}></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${editing?tr("Save changes","Módosítások mentése"):tr("Create user","Felhasználó létrehozása")}</button></div></form>`});
+  const roleSelect=$("#userEditor")?.elements?.role,scopeField=$("#managerScopeField");
+  const syncManagerScope=()=>scopeField?.classList.toggle("hidden",roleSelect?.value!=="MANAGER");roleSelect?.addEventListener("change",syncManagerScope);syncManagerScope();
   $("#userEditor").addEventListener("submit",async event=>{
     event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));
     if(editing&&!body.password){delete body.password;delete body.password_confirmation;}
     if(editing&&isSelf)delete body.status;
     const notificationsEnabled=editing&&canManageNotifications?Boolean(event.currentTarget.elements.notifications_enabled?.checked):null;
-    delete body.notifications_enabled;
+    const skillIds=[...event.currentTarget.querySelectorAll('[name="skill_ids"]:checked')].map(input=>Number(input.value)).filter(Boolean),managerScope=body.role==="MANAGER"?(body.manager_scope||null):null;
+    delete body.notifications_enabled;delete body.skill_ids;delete body.manager_scope;
     try{
       const updated=await api(editing?`/api/users/${encodeURIComponent(user.id)}`:"/api/users",{method:editing?"PUT":"POST",body:JSON.stringify(body)});
+      await api("/api/users/"+encodeURIComponent(updated.id)+"/work-profile",{method:"PUT",body:JSON.stringify({manager_scope:managerScope,skill_ids:skillIds})});await loadOperationalProfiles({refresh:true});
       if(editing&&canManageNotifications)await api("/api/admin/users/"+encodeURIComponent(user.id)+"/notification-delivery",{method:"PUT",body:JSON.stringify({notifications_enabled:notificationsEnabled})});
       closeDialog();toast(editing?tr("Team member updated.","Csapattag frissítve."):tr("User created.","Felhasználó létrehozva."),"success");
       if(editing&&isSelf){state.user={...state.user,...updated};$("#profileInitials").textContent=initials(state.user.name);}
-      await renderProfile();
+      await renderSettings();
     }catch(error){toast(humanError(error),"error");}
   });
 }
