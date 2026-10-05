@@ -39,7 +39,7 @@ async function login(email){
   const result=await request("/api/login",{method:"POST",body:{email,password:"WorkshopV5!"}});
   assert.equal(result.status,200,JSON.stringify(result.payload));return result.payload.token;
 }
-function futureIso(day,hour=14,minute=0){return new Date(Date.UTC(2036,5,10+day,hour,minute,0)).toISOString();}
+function futureIso(day,hour=14,minute=0){return new Date(Date.UTC(2036,5,10+day,hour,minute,0)).toISOString();}\nfunction recentBusinessIso(daysAgo=1,hourUtc=14){const d=new Date();d.setUTCDate(d.getUTCDate()-daysAgo);d.setUTCHours(hourUtc,0,0,0);return d.toISOString();}
 
 test.before(async()=>{
   const init=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env,encoding:"utf8"});
@@ -96,7 +96,7 @@ test("job-specific workflow skips disabled intermediates but keeps Admin Approva
 });
 
 test("calendar reschedule updates the same workflow job record",async()=>{
-  const moved=futureIso(3,15,15);
+  const moved=futureIso(3,15,30);
   const result=await request("/api/jobs/"+globalThis.jobId+"/schedule",{token:globalThis.admin,method:"PATCH",body:{
     scheduled_at:moved,estimated_duration_min:165,assigned_technician_id:"WV5-T"
   }});
@@ -115,8 +115,7 @@ test("calendar reschedule updates the same workflow job record",async()=>{
 });
 
 test("phase deadline/blocker drives overdue workshop overview drilldown",async()=>{
-  const pastStartDate=new Date(Date.now()-4*3600000);pastStartDate.setUTCMinutes(Math.floor(pastStartDate.getUTCMinutes()/15)*15,0,0);const pastStart=pastStartDate.toISOString();
-  const pastDate=new Date(Date.now()-3600000);pastDate.setUTCMinutes(Math.floor(pastDate.getUTCMinutes()/15)*15,0,0);const past=pastDate.toISOString();
+  const pastStart=recentBusinessIso(1,14),past=recentBusinessIso(1,17);
   const update=await request("/api/jobs/"+globalThis.jobId+"/workflow-phases/qa_review",{token:globalThis.admin,method:"PATCH",body:{
     starts_at:pastStart,due_at:past,blocker_code:"material_procurement",blocker_note:"Awaiting action parts"
   }});
