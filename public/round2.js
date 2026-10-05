@@ -27,7 +27,7 @@ const r2IsAdmin=()=>["ADMIN","SUPERADMIN"].includes(state.user?.role);
 
 function r2Definitions(){return state.r2Workflow?.stages?.length?state.r2Workflow.stages:R2_STAGES.map(row=>({key:row.key,label_en:row.en,label_hu:row.hu,position:row.position}));}
 function r2ActiveDefinitions(){return r2Definitions().filter(stage=>stage.key!=="completed");}
-function r2StageLabel(stage){if(stage==="cancelled")return tr("Cancelled","Törölt / megszakított");const row=r2Definitions().find(item=>item.key===stage)||R2_STAGES.find(item=>item.key===stage);return row?state.language==="hu"?(row.label_hu||row.hu):(row.label_en||row.en):stage||"";}
+function r2StageLabel(stage){const source=stage&&typeof stage==="object"?stage:null,key=source?(source.stage_key||source.key):stage;if(key==="cancelled")return tr("Cancelled","Törölt / megszakított");const row=source||r2Definitions().find(item=>item.key===key)||R2_STAGES.find(item=>item.key===key);return row?state.language==="hu"?(row.label_hu||row.hu||key):(row.label_en||row.en||key):key||"";}
 function r2FixedStage(key){return ["received","admin_approval","completed"].includes(key);}
 function r2BlockerLabel(code){const pair=R2_BLOCKERS[code];return pair?(state.language==="hu"?pair[1]:pair[0]):tr("No delay reason","Nincs elakadás-ok");}
 function r2NyParts(date){
@@ -52,6 +52,70 @@ function r2NyInputToIso(value){
   const result=new Date(guess),rendered=r2NyParts(result);
   if(+rendered.year!==wanted.year||+rendered.month!==wanted.month||+rendered.day!==wanted.day||+rendered.hour!==wanted.hour||+rendered.minute!==wanted.minute)throw new Error("INVALID_SCHEDULE_TIME");
   return result.toISOString();
+}
+function r2QuarterLocalValue(value){
+  let raw=String(value||"").trim();if(!raw)return "";
+  if(/(?:Z|[+-]\d{2}:\d{2})$/.test(raw))raw=r2IsoToNyInput(raw);
+  const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);if(!match)return "";
+  const base=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],0,0,0)),minutes=Math.round((+match[4]*60+(+match[5]))/R2_SLOT_MIN)*R2_SLOT_MIN;
+  base.setUTCMinutes(minutes);
+  return base.toISOString().slice(0,16);
+}
+function r2QuarterTimeOptions(selected="",allowEmpty=true){
+  const normalized=r2QuarterLocalValue("2000-01-01T"+String(selected||"00:00")).slice(11,16);
+  let html=allowEmpty?'<option value="">—</option>':"";
+  for(let minutes=0;minutes<24*60;minutes+=R2_SLOT_MIN){
+    const value=r2Pad(Math.floor(minutes/60))+":"+r2Pad(minutes%60);
+    html+='<option value="'+value+'" '+(value===normalized?'selected':'')+'>'+value+'</option>';
+  }
+  return html;
+}
+function r2DateTimeFields(name,value,{required=false}={}){
+  const normalized=r2QuarterLocalValue(value),date=normalized.slice(0,10),time=normalized.slice(11,16);
+  return '<div class="r2-quarter-datetime" data-r2-datetime="'+esc(name)+'"><input type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" '+(required?"required":"")+'>' +
+    '<select name="'+esc(name)+'_time" '+(required?"required":"")+'>'+r2QuarterTimeOptions(time,!required)+'</select></div>';
+}
+function r2DateTimeValue(root,name){
+  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  return date&&time?date+"T"+time:"";
+}
+function r2ReadDateTime(root,name,{required=false}={}){
+  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  if(!date&&!time&&!required)return "";
+  if(!date||!time)throw new Error("INVALID_SCHEDULE_TIME");
+  const value=date+"T"+time;if(!r2QuarterLocalValue(value))throw new Error("INVALID_SCHEDULE_TIME");return value;
+}
+function r2SetDateTime(root,name,value){
+  const normalized=r2QuarterLocalValue(value),date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
+  if(date)date.value=normalized.slice(0,10);if(time)time.value=normalized.slice(11,16);
+}
+function r2WallAddMinutes(value,minutes){
+  const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)return "";
+  const date=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],+match[4],+match[5]));date.setUTCMinutes(date.getUTCMinutes()+Number(minutes||0));return date.toISOString().slice(0,16);
+}
+function r2IsLogisticsStage(stage){
+  const key=String(stage?.stage_key||stage?.key||stage||"").toLowerCase(),labels=[stage?.label_en,stage?.label_hu].filter(Boolean).join(" ").toLowerCase();
+  return key==="received"||/(arrival|inbound|receiv|beérkez|érkez)/i.test(key+" "+labels)||/(delivery|dispatch|final handover|kiszáll|elszáll|szállítás)/i.test(key+" "+labels);
+}
+function r2WorkflowDefinitions(plan=[]){
+  const defs=r2ActiveDefinitions().map(stage=>({...stage,job_specific:false})),keys=new Set(defs.map(stage=>stage.key));
+  const adminPosition=Number(defs.find(stage=>stage.key==="admin_approval")?.position||99);let draftOffset=0;
+  for(const phase of Array.isArray(plan)?plan:[]){
+    const key=String(phase?.stage_key||phase?.key||"");if(!key||key==="completed"||keys.has(key))continue;
+    draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
+  }
+  return defs.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
+}
+function r2BindWorkflowTiming(form){
+  $("[data-workflow-phase]",form).forEach(row=>{
+    const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};if(!r2IsLogisticsStage(stage))return;
+    const startName="start_"+stage.key,dueName="due_"+stage.key;
+    const enforce=()=>{
+      const start=r2DateTimeValue(row,startName);if(!start)return;const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(row,dueName);
+      if(!due||new Date(r2NyInputToIso(due)).getTime()<new Date(r2NyInputToIso(minimum)).getTime())r2SetDateTime(row,dueName,minimum);
+    };
+    row.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
+  });
 }
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
 function r2Today(){return r2NyDate(new Date());}
@@ -116,31 +180,36 @@ function r2MinutesInput(date,minutes){const safe=Math.max(0,Math.min(1439,minute
 function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
 
 function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null}={}){
-  const map=new Map((plan||[]).map(row=>[row.stage_key,row]));
-  return r2ActiveDefinitions().map(stage=>{
+  const source=Array.isArray(plan)?plan:[],map=new Map(source.map(row=>[String(row.stage_key||row.key||""),row]));
+  return r2WorkflowDefinitions(source).map(stage=>{
     const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):!stage.removable);
     const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
     const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||defaultResponsible||state.user?.id||"";
-    const status=existing?.visual_status||"";
-    return `<div class="workflow-plan-row ${status?"phase-status-"+status:""}" data-workflow-phase="${stage.key}">
-      <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${stage.key}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?stage.label_hu:stage.label_en)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):tr("Include this phase","Fázis használata")}</small></span></label>
-      <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_${stage.key}" required>${r2ResponsibleOptions(responsible)}</select></label>
-      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span><input type="datetime-local" step="900" name="start_${stage.key}" value="${esc(start)}"></label>
-      <label class="field"><span>${tr("Expected completion","Várható befejezés")}</span><input type="datetime-local" step="900" name="due_${stage.key}" value="${esc(due)}"></label>
+    const status=existing?.visual_status||"",labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||stage.key;
+    const jobSpecific=Boolean(existing?.job_specific||stage.job_specific);
+    return `<div class="workflow-plan-row ${status?"phase-status-"+status:""}" data-workflow-phase="${esc(stage.key)}" data-phase-position="${Number(existing?.position||stage.position||0)}" data-phase-label-en="${esc(labelEn)}" data-phase-label-hu="${esc(labelHu)}" data-job-specific="${jobSpecific?"1":"0"}">
+      <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${esc(stage.key)}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?labelHu:labelEn)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):jobSpecific?tr("Only for this job","Csak ehhez a munkához"):tr("Include this phase","Fázis használata")}</small></span></label>
+      <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_${esc(stage.key)}" required>${r2ResponsibleOptions(responsible)}</select></label>
+      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start)}</label>
+      <label class="field"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu})?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
     </div>`;
   }).join("");
 }
 function r2ReadWorkflowPlan(form){
-  return r2ActiveDefinitions().map(stage=>{
-    const enabled=r2FixedStage(stage.key)?true:Boolean(form.querySelector(`[name="phase_${stage.key}"]`)?.checked);
-    const startValue=form.querySelector(`[name="start_${stage.key}"]`)?.value||"";
-    const dueValue=form.querySelector(`[name="due_${stage.key}"]`)?.value||"";
-    const responsible=form.querySelector(`[name="responsible_${stage.key}"]`)?.value||state.user?.id||"";
-    return {stage_key:stage.key,enabled,starts_at:startValue?r2NyInputToIso(startValue):null,due_at:dueValue?r2NyInputToIso(dueValue):null,responsible_user_id:responsible||null};
+  return $$("[data-workflow-phase]",form).map(row=>{
+    const key=String(row.dataset.workflowPhase||""),enabled=r2FixedStage(key)?true:Boolean(row.querySelector(`[name="phase_${CSS.escape(key)}"]`)?.checked);
+    const startValue=r2ReadDateTime(row,"start_"+key),dueValue=r2ReadDateTime(row,"due_"+key),responsible=row.querySelector(`[name="responsible_${CSS.escape(key)}"]`)?.value||state.user?.id||"";
+    const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||key,jobSpecific=row.dataset.jobSpecific==="1";
+    const startsAt=startValue?r2NyInputToIso(startValue):null,dueAt=dueValue?r2NyInputToIso(dueValue):null;
+    if(startsAt&&dueAt){
+      const duration=(new Date(dueAt).getTime()-new Date(startsAt).getTime())/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");
+      if(r2IsLogisticsStage({key,label_en:labelEn,label_hu:labelHu})&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
+    }
+    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,responsible_user_id:responsible||null,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
   });
 }
 
-function r2PlannedCard(job){
+function r2PlannedCard(job){function r2PlannedCard(job){
   return `<article class="job-card planned-card" data-job-id="${job.id}">
     <div class="job-card-top"><span class="job-code">${esc(job.job_code||("#"+job.id))}</span><span class="priority-chip">${tr("PLANNED","TERVEZETT")}</span></div>
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
