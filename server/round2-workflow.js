@@ -242,16 +242,17 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   }
   function writePlan(jobId,plan,{preserveProgress=false,updatedByUserId=null}={}){
     const existing=new Map(phasesForJob(jobId).map(row=>[row.stage_key,row]));
-    const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,activated_at,completed_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(job_id,stage_key) DO UPDATE SET position=excluded.position,enabled=excluded.enabled,starts_at=excluded.starts_at,due_at=excluded.due_at,customer_price=excluded.customer_price,responsible_user_id=excluded.responsible_user_id,
+    const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,responsibility_skill_id,activated_at,completed_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(job_id,stage_key) DO UPDATE SET position=excluded.position,enabled=excluded.enabled,starts_at=excluded.starts_at,due_at=excluded.due_at,customer_price=excluded.customer_price,responsible_user_id=excluded.responsible_user_id,responsibility_skill_id=excluded.responsibility_skill_id,
       activated_at=CASE WHEN ?=1 THEN job_workflow_phases.activated_at ELSE excluded.activated_at END,
       completed_at=CASE WHEN ?=1 THEN job_workflow_phases.completed_at ELSE excluded.completed_at END,
       updated_at=CURRENT_TIMESTAMP`);
     for(const row of plan){
       const old=existing.get(row.stage_key);
-      upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.starts_at,row.due_at,row.customer_price||0,row.responsible_user_id,
+      upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.starts_at,row.due_at,row.customer_price||0,row.responsible_user_id,row.responsibility_skill_id||null,
         preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
+      if(row.responsibility_skill_id){const job=db.prepare("SELECT assigned_technician_id FROM jobs WHERE id=?").get(jobId),effectiveUser=row.responsible_user_id||job?.assigned_technician_id||null;if(effectiveUser)ensureUserSkill(effectiveUser,row.responsibility_skill_id,updatedByUserId);}
       if(Array.isArray(row.costs))replacePhaseCosts(jobId,row.stage_key,row.costs,updatedByUserId);
     }
   }
@@ -261,6 +262,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const labelHu=text(input?.label_hu??input?.custom_label_hu,80)||labelEn;
     const key=stageKeyFromLabels(labelEn,labelHu),adminPhase=phases.find(row=>row.stage_key==="admin_approval"),position=Number(adminPhase?.position||Math.max(2,phases.length));
     const responsibleId=text(input?.responsible_user_id||defaultResponsibleId,160)||null;if(responsibleId)responsibleUser(responsibleId,{optional:false});
+    const responsibilitySkillId=integerId(input?.responsibility_skill_id)||null;if(responsibilitySkillId)responsibilitySkill(responsibilitySkillId,{optional:false});
     const startsAt=input?.starts_at?optionalQuarterIso(input.starts_at):null,dueAt=input?.due_at?optionalQuarterIso(input.due_at):null;
     const customerPrice=money(input?.customer_price??0);if(!(customerPrice>=0))throw problem("INVALID_WORKFLOW_CUSTOMER_PRICE");
     const definition={key,stage_key:key,label_en:labelEn,label_hu:labelHu,position,stage_type:"intermediate",active:false,removable:true};
@@ -269,8 +271,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     for(const row of shifts){const next=Number(row.position)+1;if(next>MAX_WORKFLOW_STAGES+1)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});db.prepare("UPDATE job_workflow_phases SET position=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next,row.id);}
     db.prepare(`INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,updated_by_user_id,updated_at)
       VALUES(?,?,?,?,'intermediate',0,1,?,CURRENT_TIMESTAMP)`).run(key,Math.min(MAX_WORKFLOW_STAGES+1,position),labelEn,labelHu,userId);
-    db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,created_at,updated_at)
-      VALUES(?,?,?,1,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(jobId,key,position,startsAt,dueAt,customerPrice,responsibleId);
+    db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,responsibility_skill_id,created_at,updated_at)
+      VALUES(?,?,?,1,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(jobId,key,position,startsAt,dueAt,customerPrice,responsibleId,responsibilitySkillId);
+    if(responsibilitySkillId){const job=db.prepare("SELECT assigned_technician_id FROM jobs WHERE id=?").get(jobId);ensureUserSkill(responsibleId||job?.assigned_technician_id||null,responsibilitySkillId,userId);}
     if(Array.isArray(input?.costs))replacePhaseCosts(jobId,key,input.costs,userId);
     return key;
   }
