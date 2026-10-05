@@ -5,7 +5,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const test=require("node:test");
 const AdmZip=require("adm-zip");
-const {createWorkbook}=require("../server/operations-enhancements");
+const {createWorkbook,excelSafeTable}=require("../server/operations-enhancements");
 
 const root=path.join(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
@@ -82,6 +82,8 @@ test("complete database export creates a structured native XLSX workbook and pro
   assert.match(api,/SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name/);
   assert.match(api,/Manifest/);
   assert.match(api,/schema_sql/);
+  assert.match(api,/Export Notes/);
+  assert.match(api,/__part_2/);
   assert.match(api,/Content-Disposition/);
   assert.match(api,/password_hash/);
   assert.match(api,/password\|secret\|token\|code_hash\|signature/);
@@ -103,6 +105,11 @@ test("complete database export creates a structured native XLSX workbook and pro
   const workbook=zip.readAsText("xl/workbook.xml");
   assert.match(workbook,/Manifest/);
   assert.match(workbook,/clients/);
+  const safe=excelSafeTable(["content"],[{content:"x".repeat(65010)}]);
+  assert.deepEqual(safe.headers,["content","content__part_2","content__part_3"]);
+  assert.equal(safe.rows[0].content.length,30000);
+  assert.equal(safe.rows[0].content__part_2.length,30000);
+  assert.equal(safe.rows[0].content__part_3.length,5010);
 });
 
 test("final theme normalization covers legacy fixed-light admin surfaces and narrows invoice quantity",()=>{
