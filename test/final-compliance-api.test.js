@@ -667,7 +667,36 @@ test("Dynamic workflow supports seven active reorderable phases plus a separate 
   assert.deepEqual(removeRegulation.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
 });
 
-test("Job-specific phases stay isolated and workflow/calendar APIs enforce quarter-hour logistics timing",async()=>{\n  const token=shared.adminToken;\n  const first=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase A"}});\n  const second=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase B"}});\n  assert.equal(first.status,201,JSON.stringify(first.payload));\n  assert.equal(second.status,201,JSON.stringify(second.payload));\n\n  const added=await request("/api/jobs/"+first.payload.id+"/workflow-phases/custom",{token,method:"POST",body:{label_en:"Delivery Window",label_hu:"Kiszállítási ablak"}});\n  assert.equal(added.status,201,JSON.stringify(added.payload));\n  const custom=added.payload.workflow_phases.find(phase=>phase.label_en==="Delivery Window");\n  assert.ok(custom);\n  assert.equal(custom.job_specific,true);\n  const untouched=await request("/api/jobs/"+second.payload.id,{token});\n  assert.equal(untouched.status,200,JSON.stringify(untouched.payload));\n  assert.equal(untouched.payload.workflow_phases.some(phase=>phase.stage_key===custom.stage_key),false);\n\n  const invalidQuarter=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:07:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});\n  assert.equal(invalidQuarter.status,400,JSON.stringify(invalidQuarter.payload));\n  assert.equal(invalidQuarter.payload.error,"INVALID_SCHEDULE_TIME");\n\n  const activated=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:00:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});\n  assert.equal(activated.status,200,JSON.stringify(activated.payload));\n  const tooShort=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T16:45:00.000Z"}});\n  assert.equal(tooShort.status,400,JSON.stringify(tooShort.payload));\n  assert.equal(tooShort.payload.error,"WORKFLOW_LOGISTICS_MINIMUM_WINDOW");\n  const validWindow=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T17:00:00.000Z"}});\n  assert.equal(validWindow.status,200,JSON.stringify(validWindow.payload));\n});\n\ntest("Workflow timing can move backward and forward and recomputes colors",async()=>{
+test("Job-specific phases stay isolated and workflow/calendar APIs enforce quarter-hour logistics timing",async()=>{
+  const token=shared.adminToken;
+  const first=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase A"}});
+  const second=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase B"}});
+  assert.equal(first.status,201,JSON.stringify(first.payload));
+  assert.equal(second.status,201,JSON.stringify(second.payload));
+
+  const added=await request("/api/jobs/"+first.payload.id+"/workflow-phases/custom",{token,method:"POST",body:{label_en:"Delivery Window",label_hu:"Kiszállítási ablak"}});
+  assert.equal(added.status,201,JSON.stringify(added.payload));
+  const custom=added.payload.workflow_phases.find(phase=>phase.label_en==="Delivery Window");
+  assert.ok(custom);
+  assert.equal(custom.job_specific,true);
+  const untouched=await request("/api/jobs/"+second.payload.id,{token});
+  assert.equal(untouched.status,200,JSON.stringify(untouched.payload));
+  assert.equal(untouched.payload.workflow_phases.some(phase=>phase.stage_key===custom.stage_key),false);
+
+  const invalidQuarter=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:07:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});
+  assert.equal(invalidQuarter.status,400,JSON.stringify(invalidQuarter.payload));
+  assert.equal(invalidQuarter.payload.error,"INVALID_SCHEDULE_TIME");
+
+  const activated=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:00:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});
+  assert.equal(activated.status,200,JSON.stringify(activated.payload));
+  const tooShort=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T16:45:00.000Z"}});
+  assert.equal(tooShort.status,400,JSON.stringify(tooShort.payload));
+  assert.equal(tooShort.payload.error,"WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
+  const validWindow=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T17:00:00.000Z"}});
+  assert.equal(validWindow.status,200,JSON.stringify(validWindow.payload));
+});
+
+test("Workflow timing can move backward and forward and recomputes colors",async()=>{
   const token=shared.adminToken;
   const created=await request("/api/jobs",{token,method:"POST",body:{
     client_id:shared.client.id,
