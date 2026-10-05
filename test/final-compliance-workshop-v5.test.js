@@ -73,7 +73,7 @@ test("job-specific workflow skips disabled intermediates but keeps Admin Approva
     client_id:globalThis.clientId,piano_id:globalThis.pianoId,title:"Selective workflow",
     scheduled_at:futureIso(0,14),estimated_duration_min:120,assigned_technician_id:"WV5-T",
     workflow_phases:[
-      {stage_key:"received",enabled:true,due_at:futureIso(0,16)},
+      {stage_key:"received",enabled:true,due_at:futureIso(0,17)},
       {stage_key:"in_progress",enabled:false},
       {stage_key:"qa_review",enabled:true,due_at:futureIso(1,16)},
       {stage_key:"admin_approval",enabled:false},
@@ -115,7 +115,7 @@ test("calendar reschedule updates the same workflow job record",async()=>{
 });
 
 test("phase deadline/blocker drives overdue workshop overview drilldown",async()=>{
-  const past=new Date(Date.now()-3600000).toISOString();
+  const pastDate=new Date(Date.now()-3600000);pastDate.setUTCMinutes(Math.floor(pastDate.getUTCMinutes()/15)*15,0,0);const past=pastDate.toISOString();
   const update=await request("/api/jobs/"+globalThis.jobId+"/workflow-phases/qa_review",{token:globalThis.admin,method:"PATCH",body:{
     due_at:past,blocker_code:"material_procurement",blocker_note:"Awaiting action parts"
   }});
