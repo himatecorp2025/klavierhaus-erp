@@ -4499,3 +4499,11 @@ input,textarea,select,
 
 @media(max-width:1100px){.milestone-direct-media-grid{grid-template-columns:1fr 1fr}.ms-shortcuts-grid{grid-template-columns:1fr 1fr!important}.ms-footer-grid{grid-template-columns:1fr!important;height:auto!important}.ms-footer-grid .ms-craft,.ms-footer-grid .ms-quote{height:184px!important}}
 @media(max-width:820px){.ms-growth-head{height:190px!important;min-height:190px!important}.ms-roadmap-panel{height:410px!important}.ms-roadmap-track{grid-template-columns:repeat(var(--major-count),210px)!important;min-width:calc(var(--major-count) * 210px)!important}.milestone-direct-media-grid{grid-template-columns:1fr 1fr}}
+
+/* Milestone text-only vertical refinement: keep nodes/icons fixed, lift labels slightly. */
+.roadmap-major > b,
+.roadmap-major > h3,
+.roadmap-major > p,
+.roadmap-major > .roadmap-substeps{
+  transform:translateY(-10px);
+}
