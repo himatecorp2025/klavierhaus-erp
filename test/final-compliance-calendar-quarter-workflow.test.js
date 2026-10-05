@@ -7,30 +7,45 @@ const path=require("node:path");
 const root=path.join(__dirname,"..");
 const read=file=>fs.readFileSync(path.join(root,file),"utf8");
 
-test("job scheduling uses hidden year, compact month/day and 30-minute New York business-time choices",()=>{
+test("job scheduling uses a native calendar picker, compact MM/DD display and 30-minute New York business-time choices",()=>{
   const ui=read("public/round2.js"),api=read("server/round2-workflow.js"),css=read("public/styles.css");
   assert.match(ui,/const R2_JOB_SLOT_MIN=30/);
-  assert.match(ui,/class="r2-date-month"/);
-  assert.match(ui,/class="r2-date-day"/);
-  assert.match(ui,/type="hidden" name="'\+esc\(name\)\+'_year"/);
+  assert.match(ui,/type="date" name="'\+esc\(name\)\+'_date"/);
+  assert.match(ui,/function r2CompactDateLabel/);
+  assert.match(ui,/year===currentYear/);
+  assert.match(ui,/r2CalendarSvg/);
   assert.match(ui,/minutes\+=slotMinutes/);
   assert.match(ui,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
   assert.match(ui,/r2SnapJobMinutes/);
   assert.doesNotMatch(ui,/type="datetime-local"/);
   assert.match(api,/minute%30!==0/);
   assert.match(api,/clock<7\*60\|\|clock>20\*60/);
-  assert.match(css,/\.r2-compact-datetime/);
+  assert.match(css,/\.r2-calendar-datetime/);
+  assert.match(css,/\.r2-native-date-picker/);
 });
 
-test("workflow jobs persist customer phase prices and deposit finance",()=>{
-  const schema=read("server/schema.sql"),api=read("server/round2-workflow.js"),finance=read("server/round3-finance.js"),ui=read("public/round2.js");
+test("workflow jobs separate planned total, customer phase prices, deposits and internal phase costs",()=>{
+  const schema=read("server/schema.sql"),api=read("server/round2-workflow.js"),finance=read("server/round3-finance.js"),ui=read("public/round2.js"),app=read("public/app.js"),v6=read("public/v6.js");
   assert.match(schema,/deposit_amount REAL NOT NULL DEFAULT 0/);
   assert.match(schema,/customer_price REAL NOT NULL DEFAULT 0/);
+  assert.match(schema,/CREATE TABLE IF NOT EXISTS job_workflow_phase_costs/);
   assert.match(api,/phase_customer_total/);
-  assert.match(api,/balance_due/);
+  assert.match(api,/phase_internal_cost_total/);
+  assert.match(api,/planned_total/);
+  assert.match(api,/replacePhaseCosts/);
+  assert.match(ui,/Planned total/);
   assert.match(ui,/Customer price/);
-  assert.match(ui,/Deposit received/);
+  assert.match(ui,/Internal \/ material costs/);
+  assert.match(ui,/data-phase-detail/);
+  assert.match(ui,/data-add-cost/);
   assert.match(ui,/data-workflow-finance-summary/);
+  assert.match(ui,/jobClientSearch/);
+  assert.match(ui,/jobPianoSearch/);
+  assert.match(app,/function openQuickClientCreate/);
+  assert.match(app,/function openQuickPianoCreate/);
+  assert.match(v6,/intakeAddClient/);
+  assert.match(v6,/intakeAddPiano/);
+  assert.match(v6,/assessment-selected-check/);
   assert.match(finance,/Deposit received/);
   assert.match(finance,/customer_price/);
 });
