@@ -61,6 +61,9 @@ function futureIso(dayOffset,hour=14){
   const d=new Date(Date.UTC(2035,4,10+dayOffset,hour,0,0));
   return d.toISOString();
 }
+function recentBusinessIso(daysAgo=1,hourUtc=14){
+  const d=new Date();d.setUTCDate(d.getUTCDate()-daysAgo);d.setUTCHours(hourUtc,0,0,0);return d.toISOString();
+}
 
 test.before(async()=>{
   const init=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env,encoding:"utf8"});
@@ -667,7 +670,7 @@ test("Dynamic workflow supports seven active reorderable phases plus a separate 
   assert.deepEqual(removeRegulation.payload.stages.map(stage=>stage.key),["received","qa_review","in_progress","admin_approval","completed"]);
 });
 
-test("Job-specific phases stay isolated and workflow/calendar APIs enforce quarter-hour logistics timing",async()=>{
+test("Job-specific phases stay isolated and workflow/calendar APIs enforce half-hour business scheduling",async()=>{
   const token=shared.adminToken;
   const first=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase A"}});
   const second=await request("/api/jobs",{token,method:"POST",body:{client_id:shared.client.id,piano_id:shared.piano.id,title:"Job scoped phase B"}});
@@ -685,11 +688,11 @@ test("Job-specific phases stay isolated and workflow/calendar APIs enforce quart
 
   const invalidQuarter=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:07:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});
   assert.equal(invalidQuarter.status,400,JSON.stringify(invalidQuarter.payload));
-  assert.equal(invalidQuarter.payload.error,"INVALID_SCHEDULE_TIME");
+  assert.equal(invalidQuarter.payload.error,"WORK_TIME_HALF_HOUR_REQUIRED");
 
   const activated=await request("/api/jobs/activate/"+second.payload.id,{token,method:"POST",body:{scheduled_at:"2035-05-20T14:00:00.000Z",estimated_duration_min:120,assigned_technician_id:"U-F-WORKER"}});
   assert.equal(activated.status,200,JSON.stringify(activated.payload));
-  const tooShort=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T16:45:00.000Z"}});
+  const tooShort=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T16:30:00.000Z"}});
   assert.equal(tooShort.status,400,JSON.stringify(tooShort.payload));
   assert.equal(tooShort.payload.error,"WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
   const validWindow=await request("/api/jobs/"+second.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{starts_at:"2035-05-20T14:00:00.000Z",due_at:"2035-05-20T17:00:00.000Z"}});
@@ -702,7 +705,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
     client_id:shared.client.id,
     piano_id:shared.piano.id,
     title:"Bidirectional workflow timing test",
-    scheduled_at:futureIso(30,9),
+    scheduled_at:futureIso(30,14),
     estimated_duration_min:120,
     assigned_technician_id:"U-F-WORKER"
   }});
@@ -717,7 +720,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(movedOwner.payload.workflow_owner_user_id,"U-F-MANAGER");
   assert.equal(movedOwner.payload.assigned_technician_id,"U-F-WORKER");
 
-  const pastStartDate=new Date(Date.now()-5*60*60*1000);pastStartDate.setUTCMinutes(Math.floor(pastStartDate.getUTCMinutes()/15)*15,0,0);const pastStart=pastStartDate.toISOString();
+  const pastStart=recentBusinessIso(1,14),pastDue=recentBusinessIso(1,17);
   const farFuture=futureIso(31,18);
   const started=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
     starts_at:pastStart,due_at:farFuture,responsible_user_id:"U-F-MANAGER",blocker_code:null,blocker_note:null
@@ -728,7 +731,7 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(started.payload.scheduled_at,pastStart);
 
   const overdue=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
-    due_at:(()=>{const d=new Date(Date.now()-60*60*1000);d.setUTCMinutes(Math.floor(d.getUTCMinutes()/15)*15,0,0);return d.toISOString();})()
+    due_at:pastDue
   }});
   assert.equal(overdue.status,200,JSON.stringify(overdue.payload));
   assert.equal(overdue.payload.workflow_status,"overdue");
@@ -740,11 +743,11 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(blocked.payload.workflow_status,"blocked");
 
   const scheduledAgain=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
-    starts_at:futureIso(32,10),due_at:futureIso(32,18),blocker_code:null,blocker_note:null
+    starts_at:futureIso(32,14),due_at:futureIso(32,18),blocker_code:null,blocker_note:null
   }});
   assert.equal(scheduledAgain.status,200,JSON.stringify(scheduledAgain.payload));
   assert.equal(scheduledAgain.payload.workflow_status,"scheduled");
-  assert.equal(scheduledAgain.payload.scheduled_at,futureIso(32,10));
+  assert.equal(scheduledAgain.payload.scheduled_at,futureIso(32,14));
 
   const calendarMovedAt=futureIso(33,11);
   const calendarMoved=await request("/api/jobs/"+created.payload.id+"/schedule",{token,method:"PATCH",body:{scheduled_at:calendarMovedAt}});
