@@ -90,8 +90,9 @@ test("complete database export creates a structured native XLSX workbook and pro
   assert.match(api,/__part_2/);
   assert.match(api,/Content-Disposition/);
   assert.match(api,/password_hash/);
-  assert.match(api,/password\|secret\|token\|code_hash\|signature/);
+  assert.match(api,/password\|secret\|token\|code_hash\|otp_hash\|activation_hash/);
   assert.match(api,/\[REDACTED\]/);
+  assert.doesNotMatch(api,/password\|secret\|token\|code_hash\|signature/);
   assert.match(v6,/operationsExportRecoveryCard/);
   assert.match(v6,/bindOperationsExportRecovery/);
   assert.match(ops,/Authentication secrets such as password hashes and tokens are securely redacted/);
