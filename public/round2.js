@@ -113,7 +113,7 @@ function r2SetDateTime(root,name,value){
 }
 function r2BindDatePickers(root){
   if(!root)return;
-  $("[data-r2-datetime]",root).forEach(wrap=>{
+  Array.from(root.querySelectorAll("[data-r2-datetime]")).forEach(wrap=>{
     const date=wrap.querySelector(".r2-native-date-picker");if(!date)return;
     const sync=()=>{wrap.dataset.selectedDate=date.value||"";};
     if(date.dataset.r2DateBound!=="1"){
