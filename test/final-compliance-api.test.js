@@ -759,6 +759,24 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(movedOwner.payload.workflow_owner_user_id,"U-F-MANAGER");
   assert.equal(movedOwner.payload.assigned_technician_id,"U-F-WORKER");
 
+  const overridePlan=movedOwner.payload.workflow_phases.map(phase=>({
+    stage_key:phase.stage_key,position:phase.position,enabled:phase.enabled,starts_at:phase.starts_at,due_at:phase.due_at,
+    customer_price:phase.customer_price,responsible_user_id:phase.stage_key==="qa_review"?"U-F-MANAGER":phase.responsible_user_id,costs:phase.costs||[]
+  }));
+  const overridden=await request("/api/jobs/"+created.payload.id+"/workflow-phases",{token,method:"PUT",body:{phases:overridePlan,estimated_revenue:movedOwner.payload.estimated_revenue,deposit_amount:movedOwner.payload.deposit_amount}});
+  assert.equal(overridden.status,200,JSON.stringify(overridden.payload));
+  assert.equal(overridden.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").responsible_user_id,"U-F-MANAGER");
+  assert.equal(overridden.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").effective_responsible_user_id,"U-F-MANAGER");
+
+  const resetPlan=overridden.payload.workflow_phases.map(phase=>({
+    stage_key:phase.stage_key,position:phase.position,enabled:phase.enabled,starts_at:phase.starts_at,due_at:phase.due_at,
+    customer_price:phase.customer_price,responsible_user_id:phase.stage_key==="qa_review"?null:phase.responsible_user_id,costs:phase.costs||[]
+  }));
+  const reset=await request("/api/jobs/"+created.payload.id+"/workflow-phases",{token,method:"PUT",body:{phases:resetPlan,estimated_revenue:overridden.payload.estimated_revenue,deposit_amount:overridden.payload.deposit_amount}});
+  assert.equal(reset.status,200,JSON.stringify(reset.payload));
+  assert.equal(reset.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").responsible_user_id,null);
+  assert.equal(reset.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").effective_responsible_user_id,"U-F-WORKER");
+
   const pastStart=recentBusinessIso(1,14),pastDue=recentBusinessIso(1,17);
   const farFuture=futureIso(31,18);
   const started=await request("/api/jobs/"+created.payload.id+"/workflow-phases/received",{token,method:"PATCH",body:{
