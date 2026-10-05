@@ -106,15 +106,19 @@ function r2WorkflowDefinitions(plan=[]){
   }
   return defs.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
 }
+function r2BindStandaloneLogisticsTiming(root,stage,startName,dueName){
+  if(!root||!r2IsLogisticsStage(stage))return;
+  const enforce=()=>{
+    const start=r2DateTimeValue(root,startName);if(!start)return;const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(root,dueName);
+    if(!due||new Date(r2NyInputToIso(due)).getTime()<new Date(r2NyInputToIso(minimum)).getTime())r2SetDateTime(root,dueName,minimum);
+  };
+  root.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
+}
 function r2BindWorkflowTiming(form){
-  $("[data-workflow-phase]",form).forEach(row=>{
-    const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};if(!r2IsLogisticsStage(stage))return;
-    const startName="start_"+stage.key,dueName="due_"+stage.key;
-    const enforce=()=>{
-      const start=r2DateTimeValue(row,startName);if(!start)return;const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(row,dueName);
-      if(!due||new Date(r2NyInputToIso(due)).getTime()<new Date(r2NyInputToIso(minimum)).getTime())r2SetDateTime(row,dueName,minimum);
-    };
-    row.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
+  if(!form)return;
+  Array.from(form.querySelectorAll("[data-workflow-phase]")).forEach(row=>{
+    const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};
+    r2BindStandaloneLogisticsTiming(row,stage,"start_"+stage.key,"due_"+stage.key);
   });
 }
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
@@ -215,7 +219,7 @@ function r2PlannedCard(job){
     <h3>${esc(job.title)}</h3><p class="job-party">${esc(job.client_name)} · ${esc(r2JobPiano(job))}</p>
     ${job.description?`<p class="job-description">${esc(job.description)}</p>`:""}
     <div class="job-meta"><span>◎ ${esc(job.workflow_owner_name||tr("No workflow owner","Nincs fő felelős"))}</span><span>⏱ ${Number(job.estimated_duration_min||120)} min</span><span>${job.location_type==="on_site"?"⌂ "+tr("On site","Helyszíni"):"♬ "+tr("Workshop","Műhely")}</span></div>
-    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
+    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip">${esc(r2StageLabel(p))}</span>`).join("")}</div>
     <div class="job-actions"><button class="primary-button" type="button" data-activate-job="${job.id}">${tr("Activate & Schedule","Aktiválás és ütemezés")}</button><button class="text-button" type="button" data-edit-job="${job.id}">${tr("Edit","Szerkesztés")}</button>${r2IsAdmin()?`<button class="text-button" type="button" data-plan-job="${job.id}">${tr("Workflow","Munkafolyamat")}</button><button class="danger-button" type="button" data-cancel-job="${job.id}">${tr("Cancel","Megszakítás")}</button>`:""}</div>
   </article>`;
 }
@@ -378,7 +382,7 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     <label class="field full"><span>${tr("Delay / blocker reason","Elakadás / késés oka")}</span><select name="blocker_code"><option value="">${tr("No blocker","Nincs elakadás")}</option>${Object.entries(R2_BLOCKERS).map(([code,pair])=>`<option value="${code}" ${phase.blocker_code===code?"selected":""}>${esc(state.language==="hu"?pair[1]:pair[0])}</option>`).join("")}</select></label>
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
-  r2BindWorkflowTiming($("#blockerForm"));$("#blockerForm").querySelector(".form-grid");
+  r2BindStandaloneLogisticsTiming($("#blockerForm"),phase,"starts_at","due_at");
   $("#blockerForm").addEventListener("submit",async event=>{
     event.preventDefault();
     try{const form=Object.fromEntries(new FormData(event.currentTarget)),startLocal=r2ReadDateTime(event.currentTarget,"starts_at"),dueLocal=r2ReadDateTime(event.currentTarget,"due_at"),body={
@@ -446,7 +450,7 @@ function r2WorkflowCard(job){
     ${phase.starts_at?`<div class="workflow-start">${tr("Start","Kezdés")}: ${esc(r2FormatDateTime(phase.starts_at))}</div>`:""}
     ${phase.due_at?`<div class="workflow-due ${status==="overdue"?"overdue":""}">${tr("Due","Határidő")}: ${esc(r2FormatDateTime(phase.due_at))}</div>`:""}
     ${phase.blocker_code?`<div class="blocked-note">⚠ ${esc(r2BlockerLabel(phase.blocker_code))}${phase.blocker_note?` · ${esc(phase.blocker_note)}`:""}</div>`:""}
-    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip phase-status-${esc(p.visual_status||"scheduled")}">${esc(r2StageLabel(p.stage_key))}</span>`).join("")}</div>
+    <div class="phase-chip-row">${(job.workflow_phases||[]).filter(p=>p.enabled&&p.stage_key!=="completed").map(p=>`<span class="phase-chip phase-status-${esc(p.visual_status||"scheduled")}">${esc(r2StageLabel(p))}</span>`).join("")}</div>
     <div class="job-actions">
       <button class="text-button" type="button" data-history-job="${job.id}">ⓘ ${tr("Details","Részletek")}</button>
       ${job.ready_for_closeout&&r2IsAdmin()?`<button class="primary-button closeout-button" type="button" data-closeout-job="${job.id}">${tr("Complete & Invoice","Lezárás és számlázás")}</button>`:""}
