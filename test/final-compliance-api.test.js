@@ -699,6 +699,39 @@ test("Job-specific phases stay isolated and workflow/calendar APIs enforce half-
   assert.equal(validWindow.status,200,JSON.stringify(validWindow.payload));
 });
 
+test("customer phase prices and deposit persist through job finance into the final invoice",async()=>{
+  const token=shared.adminToken;
+  const created=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Quoted phase finance",
+    scheduled_at:futureIso(40,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER",deposit_amount:250,
+    workflow_phases:[
+      {stage_key:"received",enabled:true,customer_price:700,starts_at:futureIso(40,14),due_at:futureIso(40,17)},
+      {stage_key:"admin_approval",enabled:true,customer_price:300},
+      {stage_key:"completed",enabled:true}
+    ]
+  }});
+  assert.equal(created.status,201,JSON.stringify(created.payload));
+  assert.equal(created.payload.phase_customer_total,1000);
+  assert.equal(created.payload.deposit_amount,250);
+  assert.equal(created.payload.balance_due,750);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").customer_price,700);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="admin_approval").customer_price,300);
+
+  const approval=await request("/api/jobs/"+created.payload.id+"/handoff",{token,method:"POST",body:{to_stage:"admin_approval"}});
+  assert.equal(approval.status,201,JSON.stringify(approval.payload));
+  assert.equal(approval.payload.job.stage,"admin_approval");
+
+  const completed=await request("/api/jobs/"+created.payload.id+"/complete",{token,method:"POST",body:{invoice_mode:"draft",email_language:"en"}});
+  assert.equal(completed.status,201,JSON.stringify(completed.payload));
+  assert.equal(completed.payload.invoice.total_amount,750);
+  const invoice=await request("/api/invoices/"+completed.payload.invoice.id,{token});
+  assert.equal(invoice.status,200,JSON.stringify(invoice.payload));
+  assert.equal(invoice.payload.items.filter(item=>item.phase_key).reduce((sum,item)=>sum+Number(item.total_price),0),1000);
+  const deposit=invoice.payload.items.find(item=>item.item_type==="adjustment"&&item.item_description==="Deposit received");
+  assert.ok(deposit);
+  assert.equal(deposit.total_price,-250);
+});
+
 test("Workflow timing can move backward and forward and recomputes colors",async()=>{
   const token=shared.adminToken;
   const created=await request("/api/jobs",{token,method:"POST",body:{
