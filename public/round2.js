@@ -156,8 +156,12 @@ function r2WorkflowFinancialSummary(form){
 }
 function r2RefreshWorkflowFinancialSummary(form){
   const summary=form?.querySelector("[data-workflow-finance-summary]");if(!summary)return;
-  const totals=r2WorkflowFinancialSummary(form);
-  summary.innerHTML='<div><span>'+tr("Phase total","Fázisok összege")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
+  const totals=r2WorkflowFinancialSummary(form),phaseLines=$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked).map(row=>{
+    const label=state.language==="hu"?(row.dataset.phaseLabelHu||row.dataset.phaseLabelEn):(row.dataset.phaseLabelEn||row.dataset.phaseLabelHu),price=Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0));
+    return '<div class="workflow-finance-phase"><span>'+esc(label)+'</span><strong>'+r2Money(price)+'</strong></div>';
+  }).join("");
+  summary.innerHTML='<div class="workflow-finance-lines">'+phaseLines+'</div>'+
+    '<div><span>'+tr("Phase total","Fázisok összege")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
     '<div><span>'+tr("Deposit received","Kapott előleg")+'</span><strong>− '+r2Money(totals.deposit)+'</strong></div>'+
     '<div class="workflow-finance-balance"><span>'+tr("Remaining to invoice","Még számlázandó")+'</span><strong>'+r2Money(totals.balance)+'</strong></div>';
 }
@@ -229,6 +233,7 @@ function r2TimeMinutes(value){const p=r2NyParts(new Date(value));return Number(p
 function r2Pad(value){return String(value).padStart(2,"0");}
 function r2MinutesInput(date,minutes){const safe=Math.max(0,Math.min(1439,minutes)),h=Math.floor(safe/60),m=safe%60;return `${date}T${r2Pad(h)}:${r2Pad(m)}`;}
 function r2SnapMinutes(value){return Math.round(value/R2_SLOT_MIN)*R2_SLOT_MIN;}
+function r2SnapJobMinutes(value){return Math.round(value/R2_JOB_SLOT_MIN)*R2_JOB_SLOT_MIN;}
 
 function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null}={}){
   const source=Array.isArray(plan)?plan:[],map=new Map(source.map(row=>[String(row.stage_key||row.key||""),row]));
@@ -236,13 +241,14 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
     const existing=map.get(stage.key),mandatory=r2FixedStage(stage.key),enabled=mandatory?true:(existing?Boolean(existing.enabled):!stage.removable);
     const start=existing?.starts_at?r2IsoToNyInput(existing.starts_at):(stage.key==="received"&&defaultStart?defaultStart:"");
     const due=existing?.due_at?r2IsoToNyInput(existing.due_at):"",responsible=existing?.responsible_user_id||defaultResponsible||state.user?.id||"";
-    const status=existing?.visual_status||"",labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||stage.key;
-    const jobSpecific=Boolean(existing?.job_specific||stage.job_specific);
+    const status=existing?.visual_status||"",labelEn=existing?.label_en||existing?.custom_label_en||stage.label_en||stage.en||stage.key,labelHu=existing?.label_hu||existing?.custom_label_hu||stage.label_hu||stage.hu||labelEn;
+    const jobSpecific=Boolean(existing?.job_specific||stage.job_specific),logistics=r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu}),customerPrice=Math.max(0,Number(existing?.customer_price||0));
     return `<div class="workflow-plan-row ${status?"phase-status-"+status:""}" data-workflow-phase="${esc(stage.key)}" data-phase-position="${Number(existing?.position||stage.position||0)}" data-phase-label-en="${esc(labelEn)}" data-phase-label-hu="${esc(labelHu)}" data-job-specific="${jobSpecific?"1":"0"}">
       <label class="workflow-phase-toggle"><input type="checkbox" name="phase_${esc(stage.key)}" ${enabled?"checked":""} ${mandatory?"disabled":""}><span><strong>${esc(state.language==="hu"?labelHu:labelEn)}</strong><small>${mandatory?tr("Required system phase","Kötelező rendszerfázis"):jobSpecific?tr("Only for this job","Csak ehhez a munkához"):tr("Include this phase","Fázis használata")}</small></span></label>
       <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_${esc(stage.key)}" required>${r2ResponsibleOptions(responsible)}</select></label>
-      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start)}</label>
-      <label class="field"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage({key:stage.key,label_en:labelEn,label_hu:labelHu})?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
+      <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start,{endMinutes:logistics?17*60:R2_DAY_END})}</label>
+      <label class="field"><span>${tr("Expected completion","Várható befejezés")}${logistics?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
+      <label class="field workflow-customer-price"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="price_${esc(stage.key)}" type="number" min="0" step="0.01" value="${customerPrice.toFixed(2)}"></label>
     </div>`;
   }).join("");
 }
@@ -250,13 +256,13 @@ function r2ReadWorkflowPlan(form){
   return $$("[data-workflow-phase]",form).map(row=>{
     const key=String(row.dataset.workflowPhase||""),enabled=r2FixedStage(key)?true:Boolean(row.querySelector(`[name="phase_${CSS.escape(key)}"]`)?.checked);
     const startValue=r2ReadDateTime(row,"start_"+key),dueValue=r2ReadDateTime(row,"due_"+key),responsible=row.querySelector(`[name="responsible_${CSS.escape(key)}"]`)?.value||state.user?.id||"";
-    const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||key,jobSpecific=row.dataset.jobSpecific==="1";
+    const labelEn=row.dataset.phaseLabelEn||key,labelHu=row.dataset.phaseLabelHu||labelEn,jobSpecific=row.dataset.jobSpecific==="1",customerPrice=Math.max(0,Number(row.querySelector(`[name="price_${CSS.escape(key)}"]`)?.value||0));
     const startsAt=startValue?r2NyInputToIso(startValue):null,dueAt=dueValue?r2NyInputToIso(dueValue):null;
     if(startsAt&&dueAt){
       const duration=(new Date(dueAt).getTime()-new Date(startsAt).getTime())/60000;if(duration<0)throw new Error("WORKFLOW_PHASE_END_BEFORE_START");
       if(r2IsLogisticsStage({key,label_en:labelEn,label_hu:labelHu})&&duration<180)throw new Error("WORKFLOW_LOGISTICS_MINIMUM_WINDOW");
     }
-    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,responsible_user_id:responsible||null,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
+    return {stage_key:key,position:Number(row.dataset.phasePosition||0),enabled,starts_at:startsAt,due_at:dueAt,customer_price:customerPrice,responsible_user_id:responsible||null,job_specific:jobSpecific,custom_label_en:jobSpecific?labelEn:null,custom_label_hu:jobSpecific?labelHu:null};
   });
 }
 
@@ -728,7 +734,7 @@ function r2UpdateCalendarNowLine(){
 async function r2MoveCalendarJob(job,targetDate,targetMinutes=null,newDuration=null){
   let minutes=targetMinutes;
   if(minutes===null){minutes=r2TimeMinutes(job.scheduled_at);}
-  minutes=Math.max(0,Math.min(23*60+45,r2SnapMinutes(minutes)));
+  minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,r2SnapJobMinutes(minutes)));
   const body={scheduled_at:r2NyInputToIso(r2MinutesInput(targetDate,minutes)),estimated_duration_min:Number(newDuration||job.estimated_duration_min||120),assigned_technician_id:job.assigned_technician_id};
   await api(`/api/jobs/${job.id}/schedule`,{method:"PATCH",body:JSON.stringify(body)});
 }
@@ -767,8 +773,8 @@ function r2BindCalendarPointer(host,jobs){
       if(state.r2CalendarMode==="month"){
         gesture.targetMinutes=r2TimeMinutes(gesture.job.scheduled_at);
       }else{
-        const rect=target.getBoundingClientRect(),minute=R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN);
-        gesture.targetMinutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,minute));
+        const rect=target.getBoundingClientRect(),minute=R2_DAY_START+r2SnapJobMinutes((event.clientY-rect.top)/R2_PX_PER_MIN);
+        gesture.targetMinutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,minute));
       }
       gesture.tip.textContent=`${r2FormatDate(gesture.targetDate,{month:"short",day:"numeric"})} · ${r2Pad(Math.floor(gesture.targetMinutes/60))}:${r2Pad(gesture.targetMinutes%60)}`;
     }
@@ -811,7 +817,7 @@ function r2BindCalendarCreate(host){
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
-    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END-R2_SLOT_MIN,R2_DAY_START+r2SnapMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
+    const minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,R2_DAY_START+r2SnapJobMinutes((event.clientY-rect.top)/R2_PX_PER_MIN)));
     r2OpenCreateJob(renderWorkshop,{date,datetime:r2MinutesInput(date,minutes)});
   }));
 }
