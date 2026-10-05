@@ -38,7 +38,7 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(app,/Inside Manager/);
   assert.match(app,/Outside Manager/);
   assert.match(app,/skill_ids/);
-  assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.doesNotMatch(v6,/operationsSkillsSettingsCard\(users\)/);
   assert.match(v6,/primary_skill_id/);
 });
 
@@ -68,6 +68,10 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
+  assert.match(v6,/admin&&typeof operationsMilestoneProfileCard/);
+  assert.match(ops,/roadmap-node-image/);
+  assert.match(ops,/d\.instrument_media_url\?`<div class="ms-instrument-art"/);
+  assert.match(ops,/tr\("Planned Jobs","Tervezett munkák"\)/);
   assert.match(css,/Enterprise roadmap shell/);
   assert.match(css,/\.ms-roadmap-track/);
   assert.match(css,/\.roadmap-substeps/);

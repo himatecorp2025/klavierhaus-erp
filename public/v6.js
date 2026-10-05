@@ -991,10 +991,8 @@ renderProfile=async function(){
           </form>
         </section>
         ${serviceCard}
-        ${typeof operationsMilestoneProfileCard==="function"?operationsMilestoneProfileCard():""}
       </div>
     </div>`;
-  if(typeof bindOperationsMilestoneProfile==="function")await bindOperationsMilestoneProfile();
   $("#profileImageFile")?.addEventListener("change",async event=>{
     const file=event.currentTarget.files?.[0];if(!file)return;const data=new FormData();data.append("file",file,file.name);
     try{const result=await api("/api/me/profile-image",{method:"POST",body:data});state.user.profile_image_url=result.profile_image_url||"";sessionStorage.setItem("kh_user",JSON.stringify(state.user));v6SyncAccountChrome();toast(tr("Profile photo updated.","A profilkép frissült."),"success");await renderProfile();}catch(error){toast(humanError(error),"error");}
@@ -1038,10 +1036,11 @@ async function renderSettings(){
         </div>
       </section>
       ${admin?`<section class="panel team-settings-card"><div class="panel-head"><div><span class="eyebrow">${tr("ADMINISTRATION","ADMINISZTRÁCIÓ")}</span><h2>${tr("Team","Csapat")}</h2></div><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><div class="team-person">${v6ProfileAvatarMarkup(user,"small")}<span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span></div><span class="role-chip">${esc(roleLabel(user.role))}</span>${typeof operationalTeamProfileMarkup==="function"?operationalTeamProfileMarkup(user):""}<div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div></div>`).join("")}</div></section>`:""}
-      ${admin&&typeof operationsSkillsSettingsCard==="function"?operationsSkillsSettingsCard(users):""}\n    </div>`;
+      ${admin&&typeof operationsMilestoneProfileCard==="function"?operationsMilestoneProfileCard():""}
+    </div>`;
   $$("[data-user-theme]").forEach(button=>button.addEventListener("click",async()=>{v6ApplyTheme(button.dataset.userTheme,{save:true});await renderSettings();}));
   $$("[data-user-language]").forEach(button=>button.addEventListener("click",async()=>{setLanguage(button.dataset.userLanguage,{save:true});}));
-  if(admin&&typeof bindOperationsSkillsSettings==="function")await bindOperationsSkillsSettings();
+  if(admin&&typeof bindOperationsMilestoneProfile==="function")await bindOperationsMilestoneProfile();
   $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
   $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
   $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{
