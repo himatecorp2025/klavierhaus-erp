@@ -87,6 +87,52 @@ test.after(async()=>{
   fs.rmSync(temp,{recursive:true,force:true});
 });
 
+test("operations enhancements persist staff profiles, Milestone and full XLSX export",async()=>{
+  const token=await login("admin.final@example.com");
+  const skill=await request("/api/staff-skills",{token,method:"POST",body:{name_en:"Concert Preparation",name_hu:"Koncert-előkészítés",description_en:"Concert preparation and final technical setup"}});
+  assert.equal(skill.status,201,JSON.stringify(skill.payload));
+  assert.equal(skill.payload.name_en,"Concert Preparation");
+  shared.operationsSkillId=skill.payload.id;
+
+  const workProfile=await request("/api/users/U-F-MANAGER/work-profile",{token,method:"PUT",body:{manager_scope:"INSIDE",skill_ids:[skill.payload.id]}});
+  assert.equal(workProfile.status,200,JSON.stringify(workProfile.payload));
+  assert.equal(workProfile.payload.manager_scope,"INSIDE");
+  assert.ok(workProfile.payload.skill_ids.includes(skill.payload.id));
+
+  const profiles=await request("/api/work-profiles",{token});
+  assert.equal(profiles.status,200,JSON.stringify(profiles.payload));
+  assert.ok(profiles.payload.some(row=>row.id==="U-F-MANAGER"&&row.manager_scope==="INSIDE"));
+
+  const milestone=await request("/api/milestone",{token,method:"PUT",body:{dashboard:{
+    title_en:"Road to One Million",title_hu:"Út az egymillióhoz",quote_en:"One completed step at a time.",quote_hu:"Lépésről lépésre.",
+    start_date:"2035-01-01",end_date:"2035-12-31",target_label:"$1M Klavierhaus",hero_icon:"◆"
+  },steps:[
+    {title_en:"Build repeatable workshop flow",title_hu:"Ismételhető műhelyfolyamat",target_date:"2035-04-01",completed:true,icon:"✓"},
+    {title_en:"Reach the next revenue milestone",title_hu:"Következő bevételi cél",target_date:"2035-09-01",completed:false,icon:"★"}
+  ]}});
+  assert.equal(milestone.status,200,JSON.stringify(milestone.payload));
+  assert.equal(milestone.payload.total_count,2);
+  assert.equal(milestone.payload.completed_count,1);
+  assert.equal(milestone.payload.dashboard.target_label,"$1M Klavierhaus");
+  assert.equal(milestone.payload.next_step.title_en,"Reach the next revenue milestone");
+
+  const milestoneRead=await request("/api/milestone",{token});
+  assert.equal(milestoneRead.status,200,JSON.stringify(milestoneRead.payload));
+  assert.equal(milestoneRead.payload.steps.length,2);
+
+  const exportResponse=await fetch(origin+"/api/system-export.xlsx",{headers:{Authorization:"Bearer "+token}});
+  assert.equal(exportResponse.status,200);
+  assert.match(exportResponse.headers.get("content-type")||"",/spreadsheetml/);
+  const exportBuffer=Buffer.from(await exportResponse.arrayBuffer());
+  assert.equal(exportBuffer.subarray(0,2).toString(),"PK");
+  const zip=new (require("adm-zip"))(exportBuffer);
+  const workbook=zip.readAsText("xl/workbook.xml");
+  assert.match(workbook,/Manifest/);
+  assert.match(workbook,/clients/);
+  assert.match(workbook,/staff_skills/);
+  assert.match(workbook,/milestone_steps/);
+});
+
 test("Intake supports real media upload and one-action conversion to a Planned Job",async()=>{
   const token=await login("admin.final@example.com");
   shared.adminToken=token;
@@ -705,7 +751,7 @@ test("customer phase prices and deposit persist through job finance into the fin
     client_id:shared.client.id,piano_id:shared.piano.id,title:"Quoted phase finance",
     scheduled_at:futureIso(40,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER",estimated_revenue:1500,deposit_amount:250,
     workflow_phases:[
-      {stage_key:"received",enabled:true,customer_price:700,starts_at:futureIso(40,14),due_at:futureIso(40,17),costs:[{title:"Wood",category:"material",amount:80},{title:"Lacquer",category:"material",amount:40}]},
+      {stage_key:"received",enabled:true,customer_price:700,responsibility_skill_id:shared.operationsSkillId,starts_at:futureIso(40,14),due_at:futureIso(40,17),costs:[{title:"Wood",category:"material",amount:80},{title:"Lacquer",category:"material",amount:40}]},
       {stage_key:"admin_approval",enabled:true,customer_price:300},
       {stage_key:"completed",enabled:true}
     ]
@@ -718,6 +764,11 @@ test("customer phase prices and deposit persist through job finance into the fin
   assert.equal(created.payload.balance_due,750);
   assert.equal(created.payload.estimated_balance,1250);
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").customer_price,700);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").responsibility_skill_id,shared.operationsSkillId);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").responsibility_skill_name_en,"Concert Preparation");
+  const technicianProfile=await request("/api/users/U-F-WORKER/work-profile",{token});
+  assert.equal(technicianProfile.status,200,JSON.stringify(technicianProfile.payload));
+  assert.ok(technicianProfile.payload.skill_ids.includes(shared.operationsSkillId));
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").costs.length,2);
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").internal_cost_total,120);
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="admin_approval").customer_price,300);
