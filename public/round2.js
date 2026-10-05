@@ -75,33 +75,30 @@ function r2TimeOptions(selected="",allowEmpty=true,{slotMinutes=R2_JOB_SLOT_MIN,
   return html;
 }
 function r2QuarterTimeOptions(selected="",allowEmpty=true){return r2TimeOptions(selected,allowEmpty);}
-function r2MonthOptions(selected="",allowEmpty=true){
-  let html=allowEmpty?'<option value="">MM</option>':"";
-  for(let month=1;month<=12;month+=1){const value=r2Pad(month);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+function r2CompactDateLabel(dateValue){
+  const value=String(dateValue||"");if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return tr("Choose date","Dátum");
+  const [year,month,day]=value.split("-"),currentYear=r2Today().slice(0,4);
+  return year===currentYear?`${month}/${day}`:`${month}/${day}/${year}`;
 }
-function r2DayOptions(selected="",allowEmpty=true){
-  let html=allowEmpty?'<option value="">DD</option>':"";
-  for(let day=1;day<=31;day+=1){const value=r2Pad(day);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+function r2CalendarSvg(){
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4.5 8.5h15M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z"></path><path d="M8 12h2M12 12h2M16 12h1M8 16h2M12 16h2"></path></svg>';
 }
 function r2DateTimeFields(name,value,{required=false,slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
-  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes}),year=normalized.slice(0,4)||r2Today().slice(0,4),month=normalized.slice(5,7),day=normalized.slice(8,10),time=normalized.slice(11,16);
-  return '<div class="r2-quarter-datetime r2-compact-datetime" data-r2-datetime="'+esc(name)+'" data-slot-minutes="'+slotMinutes+'" data-start-minutes="'+startMinutes+'" data-end-minutes="'+endMinutes+'">'+
-    '<input type="hidden" name="'+esc(name)+'_year" value="'+esc(year)+'">'+
-    '<select class="r2-date-month" name="'+esc(name)+'_month" '+(required?"required":"")+' aria-label="'+esc(tr("Month","Hónap"))+'">'+r2MonthOptions(month,!required)+'</select>'+
-    '<select class="r2-date-day" name="'+esc(name)+'_day" '+(required?"required":"")+' aria-label="'+esc(tr("Day","Nap"))+'">'+r2DayOptions(day,!required)+'</select>'+
+  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes}),date=normalized.slice(0,10),time=normalized.slice(11,16);
+  return '<div class="r2-quarter-datetime r2-calendar-datetime" data-r2-datetime="'+esc(name)+'" data-slot-minutes="'+slotMinutes+'" data-start-minutes="'+startMinutes+'" data-end-minutes="'+endMinutes+'">'+
+    '<label class="r2-date-picker-shell"><span class="r2-date-trigger">'+r2CalendarSvg()+'<strong data-r2-date-label>'+esc(r2CompactDateLabel(date))+'</strong></span><input class="r2-native-date-picker" type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" aria-label="'+esc(tr("Date","Dátum"))+'"></label>'+
     '<select class="r2-date-time" name="'+esc(name)+'_time" '+(required?"required":"")+' aria-label="'+esc(tr("Time","Idő"))+'">'+r2TimeOptions(time,!required,{slotMinutes,startMinutes,endMinutes})+'</select></div>';
 }
 function r2DateTimeValue(root,name){
-  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  return year&&month&&day&&time?year+"-"+month+"-"+day+"T"+time:"";
+  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  return date&&time?date+"T"+time:"";
 }
 function r2ReadDateTime(root,name,{required=false}={}){
-  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]');
-  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  if(!month&&!day&&!time&&!required)return "";
-  if(!year||!month||!day||!time)throw new Error("INVALID_SCHEDULE_TIME");
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]'),date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  if(!date&&!time&&!required)return "";
+  if(!date||!time)throw new Error("INVALID_SCHEDULE_TIME");
   const slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
-  const value=year+"-"+month+"-"+day+"T"+time,match=value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)throw new Error("INVALID_SCHEDULE_TIME");
+  const value=date+"T"+time,match=value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)throw new Error("INVALID_SCHEDULE_TIME");
   const check=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],+match[4],+match[5])),minutes=+match[4]*60+(+match[5]);
   if(check.getUTCFullYear()!==+match[1]||check.getUTCMonth()!==+match[2]-1||check.getUTCDate()!==+match[3])throw new Error("INVALID_SCHEDULE_TIME");
   if(minutes<startMinutes||minutes>endMinutes)throw new Error("WORK_TIME_OUTSIDE_BUSINESS_HOURS");
@@ -109,10 +106,18 @@ function r2ReadDateTime(root,name,{required=false}={}){
   return value;
 }
 function r2SetDateTime(root,name,value){
-  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]'),slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
-  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes});
-  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]'),month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]'),day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
-  if(year)year.value=normalized.slice(0,4);if(month)month.value=normalized.slice(5,7);if(day)day.value=normalized.slice(8,10);if(time)time.value=normalized.slice(11,16);
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]'),slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END),normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes});
+  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
+  if(date)date.value=normalized.slice(0,10);if(time)time.value=normalized.slice(11,16);
+  const label=wrap?.querySelector("[data-r2-date-label]");if(label)label.textContent=r2CompactDateLabel(normalized.slice(0,10));
+}
+function r2BindDatePickers(root){
+  if(!root)return;
+  $$("[data-r2-datetime]",root).forEach(wrap=>{
+    const date=wrap.querySelector(".r2-native-date-picker"),label=wrap.querySelector("[data-r2-date-label]");
+    const sync=()=>{if(label)label.textContent=r2CompactDateLabel(date?.value||"");};
+    date?.addEventListener("change",sync);date?.addEventListener("input",sync);sync();
+  });
 }
 function r2WallAddMinutes(value,minutes){
   const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)return "";
@@ -142,17 +147,30 @@ function r2BindStandaloneLogisticsTiming(root,stage,startName,dueName){
   root.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
 }
 function r2BindWorkflowTiming(form){
-  if(!form)return;
+  if(!form)return;r2BindDatePickers(form);
   Array.from(form.querySelectorAll("[data-workflow-phase]")).forEach(row=>{
     const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};
     r2BindStandaloneLogisticsTiming(row,stage,"start_"+stage.key,"due_"+stage.key);
   });
 }
+function r2PhaseCostRows(costs=[],stageKey=""){
+  return (Array.isArray(costs)?costs:[]).map(item=>`<div class="workflow-cost-row" data-phase-cost>
+    <select data-cost-category aria-label="${esc(tr("Cost category","Költségkategória"))}"><option value="material" ${item.category==="material"?"selected":""}>${tr("Material","Anyag")}</option><option value="parts" ${item.category==="parts"?"selected":""}>${tr("Parts","Alkatrész")}</option><option value="service" ${item.category==="service"?"selected":""}>${tr("External service","Külső szolgáltatás")}</option><option value="transport" ${item.category==="transport"?"selected":""}>${tr("Transport","Szállítás")}</option><option value="other" ${item.category==="other"?"selected":""}>${tr("Other","Egyéb")}</option></select>
+    <input data-cost-title maxlength="240" value="${esc(item.title||"")}" placeholder="${esc(tr("e.g. lacquer, wood, parts","pl. lakk, faanyag, alkatrész"))}">
+    <input data-cost-amount type="number" min="0" step="0.01" value="${Number(item.amount||0).toFixed(2)}" aria-label="${esc(tr("Cost","Költség"))}">
+    <button class="workflow-cost-remove" type="button" data-cost-remove aria-label="${esc(tr("Remove cost","Költség törlése"))}">×</button>
+  </div>`).join("");
+}
+function r2ReadPhaseCosts(row){
+  return $$("[data-phase-cost]",row).map(cost=>({category:cost.querySelector("[data-cost-category]")?.value||"material",title:String(cost.querySelector("[data-cost-title]")?.value||"").trim(),amount:Math.max(0,Number(cost.querySelector("[data-cost-amount]")?.value||0))})).filter(item=>item.title);
+}
+function r2PhaseInternalCost(row){return r2ReadPhaseCosts(row).reduce((sum,item)=>sum+Number(item.amount||0),0);}
 function r2WorkflowFinancialSummary(form){
   const phases=$$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked);
   const phaseTotal=phases.reduce((sum,row)=>sum+Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0)),0);
-  const deposit=Math.max(0,Number(form?.elements?.deposit_amount?.value||0)),balance=Math.max(0,phaseTotal-deposit);
-  return {phaseTotal,deposit,balance};
+  const internalCost=phases.reduce((sum,row)=>sum+r2PhaseInternalCost(row),0),plannedTotal=Math.max(0,Number(form?.elements?.estimated_revenue?.value||0)),deposit=Math.max(0,Number(form?.elements?.deposit_amount?.value||0));
+  const invoiceBasis=phaseTotal>0?phaseTotal:plannedTotal,balance=Math.max(0,invoiceBasis-deposit);
+  return {plannedTotal,phaseTotal,internalCost,deposit,balance};
 }
 function r2RefreshWorkflowFinancialSummary(form){
   const summary=form?.querySelector("[data-workflow-finance-summary]");if(!summary)return;
@@ -161,15 +179,36 @@ function r2RefreshWorkflowFinancialSummary(form){
     return '<div class="workflow-finance-phase"><span>'+esc(label)+'</span><strong>'+r2Money(price)+'</strong></div>';
   }).join("");
   summary.innerHTML='<div class="workflow-finance-lines">'+phaseLines+'</div>'+
-    '<div><span>'+tr("Phase total","Fázisok összege")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
+    '<div><span>'+tr("Planned total","Tervezett teljes ár")+'</span><strong>'+r2Money(totals.plannedTotal)+'</strong></div>'+
+    '<div><span>'+tr("Phase customer total","Fázisok ügyfélára")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
+    '<div class="workflow-internal-cost"><span>'+tr("Recorded internal costs","Rögzített belső költség")+'</span><strong>'+r2Money(totals.internalCost)+'</strong></div>'+
     '<div><span>'+tr("Deposit received","Kapott előleg")+'</span><strong>− '+r2Money(totals.deposit)+'</strong></div>'+
     '<div class="workflow-finance-balance"><span>'+tr("Remaining to invoice","Még számlázandó")+'</span><strong>'+r2Money(totals.balance)+'</strong></div>';
 }
 function r2BindWorkflowFinance(form){
   if(!form)return;r2RefreshWorkflowFinancialSummary(form);
-  form.addEventListener("input",event=>{if(event.target.matches('[name^="price_"],[name="deposit_amount"]'))r2RefreshWorkflowFinancialSummary(form);});
-  form.addEventListener("change",event=>{if(event.target.matches('[name^="phase_"]'))r2RefreshWorkflowFinancialSummary(form);});
+  form.addEventListener("input",event=>{if(event.target.matches('[name^="price_"],[name="deposit_amount"],[name="estimated_revenue"],[data-cost-amount]'))r2RefreshWorkflowFinancialSummary(form);});
+  form.addEventListener("change",event=>{if(event.target.matches('[name^="phase_"],[data-cost-category]'))r2RefreshWorkflowFinancialSummary(form);});
 }
+function r2BindWorkflowCards(form){
+  if(!form)return;
+  const technician=()=>form.elements.assigned_technician_id?.value||"";
+  const technicianName=()=>form.elements.assigned_technician_id?.selectedOptions?.[0]?.textContent?.trim()||tr("selected technician","kiválasztott technikus");
+  const syncDefaults=()=>$$("[data-workflow-phase]",form).forEach(row=>{const node=row.querySelector("[data-default-responsible-label]");if(node)node.textContent=technician()?tr("Default: ","Alapértelmezett: ")+technicianName():tr("Defaults to the job technician","Alapértelmezés: a munka technikusa");});
+  $$("[data-workflow-phase]",form).forEach(row=>{
+    const key=row.dataset.workflowPhase,box=row.querySelector('[name="phase_'+CSS.escape(key)+'"]'),mandatory=r2FixedStage(key);
+    const select=()=>{if(!mandatory&&box){box.checked=!box.checked;row.classList.toggle("selected",box.checked);r2RefreshWorkflowFinancialSummary(form);}};
+    row.querySelector("[data-phase-select]")?.addEventListener("click",select);
+    box?.addEventListener("change",()=>row.classList.toggle("selected",box.checked));
+    row.querySelector("[data-phase-detail]")?.addEventListener("click",()=>{const details=row.querySelector("[data-phase-details]"),open=details?.classList.toggle("hidden")===false;row.querySelector("[data-phase-detail]")?.setAttribute("aria-expanded",String(open));});
+    row.querySelector("[data-add-cost]")?.addEventListener("click",()=>{
+      const host=row.querySelector("[data-phase-costs]"),wrap=document.createElement("div");wrap.innerHTML=r2PhaseCostRows([{category:"material",title:"",amount:0}],key);const cost=wrap.firstElementChild;if(host&&cost){host.append(cost);cost.querySelector("[data-cost-title]")?.focus();cost.querySelector("[data-cost-remove]")?.addEventListener("click",()=>{cost.remove();r2RefreshWorkflowFinancialSummary(form);});}
+    });
+    $$("[data-cost-remove]",row).forEach(button=>button.addEventListener("click",()=>{button.closest("[data-phase-cost]")?.remove();r2RefreshWorkflowFinancialSummary(form);}));
+  });
+  form.elements.assigned_technician_id?.addEventListener("change",syncDefaults);syncDefaults();
+}
+
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
 function r2Today(){return r2NyDate(new Date());}
 function r2DateAdd(dateString,days){const d=new Date(dateString+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
