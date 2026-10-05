@@ -40,6 +40,9 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(app,/view:\(location\.hash\|\|"#milestone"\)/);
   assert.match(app,/activeViews=new Set\(\["milestone","workshop"/);
   assert.match(app,/if\(view==="milestone"&&window\.innerWidth<700\)view="workshop"/);
+  assert.match(app,/function routeFreshSessionHome\(\)/);
+  assert.match(app,/state\.view=window\.innerWidth<700\?"workshop":"milestone"/);
+  assert.match(app,/setSession\(payload\);routeFreshSessionHome\(\);showApp\(\);await renderView\(\)/);
   assert.match(app,/if\(state\.view==="milestone"\)await renderMilestone\(\)/);
   assert.match(html,/href="#milestone" data-nav="milestone"/);
   assert.match(html,/id="mobileBrandButton"[\s\S]{0,120}data-nav="milestone"/);
