@@ -62,7 +62,7 @@ function r2QuarterLocalValue(value){
   return base.toISOString().slice(0,16);
 }
 function r2QuarterTimeOptions(selected="",allowEmpty=true){
-  const normalized=r2QuarterLocalValue("2000-01-01T"+String(selected||"00:00")).slice(11,16);
+  const normalized=selected?r2QuarterLocalValue("2000-01-01T"+String(selected)).slice(11,16):"";
   let html=allowEmpty?'<option value="">—</option>':"";
   for(let minutes=0;minutes<24*60;minutes+=R2_SLOT_MIN){
     const value=r2Pad(Math.floor(minutes/60))+":"+r2Pad(minutes%60);
@@ -98,9 +98,10 @@ function r2IsLogisticsStage(stage){
   return key==="received"||/(arrival|inbound|receiv|beérkez|érkez)/i.test(key+" "+labels)||/(delivery|dispatch|final handover|kiszáll|elszáll|szállítás)/i.test(key+" "+labels);
 }
 function r2WorkflowDefinitions(plan=[]){
-  const defs=r2ActiveDefinitions().map(stage=>({...stage,job_specific:false})),keys=new Set(defs.map(stage=>stage.key));
+  const source=Array.isArray(plan)?plan:[],planByKey=new Map(source.map(phase=>[String(phase?.stage_key||phase?.key||""),phase]));
+  const defs=r2ActiveDefinitions().map(stage=>({...stage,position:Number(planByKey.get(stage.key)?.position||stage.position),job_specific:false})),keys=new Set(defs.map(stage=>stage.key));
   const adminPosition=Number(defs.find(stage=>stage.key==="admin_approval")?.position||99);let draftOffset=0;
-  for(const phase of Array.isArray(plan)?plan:[]){
+  for(const phase of source){
     const key=String(phase?.stage_key||phase?.key||"");if(!key||key==="completed"||keys.has(key))continue;
     draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
   }
