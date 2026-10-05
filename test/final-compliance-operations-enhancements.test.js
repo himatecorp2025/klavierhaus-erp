@@ -38,7 +38,7 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(app,/Inside Manager/);
   assert.match(app,/Outside Manager/);
   assert.match(app,/skill_ids/);
-  assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.doesNotMatch(v6,/operationsSkillsSettingsCard\(users\)/);
   assert.match(v6,/primary_skill_id/);
 });
 
@@ -68,6 +68,10 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
+  assert.match(v6,/admin&&typeof operationsMilestoneProfileCard/);
+  assert.match(ops,/roadmap-node-image/);
+  assert.match(ops,/d\.instrument_media_url\?`<div class="ms-instrument-art"/);
+  assert.match(ops,/tr\("Planned Jobs","Tervezett munkák"\)/);
   assert.match(css,/Enterprise roadmap shell/);
   assert.match(css,/\.ms-roadmap-track/);
   assert.match(css,/\.roadmap-substeps/);
@@ -193,16 +197,17 @@ test("final theme normalization covers legacy fixed-light admin surfaces and nar
   assert.match(round3,/data-line-price/);
 });
 
-test("admin surfaces wire Milestone editing, skills management and complete export into existing Profile, Settings and CMS recovery",()=>{
-  const v6=read("public/v6.js"),ops=read("public/operations-ui.js");
+test("admin surfaces wire Milestone editing into Settings, retain user-level skill editing and keep complete export recovery",()=>{
+  const v6=read("public/v6.js"),ops=read("public/operations-ui.js"),app=read("public/app.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
-  assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.match(v6,/admin&&typeof operationsMilestoneProfileCard/);
+  assert.doesNotMatch(v6,/operationsSkillsSettingsCard\(users\)/);
+  assert.doesNotMatch(v6,/bindOperationsSkillsSettings\(\)/);
   assert.match(v6,/primary_skill_id/);
-  assert.match(v6,/bindOperationsSkillsSettings/);
+  assert.match(app,/skill_ids/);
   assert.match(v6,/operationsExportRecoveryCard/);
   assert.match(v6,/bindOperationsExportRecovery/);
   assert.match(ops,/function operationsMilestoneProfileCard/);
-  assert.match(ops,/function operationsSkillsSettingsCard/);
   assert.match(ops,/function operationsExportRecoveryCard/);
 });

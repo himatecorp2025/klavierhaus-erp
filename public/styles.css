@@ -4359,3 +4359,70 @@ input,textarea,select,
 @media(max-width:699px){
   .app-shell,.app-shell.milestone-showcase-mode{display:block!important}.app-shell>.app-sidebar,.app-shell.milestone-showcase-mode>.app-sidebar{display:none!important}.app-shell .app-header,.app-shell.milestone-showcase-mode .app-header{display:grid!important}.app-shell>.mobile-nav,.app-shell.milestone-showcase-mode>.mobile-nav{display:grid!important}.app-header{grid-template-columns:auto 1fr auto!important}.global-search-shell{width:100%;min-width:0}.header-tools .profile-menu-shell{display:none}.workspace,.app-shell.milestone-showcase-mode .workspace{padding:16px 12px calc(92px + var(--safe-bottom))!important}.milestone-showcase{display:none!important}
 }
+
+/* Milestone visual fidelity pass — compact showcase proportions */
+@media (min-width:1101px) and (min-height:760px){
+  .app-shell.milestone-showcase-mode{height:100dvh;overflow:hidden}
+  .app-shell.milestone-showcase-mode .app-main-column{height:100dvh;min-height:0!important;overflow:hidden}
+  .app-shell.milestone-showcase-mode .workspace{height:calc(100dvh - 66px);min-height:0!important;overflow:hidden;padding:0 14px 12px!important}
+  .milestone-roadmap-page{height:100%;grid-template-rows:142px minmax(238px,1fr) 150px 112px;gap:10px!important;overflow:hidden}
+  .ms-growth-head{min-height:0!important;height:142px!important}
+  .ms-roadmap-panel{min-height:0!important;height:auto!important}
+  .ms-shortcuts-grid{min-height:0!important;height:150px!important}
+  .ms-footer-grid{min-height:0!important;height:112px!important}
+}
+.ms-growth-head{grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr)!important}
+.ms-growth-head .ms-job-copy{padding:16px 28px!important}
+.ms-growth-head .ms-job-copy h1{margin:0 0 10px!important;font-size:clamp(26px,2.7vw,39px)!important;line-height:.98!important}
+.ms-growth-head .ms-reference{margin-bottom:6px!important;font-size:8px!important;letter-spacing:.14em!important}
+.ms-growth-head .ms-meta-row{gap:18px!important}
+.ms-growth-head .ms-meta-row>div{min-width:110px!important}
+.ms-growth-head .ms-meta-row svg{width:17px!important;height:17px!important}
+.ms-growth-head .ms-meta-row small{font-size:7px!important}.ms-growth-head .ms-meta-row strong{font-size:9px!important}
+.ms-growth-head .ms-status-dot{padding:5px 10px!important;font-size:8px!important}
+.ms-growth-head .ms-job-art{width:46%!important}
+.ms-growth-head .ms-job-art img{width:100%;height:100%;object-fit:cover;object-position:center 48%}
+
+.ms-roadmap-panel{padding:14px 16px 12px!important;border-radius:11px!important}
+.ms-roadmap-panel .ms-panel-head{margin-bottom:2px!important;min-height:45px!important;align-items:flex-start!important}
+.ms-roadmap-panel .ms-panel-head h2{font-size:21px!important;line-height:1.05!important;margin-bottom:3px!important}
+.ms-roadmap-panel .ms-panel-head p{max-width:850px;font-size:8.5px!important;line-height:1.3!important}
+.ms-roadmap-panel .ms-panel-head button{min-height:30px!important;height:30px!important;padding:0 10px!important;font-size:8px!important}
+.ms-roadmap-scroll{height:calc(100% - 45px);min-height:175px;padding:8px 3px 0!important;overflow-x:auto!important;overflow-y:hidden!important}
+.ms-roadmap-track{height:100%;min-height:170px;align-content:center!important;grid-template-columns:repeat(var(--major-count),minmax(150px,1fr))!important;min-width:max(100%,calc(var(--major-count) * 160px))!important;padding:12px 8px 0!important}
+.ms-roadmap-track .ms-timeline-line{top:46px!important;height:2px!important;left:2.5%!important;right:2.5%!important}
+.roadmap-major{min-height:145px!important;padding:0 6px!important;align-content:start!important}
+.roadmap-major:nth-of-type(even){padding-top:31px!important}
+.roadmap-major:nth-of-type(odd){padding-top:0!important}
+.roadmap-major:nth-of-type(even) .ms-step-stem{top:18px!important;height:29px!important}
+.roadmap-major:nth-of-type(odd) .ms-step-stem{top:-18px!important;height:20px!important}
+.roadmap-major .ms-step-node{width:50px!important;height:50px!important;margin-bottom:6px!important}
+.roadmap-major .ms-step-node>span{width:36px!important;height:36px!important;overflow:hidden!important}
+.roadmap-major .ms-step-node svg{width:20px!important;height:20px!important}
+.roadmap-node-image{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+.roadmap-major b{font-size:8.5px!important}.roadmap-major h3{font-size:11px!important;line-height:1.12!important;margin:3px 0 4px!important;max-width:165px}.roadmap-major>p{font-size:7px!important;line-height:1.28!important;max-width:155px!important}
+.roadmap-substeps{gap:3px!important;margin-top:5px!important;max-width:170px!important}.roadmap-substep{padding:3px 5px!important;font-size:6.3px!important}
+
+.ms-shortcuts-grid{gap:8px!important;align-items:stretch!important}
+.ms-shortcuts-grid .ms-info-card{display:grid!important;grid-template-rows:auto minmax(0,1fr) auto!important;align-content:stretch!important;min-height:0!important;height:100%!important;padding:12px 12px 10px!important;border-radius:9px!important}
+.ms-shortcuts-grid .ms-info-card header{margin-bottom:7px!important}.ms-shortcuts-grid .ms-info-card header svg{width:15px!important;height:15px!important}.ms-shortcuts-grid .ms-info-card header strong{font-size:11.5px!important}
+.ms-shortcuts-grid .ms-info-card h3{margin:0 0 4px!important;font-size:11.5px!important;align-self:start}.ms-shortcuts-grid .ms-info-card p{font-size:7.5px!important;line-height:1.3!important;align-self:start}
+.ms-shortcuts-grid .ms-info-card dl{align-self:start!important;gap:2px 5px!important}.ms-shortcuts-grid .ms-info-card dt{font-size:7px!important}.ms-shortcuts-grid .ms-info-card dd{font-size:8px!important}
+.ms-shortcuts-grid .ms-info-card>button{align-self:end!important;margin-top:6px!important;min-height:28px!important;height:28px!important;font-size:8px!important}
+.ms-instrument:not(.has-uploaded-image) .ms-instrument-art{display:none!important}
+.ms-instrument.has-uploaded-image{grid-template-rows:auto 1fr auto auto!important}.ms-instrument.has-uploaded-image .ms-instrument-art{height:48px!important;margin:0 0 3px!important;align-self:center}.ms-instrument.has-uploaded-image .ms-instrument-art img{width:100%;height:100%;object-fit:contain!important}
+
+.ms-footer-grid{gap:8px!important}.ms-footer-grid .ms-craft,.ms-footer-grid .ms-quote{min-height:0!important;height:100%!important;border-radius:9px!important}
+.ms-footer-grid .ms-craft{grid-template-columns:1.42fr 1fr!important}.ms-footer-grid .ms-craft-image{min-height:0!important;height:100%!important}.ms-footer-grid .ms-craft-image img{width:100%;height:100%;object-fit:cover!important;object-position:center!important}
+.ms-footer-grid .ms-craft>div:last-child{padding:10px 14px!important}.ms-footer-grid .ms-craft span{font-size:6.5px!important}.ms-footer-grid .ms-craft h2{font-size:16px!important;line-height:1.02!important;margin:3px 0 3px!important}.ms-footer-grid .ms-craft p{font-size:7px!important;line-height:1.25!important}.ms-footer-grid .ms-craft i{margin-top:5px!important}
+.ms-footer-grid .ms-quote{padding:10px!important}.ms-footer-grid .ms-quote>div img{width:100%;height:100%;object-fit:cover!important;object-position:center!important}.ms-footer-grid .ms-quote blockquote{font-size:10.5px!important;line-height:1.35!important;max-width:260px!important}
+
+.settings-layout .milestone-admin-card{grid-column:1/-1}.milestone-admin-card .panel-head{align-items:center}.milestone-admin-card .milestone-admin-preview{margin-top:10px}
+
+@media (min-width:1101px) and (max-height:900px){
+  .milestone-roadmap-page{grid-template-rows:118px minmax(210px,1fr) 132px 92px!important;gap:8px!important}
+  .ms-growth-head{height:118px!important}.ms-growth-head .ms-job-copy{padding-top:11px!important;padding-bottom:11px!important}.ms-growth-head .ms-job-copy h1{font-size:31px!important;margin-bottom:7px!important}
+  .ms-roadmap-panel{padding-top:10px!important;padding-bottom:8px!important}.ms-roadmap-panel .ms-panel-head{min-height:38px!important}.ms-roadmap-panel .ms-panel-head h2{font-size:18px!important}.ms-roadmap-scroll{height:calc(100% - 38px)!important;padding-top:3px!important}.ms-roadmap-track{min-height:150px!important;padding-top:8px!important}.roadmap-major{min-height:130px!important}.roadmap-major .ms-step-node{width:44px!important;height:44px!important}.roadmap-major .ms-step-node>span{width:32px!important;height:32px!important}.ms-roadmap-track .ms-timeline-line{top:41px!important}
+  .ms-shortcuts-grid{height:132px!important}.ms-shortcuts-grid .ms-info-card{padding:9px 10px 8px!important}.ms-shortcuts-grid .ms-info-card>button{height:25px!important;min-height:25px!important}
+  .ms-footer-grid{height:92px!important}.ms-footer-grid .ms-craft h2{font-size:14px!important}.ms-footer-grid .ms-craft p{display:none}.ms-footer-grid .ms-quote blockquote{font-size:9px!important}
+}
