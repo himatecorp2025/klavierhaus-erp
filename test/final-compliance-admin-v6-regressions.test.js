@@ -11,11 +11,12 @@ const round2=fs.readFileSync(path.join(root,"public","round2.js"),"utf8");
 const v6=fs.readFileSync(path.join(root,"public","v6.js"),"utf8");
 const css=fs.readFileSync(path.join(root,"public","styles.css"),"utf8");
 
-test("planned job modal loads users and workflow settings without requiring a preloaded client list",()=>{
-  assert.match(round2,/const \[,settings\]=await Promise\.all\(\[loadUsers\(\),api\("\/api\/workflow\/settings"\)\]\)/);
+test("planned job modal loads users, workflow settings and operational profiles without requiring a preloaded client list",()=>{
+  assert.match(round2,/const \[,settings\]=await Promise\.all\(\[loadUsers\(\),api\("\/api\/workflow\/settings"\),typeof loadOperationalProfiles==="function"\?loadOperationalProfiles\(\{refresh:true\}\):Promise\.resolve\(null\)\]\)/);
   assert.match(round2,/jobClientSearch/);
   assert.match(round2,/openQuickClientCreate/);
   assert.match(round2,/openQuickPianoCreate/);
+  assert.match(round2,/r2ResponsibleOptions\(responsible,responsibilitySkill\)/);
 });
 
 test("calendar collection bindings use querySelectorAll and create binding is top-level",()=>{
