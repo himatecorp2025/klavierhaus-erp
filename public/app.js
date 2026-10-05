@@ -94,7 +94,7 @@ function humanError(error){
     LAST_ADMIN_CANNOT_BE_DELETED:["The last active Admin cannot be deleted.","Az utolsó aktív Admin nem törölhető."],
     HIDDEN_OWNER_PROTECTED:["This protected owner account cannot be deleted.","Ez a védett tulajdonosi fiók nem törölhető."],
     WORKFLOW_REQUIRES_ACTIVE_PHASE:["Choose at least one working phase before Completed.","A Lezárva előtt legalább egy munkafázist válassz."],
-    WORKFLOW_LABEL_REQUIRED:["Both English and Hungarian workflow names are required.","Az angol és magyar fázisnév is kötelező."],
+    WORKFLOW_LABEL_REQUIRED:["The English workflow name is required; Hungarian is optional.","Az angol fázisnév kötelező, a magyar opcionális."],
     CURRENT_WORKFLOW_PHASE_REQUIRED:["The current phase cannot be removed from an active workflow.","Az aktuális fázis nem távolítható el az aktív munkafolyamatból."],
     INVALID_BLOCKER_CODE:["Choose a valid delay reason.","Válassz érvényes elakadási okot."],
     INVALID_WORKFLOW_DUE_AT:["The phase deadline is invalid.","A fázis határideje érvénytelen."],
