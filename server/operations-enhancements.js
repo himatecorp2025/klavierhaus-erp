@@ -158,26 +158,36 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
     }catch(error){res.status(error.status||400).json({error:error.message});}
   });
 
+  const milestoneDefaults=[
+    {title_en:"Intake",title_hu:"Igényfelvétel",description_en:"Register client, piano details and initial request.",description_hu:"Ügyfél, zongoraadatok és kezdeti igény rögzítése.",icon:"clipboard"},
+    {title_en:"Assessment",title_hu:"Felmérés",description_en:"On-site inspection, condition report and measurements.",description_hu:"Helyszíni felmérés, állapotjelentés és mérések.",icon:"piano"},
+    {title_en:"Quote",title_hu:"Ajánlat",description_en:"Prepare service plan and send quote to client.",description_hu:"Szervizterv és ajánlat elkészítése az ügyfélnek.",icon:"document"},
+    {title_en:"Workshop",title_hu:"Műhely",description_en:"Service, regulation, repairs and quality checks.",description_hu:"Szerviz, szabályozás, javítások és minőségellenőrzés.",icon:"tools"},
+    {title_en:"Delivery & Follow-up",title_hu:"Átadás és utánkövetés",description_en:"Return piano, final tuning and follow-up with client.",description_hu:"Zongora átadása, végső hangolás és utánkövetés.",icon:"flag"}
+  ];
+  function fixedMilestoneSteps(rows=[]){return milestoneDefaults.map((fallback,index)=>{const row=rows[index]||{};return {...fallback,...row,sort_order:index,completed:Boolean(row.completed)};});}
   function milestonePayload(){
     const dashboard=db.prepare("SELECT * FROM milestone_dashboard WHERE id=1").get()||{};
-    const steps=db.prepare("SELECT * FROM milestone_steps ORDER BY sort_order,id").all().map(row=>({...row,completed:Boolean(row.completed)}));
+    const steps=fixedMilestoneSteps(db.prepare("SELECT * FROM milestone_steps ORDER BY sort_order,id LIMIT 5").all());
     const completed=steps.filter(row=>row.completed).length,now=Date.now(),start=dashboard.start_date?new Date(dashboard.start_date+"T00:00:00Z").getTime():NaN,end=dashboard.end_date?new Date(dashboard.end_date+"T23:59:59Z").getTime():NaN;
     const time_progress=Number.isFinite(start)&&Number.isFinite(end)&&end>start?Math.max(0,Math.min(1,(now-start)/(end-start))):0;
-    return {dashboard,steps,completed_count:completed,total_count:steps.length,step_progress:steps.length?completed/steps.length:0,time_progress,next_step:steps.find(row=>!row.completed)||null,completed_all:Boolean(steps.length&&completed===steps.length)};
+    return {dashboard,steps,completed_count:completed,total_count:5,step_progress:completed/5,time_progress,next_step:steps.find(row=>!row.completed)||null,completed_all:completed===5};
   }
   app.get("/api/milestone",auth,staff,(_req,res)=>{res.setHeader("Cache-Control","no-store");res.json(milestonePayload());});
   app.put("/api/milestone",auth,admin,(req,res)=>{
     try{
-      const dashboard=req.body?.dashboard||{},steps=Array.isArray(req.body?.steps)?req.body.steps:[];
+      const dashboard=req.body?.dashboard||{},steps=fixedMilestoneSteps(Array.isArray(req.body?.steps)?req.body.steps:[]);
       const titleEn=text(dashboard.title_en,240),titleHu=text(dashboard.title_hu,240)||titleEn;if(!titleEn)throw problem("MILESTONE_TITLE_REQUIRED");
       db.transaction(()=>{
         db.prepare("INSERT INTO milestone_dashboard(id,title_en,title_hu,quote_en,quote_hu,start_date,end_date,target_label,hero_media_url,hero_icon,updated_by_user_id,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET title_en=excluded.title_en,title_hu=excluded.title_hu,quote_en=excluded.quote_en,quote_hu=excluded.quote_hu,start_date=excluded.start_date,end_date=excluded.end_date,target_label=excluded.target_label,hero_media_url=excluded.hero_media_url,hero_icon=excluded.hero_icon,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP").run(titleEn,titleHu,text(dashboard.quote_en,1500)||null,text(dashboard.quote_hu,1500)||null,text(dashboard.start_date,20)||null,text(dashboard.end_date,20)||null,text(dashboard.target_label,240)||null,text(dashboard.hero_media_url,1200)||null,text(dashboard.hero_icon,80)||null,req.user.id);
+        db.prepare(`UPDATE milestone_dashboard SET reference_code=?,subtitle_en=?,subtitle_hu=?,client_name=?,client_type=?,client_contact=?,location_label=?,scheduled_label=?,status_label=?,instrument_name=?,instrument_serial=?,instrument_year=?,instrument_media_url=?,schedule_range=?,delivery_estimate=?,craft_title_en=?,craft_title_hu=?,craft_body_en=?,craft_body_hu=?,craft_media_url=?,quote_media_url=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=1`).run(
+          text(dashboard.reference_code,80)||"JOB #1042",text(dashboard.subtitle_en,500)||"Track the progress of this piano service from intake to completion.",text(dashboard.subtitle_hu,500)||"Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.",text(dashboard.client_name,240)||null,text(dashboard.client_type,160)||null,text(dashboard.client_contact,240)||null,text(dashboard.location_label,240)||null,text(dashboard.scheduled_label,120)||null,text(dashboard.status_label,120)||"In Progress",text(dashboard.instrument_name,240)||null,text(dashboard.instrument_serial,120)||null,text(dashboard.instrument_year,40)||null,text(dashboard.instrument_media_url,1200)||null,text(dashboard.schedule_range,160)||null,text(dashboard.delivery_estimate,120)||null,text(dashboard.craft_title_en,300)||"Exceptional Pianos. Lasting Legacies.",text(dashboard.craft_title_hu,300)||"Kivételes zongorák. Maradandó örökség.",text(dashboard.craft_body_en,1000)||"Precision service for extraordinary instruments.",text(dashboard.craft_body_hu,1000)||"Precíz szerviz kivételes hangszerekhez.",text(dashboard.craft_media_url,1200)||null,text(dashboard.quote_media_url,1200)||null,req.user.id
+        );
         db.prepare("DELETE FROM milestone_steps").run();
         const insert=db.prepare("INSERT INTO milestone_steps(title_en,title_hu,description_en,description_hu,target_date,completed,completed_at,icon,media_url,sort_order,created_by_user_id,updated_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
         steps.forEach((step,index)=>{
-          const stepTitle=text(step?.title_en??step?.title,240);if(!stepTitle)throw problem("MILESTONE_STEP_TITLE_REQUIRED");
-          const completed=step?.completed?1:0;
-          insert.run(stepTitle,text(step?.title_hu,240)||stepTitle,text(step?.description_en,2000)||null,text(step?.description_hu,2000)||null,text(step?.target_date,20)||null,completed,completed?(text(step?.completed_at,60)||new Date().toISOString()):null,text(step?.icon,80)||null,text(step?.media_url,1200)||null,Number(step?.sort_order??index),req.user.id,req.user.id);
+          const fallback=milestoneDefaults[index],stepTitle=text(step?.title_en??step?.title,240)||fallback.title_en,completed=step?.completed?1:0;
+          insert.run(stepTitle,text(step?.title_hu,240)||fallback.title_hu,text(step?.description_en,2000)||fallback.description_en,text(step?.description_hu,2000)||fallback.description_hu,text(step?.target_date,20)||null,completed,completed?(text(step?.completed_at,60)||new Date().toISOString()):null,text(step?.icon,80)||fallback.icon,text(step?.media_url,1200)||null,index,req.user.id,req.user.id);
         });
       })();
       const after=milestonePayload();audit(req,"UPDATE","milestone","GLOBAL",null,after);res.json(after);

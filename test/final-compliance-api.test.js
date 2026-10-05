@@ -111,14 +111,14 @@ test("operations enhancements persist staff profiles, Milestone and full XLSX ex
     {title_en:"Reach the next revenue milestone",title_hu:"Következő bevételi cél",target_date:"2035-09-01",completed:false,icon:"★"}
   ]}});
   assert.equal(milestone.status,200,JSON.stringify(milestone.payload));
-  assert.equal(milestone.payload.total_count,2);
+  assert.equal(milestone.payload.total_count,5);
   assert.equal(milestone.payload.completed_count,1);
   assert.equal(milestone.payload.dashboard.target_label,"$1M Klavierhaus");
   assert.equal(milestone.payload.next_step.title_en,"Reach the next revenue milestone");
 
   const milestoneRead=await request("/api/milestone",{token});
   assert.equal(milestoneRead.status,200,JSON.stringify(milestoneRead.payload));
-  assert.equal(milestoneRead.payload.steps.length,2);
+  assert.equal(milestoneRead.payload.steps.length,5);
 
   const exportResponse=await fetch(origin+"/api/system-export.xlsx",{headers:{Authorization:"Bearer "+token}});
   assert.equal(exportResponse.status,200);
