@@ -156,7 +156,7 @@ function r2WorkflowFinancialSummary(form){
 }
 function r2RefreshWorkflowFinancialSummary(form){
   const summary=form?.querySelector("[data-workflow-finance-summary]");if(!summary)return;
-  const totals=r2WorkflowFinancialSummary(form),phaseLines=$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked).map(row=>{
+  const totals=r2WorkflowFinancialSummary(form),phaseLines=$$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked).map(row=>{
     const label=state.language==="hu"?(row.dataset.phaseLabelHu||row.dataset.phaseLabelEn):(row.dataset.phaseLabelEn||row.dataset.phaseLabelHu),price=Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0));
     return '<div class="workflow-finance-phase"><span>'+esc(label)+'</span><strong>'+r2Money(price)+'</strong></div>';
   }).join("");
