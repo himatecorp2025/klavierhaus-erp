@@ -523,6 +523,48 @@ function openDialog({title,eyebrow="",body,variant=""}){
   const dialog=$("#appDialog");dialog.classList.toggle("app-dialog--wide",variant==="wide");if(!dialog.open)dialog.showModal();return dialog;
 }
 function closeDialog(){const dialog=$("#appDialog");if(dialog?.open)dialog.close();}
+function openMiniDialog({title,eyebrow="",body}){
+  document.querySelector(".mini-dialog-backdrop")?.remove();
+  const overlay=document.createElement("div");overlay.className="mini-dialog-backdrop";overlay.innerHTML=`<section class="mini-dialog-card" role="dialog" aria-modal="true"><header><div><span class="eyebrow">${esc(eyebrow)}</span><h3>${esc(title)}</h3></div><button type="button" class="icon-button" data-mini-close aria-label="${esc(tr("Close","Bezárás"))}">×</button></header><div class="mini-dialog-body">${body}</div></section>`;
+  document.body.append(overlay);
+  const close=()=>overlay.remove();
+  overlay.addEventListener("click",event=>{if(event.target===overlay||event.target.closest("[data-mini-close]")){event.preventDefault();close();}});
+  const onKey=event=>{if(event.key==="Escape"&&document.body.contains(overlay)){event.preventDefault();close();document.removeEventListener("keydown",onKey);}};
+  document.addEventListener("keydown",onKey);
+  queueMicrotask(()=>overlay.querySelector("input,select,textarea,button")?.focus());
+  return {root:overlay,close};
+}
+function openQuickClientCreate({seedName="",onSaved}={}){
+  const mini=openMiniDialog({title:tr("New client","Új ügyfél"),eyebrow:tr("QUICK MASTER DATA","GYORS TÖRZSADAT"),body:`<form id="quickClientForm" class="form-grid">
+    <label class="field full"><span>${tr("Client name","Ügyfél neve")} *</span><input name="name" required maxlength="240" value="${esc(seedName)}"></label>
+    <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email"></label>
+    <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" autocomplete="tel"></label>
+    <label class="field full"><span>${tr("Address","Cím")}</span><input name="address" autocomplete="street-address"></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-mini-close>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Create client","Ügyfél létrehozása")}</button></div>
+  </form>`});
+  mini.root.querySelector("#quickClientForm").addEventListener("submit",async event=>{
+    event.preventDefault();const button=event.currentTarget.querySelector('button[type="submit"]'),body=Object.fromEntries(new FormData(event.currentTarget));button.disabled=true;
+    try{const saved=await api("/api/clients",{method:"POST",body:JSON.stringify(body)});mini.close();toast(tr("Client created.","Ügyfél létrehozva."),"success");if(typeof onSaved==="function")await onSaved(saved);}
+    catch(error){button.disabled=false;toast(humanError(error),"error");}
+  });
+  return mini;
+}
+function openQuickPianoCreate(client,{onSaved}={}){
+  if(!client?.id){toast(tr("Select or create a client first.","Előbb válassz vagy hozz létre ügyfelet."),"error");return null;}
+  const mini=openMiniDialog({title:tr("New piano","Új zongora"),eyebrow:client.name||tr("QUICK MASTER DATA","GYORS TÖRZSADAT"),body:`<form id="quickPianoForm" class="form-grid">
+    <label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" required maxlength="200" placeholder="Steinway & Sons"></label>
+    <label class="field"><span>${tr("Model","Modell")}</span><input name="model" maxlength="200"></label>
+    <label class="field"><span>${tr("Serial number","Gyári szám")}</span><input name="serial_number" maxlength="200"></label>
+    <label class="field"><span>${tr("Location","Hely")}</span><input name="location_notes" maxlength="1200" value="${esc(client.address||"")}"></label>
+    <div class="form-actions full"><button type="button" class="secondary-button" data-mini-close>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Create piano","Zongora létrehozása")}</button></div>
+  </form>`});
+  mini.root.querySelector("#quickPianoForm").addEventListener("submit",async event=>{
+    event.preventDefault();const button=event.currentTarget.querySelector('button[type="submit"]'),body=Object.fromEntries(new FormData(event.currentTarget));button.disabled=true;
+    try{const saved=await api(`/api/clients/${client.id}/pianos`,{method:"POST",body:JSON.stringify(body)});mini.close();toast(tr("Piano created and linked.","Zongora létrehozva és összekapcsolva."),"success");if(typeof onSaved==="function")await onSaved(saved);}
+    catch(error){button.disabled=false;toast(humanError(error),"error");}
+  });
+  return mini;
+}
 document.addEventListener("click",event=>{
   if(event.target.closest("[data-dialog-close],[data-close-dialog]")){event.preventDefault();closeDialog();}
 });
