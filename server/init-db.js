@@ -520,6 +520,27 @@ CREATE TABLE IF NOT EXISTS milestone_dashboard (
   target_label TEXT,
   hero_media_url TEXT,
   hero_icon TEXT,
+  reference_code TEXT NOT NULL DEFAULT 'JOB #1042',
+  subtitle_en TEXT NOT NULL DEFAULT 'Track the progress of this piano service from intake to completion.',
+  subtitle_hu TEXT NOT NULL DEFAULT 'Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.',
+  client_name TEXT,
+  client_type TEXT,
+  client_contact TEXT,
+  location_label TEXT,
+  scheduled_label TEXT,
+  status_label TEXT NOT NULL DEFAULT 'In Progress',
+  instrument_name TEXT,
+  instrument_serial TEXT,
+  instrument_year TEXT,
+  instrument_media_url TEXT,
+  schedule_range TEXT,
+  delivery_estimate TEXT,
+  craft_title_en TEXT NOT NULL DEFAULT 'Exceptional Pianos. Lasting Legacies.',
+  craft_title_hu TEXT NOT NULL DEFAULT 'Kivételes zongorák. Maradandó örökség.',
+  craft_body_en TEXT NOT NULL DEFAULT 'Precision service for extraordinary instruments.',
+  craft_body_hu TEXT NOT NULL DEFAULT 'Precíz szerviz kivételes hangszerekhez.',
+  craft_media_url TEXT,
+  quote_media_url TEXT,
   updated_by_user_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -541,7 +562,29 @@ CREATE TABLE IF NOT EXISTS milestone_steps (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_milestone_steps_order ON milestone_steps(sort_order,id);`);
+for(const [name,definition] of [
+  ["reference_code","TEXT NOT NULL DEFAULT 'JOB #1042'"],
+  ["subtitle_en","TEXT NOT NULL DEFAULT 'Track the progress of this piano service from intake to completion.'"],
+  ["subtitle_hu","TEXT NOT NULL DEFAULT 'Kövesd a zongoraszerviz folyamatát az igényfelvételtől az átadásig.'"],
+  ["client_name","TEXT"],["client_type","TEXT"],["client_contact","TEXT"],["location_label","TEXT"],["scheduled_label","TEXT"],
+  ["status_label","TEXT NOT NULL DEFAULT 'In Progress'"],["instrument_name","TEXT"],["instrument_serial","TEXT"],["instrument_year","TEXT"],["instrument_media_url","TEXT"],
+  ["schedule_range","TEXT"],["delivery_estimate","TEXT"],
+  ["craft_title_en","TEXT NOT NULL DEFAULT 'Exceptional Pianos. Lasting Legacies.'"],["craft_title_hu","TEXT NOT NULL DEFAULT 'Kivételes zongorák. Maradandó örökség.'"],
+  ["craft_body_en","TEXT NOT NULL DEFAULT 'Precision service for extraordinary instruments.'"],["craft_body_hu","TEXT NOT NULL DEFAULT 'Precíz szerviz kivételes hangszerekhez.'"],
+  ["craft_media_url","TEXT"],["quote_media_url","TEXT"]
+])ensureColumn("milestone_dashboard",name,definition);
 db.prepare(`INSERT OR IGNORE INTO milestone_dashboard(id,title_en,title_hu,quote_en,quote_hu,target_label) VALUES(1,?,?,?,?,?)`).run('Our next milestone','A következő mérföldkő','Progress is built one completed step at a time.','A fejlődés minden teljesített lépéssel közelebb visz.','Klavierhaus');
+if(Number(db.prepare('SELECT COUNT(*) count FROM milestone_steps').get()?.count||0)===0){
+  const seedMilestone=db.prepare('INSERT INTO milestone_steps(title_en,title_hu,description_en,description_hu,icon,sort_order) VALUES(?,?,?,?,?,?)');
+  [
+    ['Intake','Igényfelvétel','Register client, piano details and initial request.','Ügyfél, zongoraadatok és kezdeti igény rögzítése.','clipboard',0],
+    ['Assessment','Felmérés','On-site inspection, condition report and measurements.','Helyszíni felmérés, állapotjelentés és mérések.','piano',1],
+    ['Quote','Ajánlat','Prepare service plan and send quote to client.','Szervizterv és ajánlat elkészítése az ügyfélnek.','document',2],
+    ['Workshop','Műhely','Service, regulation, repairs and quality checks.','Szerviz, szabályozás, javítások és minőségellenőrzés.','tools',3],
+    ['Delivery & Follow-up','Átadás és utánkövetés','Return piano, final tuning and follow-up with client.','Zongora átadása, végső hangolás és utánkövetés.','flag',4]
+  ].forEach(row=>seedMilestone.run(...row));
+}
+
 if(Number(db.prepare('SELECT COUNT(*) count FROM staff_skills').get()?.count||0)===0){
   const seedSkill=db.prepare('INSERT INTO staff_skills(code,name_en,name_hu,sort_order,active) VALUES(?,?,?,?,1)');
   [

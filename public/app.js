@@ -595,6 +595,7 @@ async function renderView(){
   consumeDeepLink();
   document.documentElement.classList.remove("messenger-thread-open");
   $("#appShell")?.classList.toggle("messenger-mode",state.view==="messenger");
+  $("#appShell")?.classList.toggle("milestone-showcase-mode",state.view==="milestone");
   const workspace=$("#workspace");workspace.classList.toggle("messenger-workspace",state.view==="messenger");workspace.innerHTML=loading();
   try{
     if(state.view==="milestone")await renderMilestone();

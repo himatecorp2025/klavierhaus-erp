@@ -52,9 +52,11 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(html,/id="mobileBrandButton"[\s\S]{0,120}data-nav="milestone"/);
   assert.match(html,/\/operations-ui\.js/);
   assert.match(ops,/async function renderMilestone/);
-  assert.match(ops,/GOAL ACHIEVED/);
+  assert.match(ops,/milestone-showcase/);
+  assert.match(ops,/Service Milestones/);
+  assert.match(ops,/Array\.from\(\{length:5\}/);
   assert.match(ops,/openMilestoneEditor/);
-  assert.match(ops,/step_progress/);
+  assert.match(ops,/data-ms-nav/);
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
@@ -65,6 +67,9 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(api,/\/api\/milestone\/media/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS milestone_dashboard/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS milestone_steps/);
+  assert.match(schema,/reference_code TEXT NOT NULL DEFAULT 'JOB #1042'/);
+  assert.match(schema,/instrument_media_url TEXT/);
+  assert.match(schema,/craft_media_url TEXT/);
 });
 
 test("VIP clients have explicit last-contacted tracking and a three-month warning",()=>{
