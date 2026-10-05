@@ -219,6 +219,11 @@ function setSession(payload){
   if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1)){state.view="profile";history.replaceState({},"","#profile");}
   sessionStorage.setItem("kh_token",state.token);sessionStorage.setItem("kh_user",JSON.stringify(state.user));
 }
+function routeFreshSessionHome(){
+  if(state.serviceSuspended&&(state.user?.role==="SUPERADMIN"||Number(state.user?.is_superadmin||0)===1))return;
+  state.view=window.innerWidth<700?"workshop":"milestone";
+  history.replaceState({},"","#"+state.view);
+}
 function clearSession(){
   clearApiMemoryCache();apiInflightGets.clear();
   state.token="";state.user=null;sessionStorage.removeItem("kh_token");sessionStorage.removeItem("kh_user");
@@ -1358,12 +1363,12 @@ $("#loginForm").addEventListener("submit",async event=>{
       sessionStorage.setItem("kh_activation_token",payload.activation_token);$("#loginForm").classList.add("hidden");$("#activationForm").classList.remove("hidden");
       $("#activationHint").textContent=tr(`We sent the code to ${payload.contact_email_masked||"your contact email"}.`,`A kódot ide küldtük: ${payload.contact_email_masked||"a kapcsolati e-mail címre"}.`);$("#activationCode").focus();return;
     }
-    setSession(payload);showApp();await renderView();
+    setSession(payload);routeFreshSessionHome();showApp();await renderView();
   }catch(error){toast(humanError(error),"error");}finally{button.disabled=false;}
 });
 $("#activationForm").addEventListener("submit",async event=>{
   event.preventDefault();
-  try{const payload=await api("/api/account-activation/verify",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token"),activation_code:$("#activationCode").value})});sessionStorage.removeItem("kh_activation_token");setSession(payload);showApp();await renderView();}
+  try{const payload=await api("/api/account-activation/verify",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token"),activation_code:$("#activationCode").value})});sessionStorage.removeItem("kh_activation_token");setSession(payload);routeFreshSessionHome();showApp();await renderView();}
   catch(error){toast(humanError(error),"error");}
 });
 $("#resendActivationBtn").addEventListener("click",async()=>{try{const payload=await api("/api/account-activation/resend",{method:"POST",body:JSON.stringify({activation_token:sessionStorage.getItem("kh_activation_token")})});sessionStorage.setItem("kh_activation_token",payload.activation_token);toast(tr("A new activation code was sent.","Új aktiváló kód elküldve."),"success");}catch(error){toast(humanError(error),"error");}});
