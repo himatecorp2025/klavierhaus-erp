@@ -119,6 +119,7 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
     try{
       const profile=workProfile(req.params.id);if(!profile)throw problem("USER_NOT_FOUND",404);
       const scope=profile.role==="MANAGER"?text(req.body?.manager_scope,20).toUpperCase():null;
+      if(profile.role==="MANAGER"&&!scope)throw problem("MANAGER_SCOPE_REQUIRED");
       if(scope&&!["INSIDE","OUTSIDE"].includes(scope))throw problem("INVALID_MANAGER_SCOPE");
       const skillIds=[...new Set((Array.isArray(req.body?.skill_ids)?req.body.skill_ids:[]).map(integerId).filter(Boolean))];
       for(const id of skillIds)if(!db.prepare("SELECT 1 FROM staff_skills WHERE id=? AND active=1").get(id))throw problem("STAFF_SKILL_NOT_FOUND");
