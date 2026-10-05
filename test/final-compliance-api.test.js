@@ -129,6 +129,21 @@ test("operations enhancements persist staff profiles, Milestone and full XLSX ex
   assert.equal(milestoneRead.payload.steps.length,6);
   assert.equal(milestoneRead.payload.steps.find(row=>row.uid==="s1").parent_uid,"m1");
 
+  const huOnlyMilestone=await request("/api/milestone",{token,method:"PUT",body:{dashboard:{title_en:"Road to One Million",title_hu:"Út az egymillióhoz"},steps:[
+    {uid:"hm1",step_kind:"major",title_hu:"Magyar fő mérföldkő",completed:false,icon:"target"},
+    {uid:"hs1",parent_uid:"hm1",step_kind:"minor",title_hu:"Magyar almérföldkő",completed:false,icon:"check"}
+  ]}});
+  assert.equal(huOnlyMilestone.status,200,JSON.stringify(huOnlyMilestone.payload));
+  assert.equal(huOnlyMilestone.payload.steps.find(row=>row.uid==="hm1").title_en,"Magyar fő mérföldkő");
+  assert.equal(huOnlyMilestone.payload.steps.find(row=>row.uid==="hs1").parent_uid,"hm1");
+
+  const orphanMinor=await request("/api/milestone",{token,method:"PUT",body:{dashboard:{title_en:"Road to One Million",title_hu:"Út az egymillióhoz"},steps:[
+    {uid:"om1",step_kind:"major",title_en:"Major",title_hu:"Fő"},
+    {uid:"os1",step_kind:"minor",title_hu:"Árva almérföldkő",icon:"check"}
+  ]}});
+  assert.equal(orphanMinor.status,400,JSON.stringify(orphanMinor.payload));
+  assert.equal(orphanMinor.payload.error,"MILESTONE_PARENT_REQUIRED");
+
   const exportResponse=await fetch(origin+"/api/system-export.xlsx",{headers:{Authorization:"Bearer "+token}});
   assert.equal(exportResponse.status,200);
   assert.match(exportResponse.headers.get("content-type")||"",/spreadsheetml/);
