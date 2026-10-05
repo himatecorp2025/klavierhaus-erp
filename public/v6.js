@@ -905,7 +905,7 @@ openIntakeDialog=async function(options={}){
   });
 };
 openConvertToJobDialog=async function(lead){
-  const [assessment,settings]=await Promise.all([api(`/api/intake/${lead.id}/assessment`),api("/api/workflow/settings"),loadUsers()]);
+  const [assessment,settings]=await Promise.all([api(`/api/intake/${lead.id}/assessment`),api("/api/workflow/settings"),loadUsers(),typeof loadOperationalProfiles==="function"?loadOperationalProfiles({refresh:true}):Promise.resolve(null)]);
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages};const pianos=lead.client_id?await api(`/api/clients/${lead.client_id}/pianos`):[],pianoOptions=pianos.map(p=>`<option value="${p.id}">${esc([p.brand,p.model,p.serial_number].filter(Boolean).join(" · "))}</option>`).join("");
   openDialog({title:tr("Approve intake & create job","Igény jóváhagyása és munka létrehozása"),eyebrow:tr("ONE-STEP CONVERSION","EGYLÉPÉSES KONVERZIÓ"),variant:"wide",body:`<form id="convertJobEditor" class="form-grid">
     <div class="full intake-quote-summary"><span>${tr("Estimated quoted work","Becsült ajánlati munka")}</span><strong>${r3Money(assessment.estimated_total||0)}</strong><div>${assessment.items.map(item=>`<small>${esc(state.language==="hu"?item.item_title_hu:item.item_title_en)} · ${r3Money(item.price)}</small>`).join("")}</div></div>
@@ -917,12 +917,13 @@ openConvertToJobDialog=async function(lead){
     <label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="0.00"></label>
     <div class="field"><span>${tr("Start · New York (optional)","Kezdés · New York (opcionális)")}</span>${r2DateTimeFields("scheduled_at","")}</div>
     <label class="field"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Choose when scheduling","Ütemezéskor választom")}</option>${r2TechnicianOptions(lead.assigned_technician_id)}</select></label>
+    <label class="field"><span>${tr("Primary job role","Elsődleges munkakör")}</span><select name="primary_skill_id">${r2SkillOptions("")}</select></label>
     <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select></label>
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><h3>${tr("Workflow phases","Munkafázisok")}</h3></div><div class="workflow-phase-card-grid">${r2WorkflowPlanRows(null)}</div><section class="workflow-finance-summary" data-workflow-finance-summary></section></section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Approve & create job","Jóváhagyás és munka létrehozása")}</button></div></form>`});
   const editor=$("#convertJobEditor");r2BindWorkflowTiming(editor);r2BindWorkflowCards(editor);r2BindWorkflowFinance(editor);
   editor.addEventListener("submit",async event=>{
-    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={title:form.title,estimated_duration_min:Number(form.estimated_duration_min||120),estimated_revenue:Math.max(0,Number(form.estimated_revenue||0)),deposit_amount:Math.max(0,Number(form.deposit_amount||0)),workflow_owner_user_id:form.workflow_owner_user_id||state.user?.id,workflow_phases:r2ReadWorkflowPlan(event.currentTarget)};
+    event.preventDefault();const form=Object.fromEntries(new FormData(event.currentTarget)),body={title:form.title,estimated_duration_min:Number(form.estimated_duration_min||120),estimated_revenue:Math.max(0,Number(form.estimated_revenue||0)),deposit_amount:Math.max(0,Number(form.deposit_amount||0)),workflow_owner_user_id:form.workflow_owner_user_id||state.user?.id,primary_skill_id:Number(form.primary_skill_id||0)||null,workflow_phases:r2ReadWorkflowPlan(event.currentTarget)};
     const scheduledLocal=r2ReadDateTime(event.currentTarget,"scheduled_at");
     if(scheduledLocal){if(!form.assigned_technician_id){toast(tr("Choose a technician for a scheduled job.","Ütemezett munkához válassz technikust."),"error");return;}body.scheduled_at=r2NyInputToIso(scheduledLocal);body.assigned_technician_id=form.assigned_technician_id;const received=body.workflow_phases.find(phase=>phase.stage_key==="received");if(received&&!received.starts_at)received.starts_at=body.scheduled_at;}
     else if(form.assigned_technician_id)body.assigned_technician_id=form.assigned_technician_id;
