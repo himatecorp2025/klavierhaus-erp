@@ -190,10 +190,10 @@ function r2BindWorkflowFinance(form){
   form.addEventListener("input",event=>{if(event.target.matches('[name^="price_"],[name="deposit_amount"],[name="estimated_revenue"],[data-cost-amount]'))r2RefreshWorkflowFinancialSummary(form);});
   form.addEventListener("change",event=>{if(event.target.matches('[name^="phase_"],[data-cost-category]'))r2RefreshWorkflowFinancialSummary(form);});
 }
-function r2BindWorkflowCards(form){
+function r2BindWorkflowCards(form,{defaultTechnicianId="",defaultTechnicianName=""}={}){
   if(!form)return;
-  const technician=()=>form.elements.assigned_technician_id?.value||"";
-  const technicianName=()=>form.elements.assigned_technician_id?.selectedOptions?.[0]?.textContent?.trim()||tr("selected technician","kiválasztott technikus");
+  const technician=()=>form.elements.assigned_technician_id?.value||defaultTechnicianId||"";
+  const technicianName=()=>form.elements.assigned_technician_id?.selectedOptions?.[0]?.textContent?.trim()||defaultTechnicianName||tr("selected technician","kiválasztott technikus");
   const syncDefaults=()=>$$("[data-workflow-phase]",form).forEach(row=>{const node=row.querySelector("[data-default-responsible-label]");if(node)node.textContent=technician()?tr("Default: ","Alapértelmezett: ")+technicianName():tr("Defaults to the job technician","Alapértelmezés: a munka technikusa");});
   $$("[data-workflow-phase]",form).forEach(row=>{
     const key=row.dataset.workflowPhase,box=row.querySelector('[name="phase_'+CSS.escape(key)+'"]'),mandatory=r2FixedStage(key);
@@ -468,30 +468,31 @@ async function r2OpenSchedule(job,refresh=renderWorkshop){
 }
 function r2OpenWorkflowPlan(job,refresh=renderWorkshop){
   if(!r2IsAdmin())return;
-  const currentCount=r2WorkflowDefinitions(job.workflow_phases||[]).length,max=Number(state.r2Workflow?.max_stages||7);
+  const currentCount=r2WorkflowDefinitions(job.workflow_phases||[]).length,max=Number(state.r2Workflow?.max_stages||7),assignedName=(state.users||[]).find(user=>String(user.id)===String(job.assigned_technician_id||""))?.name||job.assigned_technician_name||"";
   openDialog({title:tr("Workflow configuration","Munkafolyamat beállítása"),eyebrow:job.job_code||tr("WORKFLOW","MUNKAFOLYAMAT"),variant:"wide",body:`<form id="workflowPlanForm">
-    <div class="workflow-editor-finance-head"><div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Future phases can be activated or removed while the job is running. Job-specific phases stay on this job only.","A még el nem ért fázisok futás közben is hozzáadhatók vagy kikapcsolhatók. Az egyedi fázisok kizárólag ehhez a munkához tartoznak.")}</div><label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(job.deposit_amount||0).toFixed(2)}"></label></div>
-    <div class="workflow-plan-editor" id="workflowExistingPlanRows">${r2WorkflowPlanRows(job.workflow_phases)}</div>
+    <div class="workflow-editor-finance-head"><div class="detail-note"><strong>${esc(job.title)}</strong><br>${tr("Click a phase card to include it. Use + for responsibility overrides and internal/material costs.","Kattints a fáziskártyára a kiválasztáshoz. A + az egyedi felelőshöz és belső/anyagköltségekhez kell.")}</div><div class="workflow-finance-inputs"><label class="field"><span>${tr("Planned total","Tervezett teljes ár")} (USD)</span><input name="estimated_revenue" type="number" min="0" step="0.01" value="${Number(job.estimated_revenue||0).toFixed(2)}"></label><label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(job.deposit_amount||0).toFixed(2)}"></label></div></div>
+    <div class="workflow-plan-editor workflow-phase-card-grid" id="workflowExistingPlanRows">${r2WorkflowPlanRows(job.workflow_phases)}</div>
     <div class="workflow-job-phase-adder"><button class="workflow-add-phase-card" id="workflowExistingAddPhase" type="button" ${currentCount>=max?"disabled":""}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("English is required; Hungarian is optional.","Az angol név kötelező, a magyar opcionális.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowExistingAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")} *</span><input id="workflowExistingPhaseEn" maxlength="80"></label><button class="phase-hu-toggle" id="workflowExistingHuToggle" type="button" aria-expanded="false">HU</button><label class="field workflow-hu-field hidden" id="workflowExistingHuField"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowExistingPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowExistingCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>
     <section class="workflow-finance-summary" data-workflow-finance-summary aria-live="polite"></section>
     <div class="form-actions"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save workflow","Munkafolyamat mentése")}</button></div></form>`});
-  const form=$("#workflowPlanForm");r2BindWorkflowTiming(form);r2BindWorkflowFinance(form);
+  const form=$("#workflowPlanForm");r2BindWorkflowTiming(form);r2BindWorkflowCards(form,{defaultTechnicianId:job.assigned_technician_id||"",defaultTechnicianName:assignedName});r2BindWorkflowFinance(form);
   $("#workflowExistingAddPhase")?.addEventListener("click",()=>$("#workflowExistingAddPhaseInline")?.classList.toggle("hidden"));
   $("#workflowExistingHuToggle")?.addEventListener("click",event=>{const field=$("#workflowExistingHuField"),open=field?.classList.toggle("hidden")===false;event.currentTarget.setAttribute("aria-expanded",String(open));if(open)$("#workflowExistingPhaseHu")?.focus();});
   $("#workflowExistingCreatePhase")?.addEventListener("click",async()=>{
     const labelEn=String($("#workflowExistingPhaseEn")?.value||"").trim(),labelHu=String($("#workflowExistingPhaseHu")?.value||"").trim()||labelEn;if(!labelEn){toast(tr("Enter the English phase name.","Add meg az angol fázisnevet."),"error");return;}
     const button=$("#workflowExistingCreatePhase");button.disabled=true;
     try{
-      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(form),deposit_amount:Math.max(0,Number(form.elements.deposit_amount?.value||0))})});
+      const estimated_revenue=Math.max(0,Number(form.elements.estimated_revenue?.value||0)),deposit_amount=Math.max(0,Number(form.elements.deposit_amount?.value||0));
+      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases:r2ReadWorkflowPlan(form),estimated_revenue,deposit_amount})});
       const updated=await api(`/api/jobs/${job.id}/workflow-phases/custom`,{method:"POST",body:JSON.stringify({label_en:labelEn,label_hu:labelHu})});
       closeDialog();toast(tr("Job-specific phase added.","A munkához tartozó egyedi fázis hozzáadva."),"success");r2OpenWorkflowPlan(updated,refresh);
     }catch(error){button.disabled=false;toast(humanError(error),"error");}
   });
   form.addEventListener("submit",async event=>{
     event.preventDefault();try{
-      const phases=r2ReadWorkflowPlan(event.currentTarget),deposit_amount=Math.max(0,Number(event.currentTarget.elements.deposit_amount?.value||0)),phaseTotal=phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0);
-      if(phaseTotal>0&&deposit_amount>phaseTotal)throw new Error("JOB_DEPOSIT_EXCEEDS_TOTAL");
-      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases,deposit_amount})});closeDialog();toast(tr("Workflow updated.","Munkafolyamat frissítve."),"success");await refresh();
+      const phases=r2ReadWorkflowPlan(event.currentTarget),estimated_revenue=Math.max(0,Number(event.currentTarget.elements.estimated_revenue?.value||0)),deposit_amount=Math.max(0,Number(event.currentTarget.elements.deposit_amount?.value||0)),phaseTotal=phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0),basis=Math.max(estimated_revenue,phaseTotal);
+      if(basis>0&&deposit_amount>basis)throw new Error("JOB_DEPOSIT_EXCEEDS_TOTAL");
+      await api(`/api/jobs/${job.id}/workflow-phases`,{method:"PUT",body:JSON.stringify({phases,estimated_revenue,deposit_amount})});closeDialog();toast(tr("Workflow updated.","Munkafolyamat frissítve."),"success");await refresh();
     }catch(error){toast(humanError(error),"error");}
   });
 }
