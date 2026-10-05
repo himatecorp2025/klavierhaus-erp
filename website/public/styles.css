@@ -241,6 +241,46 @@ a {
   gap: clamp(1rem, 2vw, 2rem);
 }
 
+.header-quick-contact {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+
+.header-quick-contact--mobile {
+  display: none;
+}
+
+.header-contact-icon {
+  width: 2.72rem;
+  height: 2.72rem;
+  display: grid;
+  flex: 0 0 2.72rem;
+  place-items: center;
+  border: 1px solid rgba(183, 154, 96, 0.75);
+  color: var(--gold-bright);
+  background: rgba(8, 8, 7, 0.22);
+  text-decoration: none;
+  transition: color 220ms ease, background-color 220ms ease, border-color 220ms ease, transform 220ms ease;
+}
+
+.header-contact-icon svg {
+  width: 1.12rem;
+  height: 1.12rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.55;
+}
+
+.header-contact-icon:hover {
+  color: var(--black);
+  border-color: var(--gold-bright);
+  background: var(--gold-bright);
+  transform: translateY(-1px);
+}
+
 .language-switch {
   padding: 0.4rem 0;
 }
@@ -1286,6 +1326,17 @@ main {
     height: 3rem;
   }
 
+  .header-quick-contact--desktop {
+    display: none;
+  }
+
+  .header-quick-contact--mobile {
+    position: relative;
+    z-index: 110;
+    display: flex;
+    margin-left: auto;
+  }
+
   .menu-toggle {
     position: relative;
     z-index: 110;
@@ -1293,7 +1344,7 @@ main {
     height: 3rem;
     display: grid;
     place-items: center;
-    margin-left: auto;
+    margin-left: .1rem;
     padding: 0;
     border: 0;
     color: var(--ivory);
@@ -1636,6 +1687,16 @@ main {
 }
 
 @media (max-width: 440px) {
+  .header-contact-icon {
+    width: 2.45rem;
+    height: 2.45rem;
+    flex-basis: 2.45rem;
+  }
+
+  .header-quick-contact--mobile {
+    gap: .3rem;
+  }
+
   .header-actions {
     width: 100%;
     flex-direction: column;
