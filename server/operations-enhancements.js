@@ -219,6 +219,34 @@ function registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir
       const url="/uploads/milestone/"+path.basename(req.file.path);audit(req,"CREATE","milestone_media",url,null,{url});res.status(201).json({url});
     });
   });
+  const milestoneMediaColumns={hero:"hero_media_url",instrument:"instrument_media_url",craft:"craft_media_url",quote:"quote_media_url"};
+  app.post("/api/milestone/media-slot/:slot",auth,admin,(req,res)=>{
+    const column=milestoneMediaColumns[String(req.params.slot||"").toLowerCase()];
+    if(!column)return res.status(400).json({error:"INVALID_MILESTONE_MEDIA_SLOT"});
+    mediaUpload(req,res,error=>{
+      if(error)return res.status(400).json({error:error.message||"MILESTONE_MEDIA_UPLOAD_FAILED"});
+      if(!req.file)return res.status(400).json({error:"MILESTONE_MEDIA_REQUIRED"});
+      try{
+        const before=db.prepare("SELECT "+column+" value FROM milestone_dashboard WHERE id=1").get()?.value||null,url="/uploads/milestone/"+path.basename(req.file.path);
+        db.prepare("UPDATE milestone_dashboard SET "+column+"=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=1").run(url,req.user.id);
+        audit(req,"UPDATE","milestone_media_slot",String(req.params.slot),{url:before},{url});
+        res.status(201).json({slot:String(req.params.slot),url,dashboard:milestonePayload().dashboard});
+      }catch(saveError){res.status(500).json({error:saveError.message||"MILESTONE_MEDIA_SAVE_FAILED"});}
+    });
+  });
+  app.post("/api/milestone/steps/:uid/media",auth,admin,(req,res)=>{
+    const uid=text(req.params.uid,120);if(!uid)return res.status(400).json({error:"MILESTONE_STEP_UID_REQUIRED"});
+    if(!db.prepare("SELECT 1 FROM milestone_steps WHERE uid=?").get(uid))return res.status(404).json({error:"MILESTONE_STEP_NOT_FOUND"});
+    mediaUpload(req,res,error=>{
+      if(error)return res.status(400).json({error:error.message||"MILESTONE_MEDIA_UPLOAD_FAILED"});
+      if(!req.file)return res.status(400).json({error:"MILESTONE_MEDIA_REQUIRED"});
+      try{
+        const before=db.prepare("SELECT media_url FROM milestone_steps WHERE uid=?").get(uid)?.media_url||null,url="/uploads/milestone/"+path.basename(req.file.path);
+        db.prepare("UPDATE milestone_steps SET media_url=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE uid=?").run(url,req.user.id,uid);
+        audit(req,"UPDATE","milestone_step_media",uid,{url:before},{url});res.status(201).json({uid,url});
+      }catch(saveError){res.status(500).json({error:saveError.message||"MILESTONE_STEP_MEDIA_SAVE_FAILED"});}
+    });
+  });
 
   app.get("/api/system-export.xlsx",auth,admin,(req,res)=>{
     try{

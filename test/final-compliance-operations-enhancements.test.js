@@ -65,6 +65,10 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/bindGlobalCommandSearch/);
   assert.match(ops,/\/api\/global-search/);
   assert.match(ops,/openMilestoneEditor/);
+  assert.match(ops,/milestoneDirectMediaManager/);
+  assert.match(ops,/uploadMilestoneSlot/);
+  assert.match(ops,/uploadMilestoneStepDirect/);
+  assert.match(ops,/roadmap-connector/);
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
@@ -74,11 +78,17 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/tr\("Planned Jobs","Tervezett munkák"\)/);
   assert.match(css,/Enterprise roadmap shell/);
   assert.match(css,/\.ms-roadmap-track/);
+  assert.match(css,/Milestone fidelity v3/);
+  assert.match(css,/\.roadmap-connector/);
+  assert.match(css,/\.milestone-direct-media-grid/);
   assert.match(css,/\.roadmap-substeps/);
   assert.match(css,/\.global-search-shell/);
   assert.match(css,/\.app-shell\.milestone-showcase-mode>\.app-sidebar\{display:grid!important\}/);
   assert.match(api,/\/api\/milestone/);
   assert.match(api,/\/api\/milestone\/media/);
+  assert.match(api,/\/api\/milestone\/media-slot\/:slot/);
+  assert.match(api,/\/api\/milestone\/steps\/:uid\/media/);
+  assert.match(api,/milestoneMediaColumns/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS milestone_dashboard/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS milestone_steps/);
   assert.match(schema,/reference_code TEXT NOT NULL DEFAULT 'GROWTH ROADMAP'/);
