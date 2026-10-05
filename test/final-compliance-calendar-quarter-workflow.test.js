@@ -25,6 +25,11 @@ test("job scheduling uses directly visible native date pickers and 30-minute New
   assert.match(ui,/<div class="field"><span>\$\{tr\("Start","Kezdés"\)\}<\/span>\$\{r2DateTimeFields\("start_"/);
   assert.match(ui,/<div class="field"><span>\$\{tr\("Start · New York","Kezdés · New York"\)/);
   assert.match(v6,/<div class="field"><span>\$\{tr\("Start · New York \(optional\)","Kezdés · New York \(opcionális\)"\)/);
+  assert.match(ui,/function r2FallbackDateForWrap/);
+  assert.match(ui,/function r2FallbackTimeForWrap/);
+  assert.match(ui,/if\(date\.value&&!time\.value\)time\.value=r2FallbackTimeForWrap\(wrap\)/);
+  assert.match(ui,/if\(time\.value&&!date\.value\)date\.value=r2FallbackDateForWrap\(wrap\)/);
+  assert.match(ui,/const startValue=enabled\?r2ReadDateTime\(row,"start_"\+key\):"",dueValue=enabled\?r2ReadDateTime\(row,"due_"\+key\):""/);
 });
 
 test("workflow jobs separate planned total, customer phase prices, deposits and internal phase costs",()=>{
@@ -42,6 +47,11 @@ test("workflow jobs separate planned total, customer phase prices, deposits and 
   assert.match(ui,/data-phase-detail/);
   assert.match(ui,/data-add-cost/);
   assert.match(ui,/data-workflow-finance-summary/);
+  assert.match(ui,/data-workflow-balance-output/);
+  assert.match(ui,/Remaining to invoice/);
+  assert.match(ui,/invoiceBasis=phaseTotal>0\?phaseTotal:plannedTotal,balance=Math\.max\(0,invoiceBasis-deposit\)/);
+  assert.match(ui,/node\.textContent=r2Money\(totals\.balance\)/);
+  assert.match(app,/INVALID_SCHEDULE_TIME/);
   assert.match(ui,/jobClientSearch/);
   assert.match(ui,/jobPianoSearch/);
   assert.match(app,/function openQuickClientCreate/);

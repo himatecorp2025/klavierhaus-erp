@@ -3705,3 +3705,29 @@ button,input,select,textarea,[contenteditable="true"]{touch-action:manipulation}
   .workflow-cost-row select{grid-column:1/-1}
   .r2-quarter-datetime.r2-calendar-datetime{grid-template-columns:minmax(100px,1fr) 88px!important}
 }
+
+
+/* CALENDAR SCHEDULE + REMAINING BALANCE FIX */
+.workflow-balance-display output{
+  display:flex;
+  align-items:center;
+  width:100%;
+  min-height:40px;
+  padding:0 10px;
+  box-sizing:border-box;
+  border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));
+  border-radius:10px;
+  background:color-mix(in srgb,var(--accent) 6%,var(--surface));
+  color:var(--ink);
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
+.workflow-finance-inputs{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+@media(max-width:900px){
+  .workflow-finance-inputs{grid-template-columns:1fr 1fr}
+}
+@media(max-width:640px){
+  .workflow-finance-inputs{grid-template-columns:1fr}
+}
