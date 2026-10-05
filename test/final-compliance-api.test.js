@@ -188,6 +188,28 @@ test("Intake supports real media upload and one-action conversion to a Planned J
   assert.equal(workflow.payload.jobs.some(job=>job.id===converted.payload.job.id),false);
 });
 
+test("VIP client follow-up becomes overdue after three months and clears after contact",async()=>{
+  const token=shared.adminToken;
+  const oldContact=await request("/api/clients/"+shared.client.id,{token,method:"PUT",body:{is_vip:true,last_contacted_at:"2025-01-01"}});
+  assert.equal(oldContact.status,200,JSON.stringify(oldContact.payload));
+  assert.equal(Number(oldContact.payload.is_vip),1);
+  assert.equal(oldContact.payload.last_contacted_at,"2025-01-01");
+
+  const overdueList=await request("/api/clients?q="+encodeURIComponent(shared.client.name),{token});
+  assert.equal(overdueList.status,200,JSON.stringify(overdueList.payload));
+  const overdue=overdueList.payload.find(row=>Number(row.id)===Number(shared.client.id));
+  assert.ok(overdue);
+  assert.equal(overdue.vip_followup_due,true);
+
+  const today=new Date().toISOString().slice(0,10);
+  const contacted=await request("/api/clients/"+shared.client.id,{token,method:"PUT",body:{is_vip:true,last_contacted_at:today}});
+  assert.equal(contacted.status,200,JSON.stringify(contacted.payload));
+  const currentList=await request("/api/clients?q="+encodeURIComponent(shared.client.name),{token});
+  const current=currentList.payload.find(row=>Number(row.id)===Number(shared.client.id));
+  assert.ok(current);
+  assert.equal(current.vip_followup_due,false);
+});
+
 test("Pipeline activation feeds the Calendar and exact five-stage Workflow",async()=>{
   const token=shared.adminToken;
   const activated=await request("/api/jobs/activate/"+shared.job.id,{token,method:"POST",body:{
