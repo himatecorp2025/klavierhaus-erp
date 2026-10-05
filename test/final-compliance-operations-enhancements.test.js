@@ -69,6 +69,10 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/uploadMilestoneSlot/);
   assert.match(ops,/uploadMilestoneStepDirect/);
   assert.match(ops,/roadmap-connector/);
+  assert.match(ops,/milestoneIconPickerMarkup/);
+  assert.match(ops,/data-add-child-milestone/);
+  assert.match(ops,/roadmap-achievement-badge/);
+  assert.match(ops,/MILESTONE_PARENT_REQUIRED/);
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
@@ -80,6 +84,9 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(css,/\.ms-roadmap-track/);
   assert.match(css,/Milestone fidelity v3/);
   assert.match(css,/\.roadmap-connector/);
+  assert.match(css,/\.milestone-icon-picker-grid/);
+  assert.match(css,/\.milestone-achieved/);
+  assert.match(css,/milestone-achievement-pulse/);
   assert.match(css,/\.milestone-direct-media-grid/);
   assert.match(css,/\.roadmap-substeps/);
   assert.match(css,/\.global-search-shell/);
