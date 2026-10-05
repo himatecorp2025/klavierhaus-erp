@@ -115,9 +115,10 @@ test("calendar reschedule updates the same workflow job record",async()=>{
 });
 
 test("phase deadline/blocker drives overdue workshop overview drilldown",async()=>{
+  const pastStartDate=new Date(Date.now()-4*3600000);pastStartDate.setUTCMinutes(Math.floor(pastStartDate.getUTCMinutes()/15)*15,0,0);const pastStart=pastStartDate.toISOString();
   const pastDate=new Date(Date.now()-3600000);pastDate.setUTCMinutes(Math.floor(pastDate.getUTCMinutes()/15)*15,0,0);const past=pastDate.toISOString();
   const update=await request("/api/jobs/"+globalThis.jobId+"/workflow-phases/qa_review",{token:globalThis.admin,method:"PATCH",body:{
-    due_at:past,blocker_code:"material_procurement",blocker_note:"Awaiting action parts"
+    starts_at:pastStart,due_at:past,blocker_code:"material_procurement",blocker_note:"Awaiting action parts"
   }});
   assert.equal(update.status,200,JSON.stringify(update.payload));
   assert.equal(update.payload.current_phase.blocker_code,"material_procurement");
