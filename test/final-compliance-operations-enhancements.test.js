@@ -42,6 +42,7 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(app,/if\(view==="milestone"&&window\.innerWidth<700\)view="workshop"/);
   assert.match(app,/if\(state\.view==="milestone"\)await renderMilestone\(\)/);
   assert.match(html,/href="#milestone" data-nav="milestone"/);
+  assert.match(html,/id="mobileBrandButton"[\s\S]{0,120}data-nav="milestone"/);
   assert.match(html,/\/operations-ui\.js/);
   assert.match(ops,/async function renderMilestone/);
   assert.match(ops,/GOAL ACHIEVED/);
