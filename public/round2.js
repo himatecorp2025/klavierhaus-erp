@@ -86,7 +86,7 @@ function r2CalendarSvg(){
 function r2DateTimeFields(name,value,{required=false,slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
   const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes}),date=normalized.slice(0,10),time=normalized.slice(11,16);
   return '<div class="r2-quarter-datetime r2-calendar-datetime" data-r2-datetime="'+esc(name)+'" data-slot-minutes="'+slotMinutes+'" data-start-minutes="'+startMinutes+'" data-end-minutes="'+endMinutes+'">'+
-    '<label class="r2-date-picker-shell"><span class="r2-date-trigger">'+r2CalendarSvg()+'<strong data-r2-date-label>'+esc(r2CompactDateLabel(date))+'</strong></span><input class="r2-native-date-picker" type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" aria-label="'+esc(tr("Date","Dátum"))+'"></label>'+
+    '<input class="r2-native-date-picker" type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" '+(required?"required ":"")+'aria-label="'+esc(tr("Date","Dátum"))+'">'+
     '<select class="r2-date-time" name="'+esc(name)+'_time" '+(required?"required":"")+' aria-label="'+esc(tr("Time","Idő"))+'">'+r2TimeOptions(time,!required,{slotMinutes,startMinutes,endMinutes})+'</select></div>';
 }
 function r2DateTimeValue(root,name){
@@ -113,10 +113,15 @@ function r2SetDateTime(root,name,value){
 }
 function r2BindDatePickers(root){
   if(!root)return;
-  $$("[data-r2-datetime]",root).forEach(wrap=>{
-    const date=wrap.querySelector(".r2-native-date-picker"),label=wrap.querySelector("[data-r2-date-label]");
-    const sync=()=>{if(label)label.textContent=r2CompactDateLabel(date?.value||"");};
-    date?.addEventListener("change",sync);date?.addEventListener("input",sync);sync();
+  $("[data-r2-datetime]",root).forEach(wrap=>{
+    const date=wrap.querySelector(".r2-native-date-picker");if(!date)return;
+    const sync=()=>{wrap.dataset.selectedDate=date.value||"";};
+    if(date.dataset.r2DateBound!=="1"){
+      date.dataset.r2DateBound="1";
+      date.addEventListener("change",sync);
+      date.addEventListener("input",sync);
+    }
+    sync();
   });
 }
 function r2WallAddMinutes(value,minutes){
@@ -289,8 +294,8 @@ function r2WorkflowPlanRows(plan=null,{defaultResponsible=null,defaultStart=null
         <span class="workflow-phase-selected-check" aria-hidden="true">✓</span>
       </button>
       <div class="workflow-phase-core">
-        <label class="field"><span>${tr("Start","Kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start,{endMinutes:logistics?17*60:R2_DAY_END})}</label>
-        <label class="field"><span>${tr("Expected completion","Várható befejezés")}${logistics?` · ${tr("min. 3h","min. 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</label>
+        <div class="field"><span>${tr("Start","Kezdés")}</span>${r2DateTimeFields("start_"+stage.key,start,{endMinutes:logistics?17*60:R2_DAY_END})}</div>
+        <div class="field"><span>${tr("Expected completion","Várható befejezés")}${logistics?` · ${tr("min. 3h","min. 3 óra")}`:""}</span>${r2DateTimeFields("due_"+stage.key,due)}</div>
         <label class="field workflow-customer-price"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="price_${esc(stage.key)}" type="number" min="0" step="0.01" value="${customerPrice.toFixed(2)}"></label>
         <button class="workflow-phase-detail-button" type="button" data-phase-detail aria-expanded="false" title="${esc(tr("Phase details, responsibility and costs","Fázisrészletek, felelős és költségek"))}">＋</button>
       </div>
@@ -365,7 +370,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <label class="field"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select></label>
     <label class="field"><span>${tr("Planned total","Tervezett teljes ár")} (USD)</span><input name="estimated_revenue" type="number" min="0" step="0.01" value="${Number(defaults.estimated_revenue||0).toFixed(2)}"></label>
     <label class="field"><span>${tr("Deposit received","Kapott előleg")} (USD)</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${Number(defaults.deposit_amount||0).toFixed(2)}"></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")}${workflowEntry||calendarEntry?" *":""}</span>${r2DateTimeFields("scheduled_at",scheduledSeed,{required:workflowEntry||calendarEntry})}</label>
+    <div class="field"><span>${tr("Start · New York","Kezdés · New York")}${workflowEntry||calendarEntry?" *":""}</span>${r2DateTimeFields("scheduled_at",scheduledSeed,{required:workflowEntry||calendarEntry})}</div>
     <label class="field"><span>${tr("Technician","Technikus")}${workflowEntry||calendarEntry?" *":""}</span><select name="assigned_technician_id"><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(defaults.assigned_technician_id||"")}</select></label>
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Click a card to include it. Use + only when responsibility or internal costs need details.","Kattints a kártyára a kiválasztáshoz. A + csak az egyedi felelőshöz és belső költségekhez kell.")}</p></div></div><div id="jobWorkflowPlanRows" class="workflow-phase-card-grid">${r2WorkflowPlanRows(null,{defaultStart:scheduledSeed})}</div>${r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("English is required. Hungarian is optional and only belongs to this job.","Az angol név kötelező. A magyar opcionális, és ez a fázis csak ehhez a munkához tartozik.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")} *</span><input id="workflowJobPhaseEn" maxlength="80"></label><button class="phase-hu-toggle" id="workflowJobHuToggle" type="button" aria-expanded="false">HU</button><label class="field workflow-hu-field hidden" id="workflowJobHuField"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}
       <section class="workflow-finance-summary" data-workflow-finance-summary aria-live="polite"></section>
@@ -426,7 +431,7 @@ async function r2OpenActivate(job){
   openDialog({title:tr("Activate & Schedule","Aktiválás és ütemezés"),eyebrow:job.job_code||tr("PIPELINE","TERVEZÉS"),body:`<form id="activateJobForm" class="form-grid">
     <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(job.client_name+" · "+r2JobPiano(job))}</div>
     <label class="field full"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",plannedStart?r2IsoToNyInput(plannedStart):r2DefaultInput(),{required:true})}</label>
+    <div class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",plannedStart?r2IsoToNyInput(plannedStart):r2DefaultInput(),{required:true})}</div>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Activate","Aktiválás")}</button></div></form>`});
   $("#activateJobForm").addEventListener("submit",async event=>{
@@ -457,7 +462,7 @@ async function r2OpenSchedule(job,refresh=renderWorkshop){
   openDialog({title:tr("Schedule job","Munka ütemezése"),eyebrow:job.job_code||tr("CALENDAR","NAPTÁR"),body:`<form id="scheduleJobForm" class="form-grid">
     <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(job.client_name+" · "+r2JobPiano(job))}</div>
     <label class="field full"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
-    <label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",job.scheduled_at?r2IsoToNyInput(job.scheduled_at):r2DefaultInput(),{required:true})}</label>
+    <div class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",job.scheduled_at?r2IsoToNyInput(job.scheduled_at):r2DefaultInput(),{required:true})}</div>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save schedule","Ütemezés mentése")}</button></div></form>`});
   $("#scheduleJobForm").addEventListener("submit",async event=>{
@@ -503,8 +508,8 @@ function r2OpenBlocker(job,refresh=renderWorkshop){
     <div class="detail-note full">${tr("Start and finish times may always be moved backward or forward. The card color is recalculated from the saved times every time the workflow renders.","A kezdési és befejezési idő mindig vissza- vagy előre módosítható. A kártya színe minden megjelenítéskor a mentett időkből újraszámolódik.")}</div>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="responsible_user_id" required>${r2ResponsibleOptions(phase.responsible_user_id||job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
     <label class="field"><span>${tr("Customer price","Ügyfélár")} (USD)</span><input name="customer_price" type="number" min="0" step="0.01" value="${Number(phase.customer_price||0).toFixed(2)}"></label>
-    <label class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"",{endMinutes:r2IsLogisticsStage(phase)?17*60:R2_DAY_END})}</label>
-    <label class="field full"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage(phase)?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_at",phase.due_at?r2IsoToNyInput(phase.due_at):"")}</label>
+    <div class="field"><span>${tr("Planned start","Tervezett kezdés")}</span>${r2DateTimeFields("starts_at",phase.starts_at?r2IsoToNyInput(phase.starts_at):"",{endMinutes:r2IsLogisticsStage(phase)?17*60:R2_DAY_END})}</div>
+    <div class="field full"><span>${tr("Expected completion","Várható befejezés")}${r2IsLogisticsStage(phase)?` · ${tr("minimum 3 hours","minimum 3 óra")}`:""}</span>${r2DateTimeFields("due_at",phase.due_at?r2IsoToNyInput(phase.due_at):"")}</div>
     <label class="field full"><span>${tr("Delay / blocker reason","Elakadás / késés oka")}</span><select name="blocker_code"><option value="">${tr("No blocker","Nincs elakadás")}</option>${Object.entries(R2_BLOCKERS).map(([code,pair])=>`<option value="${code}" ${phase.blocker_code===code?"selected":""}>${esc(state.language==="hu"?pair[1]:pair[0])}</option>`).join("")}</select></label>
     <label class="field full"><span>${tr("Internal note","Belső megjegyzés")}</span><textarea name="blocker_note">${esc(phase.blocker_note||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
@@ -941,7 +946,7 @@ function r2OpenPrivateAppointment(row,refresh=()=>r2LoadPrivateAppointments(stat
     <label class="field"><span>${tr("Name","Név")}</span><input name="name" value="${esc(row.name||"")}" required></label>
     <label class="field"><span>${tr("Email","E-mail")}</span><input name="email" type="email" value="${esc(row.email||"")}" autocomplete="email"></label>
     <label class="field"><span>${tr("Phone","Telefon")}</span><input name="phone" value="${esc(row.phone||"")}" required></label>
-    <label class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span>${r2DateTimeFields("scheduled_at",r2IsoToNyInput(row.scheduled_at),{required:true,slotMinutes:15,startMinutes:0,endMinutes:23*60+45})}</label>
+    <div class="field"><span>${tr("Appointment · New York","Időpont · New York")}</span>${r2DateTimeFields("scheduled_at",r2IsoToNyInput(row.scheduled_at),{required:true,slotMinutes:15,startMinutes:0,endMinutes:23*60+45})}</div>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="duration_min" type="number" min="15" step="15" value="${Number(row.duration_min||60)}" required></label>
     <label class="field"><span>${tr("Responsible","Felelős")}</span><select name="assigned_user_id"><option value="">${tr("Unassigned","Nincs felelős")}</option>${r2ResponsibleOptions(row.assigned_user_id)}</select></label>
     <label class="field full"><span>${tr("Short note","Rövid megjegyzés")}</span><textarea name="note" maxlength="1000">${esc(row.note||"")}</textarea></label>
