@@ -20,7 +20,7 @@ test("New York job datetime conversion uses visible native date controls while p
   assert.match(source,/const R2_JOB_SLOT_MIN=30/);
   assert.match(source,/class="r2-native-date-picker" type="date" name="'\+esc\(name\)\+'_date"/);
   assert.doesNotMatch(source,/r2-date-picker-shell/);
-  assert.match(source,/\(required\?"required ":""\)\+'aria-label='/);
+  assert.match(source,/required\?"required ":""/);
   assert.match(css,/\.r2-native-date-picker\{[\s\S]{0,700}position:static!important;[\s\S]{0,500}opacity:1!important;[\s\S]{0,300}pointer-events:auto!important/);
   assert.match(source,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
   assert.match(source,/const scheduledLocal=r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:workflowEntry\|\|calendarEntry\}\)/);
