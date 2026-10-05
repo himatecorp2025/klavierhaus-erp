@@ -157,17 +157,32 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     db.prepare("UPDATE job_workflow_phases SET enabled=1,activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP),completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key='completed'").run(jobId);
   }
   function defaultJobItems(job){
-    const handoffs=db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(job.id);
-    if(handoffs.length){
-      return handoffs.map(row=>{
-        const labor=money(row.phase_labor_cost||0),material=money(row.phase_material_cost||0),total=money(labor+material);
-        return {item_type:"other",item_description:text(row.billing_description,500)||phaseLabel(row.from_stage),quantity:1,unit_price:total,labor_amount:labor,material_amount:material,phase_key:row.from_stage||null};
-      });
+    const phaseRows=db.prepare(`SELECT p.stage_key,p.customer_price,d.label_en
+      FROM job_workflow_phases p
+      LEFT JOIN workflow_stage_definitions d ON d.stage_key=p.stage_key
+      WHERE p.job_id=? AND p.enabled=1 AND p.stage_key<>'completed'
+      ORDER BY p.position,p.id`).all(job.id);
+    const quoted=phaseRows.filter(row=>Number(row.customer_price||0)>0).map(row=>({
+      item_type:"other",item_description:text(row.label_en,500)||phaseLabel(row.stage_key),quantity:1,
+      unit_price:money(row.customer_price),labor_amount:0,material_amount:0,phase_key:row.stage_key
+    }));
+    let rows=quoted;
+    if(!rows.length){
+      const handoffs=db.prepare("SELECT * FROM job_handoffs WHERE job_id=? ORDER BY created_at,id").all(job.id);
+      if(handoffs.length){
+        rows=handoffs.map(row=>{
+          const labor=money(row.phase_labor_cost||0),material=money(row.phase_material_cost||0),total=money(labor+material);
+          return {item_type:"other",item_description:text(row.billing_description,500)||phaseLabel(row.from_stage),quantity:1,unit_price:total,labor_amount:labor,material_amount:material,phase_key:row.from_stage||null};
+        });
+      }else{
+        rows=[];
+        if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:"Labor / technician service",quantity:1,unit_price:Number(job.total_labor_cost),labor_amount:Number(job.total_labor_cost),material_amount:0});
+        if(Number(job.total_material_cost||0)>0)rows.push({item_type:"material",item_description:"Materials and parts",quantity:1,unit_price:Number(job.total_material_cost),labor_amount:0,material_amount:Number(job.total_material_cost)});
+        if(!rows.length)rows.push({item_type:"labor",item_description:job.title||"Klavierhaus service",quantity:1,unit_price:0,labor_amount:0,material_amount:0});
+      }
     }
-    const rows=[];
-    if(Number(job.total_labor_cost||0)>0)rows.push({item_type:"labor",item_description:"Labor / technician service",quantity:1,unit_price:Number(job.total_labor_cost),labor_amount:Number(job.total_labor_cost),material_amount:0});
-    if(Number(job.total_material_cost||0)>0)rows.push({item_type:"material",item_description:"Materials and parts",quantity:1,unit_price:Number(job.total_material_cost),labor_amount:0,material_amount:Number(job.total_material_cost)});
-    if(!rows.length)rows.push({item_type:"labor",item_description:job.title||"Klavierhaus service",quantity:1,unit_price:0,labor_amount:0,material_amount:0});
+    const deposit=money(job.deposit_amount||0);
+    if(deposit>0)rows.push({item_type:"adjustment",item_description:"Deposit received",quantity:1,unit_price:-deposit,labor_amount:0,material_amount:0,phase_key:null});
     return rows;
   }
   function persistPdf(invoiceId,{statusOverride=null}={}){
@@ -297,7 +312,7 @@ function registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit
     const snapshot={
       version:1,issuer:company(),counterparty,
       instrument:job?{brand:job.piano_brand||null,model:job.piano_model||null,serial_number:job.piano_serial_number||null,location_notes:job.piano_location_notes||null}:null,
-      job:job?{id:job.id,job_code:job.job_code,title:job.title,location_type:job.location_type,site_address:job.site_address,scheduled_at:job.scheduled_at}:null,
+      job:job?{id:job.id,job_code:job.job_code,title:job.title,location_type:job.location_type,site_address:job.site_address,scheduled_at:job.scheduled_at,deposit_amount:Number(job.deposit_amount||0)}:null,
       created_at:new Date().toISOString()
     };
     const info=db.prepare(`INSERT INTO invoices(
