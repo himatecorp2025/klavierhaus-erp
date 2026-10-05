@@ -43,6 +43,7 @@ const { createCustomerAutomation } = require("./customer-automation");
 const { createInventoryService,registerInventoryRoutes } = require("./inventory");
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 const { createServiceSuspension } = require("./service-suspension");
+const { registerOperationsEnhancementRoutes } = require("./operations-enhancements");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -115,6 +116,7 @@ function safeUser(row) {
     email: row.email,
     contact_email: row.contact_email || "",
     role: superadmin ? "SUPERADMIN" : row.role,
+    manager_scope: row.manager_scope || null,
     status: row.status,
     phone: row.phone || "",
     address: row.address || "",
@@ -404,7 +406,7 @@ app.post("/api/auth/verify-session",auth,async(req,res)=>{
 });
 
 app.get("/api/users",auth,permit("ADMIN","MANAGER","WORKER"),(_req,res)=>{
-  res.json(db.prepare(`SELECT id,name,email,contact_email,role,status,phone,address,profile_image_url,created_at
+  res.json(db.prepare(`SELECT id,name,email,contact_email,role,manager_scope,status,phone,address,profile_image_url,created_at
     FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY CASE role WHEN 'ADMIN' THEN 0 WHEN 'MANAGER' THEN 1 ELSE 2 END,lower(name)`).all());
 });
 app.post("/api/users",auth,permit("ADMIN"),async(req,res)=>{
@@ -522,6 +524,7 @@ registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,masterDataI
 registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",inventoryService});
+registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR});
 registerInventoryRoutes({app,db,auth,permit,audit,inventoryService});
 registerArchiveCenterRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,transactionalEmail,notifications:notificationCenter});
 registerWebsiteBackupResetRoutes({
