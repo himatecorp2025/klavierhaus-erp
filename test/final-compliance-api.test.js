@@ -703,18 +703,23 @@ test("customer phase prices and deposit persist through job finance into the fin
   const token=shared.adminToken;
   const created=await request("/api/jobs",{token,method:"POST",body:{
     client_id:shared.client.id,piano_id:shared.piano.id,title:"Quoted phase finance",
-    scheduled_at:futureIso(40,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER",deposit_amount:250,
+    scheduled_at:futureIso(40,14),estimated_duration_min:120,assigned_technician_id:"U-F-WORKER",estimated_revenue:1500,deposit_amount:250,
     workflow_phases:[
-      {stage_key:"received",enabled:true,customer_price:700,starts_at:futureIso(40,14),due_at:futureIso(40,17)},
+      {stage_key:"received",enabled:true,customer_price:700,starts_at:futureIso(40,14),due_at:futureIso(40,17),costs:[{title:"Wood",category:"material",amount:80},{title:"Lacquer",category:"material",amount:40}]},
       {stage_key:"admin_approval",enabled:true,customer_price:300},
       {stage_key:"completed",enabled:true}
     ]
   }});
   assert.equal(created.status,201,JSON.stringify(created.payload));
+  assert.equal(created.payload.planned_total,1500);
   assert.equal(created.payload.phase_customer_total,1000);
+  assert.equal(created.payload.phase_internal_cost_total,120);
   assert.equal(created.payload.deposit_amount,250);
   assert.equal(created.payload.balance_due,750);
+  assert.equal(created.payload.estimated_balance,1250);
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").customer_price,700);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").costs.length,2);
+  assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="received").internal_cost_total,120);
   assert.equal(created.payload.workflow_phases.find(phase=>phase.stage_key==="admin_approval").customer_price,300);
 
   const approval=await request("/api/jobs/"+created.payload.id+"/handoff",{token,method:"POST",body:{to_stage:"admin_approval"}});
@@ -746,12 +751,31 @@ test("Workflow timing can move backward and forward and recomputes colors",async
   assert.equal(created.payload.stage,"received");
   assert.equal(created.payload.workflow_owner_user_id,"U-F-ADMIN");
   assert.equal(created.payload.workflow_status,"scheduled");
-  assert.ok(created.payload.workflow_phases.filter(phase=>phase.enabled).every(phase=>phase.responsible_user_id==="U-F-ADMIN"));
+  assert.ok(created.payload.workflow_phases.filter(phase=>phase.enabled).every(phase=>phase.responsible_user_id===null));
+  assert.ok(created.payload.workflow_phases.filter(phase=>phase.enabled).every(phase=>phase.effective_responsible_user_id==="U-F-WORKER"));
 
   const movedOwner=await request("/api/jobs/"+created.payload.id,{token,method:"PUT",body:{workflow_owner_user_id:"U-F-MANAGER"}});
   assert.equal(movedOwner.status,200,JSON.stringify(movedOwner.payload));
   assert.equal(movedOwner.payload.workflow_owner_user_id,"U-F-MANAGER");
   assert.equal(movedOwner.payload.assigned_technician_id,"U-F-WORKER");
+
+  const overridePlan=movedOwner.payload.workflow_phases.map(phase=>({
+    stage_key:phase.stage_key,position:phase.position,enabled:phase.enabled,starts_at:phase.starts_at,due_at:phase.due_at,
+    customer_price:phase.customer_price,responsible_user_id:phase.stage_key==="qa_review"?"U-F-MANAGER":phase.responsible_user_id,costs:phase.costs||[]
+  }));
+  const overridden=await request("/api/jobs/"+created.payload.id+"/workflow-phases",{token,method:"PUT",body:{phases:overridePlan,estimated_revenue:movedOwner.payload.estimated_revenue,deposit_amount:movedOwner.payload.deposit_amount}});
+  assert.equal(overridden.status,200,JSON.stringify(overridden.payload));
+  assert.equal(overridden.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").responsible_user_id,"U-F-MANAGER");
+  assert.equal(overridden.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").effective_responsible_user_id,"U-F-MANAGER");
+
+  const resetPlan=overridden.payload.workflow_phases.map(phase=>({
+    stage_key:phase.stage_key,position:phase.position,enabled:phase.enabled,starts_at:phase.starts_at,due_at:phase.due_at,
+    customer_price:phase.customer_price,responsible_user_id:phase.stage_key==="qa_review"?null:phase.responsible_user_id,costs:phase.costs||[]
+  }));
+  const reset=await request("/api/jobs/"+created.payload.id+"/workflow-phases",{token,method:"PUT",body:{phases:resetPlan,estimated_revenue:overridden.payload.estimated_revenue,deposit_amount:overridden.payload.deposit_amount}});
+  assert.equal(reset.status,200,JSON.stringify(reset.payload));
+  assert.equal(reset.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").responsible_user_id,null);
+  assert.equal(reset.payload.workflow_phases.find(phase=>phase.stage_key==="qa_review").effective_responsible_user_id,"U-F-WORKER");
 
   const pastStart=recentBusinessIso(1,14),pastDue=recentBusinessIso(1,17);
   const farFuture=futureIso(31,18);

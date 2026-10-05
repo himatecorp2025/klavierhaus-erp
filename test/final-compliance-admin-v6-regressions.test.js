@@ -11,9 +11,11 @@ const round2=fs.readFileSync(path.join(root,"public","round2.js"),"utf8");
 const v6=fs.readFileSync(path.join(root,"public","v6.js"),"utf8");
 const css=fs.readFileSync(path.join(root,"public","styles.css"),"utf8");
 
-test("planned job modal keeps workflow settings in the correct Promise.all slot",()=>{
-  assert.match(round2,/const \[clients,,settings\]=await Promise\.all\(\[loadClients\(\),loadUsers\(\)\.then\(\(\)=>null\),api\("\/api\/workflow\/settings"\)\]\)/);
-  assert.doesNotMatch(round2,/const \[clients,settings\]=await Promise\.all\(\[loadClients\(\),loadUsers\(\)\.then\(\(\)=>null\),api\("\/api\/workflow\/settings"\)\]\)/);
+test("planned job modal loads users and workflow settings without requiring a preloaded client list",()=>{
+  assert.match(round2,/const \[,settings\]=await Promise\.all\(\[loadUsers\(\),api\("\/api\/workflow\/settings"\)\]\)/);
+  assert.match(round2,/jobClientSearch/);
+  assert.match(round2,/openQuickClientCreate/);
+  assert.match(round2,/openQuickPianoCreate/);
 });
 
 test("calendar collection bindings use querySelectorAll and create binding is top-level",()=>{

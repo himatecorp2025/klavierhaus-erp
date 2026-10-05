@@ -92,6 +92,29 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(["planned","received","in_progress","qa_review","admin_approval","completed"].includes(stageKey))return stageKey;
     return "in_progress";
   }
+  function normalizePhaseCosts(input){
+    if(!Array.isArray(input))return undefined;
+    return input.map((item,index)=>{
+      const title=text(item?.title,240);if(!title)throw problem("WORKFLOW_PHASE_COST_TITLE_REQUIRED");
+      const category=text(item?.category||"material",40).toLowerCase();
+      if(!["material","parts","service","transport","other"].includes(category))throw problem("INVALID_WORKFLOW_PHASE_COST_CATEGORY");
+      const amount=money(item?.amount??0);if(!(amount>=0))throw problem("INVALID_WORKFLOW_PHASE_COST");
+      return {title,category,amount,notes:text(item?.notes,1000)||null,sort_order:index};
+    });
+  }
+  function phaseCostsForJob(jobId){
+    const rows=db.prepare("SELECT id,job_id,stage_key,title,category,amount,notes,created_by_user_id,created_at,updated_at FROM job_workflow_phase_costs WHERE job_id=? ORDER BY stage_key,id").all(jobId);
+    const byStage=new Map();
+    for(const row of rows){if(!byStage.has(row.stage_key))byStage.set(row.stage_key,[]);byStage.get(row.stage_key).push({...row,amount:money(row.amount||0)});}
+    return byStage;
+  }
+  function replacePhaseCosts(jobId,stageKey,costs,userId){
+    if(!Array.isArray(costs))return;
+    const normalized=normalizePhaseCosts(costs)||[];
+    db.prepare("DELETE FROM job_workflow_phase_costs WHERE job_id=? AND stage_key=?").run(jobId,stageKey);
+    const insert=db.prepare("INSERT INTO job_workflow_phase_costs(job_id,stage_key,title,category,amount,notes,created_by_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)");
+    for(const item of normalized)insert.run(jobId,stageKey,item.title,item.category,item.amount,item.notes,userId||null);
+  }
   function phasesForJob(jobId){
     const rows=db.prepare(`SELECT p.id,p.job_id,p.stage_key,p.position,p.enabled,p.starts_at,p.due_at,p.customer_price,p.responsible_user_id,
       ru.name AS responsible_name,p.blocker_code,p.blocker_note,p.activated_at,p.completed_at,p.created_at,p.updated_at,
@@ -100,8 +123,9 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       LEFT JOIN users ru ON ru.id=p.responsible_user_id
       LEFT JOIN workflow_stage_definitions d ON d.stage_key=p.stage_key
       WHERE p.job_id=? ORDER BY p.position,p.id`).all(jobId);
-    if(rows.length)return rows.map(row=>({...row,enabled:Boolean(row.enabled),job_specific:Number(row.definition_active)===0,removable:Boolean(row.definition_removable)}));
-    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable)}));
+    const costMap=phaseCostsForJob(jobId);
+    if(rows.length)return rows.map(row=>{const costs=costMap.get(row.stage_key)||[];return {...row,enabled:Boolean(row.enabled),job_specific:Number(row.definition_active)===0,removable:Boolean(row.definition_removable),costs,internal_cost_total:money(costs.reduce((sum,item)=>sum+Number(item.amount||0),0))};});
+    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable),costs:[],internal_cost_total:0}));
   }
   function phaseVisualStatus(job,phase,now=Date.now()){
     if(job?.cancelled_at)return "cancelled";
@@ -138,9 +162,13 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const phasesWithStatus=workflow_phases.map(phase=>({...phase,visual_status:phaseVisualStatus({...row,stage},phase)}));
     const activePhase=phasesWithStatus.find(phase=>phase.stage_key===stage)||null;
     const phase_customer_total=money(phasesWithStatus.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0));
-    const deposit_amount=money(row.deposit_amount||0),balance_due=money(Math.max(0,phase_customer_total-deposit_amount));
-    return {...row,storage_stage:row.stage,stage,workflow_phases:phasesWithStatus,current_phase:activePhase,next_stage:next_phase?.stage_key||null,
-      phase_customer_total,deposit_amount,balance_due,
+    const phase_internal_cost_total=money(phasesWithStatus.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.internal_cost_total||0),0));
+    const deposit_amount=money(row.deposit_amount||0),planned_total=money(row.estimated_revenue||0);
+    const balance_due=money(Math.max(0,phase_customer_total-deposit_amount)),estimated_balance=money(Math.max(0,planned_total-deposit_amount));
+    const phasesEffective=phasesWithStatus.map(phase=>({...phase,effective_responsible_user_id:phase.responsible_user_id||row.assigned_technician_id||row.workflow_owner_user_id||row.created_by_user_id||null}));
+    const effectiveActive=phasesEffective.find(phase=>phase.stage_key===stage)||null;
+    return {...row,storage_stage:row.stage,stage,workflow_phases:phasesEffective,current_phase:effectiveActive,next_stage:next_phase?.stage_key||null,
+      phase_customer_total,phase_internal_cost_total,planned_total,deposit_amount,balance_due,estimated_balance,
       workflow_status:stage==="planned"?"planned":phaseVisualStatus({...row,stage},activePhase),ready_for_closeout:readyForCloseout(row.id,stage)};
   }
   const jobById=id=>decorateJob(db.prepare(`${selectJob} WHERE j.id=?`).get(id));
@@ -191,15 +219,16 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       const customerPrice=money(item?.customer_price??0);if(!(customerPrice>=0))throw problem("INVALID_WORKFLOW_CUSTOMER_PRICE");
+      const costs=normalizePhaseCosts(item?.costs);
       const row={stage_key:stage.key,position:stage.position,enabled,
         starts_at:item?.starts_at?optionalQuarterIso(item.starts_at):(stage.key==="received"&&defaultStartAt?optionalQuarterIso(defaultStartAt):null),
-        due_at:item?.due_at?optionalQuarterIso(item.due_at):null,customer_price:customerPrice,responsible_user_id:responsibleId};
+        due_at:item?.due_at?optionalQuarterIso(item.due_at):null,customer_price:customerPrice,responsible_user_id:responsibleId,costs};
       assertPhaseWindow(stage,row);return row;
     });
     for(const key of ["received","admin_approval","completed"])if(!plan.find(row=>row.stage_key===key)?.enabled)throw problem("WORKFLOW_FIXED_STAGE_REQUIRED");
     return plan;
   }
-  function writePlan(jobId,plan,{preserveProgress=false}={}){
+  function writePlan(jobId,plan,{preserveProgress=false,updatedByUserId=null}={}){
     const existing=new Map(phasesForJob(jobId).map(row=>[row.stage_key,row]));
     const upsert=db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,activated_at,completed_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
@@ -211,6 +240,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const old=existing.get(row.stage_key);
       upsert.run(jobId,row.stage_key,row.position,row.enabled?1:0,row.starts_at,row.due_at,row.customer_price||0,row.responsible_user_id,
         preserveProgress?old?.activated_at||null:null,preserveProgress?old?.completed_at||null:null,preserveProgress?1:0,preserveProgress?1:0);
+      if(Array.isArray(row.costs))replacePhaseCosts(jobId,row.stage_key,row.costs,updatedByUserId);
     }
   }
   function addJobSpecificPhase(jobId,input,userId,{defaultResponsibleId=null}={}){
@@ -229,6 +259,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       VALUES(?,?,?,?,'intermediate',0,1,?,CURRENT_TIMESTAMP)`).run(key,Math.min(MAX_WORKFLOW_STAGES+1,position),labelEn,labelHu,userId);
     db.prepare(`INSERT INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,due_at,customer_price,responsible_user_id,created_at,updated_at)
       VALUES(?,?,?,1,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(jobId,key,position,startsAt,dueAt,customerPrice,responsibleId);
+    if(Array.isArray(input?.costs))replacePhaseCosts(jobId,key,input.costs,userId);
     return key;
   }
   function firstEnabledStage(jobId){
@@ -269,14 +300,15 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const suppliedPhases=Array.isArray(body?.workflow_phases??defaults.workflow_phases)?(body?.workflow_phases??defaults.workflow_phases):null;
     const customPhases=(suppliedPhases||[]).filter(row=>Boolean(row?.job_specific)&&text(row?.custom_label_en||row?.label_en,80));
     const standardPhases=suppliedPhases?suppliedPhases.filter(row=>!customPhases.includes(row)):suppliedPhases;
-    const plan=normalizePlan(standardPhases,{defaultResponsibleId:req.user.id,defaultStartAt:scheduledAt});
+    const plan=normalizePlan(standardPhases,{defaultResponsibleId:null,defaultStartAt:scheduledAt});
     if(plan.length+customPhases.length>MAX_WORKFLOW_STAGES+1)throw problem("WORKFLOW_STAGE_LIMIT_REACHED",409,{max_stages:MAX_WORKFLOW_STAGES});
     if(scheduledAt)stage=plan.find(row=>row.enabled&&row.stage_key!=="completed")?.stage_key||"received";
     const siteAddress=text(body?.site_address??body?.service_address??defaults.site_address??(locationType==="on_site"?client.address:""),1200)||null;
     const quotedTotal=money([...plan,...customPhases].filter(row=>row.enabled!==false).reduce((sum,row)=>sum+Number(row.customer_price||0),0));
-    const fallbackRevenue=money(body?.estimated_revenue??defaults.estimated_revenue??0),estimatedRevenue=quotedTotal>0?quotedTotal:Math.max(0,Number(fallbackRevenue)||0);
+    const rawEstimated=body?.estimated_revenue??defaults.estimated_revenue,estimatedRevenue=rawEstimated===undefined?quotedTotal:money(rawEstimated);
+    if(!(estimatedRevenue>=0))throw problem("INVALID_JOB_ESTIMATED_TOTAL");
     const depositAmount=money(body?.deposit_amount??defaults.deposit_amount??0);if(!(depositAmount>=0))throw problem("INVALID_JOB_DEPOSIT");
-    if(estimatedRevenue>0&&depositAmount>estimatedRevenue)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
+    const depositBasis=Math.max(estimatedRevenue,quotedTotal);if(depositBasis>0&&depositAmount>depositBasis)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
     const info=db.prepare(`INSERT INTO jobs(
       job_code,client_id,piano_id,intake_id,title,description,location_type,site_address,scheduled_at,estimated_duration_min,stage,workflow_stage_key,workflow_owner_user_id,
       assigned_technician_id,total_labor_cost,total_material_cost,estimated_revenue,deposit_amount,internal_notes,created_by_user_id,created_at,updated_at
@@ -286,8 +318,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     );
     const id=Number(info.lastInsertRowid);
     db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${newYorkYear()}-${String(id).padStart(5,"0")}`,id);
-    writePlan(id,plan);
-    for(const custom of customPhases)addJobSpecificPhase(id,custom,req.user.id,{defaultResponsibleId:custom.responsible_user_id||owner.id});
+    writePlan(id,plan,{updatedByUserId:req.user.id});
+    for(const custom of customPhases)addJobSpecificPhase(id,custom,req.user.id,{defaultResponsibleId:custom.responsible_user_id||null});
     if(stage!==PIPELINE_STAGE)activatePhase(id,stage);
     const created=jobById(id);audit(req,"CREATE","jobs",String(id),null,created);return created;
   }
@@ -368,8 +400,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         order.splice(order.indexOf("admin_approval"),0,key);applyStageOrder(order,req.user.id);
         const stage=stageDefinitions().find(row=>row.key===key);
         if(req.body?.apply_to_existing!==false){
-          const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,responsible_user_id,created_at,updated_at)
-            SELECT id,?,?,1,COALESCE(created_by_user_id,workflow_owner_user_id),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
+          const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,created_at,updated_at)
+            SELECT id,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
           insert.run(key,stage.position);
         }
       })();
@@ -531,7 +563,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
     if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
     try{
-      db.transaction(()=>addJobSpecificPhase(id,req.body||{},req.user.id,{defaultResponsibleId:before.workflow_owner_user_id||before.created_by_user_id||req.user.id}))();
+      db.transaction(()=>addJobSpecificPhase(id,req.body||{},req.user.id,{defaultResponsibleId:null}))();
       const after=jobById(id);audit(req,"ADD_JOB_WORKFLOW_PHASE","jobs",String(id),before,after);res.status(201).json(after);
     }catch(error){respondError(res,error);}
   });
@@ -540,11 +572,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
     try{
       const jobSpecificDefinitions=before.workflow_phases.filter(row=>row.job_specific).map(row=>({key:row.stage_key,position:row.position,label_en:row.label_en||row.stage_key,label_hu:row.label_hu||row.stage_key,stage_type:row.stage_type||"intermediate"}));
-      const incoming=normalizePlan(req.body?.phases,{defaultResponsibleId:before.created_by_user_id||before.workflow_owner_user_id||req.user.id,extraDefinitions:jobSpecificDefinitions}),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
+      const incoming=normalizePlan(req.body?.phases,{defaultResponsibleId:null,extraDefinitions:jobSpecificDefinitions}),currentPhase=before.stage==="planned"?null:before.workflow_phases.find(row=>row.stage_key===before.stage);
       const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
       const safe=incoming.map(row=>{
         const old=oldByKey.get(row.stage_key);
-        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id??old?.responsible_user_id??before.created_by_user_id??req.user.id};
+        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id,costs:Array.isArray(row.costs)?row.costs:old?.costs};
         if(old?.completed_at||row.stage_key===before.stage||FIXED_STAGE_KEYS.has(row.stage_key))return {...merged,enabled:true};
         return merged;
       });
@@ -557,11 +589,12 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       }
       const quotedTotal=money(safe.filter(row=>row.enabled&&row.stage_key!=="completed").reduce((sum,row)=>sum+Number(row.customer_price||0),0));
       const depositAmount=req.body?.deposit_amount===undefined?money(before.deposit_amount||0):money(req.body.deposit_amount);
-      if(!(depositAmount>=0))throw problem("INVALID_JOB_DEPOSIT");
-      if(quotedTotal>0&&depositAmount>quotedTotal)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
+      const estimatedRevenue=req.body?.estimated_revenue===undefined?money(before.estimated_revenue||0):money(req.body.estimated_revenue);
+      if(!(depositAmount>=0))throw problem("INVALID_JOB_DEPOSIT");if(!(estimatedRevenue>=0))throw problem("INVALID_JOB_ESTIMATED_TOTAL");
+      const depositBasis=Math.max(estimatedRevenue,quotedTotal);if(depositBasis>0&&depositAmount>depositBasis)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
       db.transaction(()=>{
-        writePlan(id,safe,{preserveProgress:true});
-        db.prepare("UPDATE jobs SET estimated_revenue=?,deposit_amount=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(quotedTotal,depositAmount,id);
+        writePlan(id,safe,{preserveProgress:true,updatedByUserId:req.user.id});
+        db.prepare("UPDATE jobs SET estimated_revenue=?,deposit_amount=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(estimatedRevenue,depositAmount,id);
         if(currentPhase&&calendarStart)db.prepare("UPDATE jobs SET scheduled_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(calendarStart,id);
       })();
       const after=jobById(id);audit(req,"UPDATE_WORKFLOW_PLAN","jobs",String(id),before,after);res.json(after);
@@ -577,6 +610,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const dueAt=req.body?.due_at===undefined?phase.due_at:optionalQuarterIso(req.body.due_at);
       assertPhaseWindow(stageByKey(stage,{includeInactive:true})||phase,{starts_at:startsAt,due_at:dueAt});
       const customerPrice=req.body?.customer_price===undefined?money(phase.customer_price||0):money(req.body.customer_price);if(!(customerPrice>=0))throw problem("INVALID_WORKFLOW_CUSTOMER_PRICE");
+      const costs=req.body?.costs===undefined?undefined:normalizePhaseCosts(req.body.costs);
       const responsibleId=req.body?.responsible_user_id===undefined?phase.responsible_user_id:(text(req.body.responsible_user_id,160)||null);
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       let blockerCode=req.body?.blocker_code===undefined?phase.blocker_code:text(req.body.blocker_code,50)||null;
@@ -591,8 +625,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       db.transaction(()=>{
         db.prepare("UPDATE job_workflow_phases SET starts_at=?,due_at=?,customer_price=?,responsible_user_id=?,blocker_code=?,blocker_note=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?")
           .run(currentActive?calendarStart:startsAt,dueAt,customerPrice,responsibleId,blockerCode,blockerNote,id,stage);
-        const quotedTotal=money(db.prepare("SELECT COALESCE(SUM(customer_price),0) total FROM job_workflow_phases WHERE job_id=? AND enabled=1 AND stage_key<>'completed'").get(id)?.total||0);
-        db.prepare("UPDATE jobs SET estimated_revenue=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(quotedTotal,id);
+        if(Array.isArray(costs))replacePhaseCosts(id,stage,costs,req.user.id);
         if(currentActive&&calendarStart)db.prepare("UPDATE jobs SET scheduled_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(calendarStart,id);
       })();
       const after=jobById(id);audit(req,"UPDATE_PHASE_STATUS","jobs",String(id),before,after);res.json(after);
@@ -649,10 +682,11 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:true});
       const owner=responsibleUser(req.body?.workflow_owner_user_id??before.workflow_owner_user_id??before.created_by_user_id,{optional:false});
       const depositAmount=money(req.body?.deposit_amount??before.deposit_amount??0);if(!(depositAmount>=0))throw problem("INVALID_JOB_DEPOSIT");
-      if(Number(before.estimated_revenue||0)>0&&depositAmount>Number(before.estimated_revenue))throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
-      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,workflow_owner_user_id=?,deposit_amount=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      const estimatedRevenue=money(req.body?.estimated_revenue??before.estimated_revenue??0);if(!(estimatedRevenue>=0))throw problem("INVALID_JOB_ESTIMATED_TOTAL");
+      const phaseTotal=money(before.phase_customer_total||0),depositBasis=Math.max(estimatedRevenue,phaseTotal);if(depositBasis>0&&depositAmount>depositBasis)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
+      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,workflow_owner_user_id=?,estimated_revenue=?,deposit_amount=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
         title,text(req.body?.description??before.description,10000)||null,location,text(req.body?.site_address??before.site_address,1200)||null,
-        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,owner.id,depositAmount,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
+        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,owner.id,estimatedRevenue,depositAmount,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
       );
       const after=jobById(id);audit(req,"UPDATE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}
@@ -688,7 +722,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const labor=money(req.body?.phase_labor_cost||0),material=money(req.body?.phase_material_cost||0),duration=Math.max(0,Math.round(Number(req.body?.phase_duration_min||0)));
       if(!(labor>=0)||!(material>=0)||!Number.isFinite(duration))throw problem("INVALID_HANDOFF_COST");
       const materialUsage=inventoryService?.normalizeUsage?inventoryService.normalizeUsage(req.body?.materials||[]):[];
-      const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
+      const responsible=responsibleUser(req.body?.assigned_to_user_id||target.responsible_user_id||before.assigned_technician_id||before.workflow_owner_user_id||before.created_by_user_id||req.user.id,{optional:false});
       const resourceTechnician=before.assigned_technician_id,targetCalendarStart=target.starts_at||before.scheduled_at||null;
       if(targetCalendarStart&&resourceTechnician){
         const conflict=findConflict(id,resourceTechnician,targetCalendarStart,before.estimated_duration_min);

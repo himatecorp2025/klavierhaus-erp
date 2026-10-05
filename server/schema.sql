@@ -1490,6 +1490,22 @@ CREATE TABLE IF NOT EXISTS job_workflow_phases (
   FOREIGN KEY (responsible_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS job_workflow_phase_costs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  stage_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'material' CHECK(category IN ('material','parts','service','transport','other')),
+  amount REAL NOT NULL DEFAULT 0 CHECK(amount >= 0),
+  notes TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_workflow_phase_costs_job_stage ON job_workflow_phase_costs(job_id,stage_key,id);
+
 CREATE TABLE IF NOT EXISTS job_handoffs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL,

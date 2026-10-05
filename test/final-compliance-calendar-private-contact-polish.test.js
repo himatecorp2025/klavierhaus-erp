@@ -18,11 +18,12 @@ test("New York job datetime conversion uses compact half-hour business controls 
   const source=read("public/round2.js");
   assert.match(source,/function r2NyInputToIso\(value\)[\s\S]{0,1800}rendered=r2NyParts\(result\)/);
   assert.match(source,/const R2_JOB_SLOT_MIN=30/);
-  assert.match(source,/name="'\+esc\(name\)\+'_year"/);
-  assert.match(source,/class="r2-date-month"/);
-  assert.match(source,/class="r2-date-day"/);
+  assert.match(source,/type="date" name="'\+esc\(name\)\+'_date"/);
+  assert.match(source,/function r2CompactDateLabel/);
+  assert.match(source,/year===currentYear\?\`\$\{month\}\/\$\{day\}\`/);
   assert.match(source,/startMinutes=R2_DAY_START,endMinutes=R2_DAY_END/);
-  assert.match(source,/body\.scheduled_at=r2NyInputToIso\(r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:true\}\)\)/);
+  assert.match(source,/const scheduledLocal=r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:workflowEntry\|\|calendarEntry\}\)/);
+  assert.match(source,/body\.scheduled_at=r2NyInputToIso\(scheduledLocal\)/);
   assert.match(source,/slotMinutes:15,startMinutes:0,endMinutes:23\*60\+45/);
   assert.match(source,/r2PrivateCalendarRow[\s\S]{0,700}row\.duration_min[\s\S]{0,700}row\.scheduled_end_at/);
 });
