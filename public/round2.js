@@ -11,6 +11,7 @@ const R2_TZ="America/New_York";
 const R2_DAY_START=7*60;
 const R2_DAY_END=20*60;
 const R2_SLOT_MIN=15;
+const R2_JOB_SLOT_MIN=30;
 const R2_SLOT_HEIGHT=18;
 const R2_PX_PER_MIN=R2_SLOT_HEIGHT/R2_SLOT_MIN;
 const R2_BLOCKERS={
@@ -53,41 +54,65 @@ function r2NyInputToIso(value){
   if(+rendered.year!==wanted.year||+rendered.month!==wanted.month||+rendered.day!==wanted.day||+rendered.hour!==wanted.hour||+rendered.minute!==wanted.minute)throw new Error("INVALID_SCHEDULE_TIME");
   return result.toISOString();
 }
-function r2QuarterLocalValue(value){
+function r2SlotLocalValue(value,{slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
   let raw=String(value||"").trim();if(!raw)return "";
   if(/(?:Z|[+-]\d{2}:\d{2})$/.test(raw))raw=r2IsoToNyInput(raw);
   const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);if(!match)return "";
-  const base=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],0,0,0)),minutes=Math.round((+match[4]*60+(+match[5]))/R2_SLOT_MIN)*R2_SLOT_MIN;
-  base.setUTCMinutes(minutes);
-  return base.toISOString().slice(0,16);
+  const day=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],0,0,0));
+  if(day.getUTCFullYear()!==+match[1]||day.getUTCMonth()!==+match[2]-1||day.getUTCDate()!==+match[3])return "";
+  let minutes=Math.round((+match[4]*60+(+match[5]))/slotMinutes)*slotMinutes;
+  minutes=Math.max(startMinutes,Math.min(endMinutes,minutes));
+  return `${match[1]}-${match[2]}-${match[3]}T${r2Pad(Math.floor(minutes/60))}:${r2Pad(minutes%60)}`;
 }
-function r2QuarterTimeOptions(selected="",allowEmpty=true){
-  const normalized=selected?r2QuarterLocalValue("2000-01-01T"+String(selected)).slice(11,16):"";
+function r2QuarterLocalValue(value){return r2SlotLocalValue(value);}
+function r2TimeOptions(selected="",allowEmpty=true,{slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
+  const normalized=selected?r2SlotLocalValue("2000-01-01T"+String(selected),{slotMinutes,startMinutes,endMinutes}).slice(11,16):"";
   let html=allowEmpty?'<option value="">—</option>':"";
-  for(let minutes=0;minutes<24*60;minutes+=R2_SLOT_MIN){
+  for(let minutes=startMinutes;minutes<=endMinutes;minutes+=slotMinutes){
     const value=r2Pad(Math.floor(minutes/60))+":"+r2Pad(minutes%60);
     html+='<option value="'+value+'" '+(value===normalized?'selected':'')+'>'+value+'</option>';
   }
   return html;
 }
-function r2DateTimeFields(name,value,{required=false}={}){
-  const normalized=r2QuarterLocalValue(value),date=normalized.slice(0,10),time=normalized.slice(11,16);
-  return '<div class="r2-quarter-datetime" data-r2-datetime="'+esc(name)+'"><input type="date" name="'+esc(name)+'_date" value="'+esc(date)+'" '+(required?"required":"")+'>' +
-    '<select name="'+esc(name)+'_time" '+(required?"required":"")+'>'+r2QuarterTimeOptions(time,!required)+'</select></div>';
+function r2QuarterTimeOptions(selected="",allowEmpty=true){return r2TimeOptions(selected,allowEmpty);}
+function r2MonthOptions(selected="",allowEmpty=true){
+  let html=allowEmpty?'<option value="">MM</option>':"";
+  for(let month=1;month<=12;month+=1){const value=r2Pad(month);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+}
+function r2DayOptions(selected="",allowEmpty=true){
+  let html=allowEmpty?'<option value="">DD</option>':"";
+  for(let day=1;day<=31;day+=1){const value=r2Pad(day);html+='<option value="'+value+'" '+(value===selected?'selected':'')+'>'+value+'</option>';}return html;
+}
+function r2DateTimeFields(name,value,{required=false,slotMinutes=R2_JOB_SLOT_MIN,startMinutes=R2_DAY_START,endMinutes=R2_DAY_END}={}){
+  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes}),year=normalized.slice(0,4)||r2Today().slice(0,4),month=normalized.slice(5,7),day=normalized.slice(8,10),time=normalized.slice(11,16);
+  return '<div class="r2-quarter-datetime r2-compact-datetime" data-r2-datetime="'+esc(name)+'" data-slot-minutes="'+slotMinutes+'" data-start-minutes="'+startMinutes+'" data-end-minutes="'+endMinutes+'">'+
+    '<input type="hidden" name="'+esc(name)+'_year" value="'+esc(year)+'">'+
+    '<select class="r2-date-month" name="'+esc(name)+'_month" '+(required?"required":"")+' aria-label="'+esc(tr("Month","Hónap"))+'">'+r2MonthOptions(month,!required)+'</select>'+
+    '<select class="r2-date-day" name="'+esc(name)+'_day" '+(required?"required":"")+' aria-label="'+esc(tr("Day","Nap"))+'">'+r2DayOptions(day,!required)+'</select>'+
+    '<select class="r2-date-time" name="'+esc(name)+'_time" '+(required?"required":"")+' aria-label="'+esc(tr("Time","Idő"))+'">'+r2TimeOptions(time,!required,{slotMinutes,startMinutes,endMinutes})+'</select></div>';
 }
 function r2DateTimeValue(root,name){
-  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  return date&&time?date+"T"+time:"";
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  return year&&month&&day&&time?year+"-"+month+"-"+day+"T"+time:"";
 }
 function r2ReadDateTime(root,name,{required=false}={}){
-  const date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
-  if(!date&&!time&&!required)return "";
-  if(!date||!time)throw new Error("INVALID_SCHEDULE_TIME");
-  const value=date+"T"+time;if(!r2QuarterLocalValue(value))throw new Error("INVALID_SCHEDULE_TIME");return value;
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]');
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]')?.value||"",month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]')?.value||"",day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]')?.value||"",time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]')?.value||"";
+  if(!month&&!day&&!time&&!required)return "";
+  if(!year||!month||!day||!time)throw new Error("INVALID_SCHEDULE_TIME");
+  const slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
+  const value=year+"-"+month+"-"+day+"T"+time,match=value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)throw new Error("INVALID_SCHEDULE_TIME");
+  const check=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],+match[4],+match[5])),minutes=+match[4]*60+(+match[5]);
+  if(check.getUTCFullYear()!==+match[1]||check.getUTCMonth()!==+match[2]-1||check.getUTCDate()!==+match[3])throw new Error("INVALID_SCHEDULE_TIME");
+  if(minutes<startMinutes||minutes>endMinutes)throw new Error("WORK_TIME_OUTSIDE_BUSINESS_HOURS");
+  if(minutes%slotMinutes!==0)throw new Error("WORK_TIME_HALF_HOUR_REQUIRED");
+  return value;
 }
 function r2SetDateTime(root,name,value){
-  const normalized=r2QuarterLocalValue(value),date=root.querySelector('[name="'+CSS.escape(name+'_date')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
-  if(date)date.value=normalized.slice(0,10);if(time)time.value=normalized.slice(11,16);
+  const wrap=root.querySelector('[data-r2-datetime="'+CSS.escape(name)+'"]'),slotMinutes=Number(wrap?.dataset.slotMinutes||R2_JOB_SLOT_MIN),startMinutes=Number(wrap?.dataset.startMinutes||R2_DAY_START),endMinutes=Number(wrap?.dataset.endMinutes||R2_DAY_END);
+  const normalized=r2SlotLocalValue(value,{slotMinutes,startMinutes,endMinutes});
+  const year=root.querySelector('[name="'+CSS.escape(name+'_year')+'"]'),month=root.querySelector('[name="'+CSS.escape(name+'_month')+'"]'),day=root.querySelector('[name="'+CSS.escape(name+'_day')+'"]'),time=root.querySelector('[name="'+CSS.escape(name+'_time')+'"]');
+  if(year)year.value=normalized.slice(0,4);if(month)month.value=normalized.slice(5,7);if(day)day.value=normalized.slice(8,10);if(time)time.value=normalized.slice(11,16);
 }
 function r2WallAddMinutes(value,minutes){
   const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)return "";
@@ -103,14 +128,15 @@ function r2WorkflowDefinitions(plan=[]){
   const adminPosition=Number(defs.find(stage=>stage.key==="admin_approval")?.position||99);let draftOffset=0;
   for(const phase of source){
     const key=String(phase?.stage_key||phase?.key||"");if(!key||key==="completed"||keys.has(key))continue;
-    draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
+    draftOffset+=1;defs.push({key,label_en:phase.label_en||phase.custom_label_en||key,label_hu:phase.label_hu||phase.custom_label_hu||phase.label_en||phase.custom_label_en||key,position:Number(phase.position||adminPosition-(1/(draftOffset+1))),removable:true,job_specific:true});keys.add(key);
   }
   return defs.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
 }
 function r2BindStandaloneLogisticsTiming(root,stage,startName,dueName){
   if(!root||!r2IsLogisticsStage(stage))return;
   const enforce=()=>{
-    const start=r2DateTimeValue(root,startName);if(!start)return;const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(root,dueName);
+    const start=r2DateTimeValue(root,startName);if(!start)return;
+    const minimum=r2WallAddMinutes(start,180),due=r2DateTimeValue(root,dueName);
     if(!due||new Date(r2NyInputToIso(due)).getTime()<new Date(r2NyInputToIso(minimum)).getTime())r2SetDateTime(root,dueName,minimum);
   };
   root.addEventListener("change",event=>{if(event.target.closest("[data-r2-datetime]"))enforce();});enforce();
@@ -121,6 +147,24 @@ function r2BindWorkflowTiming(form){
     const stage={key:row.dataset.workflowPhase,label_en:row.dataset.phaseLabelEn||"",label_hu:row.dataset.phaseLabelHu||""};
     r2BindStandaloneLogisticsTiming(row,stage,"start_"+stage.key,"due_"+stage.key);
   });
+}
+function r2WorkflowFinancialSummary(form){
+  const phases=$$("[data-workflow-phase]",form).filter(row=>r2FixedStage(row.dataset.workflowPhase)||row.querySelector('[name="phase_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.checked);
+  const phaseTotal=phases.reduce((sum,row)=>sum+Math.max(0,Number(row.querySelector('[name="price_'+CSS.escape(row.dataset.workflowPhase)+'"]')?.value||0)),0);
+  const deposit=Math.max(0,Number(form?.elements?.deposit_amount?.value||0)),balance=Math.max(0,phaseTotal-deposit);
+  return {phaseTotal,deposit,balance};
+}
+function r2RefreshWorkflowFinancialSummary(form){
+  const summary=form?.querySelector("[data-workflow-finance-summary]");if(!summary)return;
+  const totals=r2WorkflowFinancialSummary(form);
+  summary.innerHTML='<div><span>'+tr("Phase total","Fázisok összege")+'</span><strong>'+r2Money(totals.phaseTotal)+'</strong></div>'+
+    '<div><span>'+tr("Deposit received","Kapott előleg")+'</span><strong>− '+r2Money(totals.deposit)+'</strong></div>'+
+    '<div class="workflow-finance-balance"><span>'+tr("Remaining to invoice","Még számlázandó")+'</span><strong>'+r2Money(totals.balance)+'</strong></div>';
+}
+function r2BindWorkflowFinance(form){
+  if(!form)return;r2RefreshWorkflowFinancialSummary(form);
+  form.addEventListener("input",event=>{if(event.target.matches('[name^="price_"],[name="deposit_amount"]'))r2RefreshWorkflowFinancialSummary(form);});
+  form.addEventListener("change",event=>{if(event.target.matches('[name^="phase_"]'))r2RefreshWorkflowFinancialSummary(form);});
 }
 function r2NyDate(value){const p=r2NyParts(new Date(value));return `${p.year}-${p.month}-${p.day}`;}
 function r2Today(){return r2NyDate(new Date());}
@@ -145,13 +189,15 @@ function r2FormatDate(dateKey,options={month:"short",day:"numeric"}){
 }
 function r2DefaultInput(dateKey=null){
   if(dateKey)return dateKey+"T09:00";
-  const date=new Date(Date.now()+60*60000);date.setMinutes(Math.ceil(date.getMinutes()/15)*15,0,0);return r2IsoToNyInput(date);
+  const raw=r2IsoToNyInput(new Date(Date.now()+60*60000).toISOString()),date=raw.slice(0,10),minutes=Number(raw.slice(11,13))*60+Number(raw.slice(14,16));
+  const snapped=Math.max(R2_DAY_START,Math.min(R2_DAY_END,Math.ceil(minutes/R2_JOB_SLOT_MIN)*R2_JOB_SLOT_MIN));
+  return date+"T"+r2Pad(Math.floor(snapped/60))+":"+r2Pad(snapped%60);
 }
 function r2TechnicianOptions(selected=""){
-  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
+  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
 }
 function r2ResponsibleOptions(selected=""){
-  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)} · ${esc(roleLabel(user.role))}</option>`).join("");
+  return (state.users||[]).filter(user=>["WORKER","MANAGER","ADMIN","SUPERADMIN"].includes(user.role)).map(user=>`<option value="${esc(user.id)}" ${String(user.id)===String(selected||"")?"selected":""}>${esc(user.name)}</option>`).join("");
 }
 function r2StatusLabel(status){
   return ({scheduled:tr("Scheduled","Ütemezve"),in_progress:tr("In progress","Folyamatban"),blocked:tr("Blocked","Elakadt"),overdue:tr("Overdue","Lejárt"),completed:tr("Completed","Lezárva"),cancelled:tr("Cancelled","Törölt"),planned:tr("Planned","Tervezett")})[status]||status||"";
