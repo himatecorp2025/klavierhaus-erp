@@ -246,7 +246,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   const [clients,,settings]=await Promise.all([loadClients(),loadUsers().then(()=>null),api("/api/workflow/settings")]);
   state.r2Workflow={...(state.r2Workflow||{}),stages:settings.stages,max_stages:settings.max_stages,active_stage_count:settings.active_stage_count,can_add_stage:settings.can_add_stage};
   if(!clients.length){toast(tr("Create a client and piano first.","Előbb hozz létre ügyfelet és zongorát."),"error");return;}
-  const workflowEntry=Boolean(defaults.workflow),scheduled=workflowEntry||Boolean(defaults.date);
+  const workflowEntry=Boolean(defaults.workflow),scheduled=workflowEntry||Boolean(defaults.date);let draftPhaseCounter=0;
   const dialogTitle=workflowEntry?tr("New Workflow Job","Új workflow munka"):scheduled?tr("New scheduled job","Új ütemezett munka"):tr("New Planned Job","Új tervezett munka");
   const dialogEyebrow=workflowEntry?tr("WORKFLOW","MUNKAFOLYAMAT"):scheduled?tr("CALENDAR","NAPTÁR"):tr("PIPELINE","TERVEZÉS");
   openDialog({title:dialogTitle,eyebrow:dialogEyebrow,variant:"wide",body:`<form id="jobCreateForm" class="form-grid">
@@ -258,8 +258,8 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="120"></label>
     <label class="field full"><span>${tr("Service address","Szervizcím")}</span><input name="site_address"></label>
     <label class="field full"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(state.user?.id)}</select><small>${tr("Defaults to the creator; this person owns the full workflow.","Alapértelmezetten a létrehozó; ő felel a teljes munkafolyamatért.")}</small></label>
-    ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span><input name="scheduled_at" type="datetime-local" step="900" value="${esc(defaults.datetime||r2DefaultInput(defaults.date))}" required></label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
-    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set the responsible person and editable timing for each phase. Times may be moved backward or forward later.","Fázisonként add meg a felelőst és a módosítható időket. Az időpontok később vissza- vagy előre is mozgathatók.")}</p></div></div><div id="jobWorkflowPlanRows">${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</div>${workflowEntry&&r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this workflow","Új fázis ehhez a workflowhoz")}</strong><small>${tr("Add a custom phase to this job. Other workflows remain unchanged and custom phases stay opt-in.","Egyedi fázis hozzáadása ehhez a munkához. A többi workflow változatlan marad, az egyedi fázisok külön választhatók.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")}</span><input id="workflowJobPhaseEn" maxlength="80"></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}</section>
+    ${scheduled?`<label class="field"><span>${tr("Start · New York","Kezdés · New York")} *</span>${r2DateTimeFields("scheduled_at",defaults.datetime||r2DefaultInput(defaults.date),{required:true})}</label><label class="field"><span>${tr("Technician","Technikus")} *</span><select name="assigned_technician_id" required><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions("")}</select></label>`:""}
+    <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Set the responsible person and editable timing for each phase. Times may be moved backward or forward later.","Fázisonként add meg a felelőst és a módosítható időket. Az időpontok később vissza- vagy előre is mozgathatók.")}</p></div></div><div id="jobWorkflowPlanRows">${r2WorkflowPlanRows(null,{defaultResponsible:state.user?.id,defaultStart:scheduled?(defaults.datetime||r2DefaultInput(defaults.date)):""})}</div>${r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("This phase belongs only to the job being created and does not change other workflows.","Ez a fázis kizárólag a most létrehozott munkához tartozik, más workflow-kat nem módosít.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")}</span><input id="workflowJobPhaseEn" maxlength="80"></label><label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}</section>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${workflowEntry?tr("Create Workflow Job","Workflow munka létrehozása"):scheduled?tr("Create & schedule","Létrehozás és ütemezés"):tr("Create Planned Job","Tervezett munka létrehozása")}</button></div>
   </form>`});
   async function loadPianos(){
@@ -267,24 +267,23 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     $("#jobPianoSelect").innerHTML=pianos.length?pianos.map(piano=>`<option value="${piano.id}">${esc([piano.brand,piano.model,piano.serial_number].filter(Boolean).join(" · "))}</option>`).join(""):`<option value="">${tr("No piano — add one in Master Data","Nincs zongora — add hozzá a Törzsadatokban")}</option>`;
     $("#jobPianoSelect").disabled=!pianos.length;
   }
-  $("#jobClientSelect").addEventListener("change",()=>loadPianos().catch(error=>toast(humanError(error),"error")));await loadPianos();
+  $("#jobClientSelect").addEventListener("change",()=>loadPianos().catch(error=>toast(humanError(error),"error")));await loadPianos();r2BindWorkflowTiming($("#jobCreateForm"));
   $("#workflowJobAddPhase")?.addEventListener("click",()=>$("#workflowJobAddPhaseInline")?.classList.toggle("hidden"));
-  $("#workflowJobCreatePhase")?.addEventListener("click",async()=>{
+  $("#workflowJobCreatePhase")?.addEventListener("click",()=>{
     const form=$("#jobCreateForm"),labelEn=String($("#workflowJobPhaseEn")?.value||"").trim(),labelHu=String($("#workflowJobPhaseHu")?.value||"").trim();
     if(!labelEn||!labelHu){toast(tr("Enter both phase names.","Add meg mindkét fázisnevet."),"error");return;}
-    const button=$("#workflowJobCreatePhase"),beforeKeys=new Set(r2ActiveDefinitions().map(stage=>stage.key)),existingPlan=r2ReadWorkflowPlan(form);
-    button.disabled=true;
     try{
-      const result=await api("/api/workflow/stages",{method:"POST",body:JSON.stringify({label_en:labelEn,label_hu:labelHu,apply_to_existing:false})});
-      state.r2Workflow={...(state.r2Workflow||{}),...result};
-      const added=r2ActiveDefinitions().find(stage=>!beforeKeys.has(stage.key));
-      if(added)existingPlan.push({stage_key:added.key,enabled:true,starts_at:null,due_at:null,responsible_user_id:form.elements.workflow_owner_user_id?.value||state.user?.id||null});
-      const host=$("#jobWorkflowPlanRows");if(host)host.innerHTML=r2WorkflowPlanRows(existingPlan,{defaultResponsible:form.elements.workflow_owner_user_id?.value||state.user?.id,defaultStart:scheduled?(form.elements.scheduled_at?.value||defaults.datetime||r2DefaultInput(defaults.date)):""});
+      const existingPlan=r2ReadWorkflowPlan(form),currentCount=r2WorkflowDefinitions(existingPlan).length,max=Number(state.r2Workflow?.max_stages||7);
+      if(currentCount>=max)throw new Error("WORKFLOW_STAGE_LIMIT_REACHED");
+      const adminPosition=Number(r2ActiveDefinitions().find(stage=>stage.key==="admin_approval")?.position||currentCount+1),key="draft_custom_"+(++draftPhaseCounter);
+      existingPlan.push({stage_key:key,position:adminPosition-.25-(draftPhaseCounter/100),enabled:true,starts_at:null,due_at:null,responsible_user_id:form.elements.workflow_owner_user_id?.value||state.user?.id||null,job_specific:true,custom_label_en:labelEn,custom_label_hu:labelHu,label_en:labelEn,label_hu:labelHu});
+      const host=$("#jobWorkflowPlanRows"),defaultStart=scheduled?(r2DateTimeValue(form,"scheduled_at")||defaults.datetime||r2DefaultInput(defaults.date)):"";
+      if(host)host.innerHTML=r2WorkflowPlanRows(existingPlan,{defaultResponsible:form.elements.workflow_owner_user_id?.value||state.user?.id,defaultStart});
+      r2BindWorkflowTiming(form);
       $("#workflowJobPhaseEn").value="";$("#workflowJobPhaseHu").value="";$("#workflowJobAddPhaseInline")?.classList.add("hidden");
-      const addButton=$("#workflowJobAddPhase");if(addButton)addButton.disabled=!result.can_add_stage;
-      toast(tr("Custom phase added to this workflow. Other workflows remain unchanged.","Az egyedi fázis hozzáadva ehhez a workflowhoz. A többi workflow változatlan marad."),"success");
+      const addButton=$("#workflowJobAddPhase");if(addButton)addButton.disabled=r2WorkflowDefinitions(existingPlan).length>=max;
+      toast(tr("Job-specific phase added.","A munkához tartozó egyedi fázis hozzáadva."),"success");
     }catch(error){toast(humanError(error),"error");}
-    finally{button.disabled=false;}
   });
   $("#jobCreateForm").addEventListener("submit",async event=>{
     event.preventDefault();
@@ -292,7 +291,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
       const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);body.estimated_duration_min=Number(body.estimated_duration_min||120);
       body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
       if(scheduled){
-        body.scheduled_at=r2NyInputToIso(body.scheduled_at);
+        body.scheduled_at=r2NyInputToIso(r2ReadDateTime(event.currentTarget,"scheduled_at",{required:true}));
         const received=body.workflow_phases.find(phase=>phase.stage_key==="received");
         if(received&&!received.starts_at)received.starts_at=body.scheduled_at;
       }
