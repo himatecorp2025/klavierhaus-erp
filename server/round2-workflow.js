@@ -400,8 +400,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         order.splice(order.indexOf("admin_approval"),0,key);applyStageOrder(order,req.user.id);
         const stage=stageDefinitions().find(row=>row.key===key);
         if(req.body?.apply_to_existing!==false){
-          const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,responsible_user_id,created_at,updated_at)
-            SELECT id,?,?,1,COALESCE(created_by_user_id,workflow_owner_user_id),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
+          const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,created_at,updated_at)
+            SELECT id,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
           insert.run(key,stage.position);
         }
       })();
@@ -563,7 +563,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const id=integerId(req.params.id),before=id&&jobById(id);if(!before)return res.status(404).json({error:"JOB_NOT_FOUND"});
     if(before.cancelled_at||before.stage==="completed")return res.status(409).json({error:before.cancelled_at?"JOB_CANCELLED":"JOB_ALREADY_COMPLETED"});
     try{
-      db.transaction(()=>addJobSpecificPhase(id,req.body||{},req.user.id,{defaultResponsibleId:before.workflow_owner_user_id||before.created_by_user_id||req.user.id}))();
+      db.transaction(()=>addJobSpecificPhase(id,req.body||{},req.user.id,{defaultResponsibleId:null}))();
       const after=jobById(id);audit(req,"ADD_JOB_WORKFLOW_PHASE","jobs",String(id),before,after);res.status(201).json(after);
     }catch(error){respondError(res,error);}
   });
@@ -576,7 +576,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const oldByKey=new Map(before.workflow_phases.map(row=>[row.stage_key,row]));
       const safe=incoming.map(row=>{
         const old=oldByKey.get(row.stage_key);
-        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id??old?.responsible_user_id??null,costs:Array.isArray(row.costs)?row.costs:old?.costs};
+        const merged={...row,starts_at:row.starts_at??old?.starts_at??null,due_at:row.due_at??old?.due_at??null,customer_price:row.customer_price??old?.customer_price??0,responsible_user_id:row.responsible_user_id,costs:Array.isArray(row.costs)?row.costs:old?.costs};
         if(old?.completed_at||row.stage_key===before.stage||FIXED_STAGE_KEYS.has(row.stage_key))return {...merged,enabled:true};
         return merged;
       });
