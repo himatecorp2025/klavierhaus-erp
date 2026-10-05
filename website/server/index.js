@@ -7,7 +7,7 @@ const compression = require("compression");
 const multer = require("multer");
 const { createEventClient } = require("./event-client");
 const { PAYMENT_METHODS } = require("../../server/payment-methods");
-const PRIVATE_PICKER_ASSET_REV = "cms-messenger-layout-20261001-1";
+const PRIVATE_PICKER_ASSET_REV = "calendar-contact-header-20261005-2";
 const {
   VERSION,
   findRoute,
@@ -223,11 +223,12 @@ function renderHeader({ copy, language, currentKey, alternateRouteOverride = "",
       <div class="header-actions">
         <a class="language-switch" href="${escapeHtml(alternateRoute)}" hreflang="${alternateLanguage === "hu" ? "hu-HU" : "en-US"}">${escapeHtml(copy.alternateLabel)}</a>
         <button class="header-consultation" type="button" data-private-viewing-open><span class="header-consultation__label">${escapeHtml(copy.consultationLabel)}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button>
-        <div class="header-quick-contact header-quick-contact--desktop" aria-label="${escapeHtml(language==="hu"?"Gyors kapcsolat":"Quick contact")}">
-          <a class="header-contact-icon" href="${escapeHtml(brand.phoneHref)}" aria-label="${escapeHtml((language==="hu"?"Telefonhívás: ":"Call: ")+brand.phoneDisplay)}" title="${escapeHtml(brand.phoneDisplay)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.1 3.5 4.8 4.7c-.7.4-1 1.2-.8 2 1.6 6.4 6.7 11.5 13.1 13.1.8.2 1.6-.1 2-.8l1.2-2.3c.3-.6.1-1.4-.5-1.8l-3-1.8c-.5-.3-1.2-.2-1.6.2l-1.4 1.4a13.1 13.1 0 0 1-4.5-4.5l1.4-1.4c.4-.4.5-1.1.2-1.6l-1.8-3c-.4-.6-1.2-.8-2-.5Z"/></svg></a>
-          <a class="header-contact-icon" href="${escapeHtml(brand.emailHref)}" aria-label="${escapeHtml((language==="hu"?"E-mail küldése: ":"Email: ")+brand.emailDisplay)}" title="${escapeHtml(brand.emailDisplay)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.5h17v13h-17z"/><path d="m4.5 7 7.5 5.5L19.5 7"/></svg></a>
-        </div>
+
       </div>
+    </div>
+    <div class="header-quick-contact header-quick-contact--desktop" aria-label="${escapeHtml(language==="hu"?"Gyors kapcsolat":"Quick contact")}">
+      <a class="header-contact-icon" href="${escapeHtml(brand.phoneHref)}" aria-label="${escapeHtml((language==="hu"?"Telefonhívás: ":"Call: ")+brand.phoneDisplay)}" title="${escapeHtml(brand.phoneDisplay)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.1 3.5 4.8 4.7c-.7.4-1 1.2-.8 2 1.6 6.4 6.7 11.5 13.1 13.1.8.2 1.6-.1 2-.8l1.2-2.3c.3-.6.1-1.4-.5-1.8l-3-1.8c-.5-.3-1.2-.2-1.6.2l-1.4 1.4a13.1 13.1 0 0 1-4.5-4.5l1.4-1.4c.4-.4.5-1.1.2-1.6l-1.8-3c-.4-.6-1.2-.8-2-.5Z"/></svg></a>
+      <a class="header-contact-icon" href="${escapeHtml(brand.emailHref)}" aria-label="${escapeHtml((language==="hu"?"E-mail küldése: ":"Email: ")+brand.emailDisplay)}" title="${escapeHtml(brand.emailDisplay)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.5h17v13h-17z"/><path d="m4.5 7 7.5 5.5L19.5 7"/></svg></a>
     </div>
   </header>
   <aside class="customer-chat" data-customer-chat data-language="${escapeHtml(language)}">
