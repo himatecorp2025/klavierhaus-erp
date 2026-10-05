@@ -1492,6 +1492,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   workflow_stage_key TEXT,
   workflow_owner_user_id TEXT,
   assigned_technician_id TEXT,
+  primary_skill_id INTEGER,
   total_labor_cost REAL NOT NULL DEFAULT 0 CHECK(total_labor_cost >= 0),
   total_material_cost REAL NOT NULL DEFAULT 0 CHECK(total_material_cost >= 0),
   estimated_revenue REAL NOT NULL DEFAULT 0 CHECK(estimated_revenue >= 0),
@@ -1514,6 +1515,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (intake_id) REFERENCES intake_leads(id) ON DELETE SET NULL,
   FOREIGN KEY (workflow_owner_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_technician_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (primary_skill_id) REFERENCES staff_skills(id) ON DELETE SET NULL,
   FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL

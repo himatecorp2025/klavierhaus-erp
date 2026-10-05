@@ -302,6 +302,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const locationType=text(body?.location_type??body?.service_location??defaults.location_type??"workshop",30);
     if(!["workshop","on_site"].includes(locationType))throw problem("INVALID_SERVICE_LOCATION");
     const assigned=technician(body?.assigned_technician_id??defaults.assigned_technician_id,{optional:true});
+    const primarySkill=responsibilitySkill(body?.primary_skill_id??defaults.primary_skill_id,{optional:true});
+    if(assigned&&primarySkill)ensureUserSkill(assigned.id,primarySkill.id,req.user.id);
     const owner=responsibleUser(body?.workflow_owner_user_id??defaults.workflow_owner_user_id??req.user.id,{optional:false});
     const duration=positiveDuration(body?.estimated_duration_min??defaults.estimated_duration_min??120);
     const rawSchedule=text(body?.scheduled_at??defaults.scheduled_at,80);
@@ -326,10 +328,10 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     const depositBasis=Math.max(estimatedRevenue,quotedTotal);if(depositBasis>0&&depositAmount>depositBasis)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
     const info=db.prepare(`INSERT INTO jobs(
       job_code,client_id,piano_id,intake_id,title,description,location_type,site_address,scheduled_at,estimated_duration_min,stage,workflow_stage_key,workflow_owner_user_id,
-      assigned_technician_id,total_labor_cost,total_material_cost,estimated_revenue,deposit_amount,internal_notes,created_by_user_id,created_at,updated_at
-    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
+      assigned_technician_id,primary_skill_id,total_labor_cost,total_material_cost,estimated_revenue,deposit_amount,internal_notes,created_by_user_id,created_at,updated_at
+    ) VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(
       clientId,pianoId,intakeId,title,text(body?.description??defaults.description,10000)||null,locationType,siteAddress,scheduledAt,duration,storageStage(stage),stage===PIPELINE_STAGE?null:stage,owner.id,
-      assigned?.id||null,estimatedRevenue,depositAmount,text(body?.internal_notes??defaults.internal_notes,10000)||null,req.user.id
+      assigned?.id||null,primarySkill?.id||null,estimatedRevenue,depositAmount,text(body?.internal_notes??defaults.internal_notes,10000)||null,req.user.id
     );
     const id=Number(info.lastInsertRowid);
     db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${newYorkYear()}-${String(id).padStart(5,"0")}`,id);
@@ -357,6 +359,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       location_type:converted.lead.service_location,
       site_address:body?.site_address||converted.client.address,
       assigned_technician_id:body?.assigned_technician_id||converted.lead.assigned_technician_id,
+      primary_skill_id:body?.primary_skill_id,
       workflow_owner_user_id:body?.workflow_owner_user_id||req.user.id,
       estimated_duration_min:body?.estimated_duration_min||120,
       estimated_revenue:body?.estimated_revenue??converted.lead.estimated_total??0,
@@ -661,6 +664,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const stage=firstEnabledStage(id);if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
+      if(before.primary_skill_id)ensureUserSkill(assigned.id,before.primary_skill_id,req.user.id);
       db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       activatePhase(id,stage);
       const after=jobById(id);audit(req,"ACTIVATE","jobs",String(id),before,after);
@@ -681,6 +685,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       if(!stage)throw problem("WORKFLOW_REQUIRES_ACTIVE_PHASE");
       db.prepare("UPDATE jobs SET scheduled_at=?,estimated_duration_min=?,assigned_technician_id=?,stage=?,workflow_stage_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(scheduledAt,duration,assigned.id,storageStage(stage),stage,id);
+      if(before.primary_skill_id)ensureUserSkill(assigned.id,before.primary_skill_id,req.user.id);
       db.prepare("UPDATE job_workflow_phases SET starts_at=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND stage_key=?").run(scheduledAt,id,stage);
       if(before.stage==="planned")activatePhase(id,stage);
       const after=jobById(id);audit(req,"SCHEDULE","jobs",String(id),before,after);
@@ -698,13 +703,15 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const title=text(req.body?.title??before.title,240);if(!title)throw problem("JOB_TITLE_REQUIRED");
       const location=text(req.body?.location_type??before.location_type,30);if(!["workshop","on_site"].includes(location))throw problem("INVALID_SERVICE_LOCATION");
       const assigned=technician(req.body?.assigned_technician_id??before.assigned_technician_id,{optional:true});
+      const primarySkill=responsibilitySkill(req.body?.primary_skill_id??before.primary_skill_id,{optional:true});
+      if(assigned&&primarySkill)ensureUserSkill(assigned.id,primarySkill.id,req.user.id);
       const owner=responsibleUser(req.body?.workflow_owner_user_id??before.workflow_owner_user_id??before.created_by_user_id,{optional:false});
       const depositAmount=money(req.body?.deposit_amount??before.deposit_amount??0);if(!(depositAmount>=0))throw problem("INVALID_JOB_DEPOSIT");
       const estimatedRevenue=money(req.body?.estimated_revenue??before.estimated_revenue??0);if(!(estimatedRevenue>=0))throw problem("INVALID_JOB_ESTIMATED_TOTAL");
       const phaseTotal=money(before.phase_customer_total||0),depositBasis=Math.max(estimatedRevenue,phaseTotal);if(depositBasis>0&&depositAmount>depositBasis)throw problem("JOB_DEPOSIT_EXCEEDS_TOTAL");
-      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,workflow_owner_user_id=?,estimated_revenue=?,deposit_amount=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      db.prepare(`UPDATE jobs SET title=?,description=?,location_type=?,site_address=?,estimated_duration_min=?,assigned_technician_id=?,primary_skill_id=?,workflow_owner_user_id=?,estimated_revenue=?,deposit_amount=?,internal_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
         title,text(req.body?.description??before.description,10000)||null,location,text(req.body?.site_address??before.site_address,1200)||null,
-        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,owner.id,estimatedRevenue,depositAmount,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
+        positiveDuration(req.body?.estimated_duration_min??before.estimated_duration_min),assigned?.id||null,primarySkill?.id||null,owner.id,estimatedRevenue,depositAmount,text(req.body?.internal_notes??before.internal_notes,10000)||null,id
       );
       const after=jobById(id);audit(req,"UPDATE","jobs",String(id),before,after);res.json(after);
     }catch(error){respondError(res,error);}

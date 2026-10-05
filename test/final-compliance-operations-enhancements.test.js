@@ -16,6 +16,7 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(schema,/CREATE TABLE IF NOT EXISTS staff_skills\s*\(/);
   assert.match(schema,/CREATE TABLE IF NOT EXISTS user_staff_skills\s*\(/);
   assert.match(schema,/responsibility_skill_id INTEGER/);
+  assert.match(schema,/primary_skill_id INTEGER/);
   assert.match(init,/OUTSIDE_TUNING/);
   assert.match(init,/WORKSHOP_COORDINATION/);
   assert.match(api,/\/api\/staff-skills/);
@@ -23,7 +24,9 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(api,/\/api\/users\/:id\/work-profile/);
   assert.match(workflow,/responsibility_skill_id/);
   assert.match(workflow,/ensureUserSkill/);
+  assert.match(workflow,/primary_skill_id/);
   assert.match(ui,/Job role \/ task/);
+  assert.match(ui,/Primary job role/);
   assert.match(ui,/data-phase-skill/);
   assert.match(ui,/data-add-phase-skill/);
   assert.match(ui,/responsibility_skill_id/);
@@ -33,6 +36,7 @@ test("staff professional roles are separate from system permissions and persist 
   assert.match(app,/Outside Manager/);
   assert.match(app,/skill_ids/);
   assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.match(v6,/primary_skill_id/);
 });
 
 test("Milestone is the desktop and tablet home while phone stays on Workshop",()=>{
@@ -140,6 +144,7 @@ test("admin surfaces wire Milestone editing, skills management and complete expo
   assert.match(v6,/operationsMilestoneProfileCard/);
   assert.match(v6,/bindOperationsMilestoneProfile/);
   assert.match(v6,/operationsSkillsSettingsCard/);
+  assert.match(v6,/primary_skill_id/);
   assert.match(v6,/bindOperationsSkillsSettings/);
   assert.match(v6,/operationsExportRecoveryCard/);
   assert.match(v6,/bindOperationsExportRecovery/);

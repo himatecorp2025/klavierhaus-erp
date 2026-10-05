@@ -412,6 +412,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     <div class="field workflow-balance-display"><span>${tr("Remaining to invoice","Még számlázandó")} (USD)</span><output data-workflow-balance-output aria-live="polite">${r2Money(0)}</output></div>
     <div class="field"><span>${tr("Start · New York","Kezdés · New York")}${workflowEntry||calendarEntry?" *":""}</span>${r2DateTimeFields("scheduled_at",scheduledSeed,{required:workflowEntry||calendarEntry})}</div>
     <label class="field"><span>${tr("Technician","Technikus")}${workflowEntry||calendarEntry?" *":""}</span><select name="assigned_technician_id"><option value="">${tr("Choose technician","Válassz technikust")}</option>${r2TechnicianOptions(defaults.assigned_technician_id||"")}</select></label>
+    <div class="field"><span>${tr("Primary job role","Elsődleges munkakör")}</span><div class="inline-skill-picker"><select name="primary_skill_id" id="jobPrimarySkill">${r2SkillOptions(defaults.primary_skill_id||"")}</select>${r2IsAdmin()?`<button type="button" class="entity-picker-add" id="jobAddPrimarySkill" title="${esc(tr("Create a new job role","Új munkakör létrehozása"))}">＋</button>`:""}</div></div>
     <section class="full workflow-plan-editor"><div class="panel-head inline-panel-head"><div><h3>${tr("Workflow phases","Munkafázisok")}</h3><p>${tr("Click a card to include it. Use + only when responsibility or internal costs need details.","Kattints a kártyára a kiválasztáshoz. A + csak az egyedi felelőshöz és belső költségekhez kell.")}</p></div></div><div id="jobWorkflowPlanRows" class="workflow-phase-card-grid">${r2WorkflowPlanRows(null,{defaultStart:scheduledSeed})}</div>${r2IsAdmin()?`<div class="workflow-job-phase-adder" id="workflowJobPhaseAdder"><button class="workflow-add-phase-card" id="workflowJobAddPhase" type="button" ${state.r2Workflow?.can_add_stage?"":"disabled"}><span>＋</span><strong>${tr("Add phase to this job","Új fázis ehhez a munkához")}</strong><small>${tr("English is required. Hungarian is optional and only belongs to this job.","Az angol név kötelező. A magyar opcionális, és ez a fázis csak ehhez a munkához tartozik.")}</small></button><div class="workflow-add-phase-inline hidden" id="workflowJobAddPhaseInline"><label class="field"><span>${tr("English name","Angol név")} *</span><input id="workflowJobPhaseEn" maxlength="80"></label><button class="phase-hu-toggle" id="workflowJobHuToggle" type="button" aria-expanded="false">HU</button><label class="field workflow-hu-field hidden" id="workflowJobHuField"><span>${tr("Hungarian name","Magyar név")}</span><input id="workflowJobPhaseHu" maxlength="80"></label><button class="primary-button" id="workflowJobCreatePhase" type="button">＋ ${tr("Add phase","Fázis hozzáadása")}</button></div></div>`:""}
       <section class="workflow-finance-summary" data-workflow-finance-summary aria-live="polite"></section>
     </section>
@@ -433,6 +434,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
   $("#jobAddPiano")?.addEventListener("click",()=>openQuickPianoCreate(selectedClient,{onSaved:async saved=>{currentPianos=await api(`/api/clients/${selectedClient.id}/pianos`);selectPiano(saved);}}));
   if(defaults.client_id){const clients=await loadClients(String(defaults.client_name||""));const client=clients.find(row=>Number(row.id)===Number(defaults.client_id))||(await loadClients()).find(row=>Number(row.id)===Number(defaults.client_id));if(client)await selectClient(client,defaults.piano_id);}
   r2BindWorkflowTiming(form);r2BindWorkflowCards(form);r2BindWorkflowFinance(form);
+  $("#jobAddPrimarySkill")?.addEventListener("click",()=>{if(typeof createOperationalSkillInline!=="function")return;createOperationalSkillInline("",saved=>{const select=$("#jobPrimarySkill");if(select){select.innerHTML=r2SkillOptions(saved.id);select.value=String(saved.id);}});});
   $("#workflowJobAddPhase")?.addEventListener("click",()=>$("#workflowJobAddPhaseInline")?.classList.toggle("hidden"));
   $("#workflowJobHuToggle")?.addEventListener("click",event=>{const field=$("#workflowJobHuField"),open=field?.classList.toggle("hidden")===false;event.currentTarget.setAttribute("aria-expanded",String(open));if(open)$("#workflowJobPhaseHu")?.focus();});
   $("#workflowJobCreatePhase")?.addEventListener("click",()=>{
@@ -454,7 +456,7 @@ async function r2OpenCreateJob(refresh=renderPlanned,defaults={}){
     try{
       const body=Object.fromEntries(new FormData(event.currentTarget));body.client_id=Number(clientId.value);body.piano_id=Number(pianoId.value);
       if(!body.client_id){toast(tr("Select or create a client.","Válassz vagy hozz létre ügyfelet."),"error");return;}if(!body.piano_id){toast(tr("Select or create the client piano.","Válaszd ki vagy hozd létre az ügyfél zongoráját."),"error");return;}
-      body.estimated_duration_min=Number(body.estimated_duration_min||120);body.estimated_revenue=Math.max(0,Number(body.estimated_revenue||0));body.deposit_amount=Math.max(0,Number(body.deposit_amount||0));
+      body.estimated_duration_min=Number(body.estimated_duration_min||120);body.estimated_revenue=Math.max(0,Number(body.estimated_revenue||0));body.deposit_amount=Math.max(0,Number(body.deposit_amount||0));body.primary_skill_id=Number(body.primary_skill_id||0)||null;
       const scheduledLocal=r2ReadDateTime(event.currentTarget,"scheduled_at",{required:workflowEntry||calendarEntry});body.workflow_phases=r2ReadWorkflowPlan(event.currentTarget);
       const phaseTotal=body.workflow_phases.filter(phase=>phase.enabled&&phase.stage_key!=="completed").reduce((sum,phase)=>sum+Number(phase.customer_price||0),0),basis=Math.max(body.estimated_revenue,phaseTotal);if(basis>0&&body.deposit_amount>basis)throw new Error("JOB_DEPOSIT_EXCEEDS_TOTAL");
       if(scheduledLocal){if(!body.assigned_technician_id)throw new Error("TECHNICIAN_REQUIRED_FOR_SCHEDULE");body.scheduled_at=r2NyInputToIso(scheduledLocal);const received=body.workflow_phases.find(phase=>phase.stage_key==="received");if(received&&!received.starts_at)received.starts_at=body.scheduled_at;}
@@ -482,17 +484,19 @@ async function r2OpenActivate(job){
 }
 async function r2OpenEditJob(job,refresh){
   if(!state.users?.length)await loadUsers();
+  if(typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
   openDialog({title:tr("Edit job","Munka szerkesztése"),eyebrow:job.job_code||tr("JOB","MUNKA"),body:`<form id="jobEditForm" class="form-grid">
     <label class="field full"><span>${tr("Title","Megnevezés")} *</span><input name="title" value="${esc(job.title)}" required></label>
     <label class="field full"><span>${tr("Description","Leírás")}</span><textarea name="description">${esc(job.description||"")}</textarea></label>
     <label class="field"><span>${tr("Location","Helyszín")}</span><select name="location_type"><option value="workshop" ${job.location_type==="workshop"?"selected":""}>${tr("Workshop","Műhely")}</option><option value="on_site" ${job.location_type==="on_site"?"selected":""}>${tr("On site","Helyszíni")}</option></select></label>
     <label class="field"><span>${tr("Duration","Időtartam")} (min)</span><input name="estimated_duration_min" type="number" min="15" step="15" value="${Number(job.estimated_duration_min||120)}"></label>
     <label class="field"><span>${tr("Calendar technician","Naptári technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
+    <label class="field"><span>${tr("Primary job role","Elsődleges munkakör")}</span><select name="primary_skill_id">${r2SkillOptions(job.primary_skill_id||"")}</select></label>
     <label class="field"><span>${tr("Workflow owner","Fő felelős")}</span><select name="workflow_owner_user_id" required>${r2ResponsibleOptions(job.workflow_owner_user_id||job.created_by_user_id||state.user?.id)}</select></label>
     <label class="field full"><span>${tr("Internal notes","Belső megjegyzés")}</span><textarea name="internal_notes">${esc(job.internal_notes||"")}</textarea></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
   $("#jobEditForm").addEventListener("submit",async event=>{
-    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.estimated_duration_min=Number(body.estimated_duration_min||120);if(!body.assigned_technician_id)body.assigned_technician_id="";
+    event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget));body.estimated_duration_min=Number(body.estimated_duration_min||120);body.primary_skill_id=Number(body.primary_skill_id||0)||null;if(!body.assigned_technician_id)body.assigned_technician_id="";
     try{await api(`/api/jobs/${job.id}`,{method:"PUT",body:JSON.stringify(body)});closeDialog();toast(tr("Job updated.","Munka frissítve."),"success");await refresh();}
     catch(error){toast(humanError(error),"error");}
   });

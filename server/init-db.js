@@ -480,6 +480,7 @@ ensureColumn("jobs","estimated_revenue","REAL NOT NULL DEFAULT 0 CHECK(estimated
 ensureColumn("jobs","deposit_amount","REAL NOT NULL DEFAULT 0 CHECK(deposit_amount >= 0)");
 ensureColumn("jobs","workflow_stage_key","TEXT");
 ensureColumn("jobs","workflow_owner_user_id","TEXT");
+ensureColumn("jobs","primary_skill_id","INTEGER");
 ensureColumn("jobs","completion_document_id","INTEGER");
 ensureColumn("job_workflow_phases","starts_at","TEXT");
 ensureColumn("job_workflow_phases","customer_price","REAL NOT NULL DEFAULT 0 CHECK(customer_price >= 0)");
