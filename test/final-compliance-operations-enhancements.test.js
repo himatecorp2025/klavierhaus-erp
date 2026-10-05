@@ -4,6 +4,9 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
 const test=require("node:test");
+const os=require("node:os");
+const {spawnSync}=require("node:child_process");
+const Database=require("better-sqlite3");
 const AdmZip=require("adm-zip");
 const {createWorkbook,excelSafeTable}=require("../server/operations-enhancements");
 
@@ -80,6 +83,41 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(schema,/parent_uid TEXT/);
   assert.match(schema,/step_kind TEXT NOT NULL DEFAULT 'major'/);
   assert.match(schema,/link_view TEXT/);
+});
+
+test("Milestone roadmap migration upgrades an existing production table before canonical indexes",()=>{
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),"kh-milestone-migration-")),dbPath=path.join(temp,"legacy.sqlite"),backupDir=path.join(temp,"backups");
+  const db=new Database(dbPath);
+  db.exec(`CREATE TABLE milestone_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title_en TEXT NOT NULL,
+    title_hu TEXT,
+    description_en TEXT,
+    description_hu TEXT,
+    target_date TEXT,
+    completed INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT,
+    icon TEXT,
+    media_url TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  INSERT INTO milestone_steps(title_en,title_hu,sort_order) VALUES('Legacy milestone','Régi mérföldkő',0);`);
+  db.close();
+  const run=spawnSync(process.execPath,[path.join(root,"server","init-db.js")],{cwd:root,env:{...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir},encoding:"utf8"});
+  assert.equal(run.status,0,run.stderr||run.stdout);
+  const migrated=new Database(dbPath,{readonly:true});
+  const cols=new Set(migrated.prepare('PRAGMA table_info("milestone_steps")').all().map(row=>row.name));
+  assert.ok(cols.has("parent_uid"));
+  assert.ok(cols.has("step_kind"));
+  assert.ok(cols.has("link_view"));
+  assert.equal(migrated.prepare("SELECT title_en FROM milestone_steps ORDER BY id LIMIT 1").get().title_en,"Legacy milestone");
+  assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_milestone_steps_parent'").get());
+  migrated.close();
+  fs.rmSync(temp,{recursive:true,force:true});
 });
 
 test("VIP clients have explicit last-contacted tracking and a three-month warning",()=>{

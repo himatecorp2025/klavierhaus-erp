@@ -260,6 +260,20 @@ function prepareMasterDataCompatibility() {
 function ensureColumn(table, name, definition) {
   if (tableExists(table) && !columns(table).has(name)) db.exec(`ALTER TABLE ${quoteName(table)} ADD COLUMN ${quoteName(name)} ${definition}`);
 }
+function prepareMilestoneRoadmapCompatibility() {
+  if (!tableExists("milestone_steps")) return;
+  for(const [name,definition] of [
+    ["uid","TEXT"],
+    ["parent_uid","TEXT"],
+    ["step_kind","TEXT NOT NULL DEFAULT 'major' CHECK(step_kind IN ('major','minor'))"],
+    ["link_view","TEXT"],
+    ["link_record_id","TEXT"],
+    ["color_key","TEXT"]
+  ]) ensureColumn("milestone_steps",name,definition);
+  db.prepare("UPDATE milestone_steps SET uid='legacy-'||id WHERE uid IS NULL OR trim(uid)='' ").run();
+  db.prepare("UPDATE milestone_steps SET step_kind='major' WHERE step_kind IS NULL OR step_kind NOT IN ('major','minor')").run();
+  console.log("[MILESTONE] Roadmap compatibility columns prepared before canonical indexes");
+}
 function legacyValue(row, ...names) {
   for (const name of names) if (row && row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") return row[name];
   return null;
@@ -407,6 +421,7 @@ for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"])
 prepareMessengerV12Compatibility();
 prepareClientSegmentationCompatibility();
 prepareMasterDataCompatibility();
+prepareMilestoneRoadmapCompatibility();
 db.exec(canonicalSchemaSql);
 if(tableExists("_workflow_capacity_legacy_workflow_stage_definitions")){
   db.pragma("foreign_keys = OFF");
