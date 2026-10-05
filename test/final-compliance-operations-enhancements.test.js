@@ -115,7 +115,13 @@ test("complete database export creates a structured native XLSX workbook and pro
 test("final theme normalization covers legacy fixed-light admin surfaces and narrows invoice quantity",()=>{
   const css=read("public/styles.css"),round3=read("public/round3.js");
   assert.match(css,/OPERATIONS V37/);
+  assert.match(css,/OPERATIONS V38/);
   assert.match(css,/\.dialog-card,[\s\S]{0,1000}background:var\(--surface\)!important/);
+  assert.match(css,/\.nav-item:hover:not\(:disabled\),[\s\S]{0,500}background:var\(--surface-2\)!important/);
+  assert.match(css,/\.calendar-event-block\{[\s\S]{0,450}background:color-mix\(in srgb,var\(--tech-color\) 11%,var\(--surface\)\)!important/);
+  assert.match(css,/\.month-day-cell\.outside-month,[\s\S]{0,450}background:var\(--surface-2\)!important/);
+  assert.match(css,/\.overview-table th,[\s\S]{0,450}background:var\(--surface-2\)!important/);
+  assert.match(css,/\.cms-upload code\{[\s\S]{0,220}background:var\(--surface-3\)!important/);
   assert.match(css,/\.invoice-line\{[\s\S]{0,200}grid-template-columns:minmax\(105px,.62fr\) minmax\(240px,1.65fr\) 72px minmax\(145px,.8fr\) 42px!important/);
   assert.match(css,/\[data-line-quantity\][\s\S]{0,120}max-width:72px!important/);
   assert.match(css,/\.typeahead-menu,[\s\S]{0,600}background:var\(--surface\)!important/);
