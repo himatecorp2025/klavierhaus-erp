@@ -17,7 +17,8 @@ test("calendar keeps existing events separate from empty-slot creation",()=>{
 test("New York datetime conversion is validated and job creation catches conversion failures",()=>{
   const source=read("public/round2.js");
   assert.match(source,/function r2NyInputToIso\(value\)[\s\S]{0,1800}rendered=r2NyParts\(result\)/);
-  assert.match(source,/jobCreateForm[\s\S]{0,1200}try\{[\s\S]{0,1200}r2NyInputToIso\(body\.scheduled_at\)/);
+  assert.match(source,/function r2QuarterTimeOptions/);
+  assert.match(source,/jobCreateForm[\s\S]{0,3500}r2NyInputToIso\(r2ReadDateTime\(event\.currentTarget,"scheduled_at",\{required:true\}\)\)/);
   assert.match(source,/r2PrivateCalendarRow[\s\S]{0,700}row\.duration_min[\s\S]{0,700}row\.scheduled_end_at/);
 });
 

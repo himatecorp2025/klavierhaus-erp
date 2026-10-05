@@ -242,9 +242,18 @@ a {
 }
 
 .header-quick-contact {
+  position: relative;
+  z-index: 4;
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: .45rem;
+  visibility: visible;
+  opacity: 1;
+}
+
+.header-quick-contact--desktop {
+  margin-left: -.35rem;
 }
 
 .header-quick-contact--mobile {
@@ -1297,6 +1306,12 @@ main {
 
   .header-consultation {
     padding-inline: 0.95rem;
+  }
+
+  .header-contact-icon {
+    width: 2.45rem;
+    height: 2.45rem;
+    flex-basis: 2.45rem;
   }
 
   .brand-wordmark {
