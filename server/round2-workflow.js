@@ -126,7 +126,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       WHERE p.job_id=? ORDER BY p.position,p.id`).all(jobId);
     const costMap=phaseCostsForJob(jobId);
     if(rows.length)return rows.map(row=>{const costs=costMap.get(row.stage_key)||[];return {...row,enabled:Boolean(row.enabled),job_specific:Number(row.definition_active)===0,removable:Boolean(row.definition_removable),costs,internal_cost_total:money(costs.reduce((sum,item)=>sum+Number(item.amount||0),0))};});
-    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,responsibility_skill_id:null,responsibility_skill_name_en:null,responsibility_skill_name_hu:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable),costs:[],internal_cost_total:0}));
+    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:ACTIVE_STAGE_KEYS.has(row.key),starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,responsibility_skill_id:null,responsibility_skill_name_en:null,responsibility_skill_name_hu:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable),costs:[],internal_cost_total:0}));
   }
   function phaseVisualStatus(job,phase,now=Date.now()){
     if(job?.cancelled_at)return "cancelled";
