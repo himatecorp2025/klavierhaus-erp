@@ -776,11 +776,11 @@ function r2OpenAddStage(){
     <label class="field"><span>${tr("English name","Angol név")}</span><input name="label_en" required autofocus></label>
     <label class="field"><span>${tr("Hungarian name","Magyar név")}</span><input name="label_hu" required></label>
     <div class="form-actions full"><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button type="submit" class="primary-button">${tr("Add phase","Fázis hozzáadása")}</button></div></form>`});
-  $("#addWorkflowStageForm").addEventListener("submit",async event=>{event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget)),before=new Set(r2Definitions().map(stage=>stage.key));try{const result=await api("/api/workflow/stages",{method:"POST",body:JSON.stringify(body)});state.r2Workflow={...(state.r2Workflow||{}),...result};const created=(result.stages||[]).find(stage=>!before.has(stage.key));if(created)state.r2WorkflowCarouselFocusStage=created.key;closeDialog();toast(tr("Workflow phase added.","Munkafázis hozzáadva."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}});
+  $("#addWorkflowStageForm").addEventListener("submit",async event=>{event.preventDefault();const body=Object.fromEntries(new FormData(event.currentTarget)),before=new Set(r2Definitions().map(stage=>stage.key));try{const result=await api("/api/workflow/stages",{method:"POST",body:JSON.stringify(body)});state.r2Workflow={...(state.r2Workflow||{}),...result};const created=(result.stages||[]).find(stage=>!before.has(stage.key));if(created)state.r2WorkflowCarouselFocusStage=created.key;state.r2WorkflowCarouselAnimateLayout=true;closeDialog();toast(tr("Workflow phase added.","Munkafázis hozzáadva."),"success");await renderWorkshop();}catch(error){toast(humanError(error),"error");}});
 }
 async function r2DeleteStage(key){
   if(!confirm(tr("Remove this custom workflow phase? Historical completed jobs keep their recorded history.","Eltávolítod ezt az egyedi munkafázist? A lezárt munkák történeti adatai megmaradnak.")))return;
-  try{const result=await api("/api/workflow/stages/"+encodeURIComponent(key),{method:"DELETE"});state.r2Workflow={...(state.r2Workflow||{}),...result};toast(tr("Workflow phase removed.","Munkafázis eltávolítva."),"success");await renderWorkshop();r2OpenStageSettings();}catch(error){toast(humanError(error),"error");}
+  try{const result=await api("/api/workflow/stages/"+encodeURIComponent(key),{method:"DELETE"});state.r2Workflow={...(state.r2Workflow||{}),...result};state.r2WorkflowCarouselAnimateLayout=true;toast(tr("Workflow phase removed.","Munkafázis eltávolítva."),"success");await renderWorkshop();r2OpenStageSettings();}catch(error){toast(humanError(error),"error");}
 }
 function r2BindStageSettingsDrag(stages){
   $$("[data-stage-setting-drag]").forEach(handle=>handle.addEventListener("dragstart",event=>{event.dataTransfer.setData("text/stage-key",handle.dataset.stageSettingDrag);event.dataTransfer.effectAllowed="move";}));
@@ -991,7 +991,7 @@ function r2BindCalendarCreate(host){
   }));
 }
 async function r2RenderCalendar(){
-  clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
+  state.r2WorkflowCarouselAnimateLayout=false;clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   const host=$("#workshopContent");if(!host)return;
   const storedCalendarMode=localStorage.getItem("kh_calendar_mode");
   state.r2CalendarMode=state.r2CalendarMode||storedCalendarMode||(window.matchMedia?.("(max-width:700px)")?.matches?"day":"week");
@@ -1104,7 +1104,7 @@ async function r2RenderWorkflow(data){
   </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
   ${bucket==="closed"
     ?`<div id="workflowBoard" class="closed-workflow-grid">${(data.jobs||[]).length?(data.jobs||[]).map(r2ClosedWorkflowCard).join(""):`<div class="empty-state closed-workflow-empty">${tr("No workflows in this filter.","Nincs workflow ebben a szűrésben.")}</div>`}</div>`
-    :`<div class="workflow-carousel" data-workflow-carousel>
+    :`<div class="workflow-carousel ${state.r2WorkflowCarouselAnimateLayout?"is-reflowing":""}" data-workflow-carousel>
       <button type="button" class="workflow-carousel-nav workflow-carousel-prev" data-workflow-carousel-prev aria-label="${esc(tr("Previous workflow phases","Korábbi munkafázisok"))}" disabled>‹</button>
       <div class="workflow-scroll workflow-carousel-viewport" data-workflow-carousel-viewport><div id="workflowBoard" class="workflow-board" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column)).join("")}</div></div>
       <div class="workflow-carousel-right-controls">
