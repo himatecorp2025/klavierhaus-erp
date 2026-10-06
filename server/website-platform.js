@@ -577,7 +577,6 @@ function registerWebsitePlatformRoutes(options) {
   });
 
   app.delete("/api/demo-content", auth, requireSuperadmin, (req, res) => {
-    if (Number(dependencies) > 0) return res.status(409).json({ error: "SAMPLE_EVENTS_HAVE_TRANSACTIONAL_DEPENDENCIES" });
     const removed = db.transaction(() => {
       const result = {};
       result.artists = db.prepare("DELETE FROM website_artists WHERE is_sample=1").run().changes;
