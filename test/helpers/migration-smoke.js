@@ -12,7 +12,8 @@ const root=path.resolve(__dirname,"../..");
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),"kh-final-migration-"));
 const dbPath=path.join(temp,"legacy.sqlite");
 const backupDir=path.join(temp,"backups");
-const env={...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir,JWT_SECRET:"final-migration-test-secret-1234567890"};
+const uploadDir=path.join(temp,"uploads");
+const env={...process.env,DB_PATH:dbPath,BACKUP_DIR:backupDir,UPLOAD_DIR:uploadDir,JWT_SECRET:"final-migration-test-secret-1234567890"};
 
 function run(label,options={}){
   const runEnv={...env,...(options.env||{})};
@@ -164,6 +165,11 @@ try{
   legacy.prepare("INSERT INTO pianos(id,brand,model,serial_no,finish,location,owner_contact_id) VALUES('P-1','Steinway & Sons','B-211','123456','Ebony','Client home','C-1')").run();
   legacy.prepare("INSERT INTO client_pianos(id,client_id,piano_id) VALUES('CP-1','C-1','P-1')").run();
   legacy.close();
+  const conversationUploadDir=path.join(uploadDir,"customer-conversations");
+  fs.mkdirSync(conversationUploadDir,{recursive:true});
+  const retiredAttachmentPath=path.join(conversationUploadDir,"event-proof.bin");
+  fs.writeFileSync(retiredAttachmentPath,"test");
+  assert.equal(fs.existsSync(retiredAttachmentPath),true,"legacy event attachment fixture must exist before migration");
 
   run("FINAL_LEGACY_MIGRATION");
   {
@@ -200,6 +206,7 @@ try{
   assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_messages WHERE id='MSG-EVENT'").get()),false,"messages belonging to retired event conversations must be removed");
   assert.ok(db.prepare("SELECT 1 FROM customer_messages WHERE id='MSG-GENERAL'").get(),"messages belonging to supported conversations must survive");
   assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_message_attachments WHERE id='ATT-EVENT'").get()),false,"attachments belonging to retired event conversations must be removed");
+  assert.equal(fs.existsSync(retiredAttachmentPath),false,"physical files belonging to retired event conversations must be removed");
   assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_conversation_events WHERE id='CE-EVENT'").get()),false,"conversation events belonging to retired event conversations must be removed");
   assert.equal(db.prepare("SELECT conversation_id FROM private_appointments WHERE id='PA-LEGACY-1'").get().conversation_id,null,"SET NULL conversation links must preserve the operational appointment");
   const trackingColumns=db.prepare("PRAGMA table_info(website_tracking_events)").all().map(row=>row.name);
