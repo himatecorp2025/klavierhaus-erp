@@ -187,6 +187,8 @@ test("Active workflow uses a five-card horizontal carousel with compact clickabl
   assert.match(canonical,/overflow-x:hidden!important/);
   assert.match(canonical,/\.workflow-carousel-nav:disabled/);
   assert.match(canonical,/\.workflow-summary-card/);
+  assert.match(canonical,/@keyframes workflow-carousel-reflow/);
+  assert.match(ui,/r2WorkflowCarouselAnimateLayout=true/);
   assert.doesNotMatch(canonical,/workflow-drag-ghost[^}]*scale\(/);
 });
 
