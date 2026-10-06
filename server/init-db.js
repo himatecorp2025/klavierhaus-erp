@@ -75,8 +75,21 @@ function applyRetiredForeignKeyActions(targetTable,targetPredicate){
     }
   }
 }
+function deleteRetiredConversationAttachmentFiles(conversationPredicate){
+  if(!conversationPredicate||!tableExists("customer_message_attachments")||!columns("customer_message_attachments").has("conversation_id")||!columns("customer_message_attachments").has("stored_name"))return;
+  const rows=db.prepare(`SELECT stored_name FROM customer_message_attachments WHERE conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`).all();
+  const uploadRoot=process.env.UPLOAD_DIR||path.join(__dirname,"uploads");
+  const attachmentRoot=path.join(uploadRoot,"customer-conversations");
+  for(const row of rows){
+    const storedName=path.basename(String(row.stored_name||""));if(!storedName)continue;
+    const filePath=path.join(attachmentRoot,storedName);
+    try{fs.rmSync(filePath,{force:true});}
+    catch(error){console.warn(`[RETIREMENT] Could not remove retired conversation attachment ${storedName}: ${error.message}`);}
+  }
+}
 function purgeRetiredConversationGraph(){
   const conversationPredicate=retiredConversationPredicate();if(!conversationPredicate)return;
+  deleteRetiredConversationAttachmentFiles(conversationPredicate);
   if(tableExists("customer_messages")&&columns("customer_messages").has("conversation_id")){
     const messagePredicate=`conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`;
     applyRetiredForeignKeyActions("customer_messages",messagePredicate);
