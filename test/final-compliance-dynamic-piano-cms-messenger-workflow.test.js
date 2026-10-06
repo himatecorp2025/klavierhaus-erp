@@ -189,7 +189,7 @@ test("dynamic public piano routes are derived from live showroom brands",()=>{
   assert.match(publicServer,/function uniquePianoBrands\(items=\[\]\)/);
   assert.match(publicServer,/pianoBrandContentKey\(brand\)/);
   assert.match(publicServer,/uniquePianoBrands\(allItems\)\.find/);
-  assert.match(publicServer,/eventClient\.content\(pianoBrandContentKey\(brand\),language\)/);
+  assert.match(publicServer,/erpClient\.content\(pianoBrandContentKey\(brand\),language\)/);
   assert.match(publicServer,/uniquePianoBrands\(values\[2\]\)\.flatMap/);
 });
 
