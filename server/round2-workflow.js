@@ -47,7 +47,7 @@ function isAdmin(user){return Boolean(user&&(user.role==="ADMIN"||user.role==="S
 function newYorkYear(){return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date());}
 function endAt(start,duration){return new Date(new Date(start).getTime()+positiveDuration(duration)*60000).toISOString();}
 
-function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation=null,inventoryService=null}){
+function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation=null,inventoryService=null,googleCalendar=null}){
   const staff=permit("ADMIN","MANAGER","WORKER");
   const admin=permit("ADMIN");
   function customerMilestone(job,eventType,options){
@@ -544,7 +544,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         AND (?='' OR j.assigned_technician_id=?)
         ORDER BY j.scheduled_at,j.id`).all(to,from,technicianId,technicianId)
         .map(row=>decorateJob({...row,scheduled_end:endAt(row.scheduled_at,row.estimated_duration_min)}));
-      res.json({from,to,timezone:"America/New_York",jobs:rows});
+      const googleRows=googleCalendar?.calendarEntries?.({from,to,technicianId})||[];
+      res.json({from,to,timezone:"America/New_York",jobs:[...rows,...googleRows]});
     }catch(error){respondError(res,error);}
   });
 

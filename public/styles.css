@@ -4906,3 +4906,7 @@ input,textarea,select,
   .workflow-carousel .workflow-board{grid-auto-columns:min(82vw,280px)!important}
   .workflow-carousel-nav,.workflow-carousel-add{width:34px;border-radius:11px}
 }
+
+/* Google Calendar imported events awaiting ERP review */
+.google-pending-event{border-style:dashed!important;box-shadow:inset 0 0 0 1px rgba(184,145,74,.3)}
+.google-pending-event::after{content:"G";position:absolute;right:6px;top:5px;font-size:10px;font-weight:800;opacity:.7}
