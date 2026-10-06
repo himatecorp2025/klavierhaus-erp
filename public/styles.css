@@ -4928,3 +4928,31 @@ input,textarea,select,
   .system-integrations-v6-grid,.system-integration-v6-fields,.system-integration-v6-meta{grid-template-columns:1fr}
   .system-integration-status-line{justify-content:flex-start}
 }
+
+
+/* Job-scoped workflow board */
+.workflow-instance-board{display:grid;gap:16px}
+.workflow-instance-row{border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:12px;min-width:0}
+.workflow-instance-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:4px 4px 12px}
+.workflow-instance-header h2{margin:2px 0 3px;font-size:18px}
+.workflow-instance-header small{color:var(--muted)}
+.workflow-instance-scroll{overflow-x:auto;overscroll-behavior-inline:contain;padding-bottom:3px}
+.workflow-instance-track{display:grid;grid-template-columns:repeat(var(--workflow-phase-count),minmax(220px,1fr));gap:10px;min-width:max(100%,calc(var(--workflow-phase-count) * 220px))}
+.workflow-instance-phase{border:1px solid var(--line);border-radius:14px;background:var(--surface);min-height:190px;padding:9px;transition:.15s border-color,.15s background,.15s transform}
+.workflow-instance-phase.is-current{border-color:var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 28%,transparent)}
+.workflow-instance-phase.is-completed{opacity:.72}
+.workflow-instance-phase.drag-over{border-color:var(--accent);background:var(--accent-soft)}
+.workflow-instance-phase-head{display:flex;align-items:center;gap:8px;padding:2px 2px 9px;min-height:36px}
+.workflow-phase-state{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:999px;border:1px solid var(--line);font-size:11px;flex:0 0 auto}
+.workflow-instance-phase.is-current .workflow-phase-state{border-color:var(--accent);color:var(--accent)}
+.workflow-instance-phase.is-completed .workflow-phase-state{font-weight:800}
+.workflow-instance-slot{min-height:130px}
+.workflow-instance-slot .workflow-summary-card{height:100%;margin:0}
+.workflow-instance-placeholder{min-height:130px;border:1px dashed var(--line);border-radius:12px;display:grid;place-items:center;text-align:center;padding:14px;color:var(--muted);font-size:12px}
+.workflow-instance-placeholder.completed{gap:5px}
+.workflow-instance-placeholder.completed strong{font-size:22px}
+@media(max-width:700px){
+  .workflow-instance-row{padding:9px}
+  .workflow-instance-header{display:grid}
+  .workflow-instance-track{grid-template-columns:repeat(var(--workflow-phase-count),minmax(190px,1fr));min-width:max(100%,calc(var(--workflow-phase-count) * 190px))}
+}
