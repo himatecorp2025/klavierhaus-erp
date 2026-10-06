@@ -60,7 +60,7 @@ test('Google sync is hard-locked to the Klavierhaus Work source calendar',()=>{
   assert.match(source,/DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail\.com"/);
   assert.match(source,/GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK/);
   assert.match(source,/FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail\.com"/);
-  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
+  assert.match(source,/normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID/);\n  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
   assert.match(source,/googleRequest\(\`\/calendars\/\$\{encodeURIComponent\(config\.calendarId\)\}\/events\?/);
   assert.doesNotMatch(source,/calendarList\/list/);
   assert.doesNotMatch(source,/\/calendars\/primary\/events/);
