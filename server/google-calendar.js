@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const PROVIDER = "GOOGLE";
 const INTEGRATION_ID = "CAL-GOOGLE-WORK";
 const DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail.com";
+const KLAVIERHAUS_WORK_CALENDAR_ID = "ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com";
 const FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail.com";
 const REVIEW_STATES = new Set(["NEEDS_REVIEW", "REVIEWED", "SOURCE_CHANGED", "SOURCE_CANCELLED", "INVALID", "IGNORED"]);
 
@@ -20,7 +21,7 @@ function createGoogleCalendarIntegration(options) {
     clientId: String(env.GOOGLE_CLIENT_ID || "").trim(),
     clientSecret: String(env.GOOGLE_CLIENT_SECRET || "").trim(),
     encryptionSecret: String(env.GOOGLE_TOKEN_ENCRYPTION_KEY || "").trim(),
-    calendarId: String(env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_EMAIL).trim(),
+    calendarId: String(env.GOOGLE_CALENDAR_ID || KLAVIERHAUS_WORK_CALENDAR_ID).trim(),
     centralEmail: String(env.GOOGLE_CALENDAR_CENTRAL_EMAIL || DEFAULT_CALENDAR_EMAIL).trim(),
     appBaseUrl: String(env.APP_BASE_URL || "").trim().replace(/\/$/, ""),
     redirectUri: String(env.GOOGLE_REDIRECT_URI || "").trim(),
@@ -36,7 +37,7 @@ function createGoogleCalendarIntegration(options) {
   const normalizedCentralEmail = config.centralEmail.toLowerCase();
   const normalizedCalendarId = config.calendarId.toLowerCase();
   if (normalizedCentralEmail !== DEFAULT_CALENDAR_EMAIL) throw new Error("GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK");
-  if (normalizedCalendarId === FORBIDDEN_NON_KLAVIERHAUS_CALENDAR || normalizedCalendarId === "primary") throw new Error("GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED");
+  if (normalizedCalendarId === FORBIDDEN_NON_KLAVIERHAUS_CALENDAR || normalizedCalendarId === "primary" || normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID) throw new Error("GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED");
 
   const configured = Boolean(config.clientId && config.clientSecret && config.encryptionSecret.length >= 32 && config.redirectUri && fetchImpl);
   const encryptionKey = config.encryptionSecret ? crypto.createHash("sha256").update(config.encryptionSecret).digest() : null;
