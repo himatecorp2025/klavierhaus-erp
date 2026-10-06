@@ -41,6 +41,8 @@ const { createInventoryService,registerInventoryRoutes } = require("./inventory"
 const { registerPrivateAppointmentRoutes } = require("./private-appointments");
 const { createServiceSuspension } = require("./service-suspension");
 const { registerOperationsEnhancementRoutes } = require("./operations-enhancements");
+const { createGoogleCalendarIntegration } = require("./google-calendar");
+const { hydrateRuntimeSecrets, registerSystemIntegrationRoutes } = require("./system-integrations");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -67,6 +69,7 @@ db.pragma("wal_autocheckpoint = 1000");
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 db.pragma("optimize");
+hydrateRuntimeSecrets(db, process.env);
 
 const serviceSuspension = createServiceSuspension({ db });
 const transactionalEmail = createTransactionalEmail(process.env);
@@ -118,7 +121,8 @@ function safeUser(row) {
     session_version: Number(row.session_version || 0),
     theme_preference: ["light","dark"].includes(row.theme_preference) ? row.theme_preference : "dark",
     language_preference: ["en","hu"].includes(row.language_preference) ? row.language_preference : "en",
-    profile_image_url: row.profile_image_url || ""
+    profile_image_url: row.profile_image_url || "",
+    google_calendar_email: row.google_calendar_email || ""
   };
 }
 function auth(req,res,next) {
@@ -400,19 +404,19 @@ app.post("/api/auth/verify-session",auth,async(req,res)=>{
 });
 
 app.get("/api/users",auth,permit("ADMIN","MANAGER","WORKER"),(_req,res)=>{
-  res.json(db.prepare(`SELECT id,name,email,contact_email,role,manager_scope,status,phone,address,profile_image_url,created_at
+  res.json(db.prepare(`SELECT id,name,email,contact_email,google_calendar_email,role,manager_scope,status,phone,address,profile_image_url,created_at
     FROM users WHERE COALESCE(hidden_user,0)=0 ORDER BY CASE role WHEN 'ADMIN' THEN 0 WHEN 'MANAGER' THEN 1 ELSE 2 END,lower(name)`).all());
 });
 app.post("/api/users",auth,permit("ADMIN"),async(req,res)=>{
-  const name=String(req.body?.name||"").trim(),email=normalizeEmail(req.body?.email),contactEmail=normalizeEmail(req.body?.contact_email),password=String(req.body?.password||""),role=String(req.body?.role||"WORKER").toUpperCase();
+  const name=String(req.body?.name||"").trim(),email=normalizeEmail(req.body?.email),contactEmail=normalizeEmail(req.body?.contact_email),googleCalendarEmail=normalizeEmail(req.body?.google_calendar_email),password=String(req.body?.password||""),role=String(req.body?.role||"WORKER").toUpperCase();
   if(!name||!email||!contactEmail||!password)return res.status(400).json({error:"REQUIRED_FIELDS"});
-  if(!validUserEmail(email)||!validContactEmail(contactEmail))return res.status(400).json({error:"INVALID_EMAIL"});
+  if(!validUserEmail(email)||!validContactEmail(contactEmail)||(googleCalendarEmail&&!validUserEmail(googleCalendarEmail)))return res.status(400).json({error:"INVALID_EMAIL"});
   if(password!==String(req.body?.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
   if(!["ADMIN","MANAGER","WORKER"].includes(role))return res.status(400).json({error:"INVALID_USER_ROLE"});
-  if(db.prepare("SELECT 1 FROM users WHERE lower(trim(email))=? OR lower(trim(contact_email))=?").get(email,contactEmail))return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
+  if(db.prepare("SELECT 1 FROM users WHERE lower(trim(email))=? OR lower(trim(contact_email))=? OR (?<>'' AND lower(trim(google_calendar_email))=?)").get(email,contactEmail,googleCalendarEmail,googleCalendarEmail))return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
   const id=newId("U"),hash=bcrypt.hashSync(password,10);
-  db.prepare(`INSERT INTO users(id,name,email,contact_email,password_hash,role,status,phone,address,hidden_user,is_superadmin,session_version)
-    VALUES(?,?,?,?,?,?, 'Active',?,?,0,0,0)`).run(id,name,email,contactEmail,hash,role,String(req.body?.phone||""),String(req.body?.address||""));
+  db.prepare(`INSERT INTO users(id,name,email,contact_email,google_calendar_email,password_hash,role,status,phone,address,hidden_user,is_superadmin,session_version)
+    VALUES(?,?,?,?,?,?,?, 'Active',?,?,0,0,0)`).run(id,name,email,contactEmail,googleCalendarEmail||null,hash,role,String(req.body?.phone||""),String(req.body?.address||""));
   const created=db.prepare("SELECT * FROM users WHERE id=?").get(id);
   const issuance=accountActivation.issue(id),delivery=await accountActivation.deliver(created,issuance,"INITIAL");
   audit(req,"CREATE","users",id,null,safeUser(created));res.status(201).json({...safeUser(created),activation_status:"PENDING",activation_delivery_status:delivery.status});
@@ -422,19 +426,19 @@ app.put("/api/users/:id",auth,async(req,res)=>{
   const self=req.user.id===before.id,admin=isSuperadmin(req.user)||req.user.role==="ADMIN";
   if(!self&&!admin)return res.status(403).json({error:"PERMISSION_DENIED"});
   if(Number(before.hidden_user||0)===1||Number(before.is_superadmin||0)===1)return res.status(403).json({error:"HIDDEN_OWNER_SELF_SERVICE_ONLY"});
-  const name=String(req.body?.name??before.name).trim(),email=normalizeEmail(req.body?.email??before.email),contactEmail=normalizeEmail(req.body?.contact_email??before.contact_email);
+  const name=String(req.body?.name??before.name).trim(),email=normalizeEmail(req.body?.email??before.email),contactEmail=normalizeEmail(req.body?.contact_email??before.contact_email),googleCalendarEmail=normalizeEmail(req.body?.google_calendar_email??before.google_calendar_email);
   const role=admin?String(req.body?.role??before.role).toUpperCase():before.role,status=admin?String(req.body?.status??before.status):before.status;
-  if(!name||!validUserEmail(email)||(contactEmail&&!validContactEmail(contactEmail)))return res.status(400).json({error:"INVALID_USER_DATA"});
+  if(!name||!validUserEmail(email)||(contactEmail&&!validContactEmail(contactEmail))||(googleCalendarEmail&&!validUserEmail(googleCalendarEmail)))return res.status(400).json({error:"INVALID_USER_DATA"});
   if(!["ADMIN","MANAGER","WORKER"].includes(role))return res.status(400).json({error:"INVALID_USER_ROLE"});
-  const duplicate=db.prepare("SELECT id FROM users WHERE id<>? AND (lower(trim(email))=? OR lower(trim(contact_email))=?) LIMIT 1").get(before.id,email,contactEmail||"");
+  const duplicate=db.prepare("SELECT id FROM users WHERE id<>? AND (lower(trim(email))=? OR lower(trim(contact_email))=? OR (?<>'' AND lower(trim(google_calendar_email))=?)) LIMIT 1").get(before.id,email,contactEmail||"",googleCalendarEmail,googleCalendarEmail);
   if(duplicate)return res.status(409).json({error:"USER_EMAIL_ALREADY_USED"});
   let passwordHash=before.password_hash;
   if(req.body?.password||req.body?.password_confirmation){
     if(String(req.body.password||"")!==String(req.body.password_confirmation||""))return res.status(400).json({error:"PASSWORD_CONFIRMATION_MISMATCH"});
     passwordHash=bcrypt.hashSync(String(req.body.password),10);
   }
-  db.prepare(`UPDATE users SET name=?,email=?,contact_email=?,phone=?,address=?,role=?,status=?,password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(name,email,contactEmail||null,String(req.body?.phone ?? before.phone ?? ""),String(req.body?.address ?? before.address ?? ""),role,status,passwordHash,before.id);
+  db.prepare(`UPDATE users SET name=?,email=?,contact_email=?,google_calendar_email=?,phone=?,address=?,role=?,status=?,password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(name,email,contactEmail||null,googleCalendarEmail||null,String(req.body?.phone ?? before.phone ?? ""),String(req.body?.address ?? before.address ?? ""),role,status,passwordHash,before.id);
   const after=db.prepare("SELECT * FROM users WHERE id=?").get(before.id);audit(req,"UPDATE","users",before.id,safeUser(before),safeUser(after));res.json(safeUser(after));
 });
 app.delete("/api/users/:id",auth,permit("ADMIN"),(req,res)=>{
@@ -476,6 +480,22 @@ app.post("/api/settings/branding/reset-logo",auth,permit("ADMIN"),(req,res)=>{se
 app.post("/api/settings/branding/reset-background",auth,permit("ADMIN"),(req,res)=>{setSetting("login_background_url","",req.user.name);bumpBranding(req.user.name);res.json(getBranding());});
 
 notificationCenter=registerNotificationCenterRoutes({app,db,auth,permit,audit,env:process.env});
+const googleCalendar=createGoogleCalendarIntegration({
+  db,rid:(prefix)=>newId(prefix),env:process.env,
+  createNotification:({recipientUserId,type,job,titleEn,titleHu,bodyEn,bodyHu})=>notificationCenter.emit({
+    category:type||"GOOGLE_CALENDAR",entityType:job?.id?"JOB":"GOOGLE_CALENDAR",entityId:String(job?.id||type||"GOOGLE_CALENDAR"),
+    titleEn,titleHu,bodyEn,bodyHu,actionUrl:"/?view=workshop",severity:/CONFLICT|CANCEL|REVIEW|CHANGED/.test(String(type||""))?"WARNING":"INFO",recipients:recipientUserId?[recipientUserId]:null
+  })
+});
+registerSystemIntegrationRoutes({app,db,auth,requireSuperadmin,audit,googleCalendar,services:{transactionalEmail,stripeSandbox},env:process.env});
+app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
+app.get('/api/google-calendar/auth-url',auth,requireSuperadmin,(req,res)=>{try{res.json({url:googleCalendar.createAuthUrl(req.user.id)});}catch(error){res.status(400).json({error:error.message});}});
+app.get('/api/google-calendar/oauth/callback',async(req,res)=>{try{const state=String(req.query.state||'');if(googleCalendar.isTestState(state)){await googleCalendar.handleTestOAuthCallback(String(req.query.code||''),state);return res.redirect('/?googleCalendarTest=authorized');}await googleCalendar.handleOAuthCallback(String(req.query.code||''),state);res.redirect('/?googleCalendar=connected');}catch(error){console.warn('[GOOGLE-CALENDAR-OAUTH]',error.message);res.redirect(`/?googleCalendar=error&reason=${encodeURIComponent(error.message)}`);}});
+app.post('/api/google-calendar/sync',auth,permit('ADMIN'),async(_req,res)=>{try{res.json(await googleCalendar.syncNow('MANUAL'));}catch(error){res.status(502).json({error:error.message});}});
+app.delete('/api/google-calendar/disconnect',auth,requireSuperadmin,async(_req,res)=>{try{res.json(await googleCalendar.disconnect());}catch(error){res.status(400).json({error:error.message});}});
+app.post('/api/google-calendar/webhook',(req,res)=>{if(!googleCalendar.handleWebhook(req.headers))return res.status(403).json({error:'INVALID_GOOGLE_CHANNEL'});res.status(204).end();});
+app.post('/api/google-calendar/events/:id/review',auth,permit('ADMIN'),(req,res)=>{try{res.json(googleCalendar.reviewEvent(req.params.id,req.body||{},req.user.id));}catch(error){res.status(error.status||400).json({error:error.message});}});
+app.post('/api/google-calendar/events/:id/ignore',auth,permit('ADMIN'),(req,res)=>{try{res.json(googleCalendar.ignoreEvent(req.params.id));}catch(error){res.status(error.status||400).json({error:error.message});}});
 const inventoryService=createInventoryService({db,notifications:notificationCenter});
 const automationOutbox=createAutomationOutbox({db,notifications:notificationCenter});
 workshopPayments=createWorkshopPayments({
@@ -515,7 +535,7 @@ registerPrivateAppointmentRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",env:process.env
 });
 registerRound1CoreRoutes({app,db,auth,permit,audit,intakeMediaUpload,masterDataImportUpload,notifications:notificationCenter});
-registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService});
+registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomation,inventoryService,googleCalendar});
 registerRound3FinanceRoutes({app,db,auth,permit,requireSuperadmin,audit,uploadDir:UPLOAD_DIR,transactionalEmail,automationOutbox,customerAutomation,workshopPayments});
 registerAdminUxV6Routes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR,appBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",inventoryService});
 registerOperationsEnhancementRoutes({app,db,auth,permit,audit,uploadDir:UPLOAD_DIR});

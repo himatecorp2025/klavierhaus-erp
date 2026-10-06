@@ -841,6 +841,13 @@ function r2EventSegment(job,date){
 }
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
+  if(job.google_calendar_pending){
+    return `<button type="button" class="calendar-event-block google-pending-event ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-google-event="${esc(job.google_external_id)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(job.assigned_technician_color||"#c99a45")}">
+      <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · G · ${esc(job.title)}</strong>
+      <span>${tr("Google · needs review","Google · ellenőrzésre vár")} · ${esc(job.assigned_technician_name||tr("Unassigned","Nincs kiosztva"))}</span>
+      <small>${esc(job.site_address||job.google_creator_email||"")}</small>
+    </button>`;
+  }
   if(job.private_appointment){
     return `<button type="button" class="calendar-event-block private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""} ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:#c99a45">
       <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · ◈ ${esc(job.title)}</strong>
@@ -884,7 +891,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>job.google_calendar_pending?`<button type="button" class="month-event-pill google-pending-event" data-google-event="${esc(job.google_external_id)}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#c99a45")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> G · ${esc(job.title)}</button>`:job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2RefreshCalendarStatuses(host,jobs){
@@ -906,6 +913,23 @@ async function r2MoveCalendarJob(job,targetDate,targetMinutes=null,newDuration=n
   minutes=Math.max(R2_DAY_START,Math.min(R2_DAY_END,r2SnapJobMinutes(minutes)));
   const body={scheduled_at:r2NyInputToIso(r2MinutesInput(targetDate,minutes)),estimated_duration_min:Number(newDuration||job.estimated_duration_min||120),assigned_technician_id:job.assigned_technician_id};
   await api(`/api/jobs/${job.id}/schedule`,{method:"PATCH",body:JSON.stringify(body)});
+}
+async function r2OpenGoogleEventReview(job){
+  if(!r2IsAdmin()){toast(tr("Administrator review is required.","Adminisztrátori ellenőrzés szükséges."),"error");return;}
+  try{
+    if(!state.users?.length)await loadUsers();const clients=await api("/api/clients");
+    openDialog({title:tr("Review Google Calendar event","Google Naptár-esemény ellenőrzése"),eyebrow:"GOOGLE CALENDAR → ERP",body:`<form id="googleCalendarReviewForm" class="form-grid">
+      <div class="detail-note full"><strong>${esc(job.title)}</strong><br>${esc(r2FormatDateTime(job.scheduled_at))}${job.site_address?` · ${esc(job.site_address)}`:""}<br>${job.description?esc(job.description):""}</div>
+      <label class="field full"><span>${tr("Client","Ügyfél")} *</span><select name="client_id" required><option value="">${tr("Choose client","Válassz ügyfelet")}</option>${clients.map(row=>`<option value="${row.id}">${esc(row.name)}</option>`).join("")}</select></label>
+      <label class="field full"><span>${tr("Piano","Zongora")} *</span><select name="piano_id" required disabled><option value="">${tr("Choose client first","Előbb válassz ügyfelet")}</option></select></label>
+      <label class="field full"><span>${tr("Technician","Technikus")}</span><select name="assigned_technician_id"><option value="">${tr("Unassigned","Nincs kiosztva")}</option>${r2TechnicianOptions(job.assigned_technician_id)}</select></label>
+      <div class="form-actions full"><button type="button" class="secondary-button" id="googleIgnoreEvent">${tr("Ignore event","Esemény figyelmen kívül hagyása")}</button><button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Create job & workflow","Munka és workflow létrehozása")}</button></div>
+    </form>`});
+    const form=$("#googleCalendarReviewForm"),pianoSelect=form.elements.piano_id;
+    form.elements.client_id.addEventListener("change",async()=>{const id=form.elements.client_id.value;pianoSelect.disabled=true;pianoSelect.innerHTML=`<option value="">${tr("Loading…","Betöltés…")}</option>`;if(!id){pianoSelect.innerHTML=`<option value="">${tr("Choose client first","Előbb válassz ügyfelet")}</option>`;return;}const rows=await api(`/api/clients/${encodeURIComponent(id)}/pianos`);pianoSelect.innerHTML=`<option value="">${tr("Choose piano","Válassz zongorát")}</option>`+rows.map(row=>`<option value="${row.id}">${esc([row.brand,row.model,row.serial_number].filter(Boolean).join(" · "))}</option>`).join("");pianoSelect.disabled=false;});
+    $("#googleIgnoreEvent")?.addEventListener("click",async()=>{try{await api(`/api/google-calendar/events/${encodeURIComponent(job.google_external_id)}/ignore`,{method:"POST",body:"{}"});closeDialog();toast(tr("Google event ignored.","Google-esemény figyelmen kívül hagyva."),"success");await r2RenderCalendar();}catch(error){toast(humanError(error),"error");}});
+    form.addEventListener("submit",async event=>{event.preventDefault();try{const body=Object.fromEntries(new FormData(form));body.client_id=Number(body.client_id);body.piano_id=Number(body.piano_id);await api(`/api/google-calendar/events/${encodeURIComponent(job.google_external_id)}/review`,{method:"POST",body:JSON.stringify(body)});closeDialog();toast(tr("Google event converted to a Klavierhaus workflow.","A Google-esemény Klavierhaus workflow-vá alakítva."),"success");await r2RenderCalendar();}catch(error){toast(humanError(error),"error");}});
+  }catch(error){toast(humanError(error),"error");}
 }
 function r2BindCalendarPointer(host,jobs){
   let gesture=null;
@@ -961,6 +985,7 @@ function r2BindCalendarPointer(host,jobs){
     }catch(error){toast(humanError(error),"error");}
     clean();await r2RenderCalendar(state.r2Workflow?.jobs||[]);
   }
+  $$("[data-google-event]",host).forEach(card=>{const job=jobs.find(row=>String(row.google_external_id)===String(card.dataset.googleEvent));if(job)card.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();void r2OpenGoogleEventReview(job);});});
   $$("[data-calendar-job]",host).forEach(card=>{
     const job=jobs.find(row=>String(row.id)===String(card.dataset.calendarJob));if(!job)return;
     if(job.stage==="completed"){
@@ -982,7 +1007,7 @@ function r2BindCalendarPointer(host,jobs){
 }
 function r2BindCalendarCreate(host){
   $$("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
-    if(event.target.closest("[data-calendar-job],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
+    if(event.target.closest("[data-calendar-job],[data-google-event],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
