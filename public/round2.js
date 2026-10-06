@@ -1007,7 +1007,8 @@ function r2BindCalendarPointer(host,jobs){
 }
 function r2BindCalendarCreate(host){
   $$("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
-    if(event.target.closest("[data-google-event]"))return;\n    if(event.target.closest("[data-calendar-job],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
+    if(event.target.closest("[data-google-event]"))return;
+    if(event.target.closest("[data-calendar-job],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
