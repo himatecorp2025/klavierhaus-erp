@@ -70,10 +70,10 @@ jobs:
         run: npm ci
       - name: Check website JavaScript syntax
         run: npm run check
-      - name: Run preserved public event-page contract
-        run: node --test test/event-pages.test.js
+      - name: Run public event-retirement contract
+        run: node --test --test-name-pattern="retired event and ticket URLs" test/website-foundation.test.js
       - name: Run private appointment website contract
-        run: node --test --test-name-pattern="private appointment forms" test/website-foundation.test.js
+        run: node --test --test-name-pattern="private appointment" test/website-foundation.test.js
       - name: Report website dependency baseline
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
