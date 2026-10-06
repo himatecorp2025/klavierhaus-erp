@@ -665,7 +665,6 @@ function r2ClosedWorkflowCard(job){
 
 function r2WorkflowInstanceRow(job){
   const phases=(job.workflow_phases||[]).filter(phase=>phase.enabled&&phase.stage_key!=="completed").sort((a,b)=>Number(a.position||0)-Number(b.position||0));
-  const currentIndex=phases.findIndex(phase=>phase.stage_key===job.stage);
   return `<section class="workflow-instance-row" data-workflow-row="${job.id}">
     <header class="workflow-instance-header">
       <div><span class="eyebrow">${esc(job.job_code||("#"+job.id))}</span><h2>${esc(job.title||tr("Workflow job","Workflow munka"))}</h2><small>${esc(job.client_name||"—")} · ${esc(r2JobPiano(job)||"—")}</small></div>
@@ -674,10 +673,10 @@ function r2WorkflowInstanceRow(job){
     <div class="workflow-instance-scroll">
       <div class="workflow-instance-track" style="--workflow-phase-count:${Math.max(1,phases.length)}">
         ${phases.map((phase,index)=>{
-          const active=phase.stage_key===job.stage,done=Boolean(phase.completed_at)||index<currentIndex,label=r2StageLabel(phase);
+          const active=phase.stage_key===job.stage,done=Boolean(phase.completed_at),label=r2StageLabel(phase);
           return `<section class="workflow-instance-phase ${active?"is-current":done?"is-completed":"is-pending"}" data-drop-stage="${esc(phase.stage_key)}" data-workflow-job="${job.id}">
             <header class="workflow-instance-phase-head"><span class="workflow-phase-state">${active?"●":done?"✓":"○"}</span><strong>${esc(label)}</strong></header>
-            <div class="workflow-instance-slot">${active?r2WorkflowCard(job):done?`<div class="workflow-instance-placeholder completed"><strong>✓</strong><span>${tr("Phase completed","Fázis lezárva")}</span></div>`:`<div class="workflow-instance-placeholder"><span>${tr("Not active for this workflow yet","Még nem aktív ebben a workflow-ban")}</span></div>`}</div>
+            <div class="workflow-instance-slot">${active?r2WorkflowCard(job):done?`<div class="workflow-instance-placeholder completed"><strong>✓</strong><span>${tr("Phase completed","Fázis lezárva")}</span></div>`:`<div class="workflow-instance-placeholder"><span>${tr("Enabled · pending phase","Engedélyezett · várakozó fázis")}</span></div>`}</div>
           </section>`;
         }).join("")}
       </div>
