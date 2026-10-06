@@ -541,6 +541,16 @@ function createGoogleCalendarIntegration(options) {
   }
 
   upsertBaseIntegration();
+  const startupStatus=publicStatus();
+  logger.info?.("Google Calendar runtime", {
+    configured: startupStatus.configured,
+    connected: startupStatus.connected,
+    status: startupStatus.status,
+    runtime_enabled: runtimeEnabled(),
+    calendar_id: startupStatus.calendar_id,
+    central_email: startupStatus.central_email,
+    webhook_enabled: startupStatus.webhook_enabled
+  });
   startTimers();
 
   return {
