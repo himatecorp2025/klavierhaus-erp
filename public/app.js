@@ -14,7 +14,7 @@ const state={
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
   notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false,staffSkills:[],workProfiles:[],milestone:null
 };
-const activeViews=new Set(["milestone","workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings"]);
+const activeViews=new Set(["milestone","workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings","system_integrations"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
 const initials=name=>String(name||"KH").split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase();
 const roleLabel=role=>role==="WORKER"?tr("Technician","Technikus"):role==="SUPERADMIN"?tr("Super Admin","Szuperadmin"):role==="ADMIN"?tr("Admin","Admin"):role==="MANAGER"?tr("Manager","Menedzser"):role||"";
@@ -608,6 +608,7 @@ async function renderView(){
     else if(state.view==="cms")await renderCms();
     else if(state.view==="profile")await renderProfile();
     else if(state.view==="settings")await renderSettings();
+    else if(state.view==="system_integrations")await renderSystemIntegrations();
     else await renderIntake();
     workspace.focus({preventScroll:true});
     syncNavigationState(state.view);
