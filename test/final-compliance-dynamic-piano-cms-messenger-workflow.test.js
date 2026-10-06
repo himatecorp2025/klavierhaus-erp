@@ -169,7 +169,7 @@ test("Planned, calendar and workflow jobs have an inline job-specific add-phase 
   assert.match(css,/\.workflow-add-phase-card/);
 });
 
-test("Active workflow renders each job with its own enabled phase track",()=>{
+test("Active workflow renders each job with its own enabled phase track and keeps carousel controls",()=>{
   const ui=read("public/round2.js"),css=read("public/styles.css"),backend=read("server/round2-workflow.js");
   assert.match(backend,/workflow_rows:workflowRows/);
   assert.match(backend,/phase=>phase\.enabled&&phase\.stage_key!==["']completed["']/);
@@ -178,10 +178,19 @@ test("Active workflow renders each job with its own enabled phase track",()=>{
   assert.match(ui,/data-workflow-job=/);
   assert.match(ui,/workflowRows\.map\(r2WorkflowInstanceRow\)/);
   assert.match(ui,/column\.dataset\.workflowJob/);
+  assert.match(ui,/data-workflow-carousel-prev/);
+  assert.match(ui,/data-workflow-carousel-next/);
+  assert.match(ui,/id="workflowCarouselAddStage"/);
+  assert.match(ui,/r2BindWorkflowCarousel\(host,data\.columns\|\|\[\]\)/);
+  assert.match(ui,/instanceScrollers/);
+  assert.match(ui,/r2OpenAddStage\(\{applyToExisting:true\}\)/);
+  assert.match(ui,/body\.apply_to_existing=true/);
   assert.match(ui,/workflow-card-open-indicator/);
   assert.match(ui,/r2OpenWorkflowHistory\(Number\(job\.id\),job\)/);
   assert.match(ui,/ghost\.style\.minWidth=rect\.width\+"px"/);
   assert.match(ui,/ghost\.style\.height=rect\.height\+"px"/);
+  assert.match(css,/\/\* Job-scoped carousel control restoration \*\//);
+  assert.match(css,/\.workflow-instance-carousel-viewport/);
   assert.match(css,/\/\* Job-scoped workflow board \*\//);
   assert.match(css,/\.workflow-instance-track\{/);
   assert.match(css,/--workflow-phase-count/);
