@@ -4930,6 +4930,13 @@ input,textarea,select,
 }
 
 
+/* Job-scoped carousel control restoration */
+.workflow-instance-carousel-viewport{min-width:0;overflow:hidden}
+.workflow-instance-carousel .workflow-instance-board{min-width:0}
+.workflow-instance-carousel .workflow-instance-scroll{scroll-behavior:smooth;scrollbar-width:none}
+.workflow-instance-carousel .workflow-instance-scroll::-webkit-scrollbar{display:none}
+.workflow-instance-carousel.is-reflowing .workflow-instance-row{animation:workflow-carousel-reflow .28s cubic-bezier(.2,.75,.25,1) both}
+
 /* Job-scoped workflow board */
 .workflow-instance-board{display:grid;gap:16px}
 .workflow-instance-row{border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:12px;min-width:0}
