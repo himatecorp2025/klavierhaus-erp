@@ -75,18 +75,20 @@ function v6MobileMenuIconSvg(kind){
 function v6OpenMore(){
   const popover=$("#mobileMorePopover"),grid=$("#mobileMoreGrid");if(!popover||!grid)return;
   if(!popover.hidden){v6CloseMore();return;}
+  const admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   grid.innerHTML=`
     <button class="mobile-more-card" type="button" data-nav="planned">${v6MobileMenuIconSvg("planned")}<strong>${tr("Planned Jobs","Tervezett munkák")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="finance">${v6MobileMenuIconSvg("finance")}<strong>${tr("Finance","Pénzügy")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="documents">${v6MobileMenuIconSvg("documents")}<strong>${tr("Documents","Dokumentumok")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="cms">${v6MobileMenuIconSvg("cms")}<strong>${tr("Website CMS","Weboldal CMS")}</strong></button>
     <button class="mobile-more-card" type="button" data-nav="profile">${v6MobileMenuIconSvg("profile")}<strong>${tr("Profile","Profil")}</strong></button>
-    <button class="mobile-more-card" type="button" data-nav="settings">${v6MobileMenuIconSvg("settings")}<strong>${tr("Settings","Beállítások")}</strong></button>`;
+    <button class="mobile-more-card" type="button" data-nav="settings">${v6MobileMenuIconSvg("settings")}<strong>${tr("Settings","Beállítások")}</strong></button>
+    ${admin?`<button class="mobile-more-card" type="button" data-nav="system_integrations">${v6MobileMenuIconSvg("settings")}<strong>${tr("System Activation & Integrations","Rendszeraktiválás és integrációk")}</strong></button>`:""}`;
   popover.hidden=false;$("#mobileMoreButton")?.setAttribute("aria-expanded","true");
 }
 function v6SyncAccountChrome(){
   if(!state.user)return;
-  const image=state.user.profile_image_url||"",initial=initials(state.user.name);
+  const image=state.user.profile_image_url||"",initial=initials(state.user.name),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   $("#profileInitials").textContent=initial;
   const avatar=$("#profileAvatarImage");
   if(avatar){avatar.hidden=!image;if(image)avatar.src=image;$("#profileInitials").hidden=Boolean(image);}
@@ -94,6 +96,10 @@ function v6SyncAccountChrome(){
   $("#profileMenuRole").textContent=roleLabel(state.user.role);
   const menuAvatar=$("#profileMenuAvatar");
   if(menuAvatar)menuAvatar.innerHTML=image?`<img src="${esc(image)}" alt="">`:esc(initial);
+  const existing=$("#profileSystemIntegrations"),separator=$("#profileMenu .profile-menu-separator");
+  if(admin&&!existing&&separator){
+    separator.insertAdjacentHTML("beforebegin",`<button id="profileSystemIntegrations" type="button" role="menuitem" data-profile-menu="system_integrations"><span class="profile-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.5"/><circle cx="16" cy="12" r="1.5"/><circle cx="11" cy="17" r="1.5"/></svg></span><span>${tr("System Activation & Integrations","Rendszeraktiválás és integrációk")}</span></button>`);
+  }else if(!admin&&existing)existing.remove();
   const welcome=$("#headerWelcome");if(welcome)welcome.textContent=tr(`Welcome to the Klavierhaus System, ${state.user.name}.`,`Üdvözöllek a Klavierhaus rendszerében, ${state.user.name}.`);
 }
 function v6CloseProfileMenu(){
@@ -1022,10 +1028,141 @@ renderProfile=async function(){
   });
 };
 
+
+const V6_SYSTEM_INTEGRATION_NAMES={
+  GOOGLE_CALENDAR:"Google Calendar",
+  GA4:"Google Analytics 4",
+  CLARITY:"Microsoft Clarity",
+  SEARCH_CONSOLE:"Google Search Console",
+  RESEND:"Resend",
+  STRIPE:"Stripe Sandbox"
+};
+function v6IntegrationConfigFields(row,payload){
+  const c=row.config||{},disabled=!payload.enabled||!row.enabled||!payload.can_edit?"disabled":"";
+  if(row.provider==="GOOGLE_CALENDAR")return `<label class="field"><span>${tr("Calendar ID","Naptár-azonosító")}</span><input value="${esc(c.calendar_id||"")}" disabled></label><label class="field"><span>${tr("Central email","Központi e-mail")}</span><input value="${esc(c.central_email||"")}" disabled></label>`;
+  if(row.provider==="GA4")return `<label class="field full"><span>Measurement ID</span><input data-integration-config="measurement_id" ${disabled} value="${esc(c.measurement_id||"")}" placeholder="G-XXXXXXXX"></label>`;
+  if(row.provider==="CLARITY")return `<label class="field full"><span>Project ID</span><input data-integration-config="project_id" ${disabled} value="${esc(c.project_id||"")}"></label>`;
+  if(row.provider==="SEARCH_CONSOLE")return `<label class="field full"><span>${tr("Property URL","Tulajdon URL")}</span><input data-integration-config="property_url" ${disabled} value="${esc(c.property_url||"")}" placeholder="sc-domain:example.com"></label>`;
+  if(row.provider==="RESEND")return `<label class="field"><span>From</span><input data-integration-config="from_email" ${disabled} value="${esc(c.from_email||"")}"></label><label class="field"><span>Reply-to</span><input data-integration-config="reply_to" ${disabled} value="${esc(c.reply_to||"")}"></label>`;
+  if(row.provider==="STRIPE")return `<label class="field full"><span>${tr("Publishable key","Publikus kulcs")}</span><input data-integration-config="publishable_key" ${disabled} value="${esc(c.publishable_key||"")}" placeholder="pk_test_..."></label>`;
+  return "";
+}
+function v6IntegrationSecretFields(row,payload){
+  const disabled=!payload.enabled||!row.enabled||!payload.can_edit?"disabled":"";
+  if(row.provider==="GA4")return `<label class="field full"><span>API secret</span><input type="password" autocomplete="new-password" data-integration-secret="api_secret" ${disabled} placeholder="${esc(row.secret_hint||"")}"></label>`;
+  if(row.provider==="RESEND")return `<label class="field full"><span>API key</span><input type="password" autocomplete="new-password" data-integration-secret="api_key" ${disabled} placeholder="${esc(row.secret_hint||"")}"></label>`;
+  if(row.provider==="STRIPE")return `<label class="field"><span>Secret key</span><input type="password" autocomplete="new-password" data-integration-secret="secret_key" ${disabled} placeholder="${esc(row.secret_hint||"sk_test_••••")}"></label><label class="field"><span>Webhook secret</span><input type="password" autocomplete="new-password" data-integration-secret="webhook_secret" ${disabled} placeholder="whsec_••••"></label>`;
+  return "";
+}
+function v6IntegrationCard(row,payload,superadmin){
+  const disabled=!payload.enabled||!row.enabled,status=String(row.status||"DISCONNECTED"),connected=status==="CONNECTED",google=row.provider==="GOOGLE_CALENDAR";
+  return `<article class="panel system-integration-v6-card" data-integration-provider="${esc(row.provider)}">
+    <div class="panel-head">
+      <div><span class="eyebrow">${esc(V6_SYSTEM_INTEGRATION_NAMES[row.provider]||row.provider)}</span><h2>${esc(status)}</h2></div>
+      <div class="system-integration-status-line">
+        <span class="badge ${connected?"success":status==="ERROR"?"danger":""}">${esc(status)}</span>
+        ${superadmin?`<label class="system-provider-toggle"><input type="checkbox" data-integration-enabled ${row.enabled?"checked":""}> ${row.enabled?tr("Enabled","Bekapcsolva"):tr("Disabled","Kikapcsolva")}</label>`:""}
+      </div>
+    </div>
+    <div class="system-integration-v6-fields">${v6IntegrationConfigFields(row,payload)}${v6IntegrationSecretFields(row,payload)}</div>
+    <div class="system-integration-v6-meta">
+      <span><small>${tr("Last test","Utolsó teszt")}</small><strong>${esc(row.last_tested_at||"—")}</strong></span>
+      <span><small>${tr("Last success","Utolsó siker")}</small><strong>${esc(row.last_success_at||row.last_sync_at||"—")}</strong></span>
+      <span><small>${tr("Last connection","Utolsó kapcsolat")}</small><strong>${esc(row.last_connection_at||"—")}</strong></span>
+      <span><small>${tr("Last error","Utolsó hiba")}</small><strong>${esc(row.last_error||"—")}</strong></span>
+    </div>
+    <div class="form-actions">
+      ${google?`
+        <button class="primary-button" type="button" data-integration-connect ${disabled?"disabled":""}>${connected?tr("Reconnect Google Calendar","Google Naptár újracsatlakoztatása"):tr("Connect Google Calendar","Google Naptár csatlakoztatása")}</button>
+        ${connected?`<button class="secondary-button" type="button" data-integration-sync>${tr("Sync now","Szinkronizálás most")}</button><button class="text-button danger-text" type="button" data-integration-disconnect>${tr("Disconnect","Leválasztás")}</button>`:""}
+      `:`<button class="primary-button" type="button" data-integration-save ${disabled||!payload.can_edit?"disabled":""}>${tr("Save","Mentés")}</button>`}
+      <button class="secondary-button" type="button" data-integration-test ${disabled||!payload.can_test?"disabled":""}>${tr("Run test","Teszt futtatása")}</button>
+    </div>
+  </article>`;
+}
+async function renderSystemIntegrations(){
+  const workspace=$("#workspace"),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role),superadmin=state.user?.role==="SUPERADMIN";
+  if(!admin){workspace.innerHTML=pageHead(tr("System Activation & Integrations","Rendszeraktiválás és integrációk"),tr("Administrator access is required.","Adminisztrátori jogosultság szükséges."));return;}
+  const payload=await api("/api/system-integrations",{memoryCacheMs:0});
+  workspace.innerHTML=pageHead(
+    tr("System Activation & Integrations","Rendszeraktiválás és integrációk"),
+    tr("Centralized provider activation, connection health and integration tests.","Központi szolgáltatóaktiválás, kapcsolatállapot és integrációs tesztek.")
+  )+`<div class="system-integrations-v6-shell">
+    <section class="panel system-integrations-v6-summary">
+      <div class="panel-head"><div><span class="eyebrow">${tr("TECHNICAL OPERATION","TECHNIKAI MŰKÖDÉS")}</span><h2>${payload.enabled?tr("Integration system enabled","Integrációs rendszer bekapcsolva"):tr("Integration system disabled","Integrációs rendszer kikapcsolva")}</h2></div>
+      ${superadmin?`<label class="system-master-toggle"><input id="systemIntegrationsMasterToggle" type="checkbox" ${payload.enabled?"checked":""}> ${tr("Master activation","Központi aktiválás")}</label>`:`<span class="badge ${payload.enabled?"success":""}">${payload.enabled?tr("Enabled","Bekapcsolva"):tr("Disabled","Kikapcsolva")}</span>`}</div>
+      <p class="muted">${tr("All administrators can connect, reconnect, synchronize and test Google Calendar. Destructive secret-management actions remain protected.","Minden admin csatlakoztathatja, újracsatlakoztathatja, szinkronizálhatja és tesztelheti a Google Naptárt. A destruktív titokkezelési műveletek továbbra is védettek.")}</p>
+      ${payload.encryption_ready?"":`<div class="service-control-warning"><strong>${tr("Encryption key missing","Hiányzik a titkosítási kulcs")}</strong><span>${tr("Secret changes are unavailable until SYSTEM_INTEGRATION_ENCRYPTION_KEY is configured.","A titkok módosítása addig nem érhető el, amíg a SYSTEM_INTEGRATION_ENCRYPTION_KEY nincs beállítva.")}</span></div>`}
+    </section>
+    <div class="system-integrations-v6-grid">${(payload.providers||[]).map(row=>v6IntegrationCard(row,payload,superadmin)).join("")}</div>
+  </div>`;
+
+  $("#systemIntegrationsMasterToggle")?.addEventListener("change",async event=>{
+    const toggle=event.currentTarget;toggle.disabled=true;
+    try{await api("/api/system-integrations/control",{method:"PUT",body:JSON.stringify({enabled:toggle.checked})});await renderSystemIntegrations();}
+    catch(error){toggle.disabled=false;toggle.checked=!toggle.checked;toast(humanError(error),"error");}
+  });
+
+  $$(".system-integration-v6-card").forEach(card=>{
+    const provider=card.dataset.integrationProvider;
+    card.querySelector("[data-integration-enabled]")?.addEventListener("change",async event=>{
+      const toggle=event.currentTarget;toggle.disabled=true;
+      try{await api(`/api/system-integrations/${encodeURIComponent(provider)}/enabled`,{method:"PUT",body:JSON.stringify({enabled:toggle.checked})});await renderSystemIntegrations();}
+      catch(error){toggle.disabled=false;toggle.checked=!toggle.checked;toast(humanError(error),"error");}
+    });
+    card.querySelector("[data-integration-save]")?.addEventListener("click",async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      const config=Object.fromEntries($$("[data-integration-config]",card).map(input=>[input.dataset.integrationConfig,input.value.trim()]));
+      const secrets=Object.fromEntries($$("[data-integration-secret]",card).filter(input=>input.value).map(input=>[input.dataset.integrationSecret,input.value]));
+      try{await api(`/api/system-integrations/${encodeURIComponent(provider)}`,{method:"PUT",body:JSON.stringify({config,secrets})});toast(tr("Integration saved.","Integráció mentve."),"success");await renderSystemIntegrations();}
+      catch(error){button.disabled=false;toast(humanError(error),"error");}
+    });
+    card.querySelector("[data-integration-connect]")?.addEventListener("click",async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{const result=await api("/api/google-calendar/auth-url",{memoryCacheMs:0});if(result?.url)window.location.assign(result.url);}
+      catch(error){button.disabled=false;toast(humanError(error),"error");}
+    });
+    card.querySelector("[data-integration-sync]")?.addEventListener("click",async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{const result=await api("/api/google-calendar/sync",{method:"POST",body:"{}"});toast(tr(`Calendar synchronized: ${Number(result.imported||0)} imported, ${Number(result.updated||0)} updated.`,`Naptár szinkronizálva: ${Number(result.imported||0)} importálva, ${Number(result.updated||0)} frissítve.`),"success");await renderSystemIntegrations();}
+      catch(error){button.disabled=false;toast(humanError(error),"error");}
+    });
+    card.querySelector("[data-integration-disconnect]")?.addEventListener("click",async()=>{
+      if(!confirm(tr("Disconnect the Klavierhaus Work Google Calendar? Imported ERP jobs will remain.","Leválasztod a Klavierhaus Work Google Naptárt? Az importált ERP-munkák megmaradnak.")))return;
+      try{await api("/api/google-calendar/disconnect",{method:"DELETE"});toast(tr("Google Calendar disconnected.","Google Naptár leválasztva."),"success");await renderSystemIntegrations();}
+      catch(error){toast(humanError(error),"error");}
+    });
+    card.querySelector("[data-integration-test]")?.addEventListener("click",async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{
+        await api(`/api/system-integrations/${encodeURIComponent(provider)}/test`,{method:"POST",body:"{}"});
+        toast(tr("Integration test succeeded.","Az integrációs teszt sikeres."),"success");await renderSystemIntegrations();
+      }catch(error){
+        if(provider==="GOOGLE_CALENDAR"&&String(error?.message||error).includes("GOOGLE_CALENDAR_TEST_WRITE_AUTH_REQUIRED")){
+          try{const auth=await api("/api/system-integrations/GOOGLE_CALENDAR/test-auth-url",{memoryCacheMs:0});if(auth?.url){window.location.assign(auth.url);return;}}catch(authError){toast(humanError(authError),"error");}
+        }else toast(humanError(error),"error");
+        button.disabled=false;
+      }
+    });
+  });
+
+  const qs=new URLSearchParams(location.search);
+  if(qs.get("googleCalendar")==="connected"){
+    history.replaceState({},"","#system_integrations");
+    toast(tr("Google Calendar connected. Initial synchronization has started.","Google Naptár csatlakoztatva. A kezdeti szinkronizáció elindult."),"success");
+  }else if(qs.get("googleCalendar")==="error"){
+    const reason=qs.get("reason")||"GOOGLE_CALENDAR_CONNECTION_FAILED";
+    history.replaceState({},"","#system_integrations");toast(humanError(new Error(reason)),"error");
+  }else if(qs.get("googleCalendarTest")==="authorized"){
+    history.replaceState({},"","#system_integrations");
+    try{await api("/api/system-integrations/GOOGLE_CALENDAR/test",{method:"POST",body:"{}"});toast(tr("Google Calendar read/write test succeeded.","A Google Naptár olvasási/írási teszt sikeres."),"success");}
+    catch(error){toast(humanError(error),"error");}
+  }
+}
+
 async function renderSettings(){
   const workspace=$("#workspace"),admin=["ADMIN","SUPERADMIN"].includes(state.user?.role);
   const users=admin?await loadUsers():[];
-  const googleStatus=admin?await api("/api/google-calendar/status",{memoryCacheMs:0}).catch(()=>null):null;
   if(admin&&typeof loadOperationalProfiles==="function")await loadOperationalProfiles({refresh:true});
   workspace.innerHTML=pageHead(tr("Settings","Beállítások"),tr("Your language, appearance and account-level workspace preferences.","Nyelv, megjelenés és személyes munkafelület-beállítások."),admin?`<button id="newUserBtn" class="primary-button" type="button">＋ ${tr("New user","Új felhasználó")}</button>`:"")+
     `<div class="settings-layout">
@@ -1037,15 +1174,11 @@ async function renderSettings(){
         </div>
       </section>
       ${admin?`<section class="panel team-settings-card"><div class="panel-head"><div><span class="eyebrow">${tr("ADMINISTRATION","ADMINISZTRÁCIÓ")}</span><h2>${tr("Team","Csapat")}</h2></div><span class="badge">${users.length}</span></div><div class="team-list">${users.map(user=>`<div class="team-row"><div class="team-person">${v6ProfileAvatarMarkup(user,"small")}<span><strong>${esc(user.name)}</strong><small>${esc(user.email||user.contact_email||"")}</small></span></div><span class="role-chip">${esc(roleLabel(user.role))}</span>${typeof operationalTeamProfileMarkup==="function"?operationalTeamProfileMarkup(user):""}<div class="team-actions"><button class="secondary-button" type="button" data-edit-user="${esc(user.id)}">${tr("Edit","Szerkesztés")}</button>${String(user.id)!==String(state.user.id)&&user.role!=="SUPERADMIN"?`<button class="text-button danger-text" type="button" data-delete-user="${esc(user.id)}">${tr("Delete","Törlés")}</button>`:""}</div></div>`).join("")}</div></section>`:""}
-      ${admin?`<section class="panel google-calendar-settings-card"><div class="panel-head"><div><span class="eyebrow">GOOGLE CALENDAR</span><h2>${tr("Klavierhaus Work calendar","Klavierhaus Work naptár")}</h2></div><span class="badge ${googleStatus?.connected?"success":""}">${googleStatus?.connected?tr("Connected","Kapcsolódva"):googleStatus?.configured?tr("Ready to connect","Kapcsolatra kész"):tr("Not configured","Nincs konfigurálva")}</span></div><p class="muted">${esc(googleStatus?.calendar_summary||"Klavierhaus Work")} · ${esc(googleStatus?.calendar_id||"klavierhauswork@gmail.com")}</p><div class="detail-note">${tr("Events entered in this Google calendar are imported into the Klavierhaus Calendar. Unambiguous events become workflows automatically; unresolved events wait for administrator review.","Az ebbe a Google naptárba beírt események bekerülnek a Klavierhaus naptárba. Az egyértelmű események automatikusan workflow-vá alakulnak; a nem egyértelműek adminisztrátori ellenőrzésre várnak.")}</div><div class="form-actions">${superadmin&&!googleStatus?.connected?`<button id="googleCalendarConnect" class="primary-button" type="button" ${googleStatus?.configured?"":"disabled"}>${tr("Connect Google Calendar","Google Naptár csatlakoztatása")}</button>`:""}${googleStatus?.connected?`<button id="googleCalendarSync" class="secondary-button" type="button">${tr("Sync now","Szinkronizálás most")}</button>`:""}${superadmin&&googleStatus?.connected?`<button id="googleCalendarDisconnect" class="text-button danger-text" type="button">${tr("Disconnect","Leválasztás")}</button>`:""}</div>${googleStatus?.last_sync_at?`<small>${tr("Last sync","Utolsó szinkron")}: ${esc(new Date(googleStatus.last_sync_at).toLocaleString(state.language==="hu"?"hu-HU":"en-US"))}</small>`:""}${googleStatus?.last_error?`<div class="service-control-warning"><strong>${tr("Last error","Utolsó hiba")}</strong><span>${esc(googleStatus.last_error)}</span></div>`:""}</section>`:""}
       ${admin&&typeof operationsMilestoneProfileCard==="function"?operationsMilestoneProfileCard():""}
     </div>`;
   $$("[data-user-theme]").forEach(button=>button.addEventListener("click",async()=>{v6ApplyTheme(button.dataset.userTheme,{save:true});await renderSettings();}));
   $$("[data-user-language]").forEach(button=>button.addEventListener("click",async()=>{setLanguage(button.dataset.userLanguage,{save:true});}));
   if(admin&&typeof bindOperationsMilestoneProfile==="function")await bindOperationsMilestoneProfile();
-  $("#googleCalendarConnect")?.addEventListener("click",async()=>{try{const result=await api("/api/google-calendar/auth-url",{memoryCacheMs:0});if(result?.url)window.location.assign(result.url);}catch(error){toast(humanError(error),"error");}});
-  $("#googleCalendarSync")?.addEventListener("click",async event=>{event.currentTarget.disabled=true;try{const result=await api("/api/google-calendar/sync",{method:"POST",body:"{}"});toast(tr(`Calendar synchronized: ${Number(result.imported||0)} imported, ${Number(result.updated||0)} updated.`,`Naptár szinkronizálva: ${Number(result.imported||0)} importálva, ${Number(result.updated||0)} frissítve.`),"success");await renderSettings();}catch(error){event.currentTarget.disabled=false;toast(humanError(error),"error");}});
-  $("#googleCalendarDisconnect")?.addEventListener("click",async()=>{if(!confirm(tr("Disconnect the Klavierhaus Work Google Calendar? Imported ERP jobs will remain.","Leválasztod a Klavierhaus Work Google Naptárt? Az importált ERP-munkák megmaradnak.")))return;try{await api("/api/google-calendar/disconnect",{method:"DELETE"});toast(tr("Google Calendar disconnected.","Google Naptár leválasztva."),"success");await renderSettings();}catch(error){toast(humanError(error),"error");}});
   $("#newUserBtn")?.addEventListener("click",()=>openUserDialog());
   $$("[data-edit-user]").forEach(button=>button.addEventListener("click",()=>openUserDialog(users.find(user=>String(user.id)===button.dataset.editUser))));
   $$("[data-delete-user]").forEach(button=>button.addEventListener("click",async()=>{
