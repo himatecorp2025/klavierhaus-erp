@@ -663,6 +663,28 @@ function r2ClosedWorkflowCard(job){
   </article>`;
 }
 
+function r2WorkflowInstanceRow(job){
+  const phases=(job.workflow_phases||[]).filter(phase=>phase.enabled&&phase.stage_key!=="completed").sort((a,b)=>Number(a.position||0)-Number(b.position||0));
+  const currentIndex=phases.findIndex(phase=>phase.stage_key===job.stage);
+  return `<section class="workflow-instance-row" data-workflow-row="${job.id}">
+    <header class="workflow-instance-header">
+      <div><span class="eyebrow">${esc(job.job_code||("#"+job.id))}</span><h2>${esc(job.title||tr("Workflow job","Workflow munka"))}</h2><small>${esc(job.client_name||"—")} · ${esc(r2JobPiano(job)||"—")}</small></div>
+      <button type="button" class="secondary-button compact" data-history-card="${job.id}">${tr("Workflow details","Workflow részletek")} ↗</button>
+    </header>
+    <div class="workflow-instance-scroll">
+      <div class="workflow-instance-track" style="--workflow-phase-count:${Math.max(1,phases.length)}">
+        ${phases.map((phase,index)=>{
+          const active=phase.stage_key===job.stage,done=Boolean(phase.completed_at)||index<currentIndex,label=r2StageLabel(phase);
+          return `<section class="workflow-instance-phase ${active?"is-current":done?"is-completed":"is-pending"}" data-drop-stage="${esc(phase.stage_key)}" data-workflow-job="${job.id}">
+            <header class="workflow-instance-phase-head"><span class="workflow-phase-state">${active?"●":done?"✓":"○"}</span><strong>${esc(label)}</strong></header>
+            <div class="workflow-instance-slot">${active?r2WorkflowCard(job):done?`<div class="workflow-instance-placeholder completed"><strong>✓</strong><span>${tr("Phase completed","Fázis lezárva")}</span></div>`:`<div class="workflow-instance-placeholder"><span>${tr("Not active for this workflow yet","Még nem aktív ebben a workflow-ban")}</span></div>`}</div>
+          </section>`;
+        }).join("")}
+      </div>
+    </div>
+  </section>`;
+}
+
 function r2WorkflowColumn(column,{closed=false}={}){
   const label=state.language==="hu"?column.label_hu:column.label_en;
   const reorderable=!closed&&r2IsAdmin()&&!r2FixedStage(column.key);
@@ -714,7 +736,7 @@ function r2BindTouchCardDrag(surface,card,jobs,root){
     if(!active&&Math.hypot(event.clientX-startX,event.clientY-startY)>8){active=true;ghost=r2CreateDragGhost(card,'workflow-touch-drag-ghost');card.classList.add('dragging');card._r2SuppressClickUntil=Date.now()+450;}
     if(!active||!ghost)return;event.preventDefault();
     ghost.style.left=(event.clientX+12)+'px';ghost.style.top=(event.clientY+12)+'px';
-    r2ClearDropHighlights(root);const hit=document.elementFromPoint(event.clientX,event.clientY),column=hit?.closest?.('[data-drop-stage]');
+    r2ClearDropHighlights(root);const hit=document.elementFromPoint(event.clientX,event.clientY),candidate=hit?.closest?.('[data-drop-stage]'),jobId=String(card.dataset.jobId||""),column=candidate&&(!candidate.dataset.workflowJob||String(candidate.dataset.workflowJob)===jobId)?candidate:null;
     target=column||null;if(target)target.classList.add('drag-over');
   };
   const end=event=>{
@@ -740,10 +762,11 @@ function r2BindDrag(root,jobs){
     r2BindTouchCardDrag(card,card,jobs,root);
   });
   $$("[data-drop-stage]",root).forEach(column=>{
-    column.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("text/job-id")){event.preventDefault();r2ClearDropHighlights(root);column.classList.add("drag-over");}});
+    column.addEventListener("dragover",event=>{if(!event.dataTransfer.types.includes("text/job-id"))return;const jobId=event.dataTransfer.getData("text/job-id");if(column.dataset.workflowJob&&String(column.dataset.workflowJob)!==String(jobId))return;event.preventDefault();r2ClearDropHighlights(root);column.classList.add("drag-over");});
     column.addEventListener("dragleave",event=>{if(!column.contains(event.relatedTarget))column.classList.remove("drag-over");});
     column.addEventListener("drop",event=>{
       const jobId=event.dataTransfer.getData("text/job-id");if(!jobId)return;
+      if(column.dataset.workflowJob&&String(column.dataset.workflowJob)!==String(jobId))return;
       event.preventDefault();r2ClearDropHighlights(root);const job=jobs.find(item=>String(item.id)===jobId),target=column.dataset.dropStage;
       if(!job||job.stage===target)return;r2OpenHandoff(job,renderWorkshop,target);
     });
@@ -1122,26 +1145,18 @@ async function r2LoadWorkflowBucket(bucket,closedType=null){
 async function r2RenderWorkflow(data){
   const host=$("#workshopContent");if(!host)return;
   const bucket=data?.bucket||state.r2WorkflowBucket||"active",closedType=data?.closed_type||state.r2ClosedType||"completed";state.r2WorkflowBucket=bucket;state.r2ClosedType=closedType;
-  const columns=data.columns||[],canAdd=bucket==="active"&&r2IsAdmin()&&Boolean(data.can_add_stage),count=columns.length;
+  const workflowRows=(data.workflow_rows||[]).map(row=>row.job||row).filter(Boolean),jobs=data.jobs||[];
   host.innerHTML=`<div class="workflow-view-toolbar"><div class="workflow-view-controls"><div class="segmented-control compact workflow-status-switch">
     <button type="button" data-workflow-bucket="active" class="${bucket==="active"?"active":""}">◉ ${tr("Active workflows","Aktív munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="closed" class="${bucket==="closed"?"active":""}">🔒 ${tr("Closed workflows","Lezárt munkafolyamatok")}</button>
     <button type="button" data-workflow-bucket="private" class="private-filter-button">◈ ${tr("Private appointments","Privát egyeztetések")}</button>
-  </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Intermediate phases can be completed and reordered flexibly.","A köztes fázisok rugalmas sorrendben végezhetők és rendezhetők."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
+  </div>${bucket==="closed"?`<div class="segmented-control compact closed-type-switch"><button type="button" data-closed-type="completed" class="${closedType==="completed"?"active":""}">✓ ${tr("Completed","Lezárt")}</button><button type="button" data-closed-type="cancelled" class="${closedType==="cancelled"?"active":""}">⊘ ${tr("Cancelled","Törölt")}</button></div>`:""}</div><small>${bucket==="active"?tr("Every job has its own enabled workflow phases. A phase shown on one workflow does not automatically belong to another.","Minden munka saját, engedélyezett workflow-fázisokkal rendelkezik. Egy másik workflow fázisa nem kerül automatikusan ehhez a munkához."):closedType==="completed"?tr("Successfully completed workflows.","Sikeresen lezárt munkafolyamatok."):tr("Cancelled workflows kept for audit history.","Megszakított munkafolyamatok audit-történettel.")}</small></div>
   ${bucket==="closed"
-    ?`<div id="workflowBoard" class="closed-workflow-grid">${(data.jobs||[]).length?(data.jobs||[]).map(r2ClosedWorkflowCard).join(""):`<div class="empty-state closed-workflow-empty">${tr("No workflows in this filter.","Nincs workflow ebben a szűrésben.")}</div>`}</div>`
-    :`<div class="workflow-carousel ${state.r2WorkflowCarouselAnimateLayout?"is-reflowing":""}" data-workflow-carousel>
-      <button type="button" class="workflow-carousel-nav workflow-carousel-prev" data-workflow-carousel-prev aria-label="${esc(tr("Previous workflow phases","Korábbi munkafázisok"))}" disabled>‹</button>
-      <div class="workflow-scroll workflow-carousel-viewport" data-workflow-carousel-viewport><div id="workflowBoard" class="workflow-board" style="--workflow-columns:${Math.max(1,count)}">${columns.map(column=>r2WorkflowColumn(column)).join("")}</div></div>
-      <div class="workflow-carousel-right-controls">
-        <button type="button" class="workflow-carousel-nav workflow-carousel-next" data-workflow-carousel-next aria-label="${esc(tr("Next workflow phases","Következő munkafázisok"))}" disabled>›</button>
-        ${r2IsAdmin()?`<button type="button" class="workflow-carousel-add" id="workflowCarouselAddStage" aria-label="${esc(tr("Add workflow phase","Új munkafázis"))}" title="${esc(canAdd?tr("Add workflow phase","Új munkafázis"):tr("Maximum workflow phases reached","Elérted a maximális munkafázis-számot"))}" ${canAdd?"":"disabled"}>＋</button>`:""}
-      </div>
-    </div>`}`;
+    ?`<div id="workflowBoard" class="closed-workflow-grid">${jobs.length?jobs.map(r2ClosedWorkflowCard).join(""):`<div class="empty-state closed-workflow-empty">${tr("No workflows in this filter.","Nincs workflow ebben a szűrésben.")}</div>`}</div>`
+    :`<div id="workflowBoard" class="workflow-instance-board">${workflowRows.length?workflowRows.map(r2WorkflowInstanceRow).join(""):`<div class="empty-state">${tr("No active workflows.","Nincs aktív workflow.")}</div>`}</div>`}`;
   $$("[data-workflow-bucket]",host).forEach(button=>button.addEventListener("click",()=>{const value=button.dataset.workflowBucket;if(value==="private")return r2LoadPrivateAppointments();if(value==="closed")return r2LoadWorkflowBucket("closed","completed");return r2LoadWorkflowBucket("active");}));
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
-  $("#workflowCarouselAddStage")?.addEventListener("click",()=>{if(canAdd)r2OpenAddStage();});
-  const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);r2BindWorkflowCarousel(host,columns);}
+  const board=$("#workflowBoard");r2BindWorkflowActions(board,jobs);if(bucket==="active")r2BindDrag(board,jobs);
   state.r2WorkflowCarouselAnimateLayout=false;clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   if(bucket==="active")state.r2WorkflowStatusTimer=setInterval(()=>{if(state.view==="workshop"&&state.r2WorkshopMode==="workflow"&&state.r2WorkflowBucket==="active")void r2LoadWorkflowBucket("active");},30000);
 }
