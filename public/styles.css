@@ -4849,6 +4849,8 @@ input,textarea,select,
   max-width:none!important;
   scroll-snap-align:start;
 }
+.workflow-carousel.is-reflowing .workflow-column{animation:workflow-carousel-reflow .28s cubic-bezier(.2,.75,.25,1) both}
+@keyframes workflow-carousel-reflow{from{opacity:.68;transform:translateX(18px)}to{opacity:1;transform:translateX(0)}}
 .workflow-carousel-nav,.workflow-carousel-add{
   display:grid;
   place-items:center;
