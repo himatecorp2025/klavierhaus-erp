@@ -40,6 +40,10 @@ try{
     INSERT INTO inventory_items(id,name,qty) VALUES('LEGACY-INV-1','Legacy felt',12);
     CREATE TABLE invoices(id INTEGER PRIMARY KEY,total_amount REAL,status TEXT);
     CREATE TABLE invoice_credit_memos(id INTEGER PRIMARY KEY,invoice_id INTEGER);
+    CREATE TABLE events(id TEXT PRIMARY KEY,title_en TEXT);
+    CREATE TABLE event_tickets(id TEXT PRIMARY KEY,event_id TEXT,attendee_name TEXT);
+    INSERT INTO events(id,title_en) VALUES('LEGACY-EVENT-1','Retired event');
+    INSERT INTO event_tickets(id,event_id,attendee_name) VALUES('LEGACY-TICKET-1','LEGACY-EVENT-1','Legacy Guest');
     CREATE TRIGGER trg_invoice_credit_memos_immutable_update
     BEFORE UPDATE ON invoice_credit_memos
     BEGIN
@@ -109,10 +113,10 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
-  for(const retired of ["contacts","client_pianos","planned_jobs","wf2_workflows","financial_items","legacy_fk_parent","legacy_fk_child","_inventory_legacy_items"]){
+  for(const retired of ["contacts","client_pianos","planned_jobs","wf2_workflows","financial_items","events","event_tickets","legacy_fk_parent","legacy_fk_child","_inventory_legacy_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","events","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","private_appointments","private_appointment_requests","customer_appointment_proposals","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
+  for(const preserved of ["users","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","private_appointments","private_appointment_requests","customer_appointment_proposals","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
@@ -145,6 +149,7 @@ try{
   assert.ok(backups.some(name=>name.startsWith("workshop-ux-v5-pre-migration-")),"Workshop UX v5 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("admin-ux-v6-pre-migration-")),"Admin UX v6 safety backup missing");
   assert.ok(backups.some(name=>name.startsWith("messenger-v12-pre-migration-")),"Messenger v12 safety backup missing");
+  assert.ok(backups.some(name=>name.startsWith("event-management-retirement-")),"Event-management retirement safety backup missing");
 
   // Reproduce the Render production shape that already has clients/is_vip but
   // predates the new client_type column. Schema indexes must not run before
