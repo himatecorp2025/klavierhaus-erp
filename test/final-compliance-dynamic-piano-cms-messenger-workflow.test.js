@@ -190,7 +190,7 @@ test("dynamic public piano routes are derived from live showroom brands",()=>{
   assert.match(publicServer,/pianoBrandContentKey\(brand\)/);
   assert.match(publicServer,/uniquePianoBrands\(allItems\)\.find/);
   assert.match(publicServer,/erpClient\.content\(pianoBrandContentKey\(brand\),language\)/);
-  assert.match(publicServer,/uniquePianoBrands\(values\[2\]\)\.flatMap/);
+  assert.match(publicServer,/uniquePianoBrands\(values\[0\]\)\.flatMap/);
 });
 
 test("CMS piano brand grids include a per-brand add-piano card and seeded brand editor",()=>{
