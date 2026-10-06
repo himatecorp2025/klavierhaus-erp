@@ -12,7 +12,7 @@ const state={
   view:(location.hash||"#milestone").slice(1)||"milestone",
   clients:[],selectedClientId:null,clientMasterFilter:"ALL",masterMode:"CLIENTS",masterSearchOpen:false,masterSearch:"",masterDetailKind:"CLIENT",masterDirty:false,pianos:[],selectedPianoId:null,duplicateReviews:[],duplicatePendingCount:0,selectedDuplicateReviewId:null,intake:[],users:[],
   cmsPages:[],cmsPage:"home",cmsLanguage:"en",cmsDraft:{},landing:[],clockTimer:null,
-  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false,staffSkills:[],workProfiles:[],milestone:null
+  notifications:[],notificationPreferences:null,notificationTimer:null,notificationSource:null,notificationReconnectTimer:null,notificationSeen:new Set(),notificationInitialized:false,notificationUiBound:false,staffSkills:[],workProfiles:[],milestone:null,pendingDeepLinkParams:null
 };
 const activeViews=new Set(["milestone","workshop","messenger","planned","intake","master","finance","documents","cms","profile","settings","system_integrations"]);
 const tr=(en,hu)=>state.language==="hu"?hu:en;
@@ -489,11 +489,13 @@ async function masterConfirmDiscard(){
   if(decision==="save")return masterSaveCurrentInlineForm({renderAfter:false});
   return false;
 }
+function viewHistoryUrl(view){return `${location.pathname}#${encodeURIComponent(view)}`;}
 async function navTo(view){
   if(view==="milestone"&&window.innerWidth<700)view="workshop";
   if(!activeViews.has(view))return;
   if(state.view==="master"&&view!=="master"&&!(await masterConfirmDiscard()))return;
-  state.view=view;history.replaceState({},"",`#${view}`);
+  state.pendingDeepLinkParams=null;
+  state.view=view;history.replaceState({},"",viewHistoryUrl(view));
   if(typeof v6CloseMore==="function")v6CloseMore();
   syncNavigationState(view);
   return renderView();
@@ -501,6 +503,7 @@ async function navTo(view){
 function consumeDeepLink(){
   const params=new URLSearchParams(location.search),view=params.get("view");
   if(!view||!activeViews.has(view))return false;
+  state.pendingDeepLinkParams=view==="system_integrations"?Object.fromEntries(params.entries()):null;
   state.view=view;
   if(view==="master"){
     const clientId=Number(params.get("client")||0),pianoId=Number(params.get("piano")||0);
@@ -516,7 +519,7 @@ function consumeDeepLink(){
   }else if(view==="workshop"){
     const jobId=Number(params.get("job")||0);if(jobId)state.pendingNotificationJobId=jobId;
   }
-  history.replaceState({},"",`#${view}`);return true;
+  history.replaceState({},"",viewHistoryUrl(view));return true;
 }
 async function notificationNavigate(row){
   if(!row?.action_url)return;
@@ -533,7 +536,7 @@ function bindNavigation(){
     if(!button||button.disabled)return;
     event.preventDefault();void navTo(button.dataset.nav);
   });
-  window.addEventListener("hashchange",async()=>{const view=location.hash.slice(1);if(activeViews.has(view)){if(state.view==="master"&&view!=="master"&&!(await masterConfirmDiscard())){history.replaceState({},"",`#${state.view}`);return;}state.view=view;void renderView();}});
+  window.addEventListener("hashchange",async()=>{const view=location.hash.slice(1);if(activeViews.has(view)){if(state.view==="master"&&view!=="master"&&!(await masterConfirmDiscard())){history.replaceState({},"",viewHistoryUrl(state.view));return;}state.view=view;void renderView();}});
   window.addEventListener("beforeunload",event=>{if(state.masterDirty){event.preventDefault();event.returnValue="";}});
   $("#languageToggle")?.addEventListener("click",()=>setLanguage(state.language==="en"?"hu":"en"));
 }
