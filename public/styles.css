@@ -4910,3 +4910,21 @@ input,textarea,select,
 /* Google Calendar imported events awaiting ERP review */
 .google-pending-event{border-style:dashed!important;box-shadow:inset 0 0 0 1px rgba(184,145,74,.3)}
 .google-pending-event::after{content:"G";position:absolute;right:6px;top:5px;font-size:10px;font-weight:800;opacity:.7}
+
+
+/* System Activation & Integrations */
+.system-integrations-v6-shell{display:grid;gap:18px}
+.system-integrations-v6-summary{display:grid;gap:12px}
+.system-integrations-v6-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.system-integration-v6-card{display:grid;gap:16px;min-width:0}
+.system-integration-status-line{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.system-integration-v6-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.system-integration-v6-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.system-integration-v6-meta>span{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;min-width:0}
+.system-integration-v6-meta small{color:var(--muted)}
+.system-integration-v6-meta strong{overflow-wrap:anywhere}
+.system-provider-toggle,.system-master-toggle{display:inline-flex;align-items:center;gap:8px;font-weight:700}
+@media (max-width:900px){
+  .system-integrations-v6-grid,.system-integration-v6-fields,.system-integration-v6-meta{grid-template-columns:1fr}
+  .system-integration-status-line{justify-content:flex-start}
+}
