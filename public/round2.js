@@ -991,7 +991,7 @@ function r2BindCalendarCreate(host){
   }));
 }
 async function r2RenderCalendar(){
-  state.r2WorkflowCarouselAnimateLayout=false;clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
+  clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   const host=$("#workshopContent");if(!host)return;
   const storedCalendarMode=localStorage.getItem("kh_calendar_mode");
   state.r2CalendarMode=state.r2CalendarMode||storedCalendarMode||(window.matchMedia?.("(max-width:700px)")?.matches?"day":"week");
@@ -1116,7 +1116,7 @@ async function r2RenderWorkflow(data){
   $$("[data-closed-type]",host).forEach(button=>button.addEventListener("click",()=>r2LoadWorkflowBucket("closed",button.dataset.closedType)));
   $("#workflowCarouselAddStage")?.addEventListener("click",()=>{if(canAdd)r2OpenAddStage();});
   const board=$("#workflowBoard");r2BindWorkflowActions(board,data.jobs||[]);if(bucket==="active"){r2BindDrag(board,data.jobs||[]);r2BindStageColumnReorder(board);r2BindWorkflowCarousel(host,columns);}
-  clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
+  state.r2WorkflowCarouselAnimateLayout=false;clearInterval(state.r2WorkflowStatusTimer);state.r2WorkflowStatusTimer=null;
   if(bucket==="active")state.r2WorkflowStatusTimer=setInterval(()=>{if(state.view==="workshop"&&state.r2WorkshopMode==="workflow"&&state.r2WorkflowBucket==="active")void r2LoadWorkflowBucket("active");},30000);
 }
 function r2OverviewRows(key,overview){
