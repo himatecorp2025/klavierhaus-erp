@@ -51,6 +51,50 @@ const EVENT_MANAGEMENT_TABLES=[
 ];
 const eventRetirementLegacyTables=[];
 let eventRetirementRan=false;
+
+function retiredConversationPredicate(){
+  if(!tableExists("customer_conversations"))return "";
+  const conversationCols=columns("customer_conversations"),predicates=[];
+  if(conversationCols.has("category"))predicates.push("upper(COALESCE(category,'')) IN ('EVENT','TICKET')");
+  if(conversationCols.has("event_id"))predicates.push("event_id IS NOT NULL");
+  if(conversationCols.has("ticket_id"))predicates.push("ticket_id IS NOT NULL");
+  return predicates.join(" OR ");
+}
+function applyRetiredForeignKeyActions(targetTable,targetPredicate){
+  if(!tableExists(targetTable)||!targetPredicate)return;
+  const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row=>row.name);
+  for(const table of tables){
+    if(table===targetTable||!tableExists(table))continue;
+    let refs=[];try{refs=db.prepare(`PRAGMA foreign_key_list(${quoteName(table)})`).all();}catch(_error){continue;}
+    for(const ref of refs.filter(row=>String(row.table||"").toLowerCase()===targetTable.toLowerCase())){
+      const column=String(ref.from||"");if(!column||!columns(table).has(column))continue;
+      const action=String(ref.on_delete||"NO ACTION").toUpperCase();
+      const where=`${quoteName(column)} IN (SELECT id FROM ${quoteName(targetTable)} WHERE ${targetPredicate})`;
+      if(action==="SET NULL")db.prepare(`UPDATE ${quoteName(table)} SET ${quoteName(column)}=NULL WHERE ${where}`).run();
+      else db.prepare(`DELETE FROM ${quoteName(table)} WHERE ${where}`).run();
+    }
+  }
+}
+function purgeRetiredConversationGraph(){
+  const conversationPredicate=retiredConversationPredicate();if(!conversationPredicate)return;
+  if(tableExists("customer_messages")&&columns("customer_messages").has("conversation_id")){
+    const messagePredicate=`conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`;
+    applyRetiredForeignKeyActions("customer_messages",messagePredicate);
+  }
+  applyRetiredForeignKeyActions("customer_conversations",conversationPredicate);
+  if(tableExists("intake_leads")&&columns("intake_leads").has("source_conversation_id")){
+    db.prepare(`UPDATE intake_leads SET source_conversation_id=NULL WHERE source_conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`).run();
+  }
+  db.prepare(`DELETE FROM customer_conversations WHERE ${conversationPredicate}`).run();
+}
+function deleteRetiredWebsiteTrackingRows(){
+  if(!tableExists("website_tracking_events"))return;
+  const trackingCols=columns("website_tracking_events"),predicates=[];
+  if(trackingCols.has("source_path"))predicates.push("lower(COALESCE(source_path,'')) LIKE '/events%'","lower(COALESCE(source_path,'')) LIKE '/hu/esemenyek%'");
+  if(trackingCols.has("event_name"))predicates.push("lower(COALESCE(event_name,'')) IN ('event_repeat_interest_open','event_repeat_interest_submit','event_checkout','event_purchase','ticket_purchase')");
+  if(trackingCols.has("event_id"))predicates.push("event_id IS NOT NULL");
+  if(predicates.length)db.prepare(`DELETE FROM website_tracking_events WHERE ${predicates.join(" OR ")}`).run();
+}
 function eventManagementNeedsRetirement(){
   if(EVENT_MANAGEMENT_TABLES.some(tableExists))return true;
   if(columns("customer_conversations").has("event_id")||columns("customer_conversations").has("ticket_id"))return true;
@@ -86,6 +130,8 @@ function prepareEventManagementRetirement(){
   eventRetirementRan=true;
   eventManagementRetirementBackup();
   db.pragma("legacy_alter_table = ON");
+  purgeRetiredConversationGraph();
+  deleteRetiredWebsiteTrackingRows();
   isolateEventDependentTable("customer_conversations",()=>columns("customer_conversations").has("event_id")||columns("customer_conversations").has("ticket_id")||String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql||"").includes("'EVENT'"));
   isolateEventDependentTable("website_reviews",()=>columns("website_reviews").has("linked_event_id"));
   isolateEventDependentTable("website_tracking_events",()=>columns("website_tracking_events").has("event_id"));
@@ -101,11 +147,6 @@ function prepareEventManagementRetirement(){
   if(tableExists("website_content_pages"))db.prepare("DELETE FROM website_content_pages WHERE page_key IN ('events','salon','ticketTerms')").run();
   if(tableExists("landing_sections"))db.prepare("DELETE FROM landing_sections WHERE section_key='salon_events'").run();
   if(tableExists("marketing_campaigns"))db.prepare("DELETE FROM marketing_campaigns WHERE lower(destination_url) LIKE '%/events%' OR lower(destination_url) LIKE '%/hu/esemenyek%'").run();
-  if(tableExists("website_tracking_events")){
-    const trackingCols=columns("website_tracking_events");
-    const eventColumn=trackingCols.has("event_id")?" OR event_id IS NOT NULL":"";
-    db.prepare(`DELETE FROM website_tracking_events WHERE lower(COALESCE(source_path,'')) LIKE '/events%' OR lower(COALESCE(source_path,'')) LIKE '/hu/esemenyek%' OR lower(COALESCE(event_name,'')) IN ('event_repeat_interest_open','event_repeat_interest_submit','event_checkout','event_purchase','ticket_purchase')${eventColumn}`).run();
-  }
   if(tableExists("communication_deliveries")){
     const deliveryCols=columns("communication_deliveries");
     const eventPredicates=[];
