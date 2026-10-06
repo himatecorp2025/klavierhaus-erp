@@ -37,3 +37,14 @@ test("Google Calendar operational OAuth is available to every ADMIN and returns 
   assert.match(server,/\?view=system_integrations&googleCalendarTest=authorized/);
   assert.match(server,/\?view=system_integrations&googleCalendar=error/);
 });
+
+
+test("consumed deep links cannot pin navigation to System Integrations",()=>{
+  const app=read("public/app.js"),v6=read("public/v6.js");
+  assert.match(app,/function viewHistoryUrl\(view\)\{return `\$\{location\.pathname\}#\$\{encodeURIComponent\(view\)\}`;\}/);
+  assert.match(app,/state\.pendingDeepLinkParams=view==="system_integrations"\?Object\.fromEntries\(params\.entries\(\)\):null/);
+  assert.match(app,/history\.replaceState\(\{\},"",viewHistoryUrl\(view\)\);return true/);
+  assert.match(v6,/const integrationParams=state\.pendingDeepLinkParams\?\.view==="system_integrations"\?state\.pendingDeepLinkParams:null/);
+  assert.match(v6,/state\.pendingDeepLinkParams=null/);
+  assert.doesNotMatch(v6,/history\.replaceState\(\{\},"","#system_integrations"\)/);
+});
