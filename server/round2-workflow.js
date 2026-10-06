@@ -534,18 +534,24 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     });
   });
 
-  app.get("/api/calendar",auth,staff,(req,res)=>{
+  app.get("/api/calendar",auth,staff,async(req,res)=>{
     try{
       const now=Date.now(),from=iso(req.query.from||new Date(now-86400000).toISOString(),"INVALID_CALENDAR_FROM"),to=iso(req.query.to||new Date(now+31*86400000).toISOString(),"INVALID_CALENDAR_TO");
       if(new Date(to).getTime()<=new Date(from).getTime())throw problem("INVALID_CALENDAR_RANGE");
       const technicianId=text(req.query.technician_id,160);
+      let googleSync=null;
+      if(googleCalendar?.syncIfStale){
+        try{googleSync=await googleCalendar.syncIfStale("CALENDAR_VIEW",30000);}
+        catch(error){googleSync={ok:false,error:String(error?.message||error).slice(0,500)};}
+      }
       const rows=db.prepare(`${selectJob} WHERE j.cancelled_at IS NULL AND j.stage<>'planned' AND j.scheduled_at IS NOT NULL
         AND j.scheduled_at<? AND datetime(j.scheduled_at,'+'||j.estimated_duration_min||' minutes')>datetime(?)
         AND (?='' OR j.assigned_technician_id=?)
         ORDER BY j.scheduled_at,j.id`).all(to,from,technicianId,technicianId)
         .map(row=>decorateJob({...row,scheduled_end:endAt(row.scheduled_at,row.estimated_duration_min)}));
       const googleRows=googleCalendar?.calendarEntries?.({from,to,technicianId})||[];
-      res.json({from,to,timezone:"America/New_York",jobs:[...rows,...googleRows]});
+      res.setHeader("Cache-Control","no-store");
+      res.json({from,to,timezone:"America/New_York",google_sync:googleSync,jobs:[...rows,...googleRows]});
     }catch(error){respondError(res,error);}
   });
 
