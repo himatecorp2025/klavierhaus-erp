@@ -44,6 +44,161 @@ function copyCommonTableColumns(source,target){
   const list=common.map(quoteName).join(",");
   db.exec(`INSERT OR IGNORE INTO ${quoteName(target)}(${list}) SELECT ${list} FROM ${quoteName(source)}`);
 }
+const EVENT_MANAGEMENT_TABLES=[
+  "event_attendance_exports","event_attendance_actions","event_attendance_entries","event_attendance_sessions",
+  "event_checkins","event_ticket_documents","event_refund_requests","event_invitations","event_checkout_holds",
+  "event_payments","event_tickets","event_repeat_requests","event_closures","events","event_categories"
+];
+const eventRetirementLegacyTables=[];
+let eventRetirementRan=false;
+
+function retiredConversationPredicate(){
+  if(!tableExists("customer_conversations"))return "";
+  const conversationCols=columns("customer_conversations"),predicates=[];
+  if(conversationCols.has("category"))predicates.push("upper(COALESCE(category,'')) IN ('EVENT','TICKET')");
+  if(conversationCols.has("event_id"))predicates.push("event_id IS NOT NULL");
+  if(conversationCols.has("ticket_id"))predicates.push("ticket_id IS NOT NULL");
+  return predicates.join(" OR ");
+}
+function applyRetiredForeignKeyActions(targetTable,targetPredicate){
+  if(!tableExists(targetTable)||!targetPredicate)return;
+  const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row=>row.name);
+  for(const table of tables){
+    if(table===targetTable||!tableExists(table))continue;
+    let refs=[];try{refs=db.prepare(`PRAGMA foreign_key_list(${quoteName(table)})`).all();}catch(_error){continue;}
+    for(const ref of refs.filter(row=>String(row.table||"").toLowerCase()===targetTable.toLowerCase())){
+      const column=String(ref.from||"");if(!column||!columns(table).has(column))continue;
+      const action=String(ref.on_delete||"NO ACTION").toUpperCase();
+      const where=`${quoteName(column)} IN (SELECT id FROM ${quoteName(targetTable)} WHERE ${targetPredicate})`;
+      if(action==="SET NULL")db.prepare(`UPDATE ${quoteName(table)} SET ${quoteName(column)}=NULL WHERE ${where}`).run();
+      else db.prepare(`DELETE FROM ${quoteName(table)} WHERE ${where}`).run();
+    }
+  }
+}
+function deleteRetiredConversationAttachmentFiles(conversationPredicate){
+  if(!conversationPredicate||!tableExists("customer_message_attachments")||!columns("customer_message_attachments").has("conversation_id")||!columns("customer_message_attachments").has("stored_name"))return;
+  const rows=db.prepare(`SELECT stored_name FROM customer_message_attachments WHERE conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`).all();
+  const uploadRoot=process.env.UPLOAD_DIR||path.join(__dirname,"uploads");
+  const attachmentRoot=path.join(uploadRoot,"customer-conversations");
+  for(const row of rows){
+    const storedName=path.basename(String(row.stored_name||""));if(!storedName)continue;
+    const filePath=path.join(attachmentRoot,storedName);
+    try{fs.rmSync(filePath,{force:true});}
+    catch(error){console.warn(`[RETIREMENT] Could not remove retired conversation attachment ${storedName}: ${error.message}`);}
+  }
+}
+function purgeRetiredConversationGraph(){
+  const conversationPredicate=retiredConversationPredicate();if(!conversationPredicate)return;
+  deleteRetiredConversationAttachmentFiles(conversationPredicate);
+  if(tableExists("customer_messages")&&columns("customer_messages").has("conversation_id")){
+    const messagePredicate=`conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`;
+    applyRetiredForeignKeyActions("customer_messages",messagePredicate);
+  }
+  applyRetiredForeignKeyActions("customer_conversations",conversationPredicate);
+  if(tableExists("intake_leads")&&columns("intake_leads").has("source_conversation_id")){
+    db.prepare(`UPDATE intake_leads SET source_conversation_id=NULL WHERE source_conversation_id IN (SELECT id FROM customer_conversations WHERE ${conversationPredicate})`).run();
+  }
+  db.prepare(`DELETE FROM customer_conversations WHERE ${conversationPredicate}`).run();
+}
+function deleteRetiredWebsiteTrackingRows(){
+  if(!tableExists("website_tracking_events"))return;
+  const trackingCols=columns("website_tracking_events"),predicates=[];
+  if(trackingCols.has("source_path"))predicates.push("lower(COALESCE(source_path,'')) LIKE '/events%'","lower(COALESCE(source_path,'')) LIKE '/hu/esemenyek%'");
+  if(trackingCols.has("event_name"))predicates.push("lower(COALESCE(event_name,'')) IN ('event_repeat_interest_open','event_repeat_interest_submit','event_checkout','event_purchase','ticket_purchase')");
+  if(trackingCols.has("event_id"))predicates.push("event_id IS NOT NULL");
+  if(predicates.length)db.prepare(`DELETE FROM website_tracking_events WHERE ${predicates.join(" OR ")}`).run();
+}
+function eventManagementNeedsRetirement(){
+  if(EVENT_MANAGEMENT_TABLES.some(tableExists))return true;
+  if(columns("customer_conversations").has("event_id")||columns("customer_conversations").has("ticket_id"))return true;
+  if(columns("website_reviews").has("linked_event_id")||columns("website_tracking_events").has("event_id"))return true;
+  if(columns("invoice_credit_memos").has("event_id")||columns("invoices").has("deferred_event_id"))return true;
+  if(columns("communication_deliveries").has("event_id")||columns("communication_deliveries").has("payment_id")||columns("communication_deliveries").has("ticket_id"))return true;
+  if(tableExists("website_content_pages")&&db.prepare("SELECT 1 FROM website_content_pages WHERE page_key IN ('events','salon','ticketTerms') LIMIT 1").get())return true;
+  if(tableExists("website_content_versions")&&db.prepare("SELECT 1 FROM website_content_versions WHERE page_key IN ('events','salon','ticketTerms') LIMIT 1").get())return true;
+  if(tableExists("landing_sections")&&db.prepare("SELECT 1 FROM landing_sections WHERE section_key='salon_events' LIMIT 1").get())return true;
+  if(tableExists("marketing_campaigns")&&db.prepare("SELECT 1 FROM marketing_campaigns WHERE lower(destination_url) LIKE '%/events%' OR lower(destination_url) LIKE '%/hu/esemenyek%' LIMIT 1").get())return true;
+  if(tableExists("website_tracking_events")&&db.prepare("SELECT 1 FROM website_tracking_events WHERE lower(COALESCE(source_path,'')) LIKE '/events%' OR lower(COALESCE(source_path,'')) LIKE '/hu/esemenyek%' OR lower(COALESCE(event_name,'')) IN ('event_repeat_interest_open','event_repeat_interest_submit','event_checkout','event_purchase','ticket_purchase') LIMIT 1").get())return true;
+  if(tableExists("invoices")&&columns("invoices").has("source_type")&&db.prepare("SELECT 1 FROM invoices WHERE lower(COALESCE(source_type,''))='event' LIMIT 1").get())return true;
+  return false;
+}
+function eventManagementRetirementBackup(){
+  if(!fs.existsSync(dbPath)||!eventManagementNeedsRetirement())return null;
+  try{db.pragma("wal_checkpoint(TRUNCATE)");}catch(_error){}
+  const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+  const target=path.join(backupDir,`event-management-retirement-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath,target);
+  console.log(`[RETIREMENT] Event-management safety backup created: ${target}`);
+  return target;
+}
+function isolateEventDependentTable(table,predicate){
+  if(!tableExists(table)||!predicate())return;
+  const legacy=`_event_retirement_${table}`;
+  if(tableExists(legacy))db.exec(`DROP TABLE ${quoteName(legacy)}`);
+  db.exec(`ALTER TABLE ${quoteName(table)} RENAME TO ${quoteName(legacy)}`);
+  eventRetirementLegacyTables.push({table,legacy});
+}
+function prepareEventManagementRetirement(){
+  if(!eventManagementNeedsRetirement())return;
+  eventRetirementRan=true;
+  eventManagementRetirementBackup();
+  db.pragma("legacy_alter_table = ON");
+  purgeRetiredConversationGraph();
+  deleteRetiredWebsiteTrackingRows();
+  isolateEventDependentTable("customer_conversations",()=>columns("customer_conversations").has("event_id")||columns("customer_conversations").has("ticket_id")||String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_conversations'").get()?.sql||"").includes("'EVENT'"));
+  isolateEventDependentTable("website_reviews",()=>columns("website_reviews").has("linked_event_id"));
+  isolateEventDependentTable("website_tracking_events",()=>columns("website_tracking_events").has("event_id"));
+  isolateEventDependentTable("website_contact_leads",()=>String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='website_contact_leads'").get()?.sql||"").includes("EVENT_INTEREST"));
+  if(tableExists("financial_items")){
+    db.prepare("DELETE FROM financial_items WHERE lower(COALESCE(source_type,'')) IN ('event_payment','event_payment_refund','event_manual_ticket','event_manual_ticket_refund') OR upper(COALESCE(source_type,'')) LIKE 'EVENT_%'").run();
+  }
+  // Remove retired public-event CMS, landing, analytics and campaign records as data, not only code.
+  if(tableExists("website_preview_tokens")&&tableExists("website_content_versions")){
+    db.prepare("DELETE FROM website_preview_tokens WHERE version_id IN (SELECT id FROM website_content_versions WHERE page_key IN ('events','salon','ticketTerms'))").run();
+  }
+  if(tableExists("website_content_versions"))db.prepare("DELETE FROM website_content_versions WHERE page_key IN ('events','salon','ticketTerms')").run();
+  if(tableExists("website_content_pages"))db.prepare("DELETE FROM website_content_pages WHERE page_key IN ('events','salon','ticketTerms')").run();
+  if(tableExists("landing_sections"))db.prepare("DELETE FROM landing_sections WHERE section_key='salon_events'").run();
+  if(tableExists("marketing_campaigns"))db.prepare("DELETE FROM marketing_campaigns WHERE lower(destination_url) LIKE '%/events%' OR lower(destination_url) LIKE '%/hu/esemenyek%'").run();
+  if(tableExists("communication_deliveries")){
+    const deliveryCols=columns("communication_deliveries");
+    const eventPredicates=[];
+    if(deliveryCols.has("event_id"))eventPredicates.push("event_id IS NOT NULL");
+    if(deliveryCols.has("payment_id"))eventPredicates.push("payment_id IS NOT NULL");
+    if(deliveryCols.has("ticket_id"))eventPredicates.push("ticket_id IS NOT NULL");
+    if(deliveryCols.has("delivery_type"))eventPredicates.push("upper(COALESCE(delivery_type,'')) LIKE 'EVENT_%'");
+    if(eventPredicates.length)db.prepare(`DELETE FROM communication_deliveries WHERE ${eventPredicates.join(" OR ")}`).run();
+  }
+  if(tableExists("invoices")&&columns("invoices").has("source_type")){
+    const ids=db.prepare("SELECT id FROM invoices WHERE lower(COALESCE(source_type,''))='event'").all().map(row=>row.id);
+    if(ids.length){
+      for(const dependent of ["invoice_items","invoice_payments","invoice_credit_memos","invoice_adjustments"]){
+        if(!tableExists(dependent)||!columns(dependent).has("invoice_id"))continue;
+        const del=db.prepare(`DELETE FROM ${quoteName(dependent)} WHERE invoice_id=?`);ids.forEach(id=>del.run(id));
+      }
+      const del=db.prepare("DELETE FROM invoices WHERE id=?");ids.forEach(id=>del.run(id));
+    }
+  }
+  if(tableExists("invoice_credit_memos")&&columns("invoice_credit_memos").has("event_id"))db.exec('ALTER TABLE "invoice_credit_memos" DROP COLUMN "event_id"');
+  if(tableExists("invoices")&&columns("invoices").has("deferred_event_id"))db.exec('ALTER TABLE "invoices" DROP COLUMN "deferred_event_id"');
+  if(tableExists("communication_deliveries")){
+    for(const column of ["event_id","payment_id","ticket_id"])if(columns("communication_deliveries").has(column))db.exec(`ALTER TABLE "communication_deliveries" DROP COLUMN ${quoteName(column)}`);
+  }
+  for(const table of EVENT_MANAGEMENT_TABLES)if(tableExists(table))db.exec(`DROP TABLE ${quoteName(table)}`);
+  const uploadRoot=process.env.UPLOAD_DIR||path.join(__dirname,"uploads"),legacyMedia=path.join(uploadRoot,"events");
+  try{fs.rmSync(legacyMedia,{recursive:true,force:true});}catch(error){console.warn(`[RETIREMENT] Could not remove legacy event media: ${error.message}`);}
+  db.pragma("legacy_alter_table = OFF");
+  console.log("[RETIREMENT] Legacy event, ticket, attendance and guest-list tables removed");
+}
+function finishEventManagementRetirement(){
+  if(!eventRetirementRan)return;
+  for(const {table,legacy} of eventRetirementLegacyTables){
+    copyCommonTableColumns(legacy,table);
+    db.exec(`DROP TABLE ${quoteName(legacy)}`);
+  }
+  setSetting("event_management_retired","1");
+  console.log("[RETIREMENT] Shared tables rebuilt without event-management columns or constraints");
+}
 function setting(key) {
   if (!tableExists("app_settings")) return null;
   return db.prepare("SELECT setting_value FROM app_settings WHERE setting_key=?").get(key)?.setting_value ?? null;
@@ -416,6 +571,8 @@ for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"])
   legacyDocumentFkTables.push({table,legacy,legacyTarget});
   console.log(`[DOCUMENTS] Legacy FK ${table} -> ${legacyTarget} isolated for canonical archive repair`);
 }
+// Retire the former public event/ticket system before canonical schema creation.
+prepareEventManagementRetirement();
 // Existing production databases already have private_appointments/intake_leads/clients.
 // Add compatibility columns before schema.sql creates indexes that depend on them.
 prepareMessengerV12Compatibility();
@@ -423,6 +580,7 @@ prepareClientSegmentationCompatibility();
 prepareMasterDataCompatibility();
 prepareMilestoneRoadmapCompatibility();
 db.exec(canonicalSchemaSql);
+finishEventManagementRetirement();
 if(tableExists("_workflow_capacity_legacy_workflow_stage_definitions")){
   db.pragma("foreign_keys = OFF");
   db.exec(`INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable,created_at,updated_by_user_id,updated_at)
@@ -763,16 +921,6 @@ db.prepare(`INSERT OR IGNORE INTO app_settings(setting_key,setting_value,updated
   ('login_background_url','','SYSTEM'),
   ('branding_version','1','SYSTEM')`).run();
 
-const defaultCategories = [
-  ["EVC-PIANO-CONCERT","PIANO_CONCERT","Piano Concert","Zongorahangverseny",10],
-  ["EVC-ARTIST-PERFORMANCE","ARTIST_PERFORMANCE","Artist Performance","Művészi előadás",20],
-  ["EVC-SALON-CONCERT","SALON_CONCERT","Salon Concert","Szalonkoncert",30],
-  ["EVC-MASTERCLASS","MASTERCLASS","Masterclass","Mesterkurzus",40],
-  ["EVC-CULTURAL-EVENT","CULTURAL_EVENT","Cultural Event","Kulturális esemény",50],
-  ["EVC-OTHER-MUSICAL","OTHER_MUSICAL_EVENT","Other Musical Event","Egyéb zenei esemény",60]
-];
-const insertCategory = db.prepare("INSERT OR IGNORE INTO event_categories(id,code,name_en,name_hu,sort_order) VALUES(?,?,?,?,?)");
-defaultCategories.forEach(row => insertCategory.run(...row));
 
 function migrateLegacyMasterData() {
   if (!tableExists("contacts") && !tableExists("_round1_legacy_pianos")) return;

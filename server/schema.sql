@@ -117,382 +117,6 @@ CREATE TABLE IF NOT EXISTS steinway_model_reference (
   size_display TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS event_categories (
-  id TEXT PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
-  name_en TEXT NOT NULL,
-  name_hu TEXT NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_by_user_id TEXT,
-  updated_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  id TEXT PRIMARY KEY,
-  event_key TEXT NOT NULL UNIQUE,
-  category_id TEXT NOT NULL,
-  custom_type TEXT,
-  access_type TEXT NOT NULL CHECK(access_type IN ('PUBLIC_PAID','PUBLIC_FREE','INVITE_ONLY','INTERNAL')),
-  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','RESCHEDULED','CANCELLED','COMPLETED','CLOSED')),
-  status_before_close TEXT,
-  slug_en TEXT NOT NULL UNIQUE,
-  slug_hu TEXT NOT NULL UNIQUE,
-  title_en TEXT NOT NULL,
-  title_hu TEXT NOT NULL,
-  short_description_en TEXT,
-  short_description_hu TEXT,
-  description_en TEXT,
-  description_hu TEXT,
-  artist_id TEXT,
-  performer_name TEXT,
-  hero_image_url TEXT,
-  hero_image_alt_en TEXT,
-  hero_image_alt_hu TEXT,
-  gallery_json TEXT DEFAULT '[]',
-  venue_name TEXT NOT NULL,
-  venue_street TEXT NOT NULL,
-  venue_city TEXT NOT NULL,
-  venue_region TEXT NOT NULL,
-  venue_postal_code TEXT NOT NULL,
-  venue_country TEXT NOT NULL DEFAULT 'US',
-  timezone TEXT NOT NULL DEFAULT 'America/New_York',
-  start_at TEXT NOT NULL,
-  end_at TEXT NOT NULL,
-  previous_start_at TEXT,
-  cancellation_reason TEXT,
-  cancelled_at TEXT,
-  cancelled_by_user_id TEXT,
-  capacity_total INTEGER NOT NULL CHECK(capacity_total > 0),
-  special_capacity_total INTEGER NOT NULL DEFAULT 0 CHECK(special_capacity_total >= 0),
-  special_capacity_unlimited INTEGER NOT NULL DEFAULT 1 CHECK(special_capacity_unlimited IN (0,1)),
-  price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
-  currency TEXT NOT NULL DEFAULT 'USD',
-  sales_start_at TEXT,
-  sales_end_at TEXT,
-  refund_policy_version TEXT NOT NULL DEFAULT 'KH-48H-V1',
-  published_at TEXT,
-  closed_at TEXT,
-  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
-  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
-  daily_rate_date TEXT,
-  closed_by_user_id TEXT,
-  closure_snapshot_json TEXT,
-  sold_out_at TEXT,
-  is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
-  relaunch_source_event_id TEXT,
-  created_by_user_id TEXT,
-  updated_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(category_id) REFERENCES event_categories(id),
-  FOREIGN KEY(artist_id) REFERENCES website_artists(id) ON DELETE SET NULL,
-  FOREIGN KEY(cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(relaunch_source_event_id) REFERENCES events(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_invitations (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  guest_name TEXT NOT NULL,
-  guest_email TEXT NOT NULL,
-  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','ACCEPTED','DECLINED','REVOKED')),
-  token_hash TEXT NOT NULL UNIQUE,
-  delivery_status TEXT NOT NULL DEFAULT 'PENDING',
-  provider_message_id TEXT,
-  sent_at TEXT,
-  accepted_at TEXT,
-  declined_at TEXT,
-  revoked_at TEXT,
-  created_by_user_id TEXT,
-  updated_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(event_id,guest_email),
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_tickets (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  invitation_id TEXT,
-  contact_id TEXT,
-  source_type TEXT NOT NULL CHECK(source_type IN ('INVITATION','COMPLIMENTARY','PURCHASE')),
-  ticket_variant TEXT NOT NULL DEFAULT 'PUBLIC_PAID',
-  buyer_name TEXT,
-  attendee_name TEXT NOT NULL,
-  original_guest_name TEXT,
-  salutation TEXT,
-  first_names TEXT,
-  surnames TEXT,
-  suffix TEXT,
-  contact_email TEXT NOT NULL,
-  public_code TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL DEFAULT 'VALID' CHECK(status IN ('VALID','USED','VOID','REFUNDED')),
-  price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
-  currency TEXT NOT NULL DEFAULT 'USD',
-  payment_method TEXT CHECK(payment_method IS NULL OR payment_method='' OR payment_method IN ('Credit Card','Bank Transfer / ACH','Zelle','Check','Payment Link','PayPal','Cash')),
-  payment_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED',
-  reservation_status TEXT NOT NULL DEFAULT 'FINALIZED',
-  on_site_deadline_at TEXT,
-  reserved_at TEXT,
-  paid_at TEXT,
-  finalized_at TEXT,
-  legacy_public_code TEXT,
-  document_front_path TEXT,
-  document_back_path TEXT,
-  document_full_path TEXT,
-  event_payment_id TEXT,
-  invoice_id TEXT,
-  ticket_sequence INTEGER,
-  checked_in_at TEXT,
-  checked_in_by_user_id TEXT,
-  voided_at TEXT,
-  voided_by_user_id TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(invitation_id),
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(invitation_id) REFERENCES event_invitations(id) ON DELETE SET NULL,
-  FOREIGN KEY(checked_in_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(voided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_ticket_documents (
-  id TEXT PRIMARY KEY,
-  ticket_id TEXT NOT NULL,
-  event_id TEXT NOT NULL,
-  document_type TEXT NOT NULL CHECK(document_type IN ('FRONT','BACK','FULL')),
-  stored_path TEXT NOT NULL,
-  generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  generated_by_user_id TEXT,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(generated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE(ticket_id,document_type)
-);
-
-CREATE TABLE IF NOT EXISTS event_checkins (
-  id TEXT PRIMARY KEY,
-  event_id TEXT,
-  ticket_id TEXT,
-  result TEXT NOT NULL CHECK(result IN ('ACCEPTED','ALREADY_USED','INVALID','VOID','REVERTED')),
-  token_fingerprint TEXT,
-  performed_by_user_id TEXT,
-  details TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
-  FOREIGN KEY(performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_refund_requests (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  ticket_id TEXT NOT NULL,
-  requester_name TEXT,
-  requester_email TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK(status IN ('REQUESTED','APPROVED','REJECTED','PROCESSED')),
-  eligibility_code TEXT NOT NULL,
-  eligible INTEGER NOT NULL CHECK(eligible IN (0,1)),
-  resolution_note TEXT,
-  review_note TEXT,
-  reviewed_at TEXT,
-  approved_at TEXT,
-  executed_at TEXT,
-  execution_status TEXT NOT NULL DEFAULT 'NOT_STARTED',
-  no_show INTEGER NOT NULL DEFAULT 0 CHECK(no_show IN (0,1)),
-  requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  resolved_at TEXT,
-  resolved_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
-  FOREIGN KEY(resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_checkout_holds (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  quantity INTEGER NOT NULL CHECK(quantity > 0),
-  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','PAID','EXPIRED','CANCELLED','FAILED','REFUNDED')),
-  expires_at TEXT NOT NULL,
-  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  attendee_names_json TEXT NOT NULL DEFAULT '[]',
-  purchaser_name TEXT,
-  purchaser_email TEXT,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  amount_total INTEGER NOT NULL DEFAULT 0 CHECK(amount_total >= 0),
-  stripe_checkout_session_id TEXT UNIQUE,
-  stripe_payment_intent_id TEXT,
-  failure_code TEXT,
-  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS event_payments (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  hold_id TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL CHECK(status IN ('PAID','REFUND_PENDING','REFUNDED','REFUND_FAILED')),
-  purchaser_name TEXT NOT NULL,
-  purchaser_email TEXT NOT NULL,
-  quantity INTEGER NOT NULL CHECK(quantity > 0),
-  amount_total INTEGER NOT NULL CHECK(amount_total >= 0),
-  currency TEXT NOT NULL DEFAULT 'USD',
-  stripe_checkout_session_id TEXT NOT NULL UNIQUE,
-  stripe_payment_intent_id TEXT NOT NULL UNIQUE,
-  stripe_refund_id TEXT UNIQUE,
-  stripe_fee_cents INTEGER,
-  invoice_id TEXT,
-  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
-  paid_at TEXT,
-  refunded_at TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(hold_id) REFERENCES event_checkout_holds(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS stripe_webhook_events (
-  id TEXT PRIMARY KEY,
-  event_type TEXT NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('PROCESSING','PROCESSED','FAILED')),
-  failure_code TEXT,
-  test_mode INTEGER NOT NULL DEFAULT 1 CHECK(test_mode=1),
-  received_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  processed_at TEXT,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS event_closures (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL UNIQUE,
-  snapshot_json TEXT NOT NULL,
-  closed_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_attendance_sessions (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL UNIQUE,
-  mode TEXT CHECK(mode IN ('PAPER','DIGITAL')),
-  status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK(status IN ('NOT_STARTED','OPEN','CLOSED')),
-  started_at TEXT,
-  started_by_user_id TEXT,
-  closed_at TEXT,
-  daily_rate_enabled INTEGER NOT NULL DEFAULT 0 CHECK(daily_rate_enabled IN (0,1)),
-  daily_rate_allocated_amount REAL NOT NULL DEFAULT 0 CHECK(daily_rate_allocated_amount >= 0),
-  daily_rate_date TEXT,
-  closed_by_user_id TEXT,
-  reopened_at TEXT,
-  reopened_by_user_id TEXT,
-  paused_at TEXT,
-  paused_by_user_id TEXT,
-  resumed_at TEXT,
-  resumed_by_user_id TEXT,
-  revision INTEGER NOT NULL DEFAULT 0,
-  export_version INTEGER NOT NULL DEFAULT 0,
-  last_status_change_at TEXT,
-  last_pdf_export_at TEXT,
-  snapshot_json TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(started_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-  ,FOREIGN KEY(paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-  ,FOREIGN KEY(resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_attendance_entries (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  ticket_id TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL DEFAULT 'NOT_ARRIVED' CHECK(status IN ('NOT_ARRIVED','PRESENT','DELETED')),
-  checked_in_at TEXT,
-  checked_in_by_user_id TEXT,
-  deleted_at TEXT,
-  deleted_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE CASCADE,
-  FOREIGN KEY(checked_in_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY(deleted_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_attendance_actions (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  session_id TEXT,
-  ticket_id TEXT,
-  action TEXT NOT NULL,
-  from_mode TEXT,
-  to_mode TEXT,
-  from_status TEXT,
-  to_status TEXT,
-  performed_by_user_id TEXT,
-  details TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(session_id) REFERENCES event_attendance_sessions(id) ON DELETE SET NULL,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
-  FOREIGN KEY(performed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_attendance_exports (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  session_id TEXT,
-  export_type TEXT NOT NULL CHECK(export_type IN ('PAPER','DIGITAL')),
-  export_version INTEGER NOT NULL,
-  snapshot_json TEXT NOT NULL,
-  exported_by_user_id TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(session_id) REFERENCES event_attendance_sessions(id) ON DELETE SET NULL,
-  FOREIGN KEY(exported_by_user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS event_repeat_requests (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  email_normalized TEXT NOT NULL,
-  device_hash TEXT NOT NULL,
-  language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  notify_event INTEGER NOT NULL DEFAULT 1 CHECK(notify_event IN (0,1)),
-  marketing_consent INTEGER NOT NULL DEFAULT 0 CHECK(marketing_consent IN (0,1)),
-  source_path TEXT,
-  notified_at TEXT,
-  notification_event_id TEXT,
-  delivery_status TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(event_id,email_normalized),
-  UNIQUE(event_id,device_hash),
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-  FOREIGN KEY(notification_event_id) REFERENCES events(id) ON DELETE SET NULL
-);
-
 CREATE TABLE IF NOT EXISTS customer_conversations (
   id TEXT PRIMARY KEY,
   public_token_hash TEXT NOT NULL UNIQUE,
@@ -502,11 +126,9 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   email TEXT,
   client_id INTEGER,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','EVENT','REFUND','PRIVATE_CONSULTATION','TECHNICAL','TICKET','BILLING','REPAIR','GENERAL','OTHER')),
+  category TEXT NOT NULL CHECK(category IN ('SERVICE','PIANO','REFUND','PRIVATE_CONSULTATION','TECHNICAL','BILLING','REPAIR','GENERAL','OTHER')),
   service_id TEXT,
   piano_id TEXT,
-  event_id TEXT,
-  ticket_id TEXT,
   status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','PENDING_CUSTOMER','PENDING_STAFF','CLOSED')),
   assigned_user_id TEXT,
   assigned_role TEXT,
@@ -530,8 +152,6 @@ CREATE TABLE IF NOT EXISTS customer_conversations (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(service_id) REFERENCES website_services(id) ON DELETE SET NULL,
   FOREIGN KEY(piano_id) REFERENCES website_showroom_pianos(id) ON DELETE SET NULL,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
-  FOREIGN KEY(ticket_id) REFERENCES event_tickets(id) ON DELETE SET NULL,
   FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
   FOREIGN KEY(assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(reopened_by_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -729,7 +349,6 @@ CREATE TABLE IF NOT EXISTS website_reviews (
   portrait_url TEXT NOT NULL,
   portrait_alt_en TEXT,
   portrait_alt_hu TEXT,
-  linked_event_id TEXT,
   visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
   is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
@@ -737,7 +356,6 @@ CREATE TABLE IF NOT EXISTS website_reviews (
   updated_by_user_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(linked_event_id) REFERENCES events(id) ON DELETE SET NULL,
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -846,7 +464,7 @@ CREATE TABLE IF NOT EXISTS website_media (
 
 CREATE TABLE IF NOT EXISTS website_contact_leads (
   id TEXT PRIMARY KEY,
-  lead_type TEXT NOT NULL DEFAULT 'SERVICE_CALLBACK' CHECK(lead_type IN ('SERVICE_CALLBACK','PRIVATE_CONSULTATION','GENERAL_CONTACT','EVENT_INTEREST')),
+  lead_type TEXT NOT NULL DEFAULT 'SERVICE_CALLBACK' CHECK(lead_type IN ('SERVICE_CALLBACK','PRIVATE_CONSULTATION','GENERAL_CONTACT')),
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT,
@@ -1148,12 +766,10 @@ CREATE TABLE IF NOT EXISTS website_tracking_events (
   anonymous_session_hash TEXT NOT NULL,
   source_path TEXT,
   language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','hu')),
-  event_id TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
   analytics_consent INTEGER NOT NULL DEFAULT 0 CHECK(analytics_consent IN (0,1)),
   marketing_consent INTEGER NOT NULL DEFAULT 0 CHECK(marketing_consent IN (0,1)),
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -1937,9 +1553,6 @@ CREATE INDEX IF NOT EXISTS idx_intake_assessment_email_log_intake ON intake_asse
 
 -- Preserved website/event indexes plus explicit public read-path indexes.
 CREATE INDEX IF NOT EXISTS idx_audit_type_time ON audit_log(audit_type,event_time DESC);
-CREATE INDEX IF NOT EXISTS idx_events_public_round1 ON events(status,start_at,published_at);
-CREATE INDEX IF NOT EXISTS idx_event_tickets_round1 ON event_tickets(event_id,status,created_at);
-CREATE INDEX IF NOT EXISTS idx_event_invitations_round1 ON event_invitations(event_id,status,created_at);
 CREATE INDEX IF NOT EXISTS idx_customer_messages_round1 ON customer_messages(conversation_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_customer_attachments_round1 ON customer_message_attachments(conversation_id,message_id);
 CREATE INDEX IF NOT EXISTS idx_website_content_versions_round1 ON website_content_versions(page_key,language,version DESC);

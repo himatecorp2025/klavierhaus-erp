@@ -29,7 +29,6 @@ function tableRows(db,table){return tableExists(db,table)?db.prepare(`SELECT * F
 function currentColumns(db,table){return tableExists(db,table)?db.prepare(`PRAGMA table_info("${table}")`).all().map(row=>row.name):[];}
 function snapshotLinks(db){
   const specs=[
-    ["events",["id","artist_id"]],
     ["customer_conversations",["id","service_id","piano_id"]],
     ["website_contact_leads",["id","service_id"]],
     ["private_appointments",["id","service_id","piano_id"]],

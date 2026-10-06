@@ -1,7 +1,6 @@
 const { Resend } = require("resend");
 
 const DEFAULT_FROM = "Klavierhaus Accounts <accounts@klavierhaus.com>";
-const DEFAULT_EVENT_FROM = "Klavierhaus Events <events@klavierhaus.com>";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -39,92 +38,11 @@ function buildActivationEmail({ name, code, appBaseUrl = "" }) {
   return { subject, text, html };
 }
 
-function eventDate(value, locale) {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: "America/New_York",
-    dateStyle: "long",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
 
-function buildEventInvitationEmail({ name, event, invitationUrl }) {
-  const safeName = escapeHtml(name || "Guest");
-  const safeTitleEn = escapeHtml(event.title_en || "Klavierhaus event");
-  const safeTitleHu = escapeHtml(event.title_hu || event.title_en || "Klavierhaus esemény");
-  const safeVenue = escapeHtml(event.venue_name || "Klavierhaus");
-  const safeUrl = escapeHtml(invitationUrl);
-  const dateEn = eventDate(event.start_at, "en-US");
-  const dateHu = eventDate(event.start_at, "hu-HU");
-  const subject = `Private invitation: ${event.title_en || "Klavierhaus event"} / Személyes meghívás`;
-  const text = [
-    `Hello ${name || "Guest"},`,
-    `Klavierhaus invites you to ${event.title_en || "a private event"}.`,
-    `${dateEn} · ${event.venue_name || "Klavierhaus"}`,
-    `Accept or decline: ${invitationUrl}`,
-    "Your invitation reserves a place only after you accept it and while capacity remains.",
-    "",
-    `Kedves ${name || "Vendég"}!`,
-    `A Klavierhaus szeretettel meghívja a következő eseményre: ${event.title_hu || event.title_en || "Klavierhaus esemény"}.`,
-    `${dateHu} · ${event.venue_name || "Klavierhaus"}`,
-    `Elfogadás vagy visszautasítás: ${invitationUrl}`,
-    "A meghívás csak az elfogadás után és a szabad férőhelyek erejéig foglal helyet."
-  ].join("\n");
-  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="margin:0 0 12px;color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:30px">${safeTitleEn}</h1><p>Hello ${safeName},</p><p>Klavierhaus is pleased to extend a private invitation.</p><p style="color:#d9d1c1"><strong>${escapeHtml(dateEn)}</strong><br>${safeVenue}</p><p style="margin:26px 0"><a href="${safeUrl}" style="display:inline-block;padding:13px 22px;border-radius:999px;background:#c9a45d;color:#080807;text-decoration:none;font-weight:700">Respond to invitation / Válasz a meghívásra</a></p><p style="color:#aaa08f">A place is reserved only after acceptance and while capacity remains.</p><hr style="margin:30px 0;border:0;border-top:1px solid #3b3428"><h2 style="font-family:Georgia,serif">${safeTitleHu}</h2><p>Kedves ${safeName}!</p><p>A Klavierhaus szeretettel meghívja erre a különleges eseményre.</p><p style="color:#d9d1c1"><strong>${escapeHtml(dateHu)}</strong><br>${safeVenue}</p><p style="color:#aaa08f">A meghívás csak elfogadás után és a szabad férőhelyek erejéig foglal helyet.</p></div></div></body></html>`;
-  return { subject, text, html };
-}
 
-function buildEventInterestEmail({ event, language = "en", websiteBaseUrl = "" }) {
-  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
-  const subject = language === "hu" ? `Érdeklődés rögzítve: ${title}` : `Interest recorded: ${title}`;
-  const url = `${String(websiteBaseUrl || "").replace(/\/$/, "")}${language === "hu" ? `/hu/esemenyek/${event.slug_hu}` : `/events/${event.slug_en}`}`;
-  const text = language === "hu"
-    ? `Köszönjük érdeklődését a(z) ${title} esemény iránt. Értesítjük, ha új alkalmat hirdetünk meg.\n${url}`
-    : `Thank you for your interest in ${title}. We will notify you if a new edition is announced.\n${url}`;
-  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">${escapeHtml(title)}</h1><p>${escapeHtml(text.split("\n")[0])}</p><p><a href="${escapeHtml(url)}" style="color:#d7b66b">${escapeHtml(language === "hu" ? "Esemény megtekintése" : "View event")}</a></p></div></div></body></html>`;
-  return { subject, text, html };
-}
 
-function buildEventReturnAnnouncement({ event, language = "en", websiteBaseUrl = "" }) {
-  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
-  const url = `${String(websiteBaseUrl || "").replace(/\/$/, "")}${language === "hu" ? `/hu/esemenyek/${event.slug_hu}` : `/events/${event.slug_en}`}`;
-  const when = eventDate(event.start_at, language === "hu" ? "hu-HU" : "en-US");
-  const subject = language === "hu" ? `Új időpont: ${title}` : `A new date is available: ${title}`;
-  const lead = language === "hu" ? "Az Ön érdeklődése alapján értesítjük, hogy az eseményt ismét meghirdettük." : "You asked to be informed, and this Klavierhaus event is now available again.";
-  const action = language === "hu" ? "Esemény és jegyek" : "Event and tickets";
-  const text = `${lead}\n${title}\n${when}\n${url}`;
-  const html = `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">${escapeHtml(title)}</h1><p>${escapeHtml(lead)}</p><p><strong>${escapeHtml(when)}</strong></p><p><a href="${escapeHtml(url)}" style="display:inline-block;padding:13px 22px;border-radius:999px;background:#c9a45d;color:#080807;text-decoration:none;font-weight:700">${escapeHtml(action)}</a></p></div></div></body></html>`;
-  return { subject, text, html };
-}
 
-function buildEventPurchaseEmail({ purchaserName, event, payment, invoiceNumber, company, websiteBaseUrl = "" }) {
-  const titleEn = event.title_en || "Klavierhaus event";
-  const titleHu = event.title_hu || titleEn;
-  const amount = `${String(payment.currency || "USD").toUpperCase()} ${(Number(payment.amount_total || 0) / 100).toFixed(2)}`;
-  const safeName = escapeHtml(purchaserName || "Guest");
-  const safeTitle = escapeHtml(titleEn);
-  const safeTitleHu = escapeHtml(titleHu);
-  const safeInvoice = escapeHtml(invoiceNumber);
-  const eventUrl = `${String(websiteBaseUrl || "").replace(/\/$/, "")}/events/${encodeURIComponent(event.slug_en || "")}`;
-  return {
-    subject: `Klavierhaus ticket confirmation · ${titleEn}`,
-    text: [`Hello ${purchaserName || "Guest"},`, `Thank you for your purchase for ${titleEn}.`, `Invoice: ${invoiceNumber}`, `Amount paid: ${amount}`, `Your ticket PDF is attached.`, eventUrl, "", `Kedves ${purchaserName || "Vendég"}!`, `Köszönjük a vásárlást: ${titleHu}.`, `Számla: ${invoiceNumber}`, `A jegyeket PDF-mellékletben küldjük.`].join("\n"),
-    html: `<!doctype html><html><body style="margin:0;background:#080807;color:#f7f3e8;font-family:Arial,sans-serif"><div style="max-width:640px;margin:0 auto;padding:34px 18px"><div style="border:1px solid #9d7a35;border-radius:18px;padding:32px;background:#11110f"><p style="color:#c9a45d;letter-spacing:.18em;text-transform:uppercase">Klavierhaus · New York</p><h1 style="font-family:Georgia,serif">Thank you, ${safeName}</h1><p>Your place for <strong>${safeTitle}</strong> is recorded. The ticket PDF and invoice are attached.</p><p style="color:#d9d1c1"><strong>${safeInvoice}</strong> · ${escapeHtml(amount)}</p><p><a href="${escapeHtml(eventUrl)}" style="color:#d7b66b">View event</a></p><hr style="margin:30px 0;border:0;border-top:1px solid #3b3428"><h2 style="font-family:Georgia,serif">${safeTitleHu}</h2><p>Köszönjük a vásárlást. A PDF-jegyet és a bizonylatot mellékletben találja.</p></div></div></body></html>`
-  };
-}
 
-function buildInvoiceEmail({ purchaserName, event, invoiceNumber, payment }) {
-  const name = purchaserName || "Guest";
-  const title = event?.title_en || event?.title_hu || "Klavierhaus event";
-  const amount = `${String(payment?.currency || "USD").toUpperCase()} ${(Number(payment?.amount_total || 0) / 100).toFixed(2)}`;
-  const safeName = escapeHtml(name);
-  const safeTitle = escapeHtml(title);
-  const safeInvoice = escapeHtml(invoiceNumber || "");
-  return {
-    subject: `Klavierhaus invoice · ${invoiceNumber || ""}`,
-    text: `Hello ${name},\n\nAttached is your Klavierhaus invoice for ${title}.\nInvoice: ${invoiceNumber || ""}\nAmount: ${amount}\n\nKedves ${name}!\nMellékelten küldjük a Klavierhaus számlát: ${invoiceNumber || ""}.`,
-    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><h1>${safeTitle}</h1><p>Hello ${safeName}, your invoice is attached.</p><p>Kedves ${safeName}! Mellékelten küldjük a Klavierhaus számlát.</p><p><strong>${safeInvoice}</strong> · ${escapeHtml(amount)}</p></div>`
-  };
-}
 
 function buildWorkshopInvoiceEmail({ clientName, piano, workSummary, invoiceNumber, totalAmount, paymentUrl = "", language = "en" }) {
   const hu=language==="hu";
@@ -220,14 +138,6 @@ function buildPaymentReceiptEmail({clientName,invoiceNumber,amount,paymentMethod
   return {subject,text,html};
 }
 
-function buildTicketDocumentsEmail({ name, event, language = "en" }) {
-  const title = language === "hu" ? (event.title_hu || event.title_en) : event.title_en;
-  return {
-    subject: language === "hu" ? `Klavierhaus jegyek · ${title}` : `Klavierhaus tickets · ${title}`,
-    text: language === "hu" ? `Kedves ${name || "Vendég"}! A ${title} eseményhez tartozó PDF-jegyet mellékletben küldjük.` : `Hello ${name || "Guest"}, your PDF ticket for ${title} is attached.`,
-    html: `<div style="font-family:Arial,sans-serif;background:#080807;color:#f7f3e8;padding:32px"><p style="color:#c9a45d;letter-spacing:.16em">KLAVIERHAUS</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(language === "hu" ? "A PDF-jegyet mellékletben küldjük." : "Your PDF ticket is attached.")}</p></div>`
-  };
-}
 
 function buildConversationReplyEmail({ name, message, conversationUrl, language = "en" }) {
   const lead = language === "hu" ? `A Klavierhaus csapata válaszolt a megkeresésére, ${name || "Ügyfelünk"}.` : `The Klavierhaus team replied to your enquiry, ${name || "our guest"}.`;
@@ -289,16 +199,14 @@ function safeProviderCode(error) {
 function createTransactionalEmail(env = process.env) {
   let apiKey = String(env.RESEND_API_KEY || "").trim();
   let from = String(env.EMAIL_FROM || DEFAULT_FROM).trim();
-  let eventFrom = String(env.EVENT_EMAIL_FROM || DEFAULT_EVENT_FROM).trim();
   let replyTo = String(env.EMAIL_REPLY_TO || "").trim();
   const appBaseUrl = String(env.APP_BASE_URL || "").trim();
   const webhookSecret = String(env.RESEND_WEBHOOK_SECRET || "").trim();
   let resend = new Resend(apiKey || "re_webhook_verification_only");
   let integrationEnabled = true;
-  function reconfigure({ apiKey: nextApiKey, from: nextFrom, eventFrom: nextEventFrom, replyTo: nextReplyTo, enabled = true } = {}) {
+  function reconfigure({ apiKey: nextApiKey, from: nextFrom, replyTo: nextReplyTo, enabled = true } = {}) {
     if (nextApiKey !== undefined) apiKey = String(nextApiKey || "").trim();
     if (nextFrom !== undefined) from = String(nextFrom || DEFAULT_FROM).trim();
-    if (nextEventFrom !== undefined) eventFrom = String(nextEventFrom || DEFAULT_EVENT_FROM).trim();
     if (nextReplyTo !== undefined) replyTo = String(nextReplyTo || "").trim();
     integrationEnabled = Boolean(enabled);
     resend = new Resend(apiKey || "re_webhook_verification_only");
@@ -333,78 +241,6 @@ function createTransactionalEmail(env = process.env) {
         deliveryError.code = safeProviderCode(error);
         throw deliveryError;
       }
-      return { providerMessageId: String(data.id) };
-    },
-    async sendEventInvitation({ to, name, event, invitationUrl, idempotencyKey }) {
-      assertEnabled();
-      if (!apiKey || !eventFrom) {
-        const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
-        error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
-        throw error;
-      }
-      const content = buildEventInvitationEmail({ name, event, invitationUrl });
-      const { data, error } = await resend.emails.send({
-        from: eventFrom,
-        to: [String(to || "").trim().toLowerCase()],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-        ...(replyTo ? { replyTo } : {}),
-        tags: [{ name: "category", value: "event_invitation" }]
-      }, { idempotencyKey });
-      if (error || !data?.id) {
-        const deliveryError = new Error("EMAIL_DELIVERY_FAILED");
-        deliveryError.code = safeProviderCode(error);
-        throw deliveryError;
-      }
-      return { providerMessageId: String(data.id) };
-    },
-    async sendEventInterestConfirmation({ to, event, language, websiteBaseUrl, idempotencyKey }) {
-      assertEnabled();
-      if (!apiKey || !eventFrom) {
-        const error = new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
-        error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
-        throw error;
-      }
-      const content = buildEventInterestEmail({ event, language, websiteBaseUrl });
-      const { data, error } = await resend.emails.send({
-        from: eventFrom,
-        to: [String(to || "").trim().toLowerCase()],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-        ...(replyTo ? { replyTo } : {}),
-        tags: [{ name: "category", value: "event_interest" }]
-      }, { idempotencyKey });
-      if (error || !data?.id) {
-        const deliveryError = new Error("EMAIL_DELIVERY_FAILED");
-        deliveryError.code = safeProviderCode(error);
-        throw deliveryError;
-      }
-      return { providerMessageId: String(data.id) };
-    },
-    async sendEventReturnAnnouncement({ to, event, language, websiteBaseUrl, idempotencyKey }) {
-      assertEnabled();
-      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      const content = buildEventReturnAnnouncement({ event, language, websiteBaseUrl });
-      const { data, error } = await resend.emails.send({ from: eventFrom, to: [String(to || "").trim().toLowerCase()], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), tags: [{ name: "category", value: "event_return" }] }, { idempotencyKey });
-      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
-      return { providerMessageId: String(data.id) };
-    },
-    async sendEventPurchaseConfirmation({ to, purchaserName, event, payment, invoiceNumber, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey }) {
-      assertEnabled();
-      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      const content = buildEventPurchaseEmail({ purchaserName, event, payment, invoiceNumber, company, websiteBaseUrl });
-      const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }, { filename: `klavierhaus-invoice-${invoiceNumber}.pdf`, content: invoicePdf }], tags: [{ name: "category", value: "event_purchase" }] }, { idempotencyKey });
-      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
-      return { providerMessageId: String(data.id) };
-    },
-    async sendEventTicketDocuments({ to, event, tickets, ticketPdf, language, idempotencyKey }) {
-      assertEnabled();
-      if (!apiKey || !eventFrom) throw Object.assign(new Error("EMAIL_DELIVERY_NOT_CONFIGURED"), { code: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      const content = buildTicketDocumentsEmail({ name: tickets?.[0]?.buyer_name || tickets?.[0]?.attendee_name, event, language });
-      const { data, error } = await resend.emails.send({ from: eventFrom, to: [normalizeRecipient(to)], subject: content.subject, html: content.html, text: content.text, ...(replyTo ? { replyTo } : {}), attachments: [{ filename: "klavierhaus-tickets.pdf", content: ticketPdf }], tags: [{ name: "category", value: "event_ticket" }] }, { idempotencyKey });
-      if (error || !data?.id) throw Object.assign(new Error("EMAIL_DELIVERY_FAILED"), { code: safeProviderCode(error) });
       return { providerMessageId: String(data.id) };
     },
     async sendCustomerConversationReply({ to, name, message, conversationUrl, language, idempotencyKey }) {
@@ -511,4 +347,4 @@ function createTransactionalEmail(env = process.env) {
 
 function normalizeRecipient(value) { return String(value || "").trim().toLowerCase(); }
 
-module.exports = { buildActivationEmail, buildEventInvitationEmail, buildEventInterestEmail, buildEventReturnAnnouncement, buildEventPurchaseEmail, buildInvoiceEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildPaymentReceiptEmail, buildTicketDocumentsEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, buildPrivateAppointmentDecisionEmail, createTransactionalEmail };
+module.exports = { buildActivationEmail, buildWorkshopInvoiceEmail, buildIntakeAssessmentEmail, buildCustomerMilestoneEmail, buildPaymentReceiptEmail, buildConversationReplyEmail, buildConversationAutoReplyEmail, buildPrivateAppointmentDecisionEmail, createTransactionalEmail };

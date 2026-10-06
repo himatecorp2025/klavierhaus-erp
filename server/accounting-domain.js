@@ -6,9 +6,7 @@ const INVOICE_DERIVED_SOURCE_TYPES = new Set([
   "TECHNICIAN_EXTRA_COMPENSATION",
   "MANUAL_INVOICE",
   "WORKFLOW_INVOICE_REVENUE",
-  "WORKFLOW_INVOICE_MATERIAL",
-  "event_payment_refund",
-  "event_manual_ticket_refund"
+  "WORKFLOW_INVOICE_MATERIAL"
 ]);
 
 const CASH_ASSET_CATEGORIES = new Set(["CASH", "BANK", "CHECKS"]);
@@ -114,13 +112,6 @@ function invoiceTotal(row) {
   return Number.isFinite(total) ? roundMoney(total) : roundMoney(invoiceSubtotal(row) + invoiceTax(row));
 }
 
-function eventRevenueRecognizedAt(row, cutoffExclusive = null) {
-  if (String(row?.source_type || "").toLowerCase() !== "event") return true;
-  if (String(row?.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") return false;
-  if (!cutoffExclusive) return true;
-  const date = String(row?.revenue_recognition_date || "");
-  return !date || date < String(cutoffExclusive);
-}
 
 function accountingCreditMemos(rows) {
   return (rows || []).filter((row) => Number(row?.accounting_effect ?? 1) === 1 && String(row?.memo_type || "").toUpperCase() !== "VOID_REVERSAL" && String(row?.invoice_status || "").toLowerCase() !== "void");
@@ -250,7 +241,7 @@ function buildAccountingSnapshot({
   const asOfMemos = accountingCreditMemos(asOfCreditMemos);
 
   const grossInvoiceRevenue = sumMoney(monthActiveInvoices
-    .filter((row) => row.direction === "receivable" && eventRevenueRecognizedAt(row))
+    .filter((row) => row.direction === "receivable")
     .map(invoiceSubtotal));
   const contraRevenue = sumMoney(monthMemos.filter((row) => memoRevenueEffectiveAt(row)).map(creditMemoSubtotal));
   const invoiceRevenue = roundMoney(grossInvoiceRevenue - contraRevenue);
@@ -277,18 +268,11 @@ function buildAccountingSnapshot({
 
   const salesTaxGross = sumMoney(asOfActiveInvoices.filter((row) => row.direction === "receivable").map(invoiceTax));
   const refundedSalesTax = sumMoney(asOfMemos.map(creditMemoTax));
-  const deferredRevenueGross = sumMoney(asOfActiveInvoices
-    .filter((row) => row.direction === "receivable" && String(row.source_type || "").toLowerCase() === "event" && !eventRevenueRecognizedAt(row, asOfDateExclusive))
-    .map(invoiceSubtotal));
-  const deferredRevenueCredits = sumMoney(asOfMemos
-    .filter((memo) => {
-      const invoice = invoiceById.get(String(memo.invoice_id || ""));
-      return invoice && String(invoice.source_type || "").toLowerCase() === "event" && !eventRevenueRecognizedAt(invoice, asOfDateExclusive);
-    })
-    .map(creditMemoSubtotal));
+  const deferredRevenueGross = 0;
+  const deferredRevenueCredits = 0;
 
   const recognizedCumulativeRevenue = sumMoney(asOfActiveInvoices
-    .filter((row) => row.direction === "receivable" && eventRevenueRecognizedAt(row, asOfDateExclusive))
+    .filter((row) => row.direction === "receivable")
     .map(invoiceSubtotal));
   const cumulativeContraRevenue = sumMoney(asOfMemos.filter((row) => memoRevenueEffectiveAt(row, asOfDateExclusive)).map(creditMemoSubtotal));
   const cumulativeInvoiceExpenses = sumMoney(asOfActiveInvoices.filter((row) => row.direction === "payable").map(invoiceTotal));

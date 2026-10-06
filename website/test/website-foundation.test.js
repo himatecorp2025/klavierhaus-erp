@@ -28,7 +28,7 @@ test("health endpoint identifies stage-one public website", async () => {
       version: "1.2.4",
       commit: "unknown",
       indexing: "disabled",
-      event_api: "not-configured"
+      erp_api: "not-configured"
     });
   });
 });
@@ -89,9 +89,9 @@ test("language and trailing-slash normalization use permanent redirects without 
     assert.equal(languageRedirect.status, 308);
     assert.equal(languageRedirect.headers.get("location"), "/hu/");
 
-    const routeRedirect = await fetch(`${origin}/events/`, { redirect: "manual" });
+    const routeRedirect = await fetch(`${origin}/artists/`, { redirect: "manual" });
     assert.equal(routeRedirect.status, 308);
-    assert.equal(routeRedirect.headers.get("location"), "/events");
+    assert.equal(routeRedirect.headers.get("location"), "/artists");
 
     const canonical = await fetch(`${origin}/hu/`);
     assert.equal(canonical.status, 200);
@@ -100,7 +100,7 @@ test("language and trailing-slash normalization use permanent redirects without 
 
 test("temporary Render deployment is protected from indexing", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
-    const page = await fetch(`${origin}/events`);
+    const page = await fetch(`${origin}/artists`);
     assert.equal(page.headers.get("x-robots-tag"), "noindex, nofollow, noarchive");
     assert.match(await page.text(), /<meta name="robots" content="noindex, nofollow, noarchive">/);
 
@@ -118,8 +118,20 @@ test("indexing mode exposes a sitemap containing both language routes", async ()
     const body = await response.text();
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /application\/xml/);
-    assert.match(body, /https:\/\/klavierhaus\.com\/events/);
-    assert.match(body, /https:\/\/klavierhaus\.com\/hu\/esemenyek/);
+    assert.match(body, /https:\/\/klavierhaus\.com\/artists/);
+    assert.match(body, /https:\/\/klavierhaus\.com\/hu\/muveszek/);
+    assert.doesNotMatch(body, /\/events|\/hu\/esemenyek/);
+  });
+});
+
+test("retired event and ticket URLs are not routable or indexed", async () => {
+  await withServer({ baseUrl: "https://klavierhaus.com", allowIndexing: true }, async (origin) => {
+    for (const route of ["/events", "/hu/esemenyek", "/events/klavierhaus-salon", "/ticket-terms", "/invitation/legacy-token"]) {
+      const response = await fetch(`${origin}${route}`, { redirect: "manual" });
+      assert.equal(response.status, 404, route);
+    }
+    const sitemap = await (await fetch(`${origin}/sitemap.xml`)).text();
+    assert.doesNotMatch(sitemap, /\/events|\/hu\/esemenyek|ticket-terms|invitation/);
   });
 });
 

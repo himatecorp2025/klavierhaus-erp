@@ -16,7 +16,7 @@ function migrateWorkflowExperience(db) {
     add('wf2_costs', 'note', "TEXT NOT NULL DEFAULT ''");
     add('invoices', 'document_status', "TEXT NOT NULL DEFAULT 'NOT_REQUIRED' CHECK(document_status IN('NOT_REQUIRED','MISSING','ATTACHED','GENERATED'))");
     add('invoices', 'workflow_outcome', "TEXT NOT NULL DEFAULT ''");
-    for (const table of ['jobs', 'event_payments', 'event_tickets']) add(table, 'finance_reset', 'INTEGER NOT NULL DEFAULT 0 CHECK(finance_reset IN(0,1))');
+    for (const table of ['jobs']) add(table, 'finance_reset', 'INTEGER NOT NULL DEFAULT 0 CHECK(finance_reset IN(0,1))');
     db.exec(`CREATE TABLE IF NOT EXISTS wf_card_events (
       id TEXT PRIMARY KEY, card_type TEXT NOT NULL CHECK(card_type IN('WORKFLOW','PHASE','CALENDAR_JOB')),
       card_id TEXT NOT NULL, workflow_id TEXT, title TEXT NOT NULL, old_status TEXT NOT NULL, new_status TEXT NOT NULL,

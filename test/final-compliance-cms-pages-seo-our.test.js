@@ -41,7 +41,7 @@ test("CMS exposes clear page hierarchy, Our page, unified legal content and Chat
   assert.match(publicRenderer,/data-chat-logo/);
   assert.match(publicRenderer,/legal-document/);
   assert.match(publicRenderer,/res\.redirect\(308,"\/our"\)/);
-  assert.match(publicRenderer,/res\.redirect\(308,"\/privacy#terms-and-conditions"\)/);
+  assert.doesNotMatch(publicRenderer,/ticket-terms|jegyvasarlasi-feltetelek|privacy#terms-and-conditions/);
 });
 
 test("CMS Pages renders every public page section as its own card instead of one Page Sections bucket",()=>{

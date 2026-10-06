@@ -1,6 +1,6 @@
 "use strict";
 
-const LANDING_SECTION_KEYS = Object.freeze(["hero", "featured_pianos", "craftsmanship", "salon_events", "testimonials", "contact_cta"]);
+const LANDING_SECTION_KEYS = Object.freeze(["hero", "featured_pianos", "craftsmanship", "testimonials", "contact_cta"]);
 const JOB_TIMEZONE = "America/New_York";
 
 function defaultLandingSections() {

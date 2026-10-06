@@ -34,23 +34,6 @@ function createBrandingUpload(uploadDir){
   });
 }
 
-function createEventImageUpload(uploadDir){
-  return multer({
-    storage:multer.diskStorage({
-      destination:(_req,_file,cb)=>cb(null,uploadDir),
-      filename:(_req,file,cb)=>{
-        const extension=imageExtension(file)||".jpg";
-        cb(null,`event-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`);
-      }
-    }),
-    limits:{fileSize:12*1024*1024,files:1},
-    fileFilter:(_req,file,cb)=>{
-      const ok=isSupportedImage(file);
-      cb(ok?null:new Error("INVALID_EVENT_IMAGE_TYPE"),ok);
-    }
-  });
-}
-
 function createWebsiteImageUpload(uploadDir){
   return multer({
     storage:multer.diskStorage({
@@ -208,7 +191,6 @@ function uploadErrorHandler(err,req,res,next){
 module.exports={
   createDocumentUpload,
   createBrandingUpload,
-  createEventImageUpload,
   createWebsiteImageUpload,
   createClientImportUpload,
   createPianoImportUpload,

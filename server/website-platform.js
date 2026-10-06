@@ -4,18 +4,18 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { inspectImageFile } = require("./upload-middleware");
-const { normalizeEventTimes, slugify } = require("./events");
+
 const { SAMPLE_VERSION_KEY } = require("./sample-content");
 const { createIntegrationCipher, saveIntegrationProvider, getIntegrationProvider, testIntegrationProvider } = require("./system-integrations");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PROVIDERS = new Set(["GA4", "SEARCH_CONSOLE", "GOOGLE_OAUTH", "CLARITY"]);
 const LEAD_STATUSES = new Set(["NEW", "CONTACTED", "IN_DISCUSSION", "APPOINTMENT_SCHEDULED", "CLOSED", "REJECTED"]);
-const SEO_PAGE_KEYS = Object.freeze(["home", "story", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "events", "salon", "mission", "contact", "privacy", "ticketTerms"]);
+const SEO_PAGE_KEYS = Object.freeze(["home", "story", "pianos", "steinway", "services", "restoration", "tuning", "concert", "artists", "mission", "contact", "privacy"]);
 const DEFAULT_SEO_SETTINGS = Object.freeze({
   enabled: true,
-  global_keywords_en: ["Klavierhaus", "piano restoration", "piano tuning", "concert piano services", "piano showroom New York", "Steinway pianos New York", "Fazioli pianos New York", "intimate classical music events"],
-  global_keywords_hu: ["Klavierhaus", "zongorafelújítás", "zongorahangolás", "koncertzongora szolgáltatás", "zongorabemutatóterem New York", "Steinway zongorák", "Fazioli zongorák", "bensőséges kulturális események"],
+  global_keywords_en: ["Klavierhaus", "piano restoration", "piano tuning", "concert piano services", "piano showroom New York", "Steinway pianos New York", "Fazioli pianos New York", "concert piano services New York"],
+  global_keywords_hu: ["Klavierhaus", "zongorafelújítás", "zongorahangolás", "koncertzongora szolgáltatás", "zongorabemutatóterem New York", "Steinway zongorák", "Fazioli zongorák", "koncertzongora szolgáltatás New York"],
   page_keywords_en: {},
   page_keywords_hu: {}
 });
@@ -81,6 +81,7 @@ function absoluteAsset(value, erpBaseUrl) {
   return src.startsWith("/uploads/") && erpBaseUrl ? `${erpBaseUrl}${src}` : src;
 }
 
+function slugify(value){return clean(value,300).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"item";}
 function uniqueSlug(db, table, column, value, excludeId = "") {
   const base = slugify(value);
   let result = base;
@@ -166,9 +167,7 @@ function registerWebsitePlatformRoutes(options) {
     const column = language === "hu" ? "slug_hu" : "slug_en";
     const row = db.prepare(`SELECT * FROM website_artists WHERE ${column}=? AND published=1`).get(req.params.slug);
     if (!row) return res.status(404).json({ error: "WEBSITE_ARTIST_NOT_FOUND" });
-    const events = db.prepare(`SELECT id,slug_en,slug_hu,title_en,title_hu,start_at,status FROM events
-      WHERE (artist_id=? OR (artist_id IS NULL AND performer_name=?)) AND published_at IS NOT NULL ORDER BY start_at`).all(row.id, row.name);
-    res.json({ ...localizedArtist(row, language, baseUrl), events: events.map((event) => ({ id: event.id, slug: event[`slug_${language}`], title: event[`title_${language}`], start_at: event.start_at, status: event.status })) });
+    res.json(localizedArtist(row, language, baseUrl));
   });
 
   app.get("/api/website-artists", auth, admin, (_req, res) => res.json(db.prepare("SELECT * FROM website_artists ORDER BY sort_order,created_at").all()));
@@ -327,93 +326,14 @@ function registerWebsitePlatformRoutes(options) {
     return crypto.createHmac("sha256", deviceSecret).update(`repeat:${nonce}`).digest("hex");
   }
 
-  app.post("/api/public/events/:eventId/repeat-interest", async (req, res) => {
-    const event = db.prepare("SELECT id,status,end_at,sold_out_at,title_en,title_hu,slug_en,slug_hu FROM events WHERE id=? AND published_at IS NOT NULL").get(req.params.eventId);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    if (!event.sold_out_at && new Date(event.end_at).getTime() > Date.now() && !["COMPLETED", "CLOSED"].includes(event.status)) return res.status(409).json({ error: "EVENT_INTEREST_NOT_AVAILABLE" });
-    const email = clean(req.body?.email, 320).toLowerCase(); const hash = deviceHash(req.body?.device_token);
-    if (!EMAIL_PATTERN.test(email) || !hash || !flag(req.body?.notify_event)) return res.status(400).json({ error: "VALID_EMAIL_DEVICE_AND_CONSENT_REQUIRED" });
-    if (rateLimited(`repeat:${hash}`, 5, 60 * 60 * 1000)) return res.status(429).json({ error: "TOO_MANY_REQUESTS" });
-    try {
-      const row = { id: identifier("EREQ"), event_id: event.id, email_normalized: email, device_hash: hash, language: req.body?.language === "hu" ? "hu" : "en", notify_event: 1, marketing_consent: flag(req.body?.marketing_consent), source_path: clean(req.body?.source_path, 1000) };
-      db.prepare(`INSERT INTO event_repeat_requests(id,event_id,email_normalized,device_hash,language,notify_event,marketing_consent,source_path)
-        VALUES(@id,@event_id,@email_normalized,@device_hash,@language,@notify_event,@marketing_consent,@source_path)`).run(row);
-      let delivery = "NOT_CONFIGURED";
-      if (transactionalEmail?.configured && transactionalEmail?.sendEventInterestConfirmation) {
-        try {
-          await transactionalEmail.sendEventInterestConfirmation({ to: email, event, language: row.language, websiteBaseUrl, idempotencyKey: `event-interest-${row.id}` });
-          delivery = "SENT";
-        } catch (_error) { delivery = "FAILED"; }
-      }
-      res.status(201).json({ ok: true, delivery });
-    } catch (error) {
-      if (String(error.message).includes("UNIQUE")) return res.status(409).json({ error: "REPEAT_INTEREST_ALREADY_RECORDED" });
-      sendError(res, error);
-    }
-  });
-
-  app.get("/api/event-repeat-interest", auth, admin, (_req, res) => {
-    res.json(db.prepare(`SELECT e.id AS event_id,e.title_en,e.title_hu,e.start_at,e.published_at,e.sold_out_at,COUNT(r.id) AS request_count,
-      CASE WHEN e.published_at IS NOT NULL AND e.sold_out_at IS NOT NULL THEN ROUND((julianday(e.sold_out_at)-julianday(e.published_at))*24,2) ELSE NULL END AS hours_to_sell_out,
-      COUNT(DISTINCT r.email_normalized) AS unique_emails,MIN(r.created_at) AS first_request_at,MAX(r.created_at) AS latest_request_at
-      FROM events e LEFT JOIN event_repeat_requests r ON r.event_id=e.id GROUP BY e.id HAVING COUNT(r.id)>0 ORDER BY request_count DESC,e.start_at DESC`).all());
-  });
-  app.get("/api/event-repeat-interest/:eventId.csv", auth, admin, (req, res) => {
-    const rows = db.prepare("SELECT email_normalized,language,marketing_consent,created_at FROM event_repeat_requests WHERE event_id=? ORDER BY created_at").all(req.params.eventId);
-    const csv = ["email,language,marketing_consent,created_at", ...rows.map((row) => [row.email_normalized, row.language, row.marketing_consent, row.created_at].map((value) => `\"${String(value).replaceAll('"', '""')}\"`).join(","))].join("\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", `attachment; filename=event-interest-${clean(req.params.eventId, 80)}.csv`); res.send(`\ufeff${csv}`);
-  });
-
-  app.post("/api/events/:eventId/relaunch", auth, admin, (req, res) => {
-    const source = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.eventId);
-    if (!source) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const times = normalizeEventTimes(req.body?.start_local || req.body?.start_at, req.body?.end_local || req.body?.end_at);
-    if (times.error) return res.status(400).json({ error: times.error });
-    const id = identifier("EVT");
-    const value = {
-      id, event_key: `EV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`, category_id: source.category_id, custom_type: source.custom_type || null, access_type: source.access_type,
-      slug_en: uniqueSlug(db, "events", "slug_en", `${source.title_en}-new-date`), slug_hu: uniqueSlug(db, "events", "slug_hu", `${source.title_hu}-uj-idopont`),
-      title_en: source.title_en, title_hu: source.title_hu, short_description_en: source.short_description_en, short_description_hu: source.short_description_hu,
-      description_en: source.description_en, description_hu: source.description_hu, artist_id: source.artist_id, performer_name: source.performer_name, hero_image_url: source.hero_image_url,
-      hero_image_alt_en: source.hero_image_alt_en, hero_image_alt_hu: source.hero_image_alt_hu, gallery_json: source.gallery_json || "[]", venue_name: source.venue_name,
-      venue_street: source.venue_street, venue_city: source.venue_city, venue_region: source.venue_region, venue_postal_code: source.venue_postal_code,
-      venue_country: source.venue_country, timezone: source.timezone, start_at: times.startAt, end_at: times.endAt, capacity_total: source.capacity_total,
-      price_cents: source.price_cents, currency: source.currency, refund_policy_version: source.refund_policy_version, user_id: req.user.id
-    };
-    db.prepare(`INSERT INTO events(id,event_key,category_id,custom_type,access_type,status,slug_en,slug_hu,title_en,title_hu,short_description_en,short_description_hu,description_en,description_hu,artist_id,performer_name,hero_image_url,hero_image_alt_en,hero_image_alt_hu,gallery_json,venue_name,venue_street,venue_city,venue_region,venue_postal_code,venue_country,timezone,start_at,end_at,capacity_total,price_cents,currency,refund_policy_version,relaunch_source_event_id,created_by_user_id,updated_by_user_id)
-      VALUES(@id,@event_key,@category_id,@custom_type,@access_type,'DRAFT',@slug_en,@slug_hu,@title_en,@title_hu,@short_description_en,@short_description_hu,@description_en,@description_hu,@artist_id,@performer_name,@hero_image_url,@hero_image_alt_en,@hero_image_alt_hu,@gallery_json,@venue_name,@venue_street,@venue_city,@venue_region,@venue_postal_code,@venue_country,@timezone,@start_at,@end_at,@capacity_total,@price_cents,@currency,@refund_policy_version,@source_event_id,@user_id,@user_id)`).run({ ...value, source_event_id: source.id });
-    const created = db.prepare("SELECT * FROM events WHERE id=?").get(id);
-    audit(req, "RELAUNCH_DRAFT", "events", id, { source_event_id: source.id }, created, 1, "New event draft created from audience demand");
-    res.status(201).json(created);
-  });
-
-  app.post("/api/events/:eventId/notify-interest", auth, admin, async (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=? AND relaunch_source_event_id=? AND published_at IS NOT NULL AND status IN ('PUBLISHED','RESCHEDULED')").get(req.body?.new_event_id, req.params.eventId);
-    if (!event) return res.status(409).json({ error: "PUBLISHED_RELAUNCH_EVENT_REQUIRED" });
-    const requests = db.prepare("SELECT * FROM event_repeat_requests WHERE event_id=? AND notify_event=1 AND notified_at IS NULL ORDER BY created_at").all(req.params.eventId);
-    let sent = 0; let failed = 0;
-    for (const request of requests) {
-      let status = "NOT_CONFIGURED";
-      try {
-        if (transactionalEmail?.configured && transactionalEmail?.sendEventReturnAnnouncement) {
-          await transactionalEmail.sendEventReturnAnnouncement({ to: request.email_normalized, event, language: request.language, websiteBaseUrl, idempotencyKey: `event-return-${request.id}-${event.id}` });
-          status = "SENT"; sent += 1;
-        } else failed += 1;
-      } catch (_error) { status = "FAILED"; failed += 1; }
-      db.prepare("UPDATE event_repeat_requests SET notified_at=CASE WHEN ?='SENT' THEN CURRENT_TIMESTAMP ELSE notified_at END,notification_event_id=?,delivery_status=? WHERE id=?").run(status, event.id, status, request.id);
-    }
-    audit(req, "NOTIFY_INTEREST", "events", req.params.eventId, null, { new_event_id: event.id, requested: requests.length, sent, failed }, 1, "Audience relaunch notification completed");
-    res.json({ requested: requests.length, sent, failed });
-  });
-
   app.post("/api/public/tracking-events", (req, res) => {
     if (!flag(req.body?.analytics_consent)) return res.status(204).end();
     const token = deviceHash(req.body?.device_token);
     if (!token) return res.status(400).json({ error: "INVALID_DEVICE_TOKEN" });
     if (rateLimited(`track:${token}`, 60, 60 * 1000)) return res.status(429).json({ error: "TOO_MANY_REQUESTS" });
     const metadata = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
-    db.prepare(`INSERT INTO website_tracking_events(id,event_name,anonymous_session_hash,source_path,language,event_id,metadata_json,analytics_consent,marketing_consent)
-      VALUES(?,?,?,?,?,?,?,?,?)`).run(identifier("MTRK"), clean(req.body?.event_name, 120), token, clean(req.body?.source_path, 1000), req.body?.language === "hu" ? "hu" : "en", clean(req.body?.event_id, 120) || null, JSON.stringify(metadata).slice(0, 10000), 1, flag(req.body?.marketing_consent));
+    db.prepare(`INSERT INTO website_tracking_events(id,event_name,anonymous_session_hash,source_path,language,metadata_json,analytics_consent,marketing_consent)
+      VALUES(?,?,?,?,?,?,?,?)`).run(identifier("MTRK"), clean(req.body?.event_name, 120), token, clean(req.body?.source_path, 1000), req.body?.language === "hu" ? "hu" : "en", JSON.stringify(metadata).slice(0, 10000), 1, flag(req.body?.marketing_consent));
     res.status(201).json({ ok: true });
   });
 
@@ -440,8 +360,7 @@ function registerWebsitePlatformRoutes(options) {
     const metrics = db.prepare(`SELECT event_name,COUNT(*) AS count,COUNT(DISTINCT anonymous_session_hash) AS unique_sessions FROM website_tracking_events
       WHERE created_at>=datetime('now','-30 days') GROUP BY event_name ORDER BY count DESC`).all();
     const leads = db.prepare("SELECT status,COUNT(*) AS count FROM website_contact_leads GROUP BY status").all();
-    const eventInterest = db.prepare("SELECT COUNT(*) AS requests,COUNT(DISTINCT email_normalized) AS unique_emails FROM event_repeat_requests").get();
-    res.json({ integrations, metrics, leads, event_interest: eventInterest, note: "Only consented first-party measurements are shown. Disconnected providers never return fabricated data." });
+    res.json({ integrations, metrics, leads, note: "Only consented first-party measurements are shown. Disconnected providers never return fabricated data." });
   });
 
   app.get("/api/marketing/seo", auth, admin, (_req, res) => {
@@ -658,11 +577,8 @@ function registerWebsitePlatformRoutes(options) {
   });
 
   app.delete("/api/demo-content", auth, requireSuperadmin, (req, res) => {
-    const dependencies = db.prepare(`SELECT COUNT(*) AS count FROM event_tickets WHERE event_id LIKE 'SAMPLE-EVENT-%'`).get().count;
-    if (Number(dependencies) > 0) return res.status(409).json({ error: "SAMPLE_EVENTS_HAVE_TRANSACTIONAL_DEPENDENCIES" });
     const removed = db.transaction(() => {
       const result = {};
-      result.events = db.prepare("DELETE FROM events WHERE is_sample=1").run().changes;
       result.artists = db.prepare("DELETE FROM website_artists WHERE is_sample=1").run().changes;
       result.pianos = db.prepare("DELETE FROM website_showroom_pianos WHERE is_sample=1").run().changes;
       result.services = db.prepare("DELETE FROM website_services WHERE is_sample=1").run().changes;

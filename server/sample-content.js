@@ -17,9 +17,7 @@ function repairSampleAssetReferences(db) {
     ["website_reviews", "portrait_url"],
     ["website_showroom_pianos", "image_url"],
     ["website_showroom_pianos", "gallery_json"],
-    ["website_services", "image_url"],
-    ["events", "hero_image_url"],
-    ["events", "gallery_json"]
+    ["website_services", "image_url"]
   ];
   for (const [from, to] of SAMPLE_IMAGE_REPLACEMENTS) {
     for (const [table, column] of columns) {
@@ -59,7 +57,7 @@ function sampleContentComplete(db) {
     ["website_showroom_pianos", ["SAMPLE-PIANO-1", "SAMPLE-PIANO-2", "SAMPLE-PIANO-3", "SAMPLE-PIANO-4", "SAMPLE-PIANO-5", "SAMPLE-PIANO-6"]],
     ["website_reviews", ["SAMPLE-REVIEW-1", "SAMPLE-REVIEW-2", "SAMPLE-REVIEW-3"]],
   ];
-  return required.every(([table, ids]) => ids.every((id) => db.prepare(`SELECT 1 FROM ${table} WHERE id=? AND is_sample=1 AND ${table === "events" ? "status='PUBLISHED' AND published_at IS NOT NULL" : table === "website_reviews" ? "visible=1" : table === "website_showroom_pianos" ? "published=1" : table === "website_artists" ? "published=1" : "visible=1"}`).get(id)));
+  return required.every(([table, ids]) => ids.every((id) => db.prepare(`SELECT 1 FROM ${table} WHERE id=? AND is_sample=1 AND ${table === "website_reviews" ? "visible=1" : table === "website_showroom_pianos" ? "published=1" : table === "website_artists" ? "published=1" : "visible=1"}`).get(id)));
 }
 
 function installSampleContent({ db, userId = null, updatedBy = "SYSTEM", publicWebsiteUrl = "" }) {
@@ -123,7 +121,7 @@ function installSampleContent({ db, userId = null, updatedBy = "SYSTEM", publicW
     db.prepare(`INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at)
       VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
       .run(SAMPLE_VERSION_KEY, "1", updatedBy);
-    return { artists: 3, services: 3, pianos: 6, reviews: 3, events: 0 };
+    return { artists: 3, services: 3, pianos: 6, reviews: 3 };
   })();
   return { alreadyInstalled: false, installed };
 }

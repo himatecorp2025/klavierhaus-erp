@@ -3,44 +3,26 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { generateInvoicePdf, generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf, generateTicketBackPdf, generateTicketFrontPdf, generateTicketFullPdf } = require("./document-pdf");
-const { generateGuestDataPdf } = require("./guest-list-pdf");
-const { readGuestData } = require("./guest-data");
-const { createTicketService } = require("./ticket-service");
+const { generateBusinessInvoicePdf, generateMonthlyInvoiceReportPdf } = require("./document-pdf");
 const { PAYMENT_METHODS, normalizePaymentMethod } = require("./payment-methods");
 const { buildConversationAutoReplyEmail, buildConversationReplyEmail } = require("./transactional-email");
 const { workflowBillablePhaseSubtotal } = require("./accounting-domain");
 const { generateCustomerConversationReportPdf } = require("./helpdesk-pdf");
 const { fallbackPage } = require("./website-content");
-const {
-  attendanceError,
-  attendanceRows,
-  attendanceSnapshot,
-  changeGuestStatus,
-  close: closeAttendance,
-  createAttendanceHub,
-  ensureSession,
-  pause: pauseAttendance,
-  recordPdfExport,
-  reopen: reopenAttendance,
-  resume: resumeAttendance,
-  startMode,
-  state: attendanceState
-} = require("./event-attendance");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "TECHNICAL", "TICKET", "BILLING", "REPAIR", "GENERAL", "OTHER"]);
+const CONVERSATION_CATEGORIES = new Set(["SERVICE", "PIANO", "REFUND", "PRIVATE_CONSULTATION", "TECHNICAL", "BILLING", "REPAIR", "GENERAL", "OTHER"]);
 const CONVERSATION_STATUSES = new Set(["OPEN", "PENDING_CUSTOMER", "PENDING_STAFF", "CLOSED"]);
-const IDENTITY_REQUIRED_CATEGORIES = new Set(["SERVICE", "EVENT", "REFUND", "PRIVATE_CONSULTATION", "BILLING", "REPAIR"]);
+const IDENTITY_REQUIRED_CATEGORIES = new Set(["SERVICE", "REFUND", "PRIVATE_CONSULTATION", "BILLING", "REPAIR"]);
 const CATEGORY_ROUTING = Object.freeze({
   SERVICE: "MANAGER", PIANO: "MANAGER", REPAIR: "MANAGER",
-  EVENT: "ADMIN", REFUND: "ADMIN", PRIVATE_CONSULTATION: "ADMIN", BILLING: "ADMIN",
-  TECHNICAL: "WORKER", TICKET: "WORKER", GENERAL: "ADMIN", OTHER: "ADMIN"
+  REFUND: "ADMIN", PRIVATE_CONSULTATION: "ADMIN", BILLING: "ADMIN",
+  TECHNICAL: "WORKER", GENERAL: "ADMIN", OTHER: "ADMIN"
 });
 const CATEGORY_LABELS = Object.freeze({
-  SERVICE: ["Services", "Szolgáltatások"], PIANO: ["Piano / showroom", "Zongora / showroom"], EVENT: ["Events", "Események"],
+  SERVICE: ["Services", "Szolgáltatások"], PIANO: ["Piano / showroom", "Zongora / showroom"],
   REFUND: ["Refund / payment", "Visszatérítés / fizetés"], PRIVATE_CONSULTATION: ["Private consultation", "Privát konzultáció"],
-  TECHNICAL: ["Technical issue", "Technikai probléma"], TICKET: ["Ticket problem", "Jegyprobléma"], BILLING: ["Billing", "Számlázás"],
+  TECHNICAL: ["Technical issue", "Technikai probléma"], BILLING: ["Billing", "Számlázás"],
   REPAIR: ["Repair / service", "Javítás / szerviz"], GENERAL: ["General question", "Általános kérdés"], OTHER: ["Other", "Egyéb"]
 });
 const CUSTOMER_ATTACHMENT_MAX_FILES = 10;
@@ -361,222 +343,6 @@ function attachmentUrl(scope, tokenOrId, attachmentId) {
     : `/api/customer-conversations/${encodeURIComponent(tokenOrId)}/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
-function createBusinessDocumentService({ db, uploadDir, transactionalEmail, websiteBaseUrl = "", env = process.env, invoiceEngineProvider = null }) {
-  const documentDir = path.join(uploadDir || path.join(__dirname, "uploads"), "documents");
-  fs.mkdirSync(documentDir, { recursive: true });
-  const engine = () => {
-    const value = typeof invoiceEngineProvider === "function" ? invoiceEngineProvider() : invoiceEngineProvider;
-    if (!value) throw Object.assign(new Error("INVOICE_ENGINE_UNAVAILABLE"), { status: 503 });
-    return value;
-  };
-
-  function deliveryRow(eventKey) { return db.prepare("SELECT * FROM communication_deliveries WHERE event_key=?").get(eventKey); }
-  function beginDelivery({ eventKey, deliveryType, recipientEmail, eventId, paymentId, ticketId, conversationId }) {
-    const existing = deliveryRow(eventKey);
-    if (existing?.status === "SENT") return existing;
-    if (!existing) db.prepare(`INSERT INTO communication_deliveries(id,event_key,delivery_type,recipient_email,event_id,payment_id,ticket_id,conversation_id,status,provider,attempt_count)
-      VALUES(?,?,?,?,?,?,?,?,'PENDING','RESEND',0)`).run(newId("DEL"), eventKey, deliveryType, recipientEmail || null, eventId || null, paymentId || null, ticketId || null, conversationId || null);
-    db.prepare("UPDATE communication_deliveries SET attempt_count=attempt_count+1,updated_at=CURRENT_TIMESTAMP WHERE event_key=?").run(eventKey);
-    return deliveryRow(eventKey);
-  }
-  function finishDelivery(eventKey, result) {
-    db.prepare(`UPDATE communication_deliveries SET status=?,provider_message_id=?,error_code=?,sent_at=CASE WHEN ?='SENT' THEN CURRENT_TIMESTAMP ELSE sent_at END,updated_at=CURRENT_TIMESTAMP WHERE event_key=?`)
-      .run(result.status, result.providerMessageId || null, result.errorCode || null, result.status, eventKey);
-  }
-  function recordDelivery({ eventKey, deliveryType, recipientEmail, eventId, paymentId, ticketId, conversationId, result }) {
-    beginDelivery({ eventKey, deliveryType, recipientEmail, eventId, paymentId, ticketId, conversationId });
-    finishDelivery(eventKey, result);
-    return deliveryRow(eventKey);
-  }
-  function artifactPath(prefix, id) { return path.join(documentDir, `${prefix}-${String(id).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`); }
-  function publicDocumentPath(filePath) { return `/uploads/documents/${path.basename(filePath)}`; }
-  function eventDocumentData(event, tickets) {
-    return { event: { ...event, dateLabel: formatEventDate(event, "en"), venueLabel: eventVenue(event) }, tickets, language: "en", logoPath: resolveTicketLogoPath(readCompanyData(db).logo_url, uploadDir) };
-  }
-  function ticketDocumentGenerator(mode) { return mode === "front" ? generateTicketFrontPdf : mode === "back" ? generateTicketBackPdf : generateTicketFullPdf; }
-  function persistTicketDocument(ticket, documentType, pdf, userId = null) {
-    const normalized = String(documentType || "FULL").toUpperCase();
-    const filePath = artifactPath(`ticket-${ticket.id}-${normalized.toLowerCase()}`, ticket.id);
-    fs.writeFileSync(filePath, pdf);
-    const column = ({ FRONT: "document_front_path", BACK: "document_back_path", FULL: "document_full_path" })[normalized];
-    if (column) db.prepare(`UPDATE event_tickets SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(publicDocumentPath(filePath), ticket.id);
-    db.prepare(`INSERT INTO event_ticket_documents(id,ticket_id,event_id,document_type,stored_path,generated_by_user_id)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(ticket_id,document_type) DO UPDATE SET stored_path=excluded.stored_path,generated_at=CURRENT_TIMESTAMP,generated_by_user_id=excluded.generated_by_user_id`)
-      .run(newId("TDOC"), ticket.id, ticket.event_id, normalized, publicDocumentPath(filePath), userId);
-    return { document_type: normalized, stored_path: publicDocumentPath(filePath), file_path: filePath };
-  }
-  function eventRecognition(event) {
-    const status = String(event?.status || "").toUpperCase();
-    const recognized = status === "COMPLETED" || (status === "CLOSED" && String(event?.status_before_close || "").toUpperCase() === "COMPLETED");
-    return {
-      revenueRecognitionStatus: recognized ? "RECOGNIZED" : "DEFERRED",
-      revenueRecognitionDate: recognized ? newYorkDateKey(event?.end_at || new Date()) : null,
-      deferredEventId: event?.id || null
-    };
-  }
-  function eventDueDate(event, issueDate) {
-    const eventDate = String(event?.start_at || "").slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate >= issueDate ? eventDate : issueDate;
-  }
-  function ensureTicketInvoice(ticket, event, { status = null } = {}) {
-    if(ticket?.finance_reset)throw Object.assign(new Error("FINANCIAL_SOURCE_RESET"),{status:409});
-    if (!ticket || Number(ticket.price_cents || 0) <= 0) return null;
-    const invoiceEngine = engine();
-    let invoice = ticket.invoice_id ? invoiceEngine.invoiceDetail(ticket.invoice_id) : null;
-    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`ticket:${ticket.id}`);
-    const desiredStatus = status || (ticket.payment_status === "PAID" ? "paid" : "issued");
-    const method = normalizePaymentMethod(ticket.payment_method) || "Cash";
-    const recognition = eventRecognition(event);
-    if (!invoice) {
-      const issueDate = String(ticket.paid_at || ticket.reserved_at || ticket.created_at || new Date().toISOString()).slice(0, 10);
-      invoice = invoiceEngine.createInvoice({
-        direction:"receivable", issueDate, dueDate:eventDueDate(event,issueDate), sourceType:"event", sourceId:`ticket:${ticket.id}`,
-        summary:`Event ticket: ${event.title_en || event.title_hu || event.id}`, taxRate:0, paymentMethod:method, status:desiredStatus,
-        ...recognition,
-        items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${ticket.attendee_name || ticket.buyer_name || "Ticket"}`, quantity:1, unit_price:Number(ticket.price_cents || 0)/100, line_type:"fee" }]
-      });
-    } else {
-      if (desiredStatus === "paid" && invoice.status !== "paid") {
-        const before = invoiceEngine.invoiceDetail(invoice.id);
-        db.prepare("UPDATE invoices SET status='paid',payment_method=?,paid_at=COALESCE(paid_at,CURRENT_TIMESTAMP) WHERE id=?").run(method, invoice.id);
-        const after = invoiceEngine.invoiceDetail(invoice.id);
-        invoiceEngine.recordAdjustment(before, after, "Ticket payment marked paid", { name: "SYSTEM" });
-      }
-      if (recognition.revenueRecognitionStatus === "DEFERRED") {
-        const current = invoiceEngine.invoiceDetail(invoice.id);
-        const needsRepair = String(current.revenue_recognition_status || "").toUpperCase() !== "DEFERRED" || String(current.deferred_event_id || "") !== String(event.id) || current.revenue_recognition_date;
-        if (needsRepair) {
-          db.prepare("UPDATE invoices SET revenue_recognition_status='DEFERRED',revenue_recognition_date=NULL,deferred_event_id=? WHERE id=?").run(event.id, current.id);
-          db.prepare("UPDATE invoice_credit_memos SET revenue_effect_date=NULL WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1 AND revenue_effect_date IS NOT NULL").run(current.id);
-          const repaired = invoiceEngine.invoiceDetail(current.id);
-          invoiceEngine.recordAdjustment(current, repaired, "Event revenue recognition corrected to deferred", { name: "SYSTEM" });
-        }
-      } else if (String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
-        invoiceEngine.recognizeEventRevenue({ eventId: event.id, recognitionDate: recognition.revenueRecognitionDate });
-      }
-      invoice = invoiceEngine.invoiceDetail(invoice.id);
-    }
-    db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,ticket.id);
-    db.prepare("DELETE FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=?").run(ticket.id);
-    return invoice;
-  }
-  function ensurePaymentInvoice(payment, event, tickets) {
-    if(payment?.finance_reset)throw Object.assign(new Error("FINANCIAL_SOURCE_RESET"),{status:409});
-    const invoiceEngine = engine();
-    let invoice = payment.invoice_id ? invoiceEngine.invoiceDetail(payment.invoice_id) : null;
-    if (!invoice) invoice = db.prepare("SELECT * FROM invoices WHERE direction='receivable' AND source_type='event' AND source_id=? LIMIT 1").get(`payment:${payment.id}`);
-    const recognition = eventRecognition(event);
-    if (!invoice) {
-      const issueDate = String(payment.paid_at || payment.created_at || new Date().toISOString()).slice(0, 10);
-      invoice = invoiceEngine.createInvoice({
-        direction:"receivable", issueDate, dueDate:eventDueDate(event,issueDate), sourceType:"event", sourceId:`payment:${payment.id}`,
-        summary:`Event ticket sale: ${event.title_en || event.title_hu || event.id}`, taxRate:0, paymentMethod:"Credit Card", status:"paid",
-        ...recognition,
-        items:[{ item_description:`${event.title_en || event.title_hu || "Event"} · ${Number(payment.quantity || tickets.length || 1)} ticket(s)`, quantity:1, unit_price:Number(payment.amount_total || 0)/100, line_type:"fee" }]
-      });
-    } else {
-      if (recognition.revenueRecognitionStatus === "DEFERRED") {
-        const current = invoiceEngine.invoiceDetail(invoice.id);
-        const needsRepair = String(current.revenue_recognition_status || "").toUpperCase() !== "DEFERRED" || String(current.deferred_event_id || "") !== String(event.id) || current.revenue_recognition_date;
-        if (needsRepair) {
-          db.prepare("UPDATE invoices SET revenue_recognition_status='DEFERRED',revenue_recognition_date=NULL,deferred_event_id=? WHERE id=?").run(event.id, current.id);
-          db.prepare("UPDATE invoice_credit_memos SET revenue_effect_date=NULL WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1 AND revenue_effect_date IS NOT NULL").run(current.id);
-          const repaired = invoiceEngine.invoiceDetail(current.id);
-          invoiceEngine.recordAdjustment(current, repaired, "Event revenue recognition corrected to deferred", { name: "SYSTEM" });
-        }
-      } else if (String(invoice.revenue_recognition_status || "").toUpperCase() !== "RECOGNIZED") {
-        invoiceEngine.recognizeEventRevenue({ eventId: event.id, recognitionDate: recognition.revenueRecognitionDate });
-      }
-      invoice = invoiceEngine.invoiceDetail(invoice.id);
-    }
-    db.prepare("UPDATE event_payments SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(invoice.id,payment.id);
-    db.prepare("UPDATE event_tickets SET invoice_id=?,updated_at=CURRENT_TIMESTAMP WHERE event_payment_id=?").run(invoice.id,payment.id);
-    db.prepare("DELETE FROM financial_items WHERE source_type='event_payment' AND source_id=?").run(payment.id);
-    return invoice;
-  }
-  function createEventRefundCreditMemo(payment, event, refund = null) {
-    if (!payment || !event) return null;
-    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
-    const invoice = ensurePaymentInvoice(payment, event, tickets);
-    const amount = roundFinancial(Number(payment.amount_total || 0) / 100);
-    if (!(amount > 0)) return null;
-    return engine().createCreditMemo({
-      invoiceId: invoice.id,
-      eventId: event.id,
-      memoType: "EVENT_REFUND",
-      sourceType: "EVENT_PAYMENT_REFUND",
-      sourceId: payment.id,
-      memoDate: newYorkDateKey(),
-      reason: clean(refund?.metadata?.administrative_reason || `Stripe ticket refund ${refund?.id || payment.stripe_refund_id || payment.id}`, 2000),
-      totalAmount: amount,
-      cashEffect: true,
-      accountingEffect: true,
-      actor: { name: "SYSTEM" }
-    });
-  }
-  function businessInvoicePdf(invoice, counterpartyName = "") {
-    const company = readCompanyData(db);
-    const logoPath = resolveCompanyLogoPath(company.logo_url, uploadDir);
-    return generateBusinessInvoicePdf({ company, invoice, items: invoice.items || [], counterpartyName: counterpartyName || invoice.counterparty_name || "Event Customer", logoPath });
-  }
-
-  async function sendPurchaseDocuments(paymentId, { resend = false } = {}) {
-    const payment = db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);
-    if (!payment) throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"), { status: 404 });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);
-    const tickets = db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);
-    if (!event || !tickets.length) throw new Error("EVENT_TICKETS_NOT_READY");
-    const company = readCompanyData(db);
-    const invoice = ensurePaymentInvoice(payment,event,tickets);
-    const ticketPdf = generateTicketFrontPdf(eventDocumentData(event, tickets));
-    tickets.forEach((ticket) => {
-      persistTicketDocument(ticket, "FRONT", generateTicketFrontPdf(eventDocumentData(event, [ticket])));
-      persistTicketDocument(ticket, "BACK", generateTicketBackPdf(eventDocumentData(event, [ticket])));
-      persistTicketDocument(ticket, "FULL", generateTicketFullPdf(eventDocumentData(event, [ticket])));
-    });
-    const invoicePdf = businessInvoicePdf(invoice,payment.purchaser_name);
-    const ticketPath = artifactPath("tickets", payment.id); const invoicePath = artifactPath("central-invoice", invoice.id);
-    if (!fs.existsSync(ticketPath) || resend) fs.writeFileSync(ticketPath, ticketPdf);
-    if (!fs.existsSync(invoicePath) || resend) fs.writeFileSync(invoicePath, invoicePdf);
-    const key = `event-purchase-documents:${payment.id}`;
-    beginDelivery({ eventKey: key, deliveryType: "EVENT_PURCHASE_DOCUMENTS", recipientEmail: payment.purchaser_email, eventId: event.id, paymentId: payment.id });
-    if (!transactionalEmail?.sendEventPurchaseConfirmation) {
-      finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" });
-      return { status: "NOT_CONFIGURED", invoice_number: invoice.invoice_number, ticket_file: publicDocumentPath(ticketPath), invoice_file: publicDocumentPath(invoicePath) };
-    }
-    try {
-      const sent = await transactionalEmail.sendEventPurchaseConfirmation({ to: payment.purchaser_email, purchaserName: payment.purchaser_name, event, payment, tickets, invoiceNumber: invoice.invoice_number, company, ticketPdf, invoicePdf, websiteBaseUrl, idempotencyKey: key });
-      finishDelivery(key, { status: "SENT", providerMessageId: sent.providerMessageId });
-      return { status: "SENT", provider_message_id: sent.providerMessageId, invoice_number: invoice.invoice_number };
-    } catch (error) {
-      finishDelivery(key, { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", errorCode: error.code || "EMAIL_DELIVERY_FAILED" });
-      return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", invoice_number: invoice.invoice_number };
-    }
-  }
-  async function sendTicketDocuments({ eventId, ticketIds, deliveryType = "EVENT_FREE_TICKETS" }) {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
-    const tickets = db.prepare(`SELECT * FROM event_tickets WHERE event_id=? AND id IN (${(ticketIds || []).map(() => "?").join(",") || "NULL"}) ORDER BY ticket_sequence,id`).all(eventId, ...(ticketIds || []));
-    if (!event || !tickets.length) return { status: "NOT_READY" };
-    const first = tickets[0]; const key = `${deliveryType.toLowerCase()}:${first.id}`;
-    beginDelivery({ eventKey: key, deliveryType, recipientEmail: first.contact_email, eventId, ticketId: first.id });
-    const pdf = generateTicketFrontPdf(eventDocumentData(event, tickets));
-    if (!validEmail(first.contact_email) || !transactionalEmail?.sendEventTicketDocuments) { finishDelivery(key, { status: "NOT_CONFIGURED", errorCode: "EMAIL_DELIVERY_NOT_CONFIGURED" }); return { status: "NOT_CONFIGURED" }; }
-    try { const sent = await transactionalEmail.sendEventTicketDocuments({ to: first.contact_email, event, tickets, ticketPdf: pdf, language: "en", websiteBaseUrl, idempotencyKey: key }); finishDelivery(key, { status: "SENT", providerMessageId: sent.providerMessageId }); return { status: "SENT", provider_message_id: sent.providerMessageId }; }
-    catch (error) { finishDelivery(key, { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED", errorCode: error.code || "EMAIL_DELIVERY_FAILED" }); return { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED" }; }
-  }
-  function ticketPdfForTicket(ticketId, mode = "full") { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});return ticketDocumentGenerator(mode)(eventDocumentData(event,[ticket])); }
-  function ticketPdfForPayment(paymentId, mode = "full") { const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);if(!payment)throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);if(!event||!tickets.length)throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"),{status:404});return ticketDocumentGenerator(mode)(eventDocumentData(event,tickets)); }
-  function generateTicketDocuments(ticketId, { mode = "full", userId = null } = {}) { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});const normalized=String(mode||"full").toLowerCase();const document=persistTicketDocument(ticket,normalized.toUpperCase(),ticketDocumentGenerator(normalized)(eventDocumentData(event,[ticket])),userId);return {ticket_id:ticket.id,event_id:event.id,mode:normalized,...document}; }
-  function ticketDocuments(ticketId) { return db.prepare("SELECT document_type,stored_path,generated_at,generated_by_user_id FROM event_ticket_documents WHERE ticket_id=? ORDER BY document_type").all(ticketId); }
-  function invoicePdfForPayment(paymentId) { const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);if(!payment)throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);if(!event||!tickets.length)throw Object.assign(new Error("EVENT_TICKETS_NOT_READY"),{status:404});const invoice=ensurePaymentInvoice(payment,event,tickets);return {pdf:businessInvoicePdf(invoice,payment.purchaser_name),invoice_number:invoice.invoice_number,stored_path:null}; }
-  function invoicePdfForTicket(ticketId) { const ticket=db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticketId);if(!ticket)throw Object.assign(new Error("TICKET_NOT_FOUND"),{status:404});if(ticket.payment_status!=="PAID"||Number(ticket.price_cents||0)<=0)throw Object.assign(new Error("TICKET_INVOICE_REQUIRES_PAID_PRICE"),{status:409});const event=db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);if(!event)throw Object.assign(new Error("EVENT_NOT_FOUND"),{status:404});const invoice=ensureTicketInvoice(ticket,event,{status:"paid"});const pdf=businessInvoicePdf(invoice,ticket.buyer_name||ticket.attendee_name);const invoicePath=artifactPath("central-invoice",invoice.id);if(!fs.existsSync(invoicePath))fs.writeFileSync(invoicePath,pdf);return {pdf,invoice_number:invoice.invoice_number,stored_path:publicDocumentPath(invoicePath)}; }
-
-  return Object.freeze({ companyData:()=>readCompanyData(db),sendPurchaseDocuments,sendTicketDocuments,ticketPdfForTicket,ticketPdfForPayment,generateTicketDocuments,ticketDocuments,invoicePdfForPayment,invoicePdfForTicket,deliveryRow,recordDelivery,ensureTicketInvoice,ensurePaymentInvoice,createEventRefundCreditMemo,
-    onPaymentRecorded({paymentId}){const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);if(!payment)throw Object.assign(new Error("EVENT_PAYMENT_NOT_FOUND"),{status:404});const event=db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);const tickets=db.prepare("SELECT * FROM event_tickets WHERE event_payment_id=? ORDER BY ticket_sequence,id").all(payment.id);if(!event||!tickets.length)throw new Error("EVENT_TICKETS_NOT_READY");return ensurePaymentInvoice(payment,event,tickets);},
-    async onPaymentFulfilled({paymentId}){return sendPurchaseDocuments(paymentId);},
-    onPaymentRefunded({paymentId,refund}){const payment=db.prepare("SELECT * FROM event_payments WHERE id=?").get(paymentId);const event=payment&&db.prepare("SELECT * FROM events WHERE id=?").get(payment.event_id);return payment&&event?createEventRefundCreditMemo(payment,event,refund):null;}
-  });
-}
 
 function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK" }) {
   function money(value) { const n = parseFinancialNumber(value); return Number.isFinite(n) ? roundFinancial(n) : 0; }
@@ -608,7 +374,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     problem.status = 409;
     throw problem;
   }
-  function createInvoice({ direction, issueDate, dueDate, partnerId = null, clientId = null, sourceType = "manual", sourceId = null, summary = "", taxRate = 0, currency = "USD", paymentMethod: method = null, paymentLinkUrl = null, notes = "", status = "issued", revenueRecognitionStatus = "RECOGNIZED", revenueRecognitionDate = null, deferredEventId = null, items = [] }) {
+  function createInvoice({ direction, issueDate, dueDate, partnerId = null, clientId = null, sourceType = "manual", sourceId = null, summary = "", taxRate = 0, currency = "USD", paymentMethod: method = null, paymentLinkUrl = null, notes = "", status = "issued", revenueRecognitionStatus = "RECOGNIZED", revenueRecognitionDate = null, items = [] }) {
     if (sourceId) {
       const existing = db.prepare("SELECT * FROM invoices WHERE direction=? AND source_type=? AND source_id=? LIMIT 1").get(direction, sourceType, sourceId);
       if (existing) { const detail = invoiceDetail(existing.id); linkInvoiceSource(detail); return detail; }
@@ -638,8 +404,8 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
     if (clean(method, 120) && !normalizedMethod) throw Object.assign(new Error("INVALID_PAYMENT_METHOD"), { status: 400, allowed: [...PAYMENT_METHODS, "NONE / INTERNAL"] });
     const recognitionStatus = String(revenueRecognitionStatus || "RECOGNIZED").toUpperCase() === "DEFERRED" ? "DEFERRED" : "RECOGNIZED";
     const recognitionDate = recognitionStatus === "RECOGNIZED" ? (revenueRecognitionDate || date) : null;
-    db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,revenue_recognition_status,revenue_recognition_date,deferred_event_id)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), normalizedMethod, normalizedMethod === "Payment Link" ? clean(paymentLinkUrl, 2000) || null : null, clean(notes, 5000) || null, status, recognitionStatus, recognitionDate, deferredEventId || null);
+    db.prepare(`INSERT INTO invoices(id,direction,invoice_number,issue_date,due_date,partner_id,client_id,source_type,source_id,summary,subtotal,tax_rate,tax_amount,total_amount,currency,payment_method,payment_link_url,notes,status,revenue_recognition_status,revenue_recognition_date)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, direction, number, date, dueDate || date, partnerId, clientId, sourceType, sourceId, clean(summary, 2000), subtotal, rate, taxAmount, total, clean(currency || "USD", 3).toUpperCase(), normalizedMethod, normalizedMethod === "Payment Link" ? clean(paymentLinkUrl, 2000) || null : null, clean(notes, 5000) || null, status, recognitionStatus, recognitionDate);
     if (status === "paid") db.prepare("UPDATE invoices SET paid_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
     const insertItem = db.prepare("INSERT INTO invoice_items(id,invoice_id,item_description,quantity,unit_price,total_price,line_type,sort_order,payment_method,financial_status) VALUES(?,?,?,?,?,?,?,?,?,?)");
     normalizedItems.forEach((item) => insertItem.run(newId("BLI"), id, item.description, item.quantity, item.unit_price, item.total_price, item.line_type, item.sort_order, item.payment_method, item.financial_status));
@@ -706,7 +472,7 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       db.prepare(`UPDATE workflow_finance_sources SET billing_status='Unbilled',invoice_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(invoice.source_id);
     }
   }
-  function createCreditMemo({ invoiceId, eventId = null, memoType = "EVENT_REFUND", sourceType, sourceId, memoDate = newYorkDateKey(), reason, subtotalAmount = null, taxAmount = null, totalAmount = null, revenueEffectDate = undefined, cashEffect = true, accountingEffect = true, actor = {} }) {
+  function createCreditMemo({ invoiceId, memoType = "CREDIT_MEMO", sourceType, sourceId, memoDate = newYorkDateKey(), reason, subtotalAmount = null, taxAmount = null, totalAmount = null, revenueEffectDate = undefined, cashEffect = true, accountingEffect = true, actor = {} }) {
     const normalizedReason = clean(reason, 2000);
     if (normalizedReason.length < 5) throw Object.assign(new Error("ADJUSTMENT_REASON_REQUIRED"), { status: 400, minimum_length: 5 });
     const normalizedSourceType = clean(sourceType || memoType, 80);
@@ -724,34 +490,17 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       subtotal = money(Number(invoice.subtotal || 0) * ratio);
       tax = money(total - subtotal);
     }
-    const refunded = money(db.prepare("SELECT COALESCE(SUM(total_amount),0) AS total FROM invoice_credit_memos WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1").get(invoice.id)?.total || 0);
-    if (memoType === "EVENT_REFUND" && money(refunded + total) > money(invoice.total_amount)) throw Object.assign(new Error("REFUND_EXCEEDS_INVOICE_TOTAL"), { status: 409 });
+    const credited = money(db.prepare("SELECT COALESCE(SUM(total_amount),0) AS total FROM invoice_credit_memos WHERE invoice_id=? AND accounting_effect=1 AND memo_type<>'VOID_REVERSAL'").get(invoice.id)?.total || 0);
+    if (money(credited + total) > money(invoice.total_amount)) throw Object.assign(new Error("CREDIT_EXCEEDS_INVOICE_TOTAL"), { status: 409 });
     const recognized = String(invoice.revenue_recognition_status || "RECOGNIZED").toUpperCase() === "RECOGNIZED";
     const effectiveDate = revenueEffectDate === undefined ? (recognized ? memoDate : null) : (revenueEffectDate || null);
     const id = newId("CM");
     const memoNumber = nextCreditMemoNumber(memoDate);
-    db.prepare(`INSERT INTO invoice_credit_memos(id,credit_memo_number,invoice_id,event_id,memo_type,source_type,source_id,memo_date,reason,subtotal_amount,tax_amount,total_amount,revenue_effect_date,cash_effect,accounting_effect,created_by_user_id,created_by_name)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, memoNumber, invoice.id, eventId || invoice.deferred_event_id || null, memoType, normalizedSourceType, normalizedSourceId, memoDate, normalizedReason, subtotal, tax, total, effectiveDate, cashEffect ? 1 : 0, accountingEffect ? 1 : 0, actor.id || null, actor.name || actor.email || actor.id || "SYSTEM");
+    db.prepare(`INSERT INTO invoice_credit_memos(id,credit_memo_number,invoice_id,memo_type,source_type,source_id,memo_date,reason,subtotal_amount,tax_amount,total_amount,revenue_effect_date,cash_effect,accounting_effect,created_by_user_id,created_by_name)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, memoNumber, invoice.id, memoType, normalizedSourceType, normalizedSourceId, memoDate, normalizedReason, subtotal, tax, total, effectiveDate, cashEffect ? 1 : 0, accountingEffect ? 1 : 0, actor.id || null, actor.name || actor.email || actor.id || "SYSTEM");
     return db.prepare("SELECT * FROM invoice_credit_memos WHERE id=?").get(id);
   }
-  function recognizeEventRevenue({ eventId, recognitionDate = newYorkDateKey(), actor = {} }) {
-    const apply = () => {
-      const invoices = db.prepare("SELECT id FROM invoices WHERE source_type='event' AND deferred_event_id=? AND status<>'void' AND revenue_recognition_status='DEFERRED'").all(eventId);
-      if (!invoices.length) return { invoices: 0, credit_memos: 0, recognized_by: actor.id || actor.name || "SYSTEM" };
-      let updatedInvoices = 0;
-      let updatedMemos = 0;
-      for (const row of invoices) {
-        const before = invoiceDetail(row.id);
-        updatedInvoices += db.prepare("UPDATE invoices SET revenue_recognition_status='RECOGNIZED',revenue_recognition_date=? WHERE id=? AND revenue_recognition_status='DEFERRED'").run(recognitionDate, row.id).changes;
-        updatedMemos += db.prepare("UPDATE invoice_credit_memos SET revenue_effect_date=? WHERE invoice_id=? AND memo_type='EVENT_REFUND' AND accounting_effect=1 AND revenue_effect_date IS NULL").run(recognitionDate, row.id).changes;
-        const after = invoiceDetail(row.id);
-        recordAdjustment(before, after, "Event revenue recognized after completion", actor);
-      }
-      return { invoices: updatedInvoices, credit_memos: updatedMemos, recognized_by: actor.id || actor.name || "SYSTEM" };
-    };
-    return db.inTransaction ? apply() : db.transaction(apply)();
-  }
-  function postManualInvoiceLedger(invoice, actor = {}) {
+    function postManualInvoiceLedger(invoice, actor = {}) {
     if (!invoice || invoice.source_type !== "manual" || invoice.status === "void") return null;
     const items = Array.isArray(invoice.items) ? invoice.items : db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id").all(invoice.id);
     const invoiceStatus = invoice.status === "paid" ? "paid" : "pending";
@@ -864,16 +613,14 @@ function createInvoiceEngine({ db, balanceAccountFromPaymentMethod = () => "BANK
       db.prepare("DELETE FROM financial_items WHERE source_type='WORKFLOW_INVOICE_REVENUE' AND source_id=?").run(`WORKFLOW_INVOICE_REVENUE:${invoice.source_id}`);
     }
   }
-  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, createWorkflowPayableInvoice, postWorkflowInvoiceLedger, createCreditMemo, recognizeEventRevenue, recordAdjustment, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
+  return { createInvoice, invoiceDetail, createJobInvoices, createWorkflowInvoice, createWorkflowPayableInvoice, postWorkflowInvoiceLedger, createCreditMemo, recordAdjustment, postManualInvoiceLedger, reverseLedger, linkInvoiceSource, resetInvoiceSource, paymentMethod };
 }
 
 function registerBusinessOperationsRoutes(options) {
-  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, documentService, ticketService: providedTicketService, customerConversationUpload, notifyUser, invoiceEngine } = options;
+  const { app, db, auth, permit, audit, transactionalEmail, websiteBaseUrl = "", uploadDir, env = process.env, customerConversationUpload, notifyUser, invoiceEngine } = options;
   const admin = permit("ADMIN");
   const financeReader = permit("ADMIN", "MANAGER");
   const helpdesk = permit("ADMIN", "MANAGER", "WORKER");
-  const attendanceOperator = permit("ADMIN", "MANAGER", "WORKER");
-  const ticketService = providedTicketService || createTicketService({ db });
   const conversationKey = conversationEncryptionKey(env);
   const recentRequests = new Map();
   function rateLimited(key, limit = 8, windowMs = 60000) {
@@ -928,7 +675,6 @@ function registerBusinessOperationsRoutes(options) {
         invoiceEngine.reverseLedger(before);
         invoiceEngine.createCreditMemo({
           invoiceId: before.id,
-          eventId: before.deferred_event_id || null,
           memoType: 'VOID_REVERSAL',
           sourceType: 'INVOICE_VOID',
           sourceId: before.id,
@@ -1281,7 +1027,7 @@ function registerBusinessOperationsRoutes(options) {
     if (!row) return null;
     const assignee = row.assigned_user_id ? db.prepare("SELECT name FROM users WHERE id=?").get(row.assigned_user_id) : null;
     const unreadCount = Number(db.prepare("SELECT COUNT(*) AS count FROM customer_messages WHERE conversation_id=? AND direction='CUSTOMER' AND status='UNREAD'").get(row.id)?.count || 0);
-    const payload = { id: row.id, name: row.name || "", email: row.email || "", language: row.language, category: row.category, category_label_en: CATEGORY_LABELS[row.category]?.[0] || row.category, category_label_hu: CATEGORY_LABELS[row.category]?.[1] || row.category, service_id: row.service_id, piano_id: row.piano_id, event_id: row.event_id, ticket_id: row.ticket_id, status: row.status, assigned_user_id: row.assigned_user_id, assigned_user_name: assignee?.name || null, assigned_role: row.assigned_role || assignee?.role || null, source_path: row.source_path, metadata: parseMetadata(row), last_message_at: row.last_message_at, last_activity_at: row.last_activity_at || row.last_message_at, closed_at: row.closed_at, auto_closed_at: row.auto_closed_at, closure_note: row.closure_note || "", reopen_reason: row.reopen_reason || "", unread_count: unreadCount, created_at: row.created_at, updated_at: row.updated_at };
+    const payload = { id: row.id, name: row.name || "", email: row.email || "", language: row.language, category: row.category, category_label_en: CATEGORY_LABELS[row.category]?.[0] || row.category, category_label_hu: CATEGORY_LABELS[row.category]?.[1] || row.category, service_id: row.service_id, piano_id: row.piano_id, status: row.status, assigned_user_id: row.assigned_user_id, assigned_user_name: assignee?.name || null, assigned_role: row.assigned_role || assignee?.role || null, source_path: row.source_path, metadata: parseMetadata(row), last_message_at: row.last_message_at, last_activity_at: row.last_activity_at || row.last_message_at, closed_at: row.closed_at, auto_closed_at: row.auto_closed_at, closure_note: row.closure_note || "", reopen_reason: row.reopen_reason || "", unread_count: unreadCount, created_at: row.created_at, updated_at: row.updated_at };
     if (includeMessages) {
       payload.messages = db.prepare("SELECT id,direction,sender_name,sender_email,sender_user_id,body,status,created_at FROM customer_messages WHERE conversation_id=? ORDER BY created_at,id").all(row.id).map((message) => ({
         ...message,
@@ -1351,7 +1097,7 @@ function registerBusinessOperationsRoutes(options) {
   function canViewConversation(user, row) {
     if (isSuperadmin(user) || user?.role === "ADMIN") return true;
     if (user?.role === "MANAGER") return row.assigned_user_id === user.id || ["SERVICE", "PIANO", "REPAIR"].includes(row.category);
-    if (user?.role === "WORKER") return row.assigned_user_id === user.id || (row.assigned_role === "MANAGER" && ["TICKET", "TECHNICAL", "GENERAL"].includes(row.category));
+    if (user?.role === "WORKER") return row.assigned_user_id === user.id || (row.assigned_role === "MANAGER" && ["TECHNICAL", "GENERAL"].includes(row.category));
     return false;
   }
   function canEditConversation(user, row) {
@@ -1377,359 +1123,14 @@ function registerBusinessOperationsRoutes(options) {
   const inactivityTimer = setInterval(autoCloseInactiveCustomerConversations, 30 * 1000);
   inactivityTimer.unref?.();
 
-  const attendanceHub = createAttendanceHub({
-    getState(eventId) {
-      const event = db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
-      return event ? attendanceState(db, event) : null;
-    }
-  });
-
-  app.get("/api/settings/company-data", auth, admin, (_req, res) => res.json(documentService.companyData()));
+  app.get("/api/settings/company-data", auth, admin, (_req, res) => res.json(readCompanyData(db)));
   app.put("/api/settings/company-data", auth, admin, (req, res) => {
     try {
-      const before = documentService.companyData();
-      const after = saveCompanyData(db, { ...before, ...(req.body || {}) }, req.user.name || req.user.id);
-      audit(req, "UPDATE", "company_data", "company", before, after, 1, "Company invoice data updated");
+      const before=readCompanyData(db);
+      const after=saveCompanyData(db,{...before,...(req.body||{})},req.user.name||req.user.id);
+      audit(req,"UPDATE","company_data","company",before,after,1,"Company invoice data updated");
       res.json(after);
-    } catch (error) { sendError(res, error); }
-  });
-
-  function sendPdf(res, pdf, filename) {
-    res.setHeader("Cache-Control", "private, no-store");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.type("application/pdf").send(pdf);
-  }
-
-  function normalizeTicketVariant(value) {
-    const key = clean(value, 40).toUpperCase().replace(/[- ]+/g, "_");
-    return ({
-      PUBLIC: "PUBLIC_PAID", PAID: "PUBLIC_PAID", PUBLIC_PAID: "PUBLIC_PAID", FREE: "PUBLIC_FREE", PUBLIC_FREE: "PUBLIC_FREE",
-      VIP: "VIP", INVITATION: "INVITATION", COMPLIMENTARY: "COMPLIMENTARY", COMPLIMENTARY_TICKET: "COMPLIMENTARY",
-      MANUAL: "MANUAL", ON_SITE: "ON_SITE", ON_SITE_PAYMENT: "ON_SITE"
-    })[key] || key;
-  }
-
-  function recordManualTicketIncome(ticket, event, userName = "SYSTEM") {
-    if (Number(ticket.price_cents || 0) <= 0) return null;
-    const desiredStatus = ticket.payment_status === "PAID" ? "paid" : "issued";
-    if (!documentService?.ensureTicketInvoice) throw Object.assign(new Error("EVENT_DOCUMENT_SERVICE_REQUIRED"), { status: 500 });
-    const invoice = documentService.ensureTicketInvoice(ticket, event, { status: desiredStatus });
-    db.prepare("DELETE FROM financial_items WHERE source_type='event_manual_ticket' AND source_id=?").run(ticket.id);
-    return invoice;
-  }
-
-  app.get("/api/events/tickets/:id.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "full"), `klavierhaus-ticket-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/events/tickets/:id/front.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "front"), `klavierhaus-ticket-${req.params.id}-front.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/events/tickets/:id/back.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "back"), `klavierhaus-ticket-${req.params.id}-back.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/events/tickets/:id/full.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForTicket(req.params.id, "full"), `klavierhaus-ticket-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.post("/api/events/tickets/:id/documents", auth, admin, async (req, res) => {
-    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
-    try {
-      const mode = ["front", "back", "full"].includes(String(req.body?.mode || "full").toLowerCase()) ? String(req.body.mode || "full").toLowerCase() : "full";
-      const document = documentService.generateTicketDocuments(ticket.id, { mode, userId: req.user.id });
-      let email = { status: "NOT_REQUESTED" };
-      if (req.body?.email_front === true) email = await documentService.sendTicketDocuments({ eventId: ticket.event_id, ticketIds: [ticket.id], deliveryType: "EVENT_MANUAL_TICKET" });
-      res.json({ ok: true, document, email, ticket: db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id) });
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/individual-tickets", auth, admin, async (req, res) => {
-    const eventId = clean(req.body?.event_id, 160);
-    const event = eventId ? db.prepare("SELECT * FROM events WHERE id=?").get(eventId) : null;
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    if (["CANCELLED", "CLOSED"].includes(event.status)) return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
-    const contactId = clean(req.body?.contact_id || req.body?.customer_id, 160) || null;
-    const contact = contactId ? db.prepare("SELECT id,name,email FROM contacts WHERE id=?").get(contactId) : null;
-    if (contactId && !contact) return res.status(404).json({ error: "CONTACT_NOT_FOUND" });
-    const salutation = clean(req.body?.salutation, 30);
-    const firstNames = clean(req.body?.first_names || req.body?.firstNames, 120);
-    const surnames = clean(req.body?.surnames || req.body?.last_names || req.body?.lastNames, 120);
-    const suffix = clean(req.body?.suffix, 30);
-    const structuredName = [salutation, firstNames, surnames, suffix].filter(Boolean).join(" ");
-    const attendeeName = clean(req.body?.attendee_name || req.body?.guest_name || req.body?.name || structuredName || contact?.name, 500);
-    if (!attendeeName) return res.status(400).json({ error: "GUEST_NAME_REQUIRED" });
-    const email = normalizeEmail(req.body?.contact_email || req.body?.email || contact?.email);
-    if (email && !validEmail(email)) return res.status(400).json({ error: "CONTACT_EMAIL_INVALID" });
-    const variant = normalizeTicketVariant(req.body?.ticket_variant || req.body?.ticket_type || req.body?.type || "PUBLIC_PAID");
-    const allowedVariants = ["PUBLIC_PAID", "PUBLIC_FREE", "VIP", "INVITATION", "COMPLIMENTARY", "MANUAL", "ON_SITE"];
-    if (!allowedVariants.includes(variant)) return res.status(400).json({ error: "INVALID_TICKET_VARIANT" });
-    const specialVariant = ["VIP", "INVITATION", "COMPLIMENTARY"].includes(variant);
-    const requestedPrice = Number(req.body?.price_cents ?? (variant === "PUBLIC_PAID" || variant === "ON_SITE" ? event.price_cents : 0));
-    const priceCents = specialVariant || variant === "PUBLIC_FREE" ? 0 : requestedPrice;
-    if (!Number.isInteger(priceCents) || priceCents < 0) return res.status(400).json({ error: "INVALID_TICKET_PRICE" });
-    const requestedPayment = clean(req.body?.payment_status, 30).toUpperCase();
-    const paymentMethod = priceCents > 0 ? normalizePaymentMethod(req.body?.payment_method, { allowEmpty: false }) : null;
-    if (priceCents > 0 && !paymentMethod) return res.status(400).json({ error: "INVALID_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
-    const paymentStatus = requestedPayment || ((priceCents > 0 && variant !== "ON_SITE" && paymentMethod) ? "PAID" : priceCents === 0 ? "NOT_REQUIRED" : "PENDING");
-    if (!["PAID", "PENDING", "NOT_REQUIRED"].includes(paymentStatus)) return res.status(400).json({ error: "INVALID_PAYMENT_STATUS" });
-    if (paymentStatus === "PAID" && priceCents <= 0) return res.status(400).json({ error: "FREE_TICKET_CANNOT_BE_PAID" });
-    if (variant === "ON_SITE" && paymentStatus === "PENDING" && !event.start_at) return res.status(400).json({ error: "EVENT_START_REQUIRED" });
-    try {
-      const ticket = db.transaction(() => {
-        const created = ticketService.createTicket({
-          eventId, ticketVariant: variant, sourceType: variant === "INVITATION" ? "INVITATION" : variant === "PUBLIC_PAID" || variant === "ON_SITE" ? "PURCHASE" : "COMPLIMENTARY",
-          invitationId: clean(req.body?.invitation_id, 160) || null, contactId, buyerName: clean(req.body?.buyer_name || contact?.name || attendeeName, 500), attendeeName,
-          originalGuestName: attendeeName, salutation, firstNames, surnames, suffix, contactEmail: email, priceCents, currency: event.currency || "USD", paymentMethod,
-          paymentStatus, reservationStatus: clean(req.body?.reservation_status, 30).toUpperCase() || undefined, userId: req.user.id
-        });
-        recordManualTicketIncome(created, event, req.user.name || req.user.id);
-        return created;
-      })();
-      const documents = variant === "ON_SITE" && paymentStatus !== "PAID"
-        ? []
-        : ["front", "back", "full"].map((mode) => documentService.generateTicketDocuments(ticket.id, { mode, userId: req.user.id }));
-      const invoice = paymentStatus === "PAID" && priceCents > 0 ? documentService.invoicePdfForTicket(ticket.id) : null;
-      let emailDelivery = { status: "NOT_REQUESTED" };
-      if (documents.length && (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1")) {
-        emailDelivery = await documentService.sendTicketDocuments({ eventId, ticketIds: [ticket.id], deliveryType: "EVENT_INDIVIDUAL_TICKET" });
-      } else if (!documents.length && (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1")) {
-        emailDelivery = { status: "NOT_AVAILABLE_UNPAID" };
-      }
-      const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id);
-      audit(req, "CREATE_INDIVIDUAL_TICKET", "event_tickets", ticket.id, null, after, 1, `Individual ${variant} ticket created`);
-      res.status(201).json({ ok: true, ticket: after, documents, invoice: invoice ? { invoice_number: invoice.invoice_number, stored_path: invoice.stored_path } : null, email: emailDelivery });
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/tickets/:id/pay", auth, admin, async (req, res) => {
-    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
-    if (ticket.event_status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
-    if (!["ON_SITE", "PUBLIC_PAID"].includes(ticket.ticket_variant)) return res.status(400).json({ error: "TICKET_VARIANT_NOT_PAYABLE_HERE" });
-    if (Number(ticket.price_cents || 0) <= 0) return res.status(400).json({ error: "TICKET_PRICE_REQUIRED" });
-    try {
-      const paymentMethod = normalizePaymentMethod(req.body?.payment_method || ticket.payment_method || "Cash", { allowEmpty: false });
-      if (!paymentMethod) return res.status(400).json({ error: "INVALID_PAYMENT_METHOD", allowed: PAYMENT_METHODS });
-      const paid = db.transaction(() => {
-        const updated = ticketService.markPaid(ticket.id, { paymentMethod });
-        recordManualTicketIncome(updated, db.prepare("SELECT * FROM events WHERE id=?").get(updated.event_id), req.user.name || req.user.id);
-        return updated;
-      })();
-      const documents = ["front", "back", "full"].map((mode) => documentService.generateTicketDocuments(paid.id, { mode, userId: req.user.id }));
-      const invoice = documentService.invoicePdfForTicket(paid.id);
-      let email = { status: "NOT_REQUESTED" };
-      if (req.body?.send_email === true || req.body?.send_email === "true" || req.body?.send_email === 1 || req.body?.send_email === "1") {
-        email = await documentService.sendTicketDocuments({ eventId: paid.event_id, ticketIds: [paid.id], deliveryType: ticket.ticket_variant === "ON_SITE" ? "EVENT_ON_SITE_TICKET" : "EVENT_PUBLIC_PAID_TICKET" });
-      }
-      const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(paid.id);
-      audit(req, "MARK_EVENT_TICKET_PAID", "event_tickets", paid.id, ticket, after, 1, `${ticket.ticket_variant} ticket paid and finalized`);
-      res.json({ ok: true, ticket: after, documents, invoice: { invoice_number: invoice.invoice_number, stored_path: invoice.stored_path }, email });
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.get("/api/events/tickets/:id/invoice.pdf", auth, admin, (req, res) => {
-    try {
-      const invoice = documentService.invoicePdfForTicket(req.params.id);
-      sendPdf(res, invoice.pdf, `klavierhaus-invoice-${invoice.invoice_number}.pdf`);
-    } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/event-payments/:id/tickets.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "full"), `klavierhaus-tickets-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/event-payments/:id/tickets/front.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "front"), `klavierhaus-tickets-${req.params.id}-front.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/event-payments/:id/tickets/back.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "back"), `klavierhaus-tickets-${req.params.id}-back.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/event-payments/:id/tickets/full.pdf", auth, admin, (req, res) => {
-    try { sendPdf(res, documentService.ticketPdfForPayment(req.params.id, "full"), `klavierhaus-tickets-${req.params.id}-full.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.get("/api/event-payments/:id/invoice.pdf", auth, admin, (req, res) => {
-    try { const invoice = documentService.invoicePdfForPayment(req.params.id); sendPdf(res, invoice.pdf, `klavierhaus-invoice-${invoice.invoice_number}.pdf`); } catch (error) { sendError(res, error); }
-  });
-  app.post("/api/event-payments/:id/invoice/resend", auth, admin, async (req, res) => {
-    try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
-  });
-
-  app.get("/api/guest-data", auth, admin, (req, res) => {
-    try {
-      const data = readGuestData(db, {
-        search: clean(req.query.search, 160),
-        eventId: clean(req.query.event_id, 160)
-      });
-      res.setHeader("Cache-Control", "private, no-store");
-      res.json(data);
-    } catch (error) { sendError(res, error, "GUEST_DATA_LOAD_FAILED"); }
-  });
-
-  app.get("/api/guest-data.pdf", auth, admin, (req, res) => {
-    try {
-      const data = readGuestData(db, {
-        search: clean(req.query.search, 160),
-        eventId: clean(req.query.event_id, 160)
-      });
-      const language = req.query.lang === "hu" ? "hu" : "en";
-      const company = readCompanyData(db);
-      const pdf = generateGuestDataPdf({
-        guests: data.guests,
-        language,
-        logoPath: resolveCompanyLogoPath(company.logo_url, uploadDir)
-      });
-      sendPdf(res, pdf, `klavierhaus-guest-data-${language}.pdf`);
-    } catch (error) { sendError(res, error, "GUEST_DATA_PDF_FAILED"); }
-  });
-
-  app.get("/api/events/:id/attendance", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT id,event_key,custom_type,title_en,title_hu,start_at,end_at,status,capacity_total,currency,venue_name,timezone FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    res.json(attendanceState(db, event, clean(req.query.q, 160)));
-  });
-
-  app.post("/api/events/:id/attendance/mode", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const before = ensureSession(db, event.id, req.user.id);
-      const session = startMode(db, event, req.body?.mode, req.user);
-      audit(req, "ATTENDANCE_MODE", "event_attendance", event.id, before, session, 1, "Attendance mode changed");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json(current);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.get("/api/events/:id/attendance/stream", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    res.status(200);
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
-    res.write(": connected\n\n");
-    const unsubscribe = attendanceHub.subscribe(event.id, res, attendanceState(db, event));
-    req.on("close", unsubscribe);
-  });
-
-  app.post("/api/events/:id/attendance/pause", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const before = ensureSession(db, event.id, req.user.id);
-      const session = pauseAttendance(db, event, req.user);
-      audit(req, "ATTENDANCE_PAUSE", "event_attendance", event.id, before, session, 1, "Digital attendance input paused");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json(current);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/:id/attendance/resume", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const before = ensureSession(db, event.id, req.user.id);
-      const session = resumeAttendance(db, event, req.user);
-      audit(req, "ATTENDANCE_RESUME", "event_attendance", event.id, before, session, 1, "Digital attendance input resumed");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json(current);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/:id/attendance/reopen", auth, admin, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const before = ensureSession(db, event.id, req.user.id);
-      const session = reopenAttendance(db, event, req.user);
-      audit(req, "ATTENDANCE_REOPEN", "event_attendance", event.id, before, session, 1, "Attendance list reopened by administrator");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json(current);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.post("/api/events/tickets/:id/check-in", auth, attendanceOperator, (req, res) => {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const result = changeGuestStatus(db, event, ticket, req.body?.checked_in === false ? "NOT_ARRIVED" : "PRESENT", req.user, { expectedRevision: req.body?.expected_revision });
-      audit(req, result.attendance_status === "PRESENT" ? "CHECK_IN" : "CHECK_IN_REVERT", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance status changed");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json({ ...result, checked_in: result.attendance_status === "PRESENT", state: current });
-    } catch (error) {
-      if (error?.message === "ATTENDANCE_CONFLICT") error.state = attendanceState(db, event);
-      sendError(res, error);
-    }
-  });
-
-  app.post("/api/events/tickets/:id/attendance-status", auth, attendanceOperator, (req, res) => {
-    const ticket = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(ticket.event_id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const result = changeGuestStatus(db, event, ticket, req.body?.status, req.user, { expectedRevision: req.body?.expected_revision });
-      audit(req, req.body?.status === "DELETED" ? "GUEST_DELETE" : "ATTENDANCE_STATUS", "event_attendance", ticket.id, ticket, result, 1, "Digital attendance guest status changed");
-      const current = attendanceState(db, event);
-      attendanceHub.publish(event.id, current);
-      res.json({ ...result, state: current });
-    } catch (error) {
-      if (error?.message === "ATTENDANCE_CONFLICT") error.state = attendanceState(db, event);
-      sendError(res, error);
-    }
-  });
-
-  app.post("/api/events/:id/attendance/close", auth, admin, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    try {
-      const before = ensureSession(db, event.id, req.user.id);
-      const report = closeAttendance(db, event, req.user, Boolean(req.body?.force));
-      audit(req, "ATTENDANCE_CLOSE", "event_attendance", event.id, before, report, 1, "Digital guest list finalized");
-      attendanceHub.publish(event.id, attendanceState(db, event));
-      res.json(report);
-    } catch (error) { sendError(res, error); }
-  });
-
-  app.get("/api/events/:id/attendance-report", auth, attendanceOperator, (req, res) => {
-    const event = db.prepare("SELECT * FROM events WHERE id=?").get(req.params.id);
-    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    const session = ensureSession(db, event.id, req.user.id);
-    if (!session.snapshot_json) return res.status(404).json({ error: "ATTENDANCE_REPORT_NOT_FOUND" });
-    res.json(JSON.parse(session.snapshot_json));
-  });
-
-  app.post("/api/events/tickets/:id/void", auth, admin, (req, res) => {
-    const ticket = db.prepare("SELECT t.*,e.status AS event_status FROM event_tickets t JOIN events e ON e.id=t.event_id WHERE t.id=?").get(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "TICKET_NOT_FOUND" });
-    if (ticket.event_status === "CLOSED") return res.status(409).json({ error: "EVENT_ALREADY_CLOSED" });
-    if (ticket.event_status === "CANCELLED") return res.status(409).json({ error: "EVENT_NOT_AVAILABLE" });
-    if (ticket.source_type === "PURCHASE" && ticket.ticket_variant !== "ON_SITE") return res.status(409).json({ error: "PURCHASE_TICKET_REQUIRES_REFUND" });
-    if (["VOID", "REFUNDED"].includes(ticket.status)) return res.json({ ...ticket, already_void: true });
-    if (ticket.status === "USED") return res.status(409).json({ error: "CHECKED_IN_TICKET_CANNOT_BE_VOIDED" });
-    db.prepare("UPDATE event_tickets SET status='VOID',voided_at=CURRENT_TIMESTAMP,voided_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, ticket.id);
-    if (ticket.invitation_id) db.prepare("UPDATE event_invitations SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.user.id, ticket.invitation_id);
-    const after = db.prepare("SELECT * FROM event_tickets WHERE id=?").get(ticket.id);
-    audit(req, "VOID_TICKET", "event_tickets", ticket.id, ticket, after, 1, "Complementary or invitation ticket voided");
-    res.json(after);
-  });
-
-  app.get("/api/event-payments/:id/documents", auth, admin, (req, res) => {
-    const payment = db.prepare("SELECT id,event_id,status,purchaser_name,purchaser_email,amount_total,currency,invoice_id FROM event_payments WHERE id=?").get(req.params.id);
-    if (!payment) return res.status(404).json({ error: "EVENT_PAYMENT_NOT_FOUND" });
-    const invoice = payment.invoice_id ? invoiceEngine.invoiceDetail(payment.invoice_id) : null;
-    res.json({ payment, delivery: documentService.deliveryRow(`event-purchase-documents:${payment.id}`), invoice });
-  });
-  app.post("/api/event-payments/:id/documents/resend", auth, admin, async (req, res) => {
-    try { res.json(await documentService.sendPurchaseDocuments(req.params.id, { resend: true })); } catch (error) { sendError(res, error); }
+    } catch(error){sendError(res,error);}
   });
 
   function autoReplyText(name, language) {
@@ -1768,17 +1169,17 @@ function registerBusinessOperationsRoutes(options) {
     autoCloseInactiveCustomerConversations(); cleanupExpiredCustomerConversations();
     const rawToken = crypto.randomBytes(32).toString("base64url"); const id = newId("CONV"); const language = req.body?.language === "hu" ? "hu" : "en";
     const outsideSupportHours = !isSupportHoursOpen(new Date(), env, db);
-    const context = { service_id: clean(req.body?.service_id, 120) || null, piano_id: clean(req.body?.piano_id, 120) || null, event_id: clean(req.body?.event_id, 120) || null, ticket_id: clean(req.body?.ticket_id, 120) || null };
+    const context = { service_id: clean(req.body?.service_id, 120) || null, piano_id: clean(req.body?.piano_id, 120) || null };
     const assignee = chooseConversationAssignee(db, input.category);
     const visitorTokenHash = input.email ? null : tokenHash(rawToken);
     let messageId;
     try {
       db.transaction(() => {
-        db.prepare(`INSERT INTO customer_conversations(id,public_token_hash,public_token_encrypted,visitor_token_hash,name,email,language,category,service_id,piano_id,event_id,ticket_id,status,assigned_user_id,assigned_role,consent_contact,source_path,metadata_json,last_message_at,last_activity_at)
+        db.prepare(`INSERT INTO customer_conversations(id,public_token_hash,public_token_encrypted,visitor_token_hash,name,email,language,category,service_id,piano_id,status,assigned_user_id,assigned_role,consent_contact,source_path,metadata_json,last_message_at,last_activity_at)
           VALUES(
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-          )`).run(id, tokenHash(rawToken), encryptConversationToken(rawToken, conversationKey), visitorTokenHash, input.name, input.email, language, input.category, context.service_id, context.piano_id, context.event_id, context.ticket_id, "PENDING_STAFF", assignee?.id || null, assignee?.routing_role || assignee?.role || null, 1, clean(req.body?.source_path, 1000), JSON.stringify({ subject: clean(req.body?.subject, 240), routing_role: assignee?.routing_role || "ADMIN" }));
+            ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )`).run(id, tokenHash(rawToken), encryptConversationToken(rawToken, conversationKey), visitorTokenHash, input.name, input.email, language, input.category, context.service_id, context.piano_id, "PENDING_STAFF", assignee?.id || null, assignee?.routing_role || assignee?.role || null, 1, clean(req.body?.source_path, 1000), JSON.stringify({ subject: clean(req.body?.subject, 240), routing_role: assignee?.routing_role || "ADMIN" }));
         messageId = newId("MSG");
         db.prepare("INSERT INTO customer_messages(id,conversation_id,direction,sender_name,sender_email,body,status) VALUES(?,?,?,?,?,?,'UNREAD')").run(messageId, id, "CUSTOMER", input.name || "Guest", input.email, input.message);
         insertAttachments(req.files, id, messageId);
@@ -1891,14 +1292,11 @@ function registerBusinessOperationsRoutes(options) {
     const conversationUrl = accessToken ? publicConversationUrl(accessToken) : `${String(websiteBaseUrl).replace(/\/$/, "")}/contact`;
     const deliveryKey = `customer-message:${messageId}`;
     if (row.email && transactionalEmail?.sendCustomerConversationReply) {
-      documentService?.recordDelivery?.({ eventKey: deliveryKey, deliveryType: "CUSTOMER_CONVERSATION_REPLY", recipientEmail: row.email, conversationId: row.id, result: { status: "PENDING" } });
       try {
         const sent = await transactionalEmail.sendCustomerConversationReply({ to: row.email, name: row.name, message: body, conversationUrl, language: row.language, idempotencyKey: deliveryKey });
         delivery = { status: "SENT", provider_message_id: sent.providerMessageId };
-        documentService?.recordDelivery?.({ eventKey: deliveryKey, deliveryType: "CUSTOMER_CONVERSATION_REPLY", recipientEmail: row.email, conversationId: row.id, result: { status: "SENT", providerMessageId: sent.providerMessageId } });
       } catch (error) {
         delivery = { status: error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" ? "NOT_CONFIGURED" : "FAILED" };
-        documentService?.recordDelivery?.({ eventKey: deliveryKey, deliveryType: "CUSTOMER_CONVERSATION_REPLY", recipientEmail: row.email, conversationId: row.id, result: { status: delivery.status, errorCode: error.code || "EMAIL_DELIVERY_FAILED" } });
       }
     }
     res.status(201).json({ conversation: conversationPayload(conversationById(row.id), true), delivery });
@@ -1995,4 +1393,4 @@ function registerBusinessOperationsRoutes(options) {
   });
 }
 
-module.exports = { COMPANY_KEYS, createBusinessDocumentService, createInvoiceEngine, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail, invoiceLifecycleStatus, closeInvoicePeriod, closeCompletedInvoicePeriods, nextNewYorkMonthBoundary, nextNewYorkMonthClose, actualMonthEndDate };
+module.exports = { COMPANY_KEYS, createInvoiceEngine, isSupportHoursOpen, readCompanyData, registerBusinessOperationsRoutes, tokenHash, validEmail, invoiceLifecycleStatus, closeInvoicePeriod, closeCompletedInvoicePeriods, nextNewYorkMonthBoundary, nextNewYorkMonthClose, actualMonthEndDate };

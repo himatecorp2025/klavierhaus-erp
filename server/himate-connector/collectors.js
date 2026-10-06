@@ -168,7 +168,7 @@ const COLLECTORS={
     return {conversation_count:n(base.conversation_count),open_count:n(base.open_count),closed_count:n(base.closed_count),average_response_minutes:Math.round(n(response.average_response_minutes)*100)/100};
   },
   website_reviews(db){
-    const x=row(db,`SELECT COUNT(*) review_count,SUM(CASE WHEN COALESCE(visible,0)=1 THEN 1 ELSE 0 END) published_count,SUM(CASE WHEN linked_event_id IS NOT NULL THEN 1 ELSE 0 END) event_linked_count FROM website_reviews WHERE COALESCE(is_sample,0)=0`);
+    const x=row(db,`SELECT COUNT(*) review_count,SUM(CASE WHEN COALESCE(visible,0)=1 THEN 1 ELSE 0 END) published_count FROM website_reviews WHERE COALESCE(is_sample,0)=0`);
     return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,n(v)]));
   },
   campaigns_utm(db){
@@ -216,24 +216,6 @@ const COLLECTORS={
     const x=row(db,`SELECT COUNT(*) contact_request_count,SUM(CASE WHEN UPPER(status)<>'NEW' THEN 1 ELSE 0 END) contacted_count,SUM(CASE WHEN UPPER(status)='APPOINTMENT_SCHEDULED' THEN 1 ELSE 0 END) appointment_count,SUM(CASE WHEN UPPER(status)='CLOSED' THEN 1 ELSE 0 END) closed_count FROM website_contact_leads`);
     return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,n(v)]));
   },
-  digital_attendance(db){
-    const tickets=count(db,"event_tickets","UPPER(status) NOT IN ('VOID','CANCELLED')");
-    const x=row(db,`SELECT COUNT(*) checkin_count,SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) deleted_entry_count FROM event_attendance_entries`);
-    return {attendee_count:tickets,checkin_count:n(x.checkin_count),deleted_entry_count:n(x.deleted_entry_count),attendance_rate:rate(n(x.checkin_count),tickets)};
-  },
-  events(db){
-    const e=row(db,`SELECT COUNT(*) event_count,SUM(CASE WHEN UPPER(status)='PUBLISHED' THEN 1 ELSE 0 END) published_count,SUM(CASE WHEN UPPER(status) IN ('COMPLETED','CLOSED') THEN 1 ELSE 0 END) completed_count,COALESCE(SUM(capacity_total),0) capacity_total FROM events WHERE COALESCE(is_sample,0)=0`);
-    const revenue=money(n(row(db,`SELECT COALESCE(SUM(price_cents),0)/100.0 value FROM event_tickets WHERE UPPER(COALESCE(payment_status,''))='PAID'`).value));
-    return {event_count:n(e.event_count),published_count:n(e.published_count),completed_count:n(e.completed_count),capacity_total:n(e.capacity_total),ticket_revenue_usd:revenue};
-  },
-  event_guest_list(db){
-    const x=row(db,`SELECT COUNT(*) guest_count,SUM(CASE WHEN UPPER(status)='ACCEPTED' THEN 1 ELSE 0 END) confirmed_count,SUM(CASE WHEN UPPER(status)='DECLINED' THEN 1 ELSE 0 END) declined_count FROM event_invitations`);
-    return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,n(v)]));
-  },
-  event_invitations(db){
-    const x=row(db,`SELECT SUM(CASE WHEN sent_at IS NOT NULL THEN 1 ELSE 0 END) sent_count,SUM(CASE WHEN UPPER(status)='ACCEPTED' THEN 1 ELSE 0 END) accepted_count,SUM(CASE WHEN UPPER(status)='DECLINED' THEN 1 ELSE 0 END) declined_count,SUM(CASE WHEN UPPER(COALESCE(delivery_status,'')) IN ('FAILED','BOUNCED') THEN 1 ELSE 0 END) delivery_failed_count FROM event_invitations`);
-    return {sent_count:n(x.sent_count),accepted_count:n(x.accepted_count),declined_count:n(x.declined_count),delivery_failed_count:n(x.delivery_failed_count),rsvp_rate:rate(n(x.accepted_count)+n(x.declined_count),n(x.sent_count))};
-  },
   media_library(db){
     const x=row(db,`SELECT COUNT(*) asset_count,SUM(CASE WHEN mime_type LIKE 'image/%' THEN 1 ELSE 0 END) image_count,SUM(CASE WHEN mime_type LIKE 'video/%' THEN 1 ELSE 0 END) video_count,COALESCE(SUM(file_size),0) storage_bytes FROM website_media`);
     return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,n(v)]));
@@ -249,11 +231,6 @@ const COLLECTORS={
   showroom_pianos(db){
     const x=row(db,`SELECT COUNT(*) piano_count,SUM(CASE WHEN COALESCE(published,0)=1 THEN 1 ELSE 0 END) published_count,SUM(CASE WHEN UPPER(COALESCE(availability_status,''))='AVAILABLE' THEN 1 ELSE 0 END) available_count,SUM(CASE WHEN COALESCE(featured,0)=1 THEN 1 ELSE 0 END) featured_count FROM website_showroom_pianos WHERE COALESCE(is_sample,0)=0`);
     return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,n(v)]));
-  },
-  event_tickets(db){
-    const t=row(db,`SELECT COUNT(*) ticket_count,SUM(CASE WHEN UPPER(COALESCE(payment_status,''))='PAID' THEN 1 ELSE 0 END) paid_count,SUM(CASE WHEN UPPER(status)='REFUNDED' OR UPPER(COALESCE(payment_status,''))='REFUNDED' THEN 1 ELSE 0 END) refunded_count,SUM(CASE WHEN checked_in_at IS NOT NULL THEN 1 ELSE 0 END) checked_in_count,COALESCE(SUM(CASE WHEN UPPER(COALESCE(payment_status,''))='PAID' THEN price_cents ELSE 0 END),0)/100.0 gross_usd FROM event_tickets`);
-    const refund=money(n(row(db,`SELECT COALESCE(SUM(CASE WHEN UPPER(status)='REFUNDED' THEN amount_total ELSE 0 END),0)/100.0 refund_usd FROM event_payments`).refund_usd));
-    return {ticket_count:n(t.ticket_count),paid_count:n(t.paid_count),refunded_count:n(t.refunded_count),checked_in_count:n(t.checked_in_count),gross_usd:money(t.gross_usd),refund_usd:refund};
   }
 };
 
