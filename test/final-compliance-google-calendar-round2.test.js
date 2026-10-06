@@ -58,9 +58,11 @@ test('Google Calendar live sync is refreshed on startup and before calendar read
 test('Google sync is hard-locked to the Klavierhaus Work source calendar',()=>{
   const source=fs.readFileSync(path.join(__dirname,"..","server","google-calendar.js"),"utf8");
   assert.match(source,/DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail\.com"/);
+  assert.match(source,/KLAVIERHAUS_WORK_CALENDAR_ID = "ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group\.calendar\.google\.com"/);
   assert.match(source,/GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK/);
   assert.match(source,/FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail\.com"/);
-  assert.match(source,/normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID/);\n  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
+  assert.match(source,/normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID/);
+  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
   assert.match(source,/googleRequest\(\`\/calendars\/\$\{encodeURIComponent\(config\.calendarId\)\}\/events\?/);
   assert.doesNotMatch(source,/calendarList\/list/);
   assert.doesNotMatch(source,/\/calendars\/primary\/events/);
