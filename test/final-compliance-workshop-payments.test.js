@@ -145,6 +145,6 @@ test("Stripe signature verification stays ahead of JSON parsing and only then de
   assert.ok(index.indexOf('app.post("/api/webhooks/stripe",express.raw')>=0);
   assert.ok(index.indexOf('app.post("/api/webhooks/stripe",express.raw')<index.indexOf("app.use(express.json"));
   assert.match(stripe,/stripe\.webhooks\.constructEvent\(req\.body,\s*signature,\s*webhookSecret\)/);
-  assert.match(stripe,/metadata\?\.payment_domain==="workshop_invoice"/);
+  assert.match(stripe,/metadata\?\.payment_domain!=="workshop_invoice"/);
   assert.match(stripe,/await onCheckoutSessionEvent\(event\.type,session\)/);
 });
