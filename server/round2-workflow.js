@@ -226,7 +226,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     definitions.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
     const plan=definitions.map(stage=>{
-      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
+      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):ACTIVE_STAGE_KEYS.has(stage.key));
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       const responsibilitySkillId=integerId(item?.responsibility_skill_id)||null;if(responsibilitySkillId)responsibilitySkill(responsibilitySkillId,{optional:false});
