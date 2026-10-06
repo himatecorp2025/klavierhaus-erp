@@ -44,6 +44,85 @@ try{
     CREATE TABLE event_tickets(id TEXT PRIMARY KEY,event_id TEXT,attendee_name TEXT);
     INSERT INTO events(id,title_en) VALUES('LEGACY-EVENT-1','Retired event');
     INSERT INTO event_tickets(id,event_id,attendee_name) VALUES('LEGACY-TICKET-1','LEGACY-EVENT-1','Legacy Guest');
+    CREATE TABLE customer_conversations(
+      id TEXT PRIMARY KEY,
+      public_token_hash TEXT NOT NULL UNIQUE,
+      public_token_encrypted TEXT,
+      visitor_token_hash TEXT,
+      name TEXT,
+      email TEXT,
+      language TEXT NOT NULL DEFAULT 'en',
+      category TEXT NOT NULL CHECK(category IN ('GENERAL','EVENT','TICKET')),
+      event_id TEXT,
+      ticket_id TEXT,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+      assigned_user_id TEXT,
+      last_activity_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE customer_messages(
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      sender_email TEXT,
+      sender_user_id TEXT,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'UNREAD',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE customer_message_attachments(
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      stored_name TEXT NOT NULL UNIQUE,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(message_id) REFERENCES customer_messages(id) ON DELETE CASCADE
+    );
+    CREATE TABLE customer_conversation_events(
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE website_tracking_events(
+      id TEXT PRIMARY KEY,
+      event_name TEXT NOT NULL,
+      anonymous_session_hash TEXT NOT NULL,
+      source_path TEXT,
+      language TEXT NOT NULL DEFAULT 'en',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      analytics_consent INTEGER NOT NULL DEFAULT 0,
+      marketing_consent INTEGER NOT NULL DEFAULT 0,
+      event_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO customer_conversations(id,public_token_hash,name,email,category,event_id,status)
+      VALUES('CONV-EVENT','hash-event','Legacy Event Guest','event@example.com','EVENT','LEGACY-EVENT-1','OPEN');
+    INSERT INTO customer_conversations(id,public_token_hash,name,email,category,ticket_id,status)
+      VALUES('CONV-TICKET','hash-ticket','Legacy Ticket Guest','ticket@example.com','TICKET','LEGACY-TICKET-1','OPEN');
+    INSERT INTO customer_conversations(id,public_token_hash,name,email,category,status)
+      VALUES('CONV-GENERAL','hash-general','Legacy General Guest','general@example.com','GENERAL','OPEN');
+    INSERT INTO customer_messages(id,conversation_id,direction,sender_name,body,status)
+      VALUES('MSG-EVENT','CONV-EVENT','CUSTOMER','Legacy Event Guest','Retire this event message','UNREAD');
+    INSERT INTO customer_messages(id,conversation_id,direction,sender_name,body,status)
+      VALUES('MSG-GENERAL','CONV-GENERAL','CUSTOMER','Legacy General Guest','Preserve this general message','UNREAD');
+    INSERT INTO customer_message_attachments(id,conversation_id,message_id,stored_name,original_name,mime_type,file_size,sha256)
+      VALUES('ATT-EVENT','CONV-EVENT','MSG-EVENT','event-proof.bin','event-proof.bin','application/octet-stream',4,'deadbeef');
+    INSERT INTO customer_conversation_events(id,conversation_id,event_type)
+      VALUES('CE-EVENT','CONV-EVENT','LEGACY_EVENT_ACTIVITY');
+    INSERT INTO website_tracking_events(id,event_name,anonymous_session_hash,source_path,event_id)
+      VALUES('TRACK-EVENT','event_purchase','anon-event','/events/legacy','LEGACY-EVENT-1');
+    INSERT INTO website_tracking_events(id,event_name,anonymous_session_hash,source_path)
+      VALUES('TRACK-GENERAL','piano_view','anon-general','/pianos');
     CREATE TRIGGER trg_invoice_credit_memos_immutable_update
     BEFORE UPDATE ON invoice_credit_memos
     BEGIN
@@ -59,6 +138,7 @@ try{
       note TEXT,
       piano_id TEXT,
       service_id TEXT,
+      conversation_id TEXT,
       status TEXT NOT NULL DEFAULT 'SCHEDULED',
       assigned_user_id TEXT,
       language TEXT NOT NULL DEFAULT 'en',
@@ -68,10 +148,11 @@ try{
       completed_at TEXT,
       cancelled_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES customer_conversations(id) ON DELETE SET NULL
     );
-    INSERT INTO private_appointments(id,appointment_type,name,phone,scheduled_at,note,status,language,created_source)
-      VALUES('PA-LEGACY-1','PRIVATE_VISIT','Legacy Appointment','212-555-0199','2031-05-10T14:00:00.000Z','Preserve me','SCHEDULED','en','PUBLIC');
+    INSERT INTO private_appointments(id,appointment_type,name,phone,scheduled_at,note,conversation_id,status,language,created_source)
+      VALUES('PA-LEGACY-1','PRIVATE_VISIT','Legacy Appointment','212-555-0199','2031-05-10T14:00:00.000Z','Preserve me','CONV-EVENT','SCHEDULED','en','PUBLIC');
     CREATE TABLE legacy_fk_parent(id INTEGER PRIMARY KEY,label TEXT);
     CREATE TABLE legacy_fk_child(id INTEGER PRIMARY KEY,parent_id INTEGER NOT NULL,FOREIGN KEY(parent_id) REFERENCES legacy_fk_parent(id));
     INSERT INTO legacy_fk_parent(id,label) VALUES(1,'parent');
@@ -113,10 +194,22 @@ try{
   assert.equal(piano.serial_number,"123456");
   assert.equal(piano.client_name,"Legacy Client");
   assert.equal(db.prepare("SELECT COUNT(*) c FROM intake_leads").get().c,0);
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_conversations WHERE id='CONV-EVENT'").get()),false,"EVENT conversations must be retired");
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_conversations WHERE id='CONV-TICKET'").get()),false,"TICKET conversations must be retired");
+  assert.ok(db.prepare("SELECT 1 FROM customer_conversations WHERE id='CONV-GENERAL'").get(),"non-event Messenger conversations must survive retirement");
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_messages WHERE id='MSG-EVENT'").get()),false,"messages belonging to retired event conversations must be removed");
+  assert.ok(db.prepare("SELECT 1 FROM customer_messages WHERE id='MSG-GENERAL'").get(),"messages belonging to supported conversations must survive");
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_message_attachments WHERE id='ATT-EVENT'").get()),false,"attachments belonging to retired event conversations must be removed");
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM customer_conversation_events WHERE id='CE-EVENT'").get()),false,"conversation events belonging to retired event conversations must be removed");
+  assert.equal(db.prepare("SELECT conversation_id FROM private_appointments WHERE id='PA-LEGACY-1'").get().conversation_id,null,"SET NULL conversation links must preserve the operational appointment");
+  const trackingColumns=db.prepare("PRAGMA table_info(website_tracking_events)").all().map(row=>row.name);
+  assert.equal(trackingColumns.includes("event_id"),false,"retired website tracking event_id column must be removed");
+  assert.equal(Boolean(db.prepare("SELECT 1 FROM website_tracking_events WHERE id='TRACK-EVENT'").get()),false,"event analytics must be removed in the same migration");
+  assert.ok(db.prepare("SELECT 1 FROM website_tracking_events WHERE id='TRACK-GENERAL'").get(),"non-event analytics must survive event retirement");
   for(const retired of ["contacts","client_pianos","planned_jobs","wf2_workflows","financial_items","events","event_tickets","legacy_fk_parent","legacy_fk_child","_inventory_legacy_items"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(retired)),false,`${retired} should be retired`);
   }
-  for(const preserved of ["users","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","intake_catalog_items","intake_assessment_items","private_appointments","private_appointment_requests","customer_appointment_proposals","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
+  for(const preserved of ["users","website_content_pages","website_showroom_pianos","website_services","website_artists","website_media","customer_conversations","customer_messages","customer_message_attachments","customer_conversation_events","website_tracking_events","intake_catalog_items","intake_assessment_items","private_appointments","private_appointment_requests","customer_appointment_proposals","inventory_items","handoff_preset_materials","purchase_requests","job_material_usage","inventory_movements","jobs","workflow_stage_definitions","job_workflow_phases","job_handoffs","partners","partner_contractors","invoice_sequences","invoices","invoice_items","invoice_payments","direct_expenses","invoice_email_log","kpi_summary_cache"]){
     assert.equal(Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(preserved)),true,`${preserved} must remain`);
   }
   assert.equal(db.prepare("SELECT COUNT(*) c FROM jobs").get().c,0);
