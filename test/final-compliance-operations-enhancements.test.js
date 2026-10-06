@@ -82,6 +82,15 @@ test("Milestone is the desktop and tablet home while phone stays on Workshop",()
   assert.match(ops,/milestoneIconPickerMarkup/);
   assert.match(ops,/data-add-child-milestone/);
   assert.match(ops,/roadmap-achievement-badge/);
+  assert.match(ops,/const formEl=event\.currentTarget/);
+  assert.match(ops,/new FormData\(formEl\)\.entries\(\)/);
+  assert.match(ops,/data-step-persisted/);
+  assert.match(ops,/row\.dataset\.stepPersisted==="1"/);
+  assert.match(ops,/uploadMilestoneFile\(file\)/);
+  assert.match(css,/Dynamic roadmap height/);
+  assert.match(css,/\.ms-roadmap-panel\{[\s\S]{0,180}height:auto!important;min-height:430px!important/);
+  assert.match(css,/\.ms-roadmap-scroll\{[\s\S]{0,160}height:auto!important;min-height:310px!important/);
+  assert.match(css,/\.roadmap-major-slot\{[\s\S]{0,180}height:auto!important;min-height:310px!important/);
   assert.match(api,/MILESTONE_PARENT_REQUIRED/);
   const v6=read("public/v6.js");
   assert.match(v6,/operationsMilestoneProfileCard/);
