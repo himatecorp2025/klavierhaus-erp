@@ -25,7 +25,7 @@
     "adm-zip": "0.6.1",
     "bcryptjs": "2.4.3",
     "better-sqlite3": "11.10.0",
-    "compression": "1.8.1",
+    "compression": "1.8.2",
     "cors": "2.8.5",
     "dotenv": "16.4.7",
     "express": "4.22.3",
@@ -36,6 +36,7 @@
     "web-push": "3.6.7"
   },
   "overrides": {
-    "path-to-regexp": "0.1.13"
+    "path-to-regexp": "0.1.13",
+    "proxy-addr": "2.0.8"
   }
 }
