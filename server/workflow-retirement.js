@@ -100,7 +100,7 @@ function installWorkflowDeletionGuards(db) {
   if(exists(db,'financial_items'))db.exec(`
     DROP TRIGGER IF EXISTS trg_financial_items_direct_immutable_delete;
     CREATE TRIGGER trg_financial_items_direct_immutable_delete BEFORE DELETE ON financial_items
-    WHEN COALESCE(OLD.source_type,'') NOT IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','MANUAL_INVOICE','WORKFLOW_INVOICE_REVENUE','WORKFLOW_INVOICE_MATERIAL','event_payment_refund','event_manual_ticket_refund','event_manual_ticket','event_payment','closed_job','job_close_revenue')
+    WHEN COALESCE(OLD.source_type,'') NOT IN ('JOB_REVENUE','DAILY_RATE','TECHNICIAN_EXTRA_COMPENSATION','MANUAL_INVOICE','WORKFLOW_INVOICE_REVENUE','WORKFLOW_INVOICE_MATERIAL','closed_job','job_close_revenue')
     AND NOT EXISTS(SELECT 1 FROM workflow_financial_delete_scope WHERE entity_table='financial_items' AND entity_id=OLD.id)
     BEGIN SELECT RAISE(ABORT,'IMMUTABLE_FINANCIAL_ITEM'); END;`);
  })();
@@ -138,8 +138,6 @@ function workflowPurgePlan(db, workflowId=null) {
   const journals=rows(db,'journal_entries').filter(j=>journalIds.has(j.id));
   if(journals.some(j=>j.job_id&&!jobIds.has(j.job_id)))throw failure('WORKFLOW_SHARED_JOURNAL_JOB');
   const creditMemos=rows(db,'invoice_credit_memos').filter(c=>invoiceIds.has(c.invoice_id));
-  if(invoices.some(i=>i.deferred_event_id))throw failure('WORKFLOW_SHARED_EVENT_INVOICE');
-  if(creditMemos.some(c=>c.event_id))throw failure('WORKFLOW_SHARED_EVENT_CREDIT');
   const closedPeriods=new Set(rows(db,'financial_statement_snapshots').map(s=>s.period));
   const latestClosedPeriod=[...closedPeriods].filter(Boolean).sort().at(-1);
   const dates=[...invoices.flatMap(i=>[i.issue_date,i.paid_at,i.revenue_recognition_date]),...financial.map(f=>f.item_date),...journals.map(j=>j.entry_date),...creditMemos.flatMap(c=>[c.memo_date,c.revenue_effect_date])];

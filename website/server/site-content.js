@@ -21,8 +21,6 @@ const routeDefinitions = Object.freeze({
   tuning: { en: "/services/tuning", hu: "/hu/szolgaltatasok/zongorahangolas" },
   concert: { en: "/services/concert-piano", hu: "/hu/szolgaltatasok/koncertzongora" },
   artists: { en: "/artists", hu: "/hu/muveszek" },
-  events: { en: "/events", hu: "/hu/esemenyek" },
-  salon: { en: "/events/klavierhaus-salon", hu: "/hu/esemenyek/klavierhaus-szalon" },
   mission: { en: "/cultural-mission", hu: "/hu/kulturalis-kuldetes" },
   contact: { en: "/contact", hu: "/hu/kapcsolat" },
   privacy: { en: "/privacy", hu: "/hu/adatkezeles" }
@@ -318,7 +316,7 @@ const pages = Object.freeze({
         lead: "Exceptional pianos, artists, and intimate cultural encounters—shaped for those who still believe listening can change a room.",
         image: shared.heroImage,
         imageAlt: "A concert grand piano in an intimate, dark New York salon",
-        primary: { label: "Enter the world of Klavierhaus", key: "events" },
+        primary: { label: "Enter the world of Klavierhaus", key: "contact" },
         secondary: { label: "Arrange a private visit", key: "services" }
       },
       sections: [
@@ -505,7 +503,7 @@ const pages = Object.freeze({
       hero: { eyebrow: "Cultural mission", title: "To return the emotional world of music to the room.", lead: "The Klavierhaus mission is to preserve not only instruments, but the quality of attention in which music becomes personally meaningful.", image: shared.salonImage, imageAlt: "Intimate audience listening to a pianist in a dark salon" },
       sections: [
         { id: "belief", type: "statement", eyebrow: "What we believe", title: "Culture is strongest when it is felt directly.", body: ["A rare piano can carry centuries of accumulated knowledge. An artist can turn that possibility into a living moment. A close audience can feel the smallest change of tone, breath, and intention.", "Klavierhaus exists to bring these elements together—and to protect a space for beauty, curiosity, and serious listening in contemporary New York."] },
-        { id: "invitation", type: "cta", eyebrow: "Enter the conversation", title: "The future of a tradition depends on those who choose to hear it.", body: "Discover the evolving programme or arrange a private visit.", link: { label: "Explore events", key: "events" } }
+        { id: "invitation", type: "cta", eyebrow: "Enter the conversation", title: "The future of a tradition depends on those who choose to hear it.", body: "Discover the evolving programme or arrange a private visit.", link: { label: "Explore events", key: "contact" } }
       ]
     },
     contact: {
@@ -544,7 +542,7 @@ const pages = Object.freeze({
         lead: "Kivételes zongorák, művészek és bensőséges kulturális találkozások azok számára, akik szerint a valódi figyelem egy egész termet képes megváltoztatni.",
         image: shared.heroImage,
         imageAlt: "Koncertzongora egy bensőséges, sötét New York-i szalonban",
-        primary: { label: "Belépés a Klavierhaus világába", key: "events" },
+        primary: { label: "Belépés a Klavierhaus világába", key: "contact" },
         secondary: { label: "Privát látogatás egyeztetése", key: "services" }
       },
       sections: [
@@ -672,7 +670,7 @@ const pages = Object.freeze({
       hero: { eyebrow: "Kulturális küldetés", title: "Visszahozni a zene érzelmi világát a terembe.", lead: "A Klavierhaus küldetése nemcsak a hangszerek, hanem annak a figyelemnek a megőrzése is, amelyben a zene személyesen jelentőssé válik.", image: shared.salonImage, imageAlt: "Bensőséges közönség hallgat egy zongoristát egy sötét szalonban" },
       sections: [
         { id: "belief", type: "statement", eyebrow: "Amiben hiszünk", title: "A kultúra akkor a legerősebb, amikor közvetlenül érezhető.", body: ["Egy ritka zongora évszázadok felhalmozott tudását hordozhatja. Egy művész ezt a lehetőséget élő pillanattá formálhatja. A közeli közönség pedig megérezheti a hang, a lélegzet és a szándék legkisebb változását is.", "A Klavierhaus azért létezik, hogy ezeket az elemeket összekapcsolja, és helyet őrizzen a szépség, a kíváncsiság és az elmélyült hallgatás számára a kortárs New Yorkban."] },
-        { id: "invitation", type: "cta", eyebrow: "Csatlakozás a párbeszédhez", title: "Egy hagyomány jövője azokon múlik, akik meghallják.", body: "Fedezze fel a formálódó programot, vagy egyeztessen privát látogatást.", link: { label: "Események felfedezése", key: "events" } }
+        { id: "invitation", type: "cta", eyebrow: "Csatlakozás a párbeszédhez", title: "Egy hagyomány jövője azokon múlik, akik meghallják.", body: "Fedezze fel a formálódó programot, vagy egyeztessen privát látogatást.", link: { label: "Események felfedezése", key: "contact" } }
       ]
     },
     contact: {

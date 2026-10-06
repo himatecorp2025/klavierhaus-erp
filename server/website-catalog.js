@@ -1,7 +1,6 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const { slugify } = require("./events");
 const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
 
 function cleanText(value, max = 20000) {
@@ -68,6 +67,8 @@ function localized(row, language, erpBaseUrl) {
   return value;
 }
 
+function slugify(value){return cleanText(value,300).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"item";}
+
 function uniqueSlug(db, table, column, title, excludeId = "") {
   const base = slugify(title);
   let candidate = base;
@@ -91,7 +92,7 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
   app.get("/api/public/website-reviews", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
     const rows = db.prepare(`SELECT r.*,e.slug_en AS event_slug_en,e.slug_hu AS event_slug_hu
-      FROM website_reviews r LEFT JOIN events e ON e.id=r.linked_event_id
+      FROM website_reviews r
       WHERE r.visible=1 ORDER BY r.sort_order,r.created_at`).all();
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
     res.json(rows.map((row) => ({ ...localized({ ...row, image_url: row.portrait_url }, language, baseUrl), event_slug: row[`event_slug_${language}`] || null })));
@@ -137,13 +138,13 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
       role_en: cleanText(req.body?.role_en, 300), role_hu: cleanText(req.body?.role_hu, 300),
       quote_en: cleanText(req.body?.quote_en, 5000), quote_hu: cleanText(req.body?.quote_hu, 5000),
       portrait_url: cleanText(req.body?.portrait_url, 1000), portrait_alt_en: cleanText(req.body?.portrait_alt_en, 500),
-      portrait_alt_hu: cleanText(req.body?.portrait_alt_hu, 500), linked_event_id: cleanText(req.body?.linked_event_id, 120) || null,
+      portrait_alt_hu: cleanText(req.body?.portrait_alt_hu, 500),
       visible: bool(req.body?.visible, true), sort_order: Number(req.body?.sort_order || 0), user_id: req.user.id
     };
     if (!value.person_name || !value.quote_en || !value.quote_hu || !value.portrait_url) return res.status(400).json({ error: "REVIEW_REQUIRED_FIELDS" });
     try {
-      db.prepare(`INSERT INTO website_reviews(id,person_name,role_en,role_hu,quote_en,quote_hu,portrait_url,portrait_alt_en,portrait_alt_hu,linked_event_id,visible,sort_order,created_by_user_id,updated_by_user_id)
-        VALUES(@id,@person_name,@role_en,@role_hu,@quote_en,@quote_hu,@portrait_url,@portrait_alt_en,@portrait_alt_hu,@linked_event_id,@visible,@sort_order,@user_id,@user_id)`).run(value);
+      db.prepare(`INSERT INTO website_reviews(id,person_name,role_en,role_hu,quote_en,quote_hu,portrait_url,portrait_alt_en,portrait_alt_hu,visible,sort_order,created_by_user_id,updated_by_user_id)
+        VALUES(@id,@person_name,@role_en,@role_hu,@quote_en,@quote_hu,@portrait_url,@portrait_alt_en,@portrait_alt_hu,@visible,@sort_order,@user_id,@user_id)`).run(value);
       const row = db.prepare("SELECT * FROM website_reviews WHERE id=?").get(value.id);
       audit(req, "CREATE", "website_reviews", row.id, null, row, 1, "Public review created");
       res.status(201).json(row);
@@ -156,8 +157,8 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
     const value = { ...before, ...req.body };
     value.person_name = cleanText(value.person_name, 200); value.quote_en = cleanText(value.quote_en, 5000); value.quote_hu = cleanText(value.quote_hu, 5000); value.portrait_url = cleanText(value.portrait_url, 1000);
     if (!value.person_name || !value.quote_en || !value.quote_hu || !value.portrait_url) return res.status(400).json({ error: "REVIEW_REQUIRED_FIELDS" });
-    db.prepare(`UPDATE website_reviews SET person_name=?,role_en=?,role_hu=?,quote_en=?,quote_hu=?,portrait_url=?,portrait_alt_en=?,portrait_alt_hu=?,linked_event_id=?,visible=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .run(value.person_name, cleanText(value.role_en, 300), cleanText(value.role_hu, 300), value.quote_en, value.quote_hu, value.portrait_url, cleanText(value.portrait_alt_en, 500), cleanText(value.portrait_alt_hu, 500), cleanText(value.linked_event_id, 120) || null, bool(value.visible, true), Number(value.sort_order || 0), req.user.id, before.id);
+    db.prepare(`UPDATE website_reviews SET person_name=?,role_en=?,role_hu=?,quote_en=?,quote_hu=?,portrait_url=?,portrait_alt_en=?,portrait_alt_hu=?,visible=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(value.person_name, cleanText(value.role_en, 300), cleanText(value.role_hu, 300), value.quote_en, value.quote_hu, value.portrait_url, cleanText(value.portrait_alt_en, 500), cleanText(value.portrait_alt_hu, 500), bool(value.visible, true), Number(value.sort_order || 0), req.user.id, before.id);
     const after = db.prepare("SELECT * FROM website_reviews WHERE id=?").get(before.id);
     audit(req, "UPDATE", "website_reviews", before.id, before, after, 1, "Public review updated");
     res.json(after);

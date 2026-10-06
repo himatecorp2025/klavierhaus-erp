@@ -18,8 +18,6 @@ const CMS_PAGE_ADMIN = Object.freeze({
   home:{group:"landing",group_order:1,page_order:0,label_en:"Landing Page",label_hu:"Landing Page"},
   artists:{group:"artists",group_order:2,page_order:0,label_en:"Artist Page",label_hu:"Artist Page"},
   mission:{group:"culture",group_order:3,page_order:0,label_en:"Culture Page",label_hu:"Culture Page"},
-  events:{group:"culture",group_order:3,page_order:1,label_en:"Culture · Events",label_hu:"Culture · Események"},
-  salon:{group:"culture",group_order:3,page_order:2,label_en:"Culture · Klavierhaus Salon",label_hu:"Culture · Klavierhaus Szalon"},
   pianos:{group:"pianos",group_order:4,page_order:0,label_en:"Piano Page",label_hu:"Piano Page"},
   steinway:{group:"pianos",group_order:4,page_order:1,label_en:"Piano · Steinway",label_hu:"Piano · Steinway"},
   services:{group:"services",group_order:5,page_order:0,label_en:"Service Page",label_hu:"Service Page"},
@@ -138,7 +136,6 @@ function normalizeLegacyPageLinks(value) {
   if(!value||typeof value!=="object")return value;
   const next=Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalizeLegacyPageLinks(item)]));
   if(next.key==="story")next.key="our";
-  if(next.key==="ticketTerms")next.key="privacy";
   return next;
 }
 

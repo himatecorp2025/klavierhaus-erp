@@ -52,7 +52,7 @@ function normalizedConfig(provider, config = {}, env = process.env) {
   if (provider === "GA4") return { measurement_id: clean(source.measurement_id, 80) };
   if (provider === "CLARITY") return { project_id: clean(source.project_id, 80) };
   if (provider === "SEARCH_CONSOLE") return { property_url: clean(source.property_url, 1000) };
-  if (provider === "RESEND") return { from_email: clean(source.from_email || env.EMAIL_FROM, 500), event_from_email: clean(source.event_from_email || env.EVENT_EMAIL_FROM, 500), reply_to: clean(source.reply_to || env.EMAIL_REPLY_TO, 500) };
+  if (provider === "RESEND") return { from_email: clean(source.from_email || env.EMAIL_FROM, 500), reply_to: clean(source.reply_to || env.EMAIL_REPLY_TO, 500) };
   if (provider === "STRIPE") return { publishable_key: clean(source.publishable_key, 500), mode: "sandbox" };
   return {};
 }
@@ -142,7 +142,7 @@ function createExternalBackup(db, provider, snapshot, userId, env = process.env)
 function applyRuntimeProvider({ db, provider, services, googleCalendar, env }) {
   const active = systemEnabled(db) && providerEnabled(db, provider);
   if (provider === "GOOGLE_CALENDAR") { if (active) googleCalendar.start?.(); else googleCalendar.stop?.(); return; }
-  if (provider === "RESEND" && services?.transactionalEmail?.reconfigure) { const config = providerConfig(db, provider, env); const bundle = hasProviderSecret(db, provider) && encryptionReady(env) ? secretBundle(db, provider, env) : {}; services.transactionalEmail.reconfigure({ apiKey: bundle.api_key ?? env.RESEND_API_KEY, from: config.from_email || env.EMAIL_FROM, eventFrom: config.event_from_email || env.EVENT_EMAIL_FROM, replyTo: config.reply_to || env.EMAIL_REPLY_TO, enabled: active }); }
+  if (provider === "RESEND" && services?.transactionalEmail?.reconfigure) { const config = providerConfig(db, provider, env); const bundle = hasProviderSecret(db, provider) && encryptionReady(env) ? secretBundle(db, provider, env) : {}; services.transactionalEmail.reconfigure({ apiKey: bundle.api_key ?? env.RESEND_API_KEY, from: config.from_email || env.EMAIL_FROM, replyTo: config.reply_to || env.EMAIL_REPLY_TO, enabled: active }); }
   if (provider === "STRIPE" && services?.stripeSandbox?.reconfigure) { const bundle = hasProviderSecret(db, provider) && encryptionReady(env) ? secretBundle(db, provider, env) : {}; services.stripeSandbox.reconfigure({ secretKey: bundle.secret_key ?? env.STRIPE_SECRET_KEY, webhookSecret: bundle.webhook_secret ?? env.STRIPE_WEBHOOK_SECRET, enabled: active }); }
 }
 function applyRuntimeState(options) { for (const provider of ["GOOGLE_CALENDAR", "RESEND", "STRIPE"]) applyRuntimeProvider({ ...options, provider }); }

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { createApp } = require("../../website/server");
 
 const routes = [
-  "/", "/hu/", "/events", "/hu/esemenyek", "/artists", "/hu/muveszek",
+  "/", "/hu/", "/artists", "/hu/muveszek",
   "/pianos", "/hu/zongorak", "/services", "/hu/szolgaltatasok"
 ];
 

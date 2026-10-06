@@ -16,15 +16,15 @@ function normalizeApiBaseUrl(value) {
   }
 }
 
-function createEventClient(options = {}) {
+function createErpClient(options = {}) {
   const baseUrl = normalizeApiBaseUrl(options.baseUrl);
   const timeoutMs = Math.max(500, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   async function request(pathname, requestOptions = {}) {
     if (!baseUrl || typeof fetchImpl !== "function") {
-      const error = new Error("Event API is not configured.");
-      error.code = "EVENT_API_NOT_CONFIGURED";
+      const error = new Error("ERP API is not configured.");
+      error.code = "ERP_API_NOT_CONFIGURED";
       throw error;
     }
 
@@ -43,9 +43,9 @@ function createEventClient(options = {}) {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const error = new Error(payload.error || `Event API request failed (${response.status}).`);
+        const error = new Error(payload.error || `ERP API request failed (${response.status}).`);
         error.status = response.status;
-        error.code = payload.error || payload.code || "EVENT_API_ERROR";
+        error.code = payload.error || payload.code || "ERP_API_ERROR";
         error.payload = payload;
         throw error;
       }
@@ -57,12 +57,12 @@ function createEventClient(options = {}) {
 
   async function requestBinary(pathname) {
     if (!baseUrl || typeof fetchImpl !== "function") {
-      const error = new Error("Event API is not configured."); error.code = "EVENT_API_NOT_CONFIGURED"; throw error;
+      const error = new Error("ERP API is not configured."); error.code = "ERP_API_NOT_CONFIGURED"; throw error;
     }
     const response = await fetchImpl(`${baseUrl}${pathname}`, { headers: { Accept: "application/octet-stream, application/pdf" } });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      const error = new Error(payload.error || `Event API request failed (${response.status}).`); error.status = response.status; error.code = payload.error || "EVENT_API_ERROR"; throw error;
+      const error = new Error(payload.error || `ERP API request failed (${response.status}).`); error.status = response.status; error.code = payload.error || "ERP_API_ERROR"; throw error;
     }
     return { buffer: Buffer.from(await response.arrayBuffer()), contentType: response.headers.get("content-type") || "application/octet-stream", contentDisposition: response.headers.get("content-disposition") || "" };
   }
@@ -79,12 +79,6 @@ function createEventClient(options = {}) {
         if (Number(error?.status) === 404) return { available: true, status: "AVAILABLE", legacy_endpoint_missing: true };
         throw error;
       }
-    },
-    list(language) {
-      return request(`/api/public/events?lang=${language === "hu" ? "hu" : "en"}`);
-    },
-    detail(slug, language) {
-      return request(`/api/public/events/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
     content(pageKey, language) {
       return request(`/api/public/website-content/${encodeURIComponent(pageKey)}?lang=${language === "hu" ? "hu" : "en"}`);
@@ -174,42 +168,13 @@ function createEventClient(options = {}) {
     createPrivateAppointment(appointment) {
       return request("/api/public/private-appointments", { method: "POST", body: JSON.stringify(appointment) });
     },
-    repeatInterest(eventId, value) {
-      return request(`/api/public/events/${encodeURIComponent(eventId)}/repeat-interest`, { method: "POST", body: JSON.stringify(value) });
-    },
     service(slug, language) {
       return request(`/api/public/website-services/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },
-    createCheckout(slug, language, quantity, attendeeNames, paymentMethod, contactEmail) {
-      return request(`/api/public/events/${encodeURIComponent(slug)}/checkout`, {
-        method: "POST",
-        body: JSON.stringify({ language: language === "hu" ? "hu" : "en", quantity, attendee_names: attendeeNames, payment_method: paymentMethod, contact_email: contactEmail })
-      });
-    },
-    reserve(slug, language, reservation) {
-      return request(`/api/public/events/${encodeURIComponent(slug)}/reservations`, {
-        method: "POST",
-        body: JSON.stringify({
-          language: language === "hu" ? "hu" : "en",
-          attendee_names: reservation.attendeeNames,
-          contact_email: reservation.contactEmail,
-          quantity: reservation.quantity
-        })
-      });
-    },
-    invitation(token, language) {
-      return request(`/api/public/event-invitations/${encodeURIComponent(token)}?lang=${language === "hu" ? "hu" : "en"}`);
-    },
-    respondToInvitation(token, decision) {
-      return request(`/api/public/event-invitations/${encodeURIComponent(token)}/respond`, {
-        method: "POST",
-        body: JSON.stringify({ decision })
-      });
-    }
   });
 }
 
 module.exports = {
-  createEventClient,
+  createErpClient,
   normalizeApiBaseUrl
 };

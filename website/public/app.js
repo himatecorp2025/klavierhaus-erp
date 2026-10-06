@@ -84,61 +84,6 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 updateHeader();
 
-document.querySelectorAll("[data-event-carousel]").forEach((carousel) => {
-  const track = carousel.querySelector(".public-event-grid--home");
-  const controls = carousel.parentElement?.querySelector(".event-carousel__controls");
-  if (!track || !controls) return;
-  const move = (direction) => {
-    track.scrollBy({ left: direction * Math.max(280, track.clientWidth * 0.82), behavior: reducedMotion ? "auto" : "smooth" });
-  };
-  controls.querySelector("[data-event-carousel-previous]")?.addEventListener("click", () => move(-1));
-  controls.querySelector("[data-event-carousel-next]")?.addEventListener("click", () => move(1));
-});
-
-document.querySelectorAll("[data-ticket-quantity]").forEach((control) => {
-  const input = control.querySelector('input[name="quantity"]');
-  const output = control.querySelector("[data-ticket-total]");
-  const attendeeContainer = control.closest("form")?.querySelector("[data-attendee-names]");
-  if (!input) return;
-  const syncAttendeeNames = () => {
-    if (!attendeeContainer) return;
-    const count = Number(input.value || 1);
-    const previousValues = [...attendeeContainer.querySelectorAll('input[name="attendee_names"]')].map((field) => field.value);
-    const labelText = attendeeContainer.dataset.attendeeLabel || "Guest";
-    const fragment = document.createDocumentFragment();
-    for (let index = 0; index < count; index += 1) {
-      const label = document.createElement("label");
-      const title = document.createElement("span");
-      const field = document.createElement("input");
-      title.textContent = `${labelText} ${index + 1}`;
-      field.name = "attendee_names";
-      field.type = "text";
-      field.maxLength = 200;
-      field.autocomplete = index === 0 ? "name" : "off";
-      field.required = true;
-      field.value = previousValues[index] || "";
-      label.append(title, field);
-      fragment.append(label);
-    }
-    attendeeContainer.replaceChildren(attendeeContainer.querySelector("legend"), fragment);
-  };
-  const clamp = (value) => Math.max(Number(input.min || 1), Math.min(Number(input.max || Number.MAX_SAFE_INTEGER), Math.trunc(Number(value) || 1)));
-  const update = (value) => {
-    input.value = String(clamp(value));
-    if (output) {
-      const amount = Number(control.dataset.unitPrice || 0) * Number(input.value);
-      const formatted = new Intl.NumberFormat(control.dataset.locale || "en-US", { style: "currency", currency: control.dataset.currency || "USD" }).format(amount / 100);
-      const label = output.querySelector("small")?.textContent || "";
-      output.innerHTML = `<small>${label}</small> ${formatted}`;
-    }
-    syncAttendeeNames();
-  };
-  control.querySelector("[data-quantity-minus]")?.addEventListener("click", () => update(Number(input.value) - 1));
-  control.querySelector("[data-quantity-plus]")?.addEventListener("click", () => update(Number(input.value) + 1));
-  input.addEventListener("change", () => update(input.value));
-  update(input.value);
-});
-
 document.querySelectorAll("[data-review-carousel]").forEach((carousel) => {
   const track = carousel.querySelector(".review-track");
   const cards = [...carousel.querySelectorAll("[data-review-card]")];
@@ -518,40 +463,6 @@ privateViewingDialog?.querySelector("[data-private-viewing-form]")?.addEventList
     recordFirstPartyEvent("private_appointment_submit",{piano_id:values.piano_id||"",service_id:values.service_id||""});
     form.reset();privatePickerReset(form);window.setTimeout(()=>{if(privateViewingDialog?.open)privateViewingDialog.close("success");},850);
   }catch(_error){if(result)result.textContent=language==="hu"?"Az időpontkérés küldése nem sikerült.":"We could not send the appointment request.";}
-});
-
-const interestDialog = document.querySelector("[data-interest-dialog]");
-document.querySelectorAll("[data-interest-open]").forEach((button) => button.addEventListener("click", () => {
-  if (!interestDialog) return;
-  interestDialog.querySelector('[name="event_id"]').value = button.dataset.eventId || "";
-  interestDialog.querySelector("[data-interest-title]").textContent = button.dataset.eventTitle || "";
-  interestDialog.showModal();
-  recordFirstPartyEvent("event_repeat_interest_open", { event_id: button.dataset.eventId || "" });
-}));
-document.querySelector("[data-interest-form]")?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const result = form.querySelector("[data-interest-result]");
-  const eventId = form.elements.event_id.value;
-  if (result) result.textContent = language === "hu" ? "Rögzítés…" : "Saving…";
-  try {
-    const payload = {
-      email: form.elements.email.value, notify_event: form.elements.notify_event.checked,
-      marketing_consent: form.elements.marketing_consent.checked, language,
-      source_path: location.pathname, device_token: await getDeviceToken()
-    };
-    const response = await fetch(`/api/site/events/${encodeURIComponent(eventId)}/repeat-interest`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (response.status === 409) {
-      if (result) result.textContent = language === "hu" ? "Ezt az érdeklődést már rögzítettük ezen az eszközön." : "This request is already recorded for this device.";
-      return;
-    }
-    if (!response.ok) throw new Error("INTEREST_FAILED");
-    if (result) result.textContent = language === "hu" ? "Köszönjük. Értesítjük a következő alkalomról." : "Thank you. We will notify you about the next edition.";
-    recordFirstPartyEvent("event_repeat_interest_submit", { event_id: eventId });
-    window.setTimeout(() => { if (interestDialog?.open) interestDialog.close("success"); }, 850);
-  } catch (_error) {
-    if (result) result.textContent = language === "hu" ? "A rögzítés nem sikerült. Kérjük, próbálja újra." : "We could not save your request. Please try again.";
-  }
 });
 
 document.querySelectorAll("[data-track-event]").forEach((element) => element.addEventListener("click", () => recordFirstPartyEvent(element.dataset.trackEvent, { id: element.dataset.trackId || "" })));

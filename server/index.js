@@ -13,15 +13,12 @@ require("dotenv").config();
 
 const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
-const { registerEventRoutes } = require("./events");
 const { registerWebsiteContentRoutes } = require("./website-content");
 const { registerWebsiteCatalogRoutes } = require("./website-catalog");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
-const { createTicketService } = require("./ticket-service");
 const {
   createBrandingUpload,
-  createEventImageUpload,
   createWebsiteImageUpload,
   createCustomerConversationUpload,
   createMasterDataImportUpload,
@@ -54,11 +51,10 @@ if (JWT_SECRET.length < 32) throw new Error("JWT_SECRET is required and must be 
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "db", "klavierhaus_v6.sqlite");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
-const EVENT_IMAGE_DIR = path.join(UPLOAD_DIR, "events");
 const WEBSITE_IMAGE_DIR = path.join(UPLOAD_DIR, "website");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const ADMIN_INDEX_TEMPLATE = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
-for (const directory of [path.dirname(DB_PATH),UPLOAD_DIR,EVENT_IMAGE_DIR,WEBSITE_IMAGE_DIR]) fs.mkdirSync(directory,{recursive:true});
+for (const directory of [path.dirname(DB_PATH),UPLOAD_DIR,WEBSITE_IMAGE_DIR]) fs.mkdirSync(directory,{recursive:true});
 
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
@@ -75,10 +71,9 @@ db.pragma("optimize");
 const serviceSuspension = createServiceSuspension({ db });
 const transactionalEmail = createTransactionalEmail(process.env);
 const accountActivation = createAccountActivationService({ db, emailService: transactionalEmail });
-const ticketService = createTicketService({ db });
 let workshopPayments=null;
 const stripeSandbox = createStripeSandbox({
-  db,env:process.env,websiteBaseUrl:process.env.WEBSITE_BASE_URL,ticketService,
+  db,env:process.env,
   onCheckoutSessionEvent:async(eventType,session)=>{
     if(!workshopPayments)throw new Error("WORKSHOP_PAYMENT_HANDLER_NOT_READY");
     return workshopPayments.processCheckoutEvent(eventType,session);
@@ -86,7 +81,6 @@ const stripeSandbox = createStripeSandbox({
 });
 
 const brandingUpload = createBrandingUpload(UPLOAD_DIR);
-const eventImageUpload = createEventImageUpload(EVENT_IMAGE_DIR);
 const websiteImageUpload = createWebsiteImageUpload(WEBSITE_IMAGE_DIR);
 const customerConversationUpload = createCustomerConversationUpload(UPLOAD_DIR);
 const masterDataImportUpload = createMasterDataImportUpload();
@@ -533,13 +527,6 @@ registerWebsiteBackupResetRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com"
 });
 
-registerEventRoutes({
-  app,db,auth,permit,requireSuperadmin,audit,transactionalEmail,
-  eventImageUpload,eventImageDir:EVENT_IMAGE_DIR,ticketService,stripeSandbox,
-  websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
-  erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com",
-  invoiceEngine:null,documentService:null,onTicketsIssued:null
-});
 registerWebsiteContentRoutes({
   app,db,auth,permit,audit,websiteImageUpload,websiteImageDir:WEBSITE_IMAGE_DIR,
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",

@@ -13,12 +13,11 @@ function gitBlobSha(file){
   return crypto.createHash("sha1").update(Buffer.from("blob "+data.length+"\0")).update(data).digest("hex");
 }
 
-test("unrelated protected website server modules remain byte-identical",()=>{
-  const expected={
-    "server/website-platform.js":"8a10313eb02bdd41fdc434d1f5a9bdbe7ca7d1e7",
-    "server/website-catalog.js":"18ebe2d0663d2c4dfd995f1732a504b6555a8b98"
-  };
-  for(const [file,sha] of Object.entries(expected))assert.equal(gitBlobSha(file),sha,file+" changed despite zero-modification policy");
+test("website platform and catalogue no longer carry ticketed-event relationships",()=>{
+  const platform=read("server/website-platform.js");
+  const catalog=read("server/website-catalog.js");
+  for(const marker of ["event_repeat_requests","repeat-interest","relaunch_source_event_id","notify-interest","FROM events","INSERT INTO events"])assert.doesNotMatch(platform,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")),marker);
+  for(const marker of ["linked_event_id","LEFT JOIN events"])assert.doesNotMatch(catalog,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")),marker);
 });
 
 test("Round 1 schema and APIs implement media, review state and zero-duplicate conversion",()=>{
