@@ -22,6 +22,7 @@ test('Google Calendar event auto-creates a Round 2 calendar job and workflow whe
   const {db,integration}=setup();const result=integration._test.processEvent(event('auto-1'));assert.equal(result.imported,1);
   const job=db.prepare("SELECT * FROM jobs").get();assert.equal(job.client_id,1);assert.equal(job.piano_id,1);assert.equal(job.assigned_technician_id,'W');assert.equal(job.stage,'received');assert.ok(job.scheduled_at.endsWith('Z'));
   assert.equal(db.prepare("SELECT COUNT(*) n FROM job_workflow_phases WHERE job_id=?").get(job.id).n,5);
+  assert.deepEqual(db.prepare("SELECT stage_key FROM job_workflow_phases WHERE job_id=? AND enabled=1 ORDER BY position").all(job.id).map(row=>row.stage_key),["received","admin_approval","completed"]);
   const source=db.prepare("SELECT * FROM external_calendar_events WHERE external_event_id='auto-1'").get();assert.equal(source.review_status,'REVIEWED');assert.equal(source.job_id,job.id);
   integration.stop();db.close();
 });
@@ -51,4 +52,16 @@ test('Google Calendar live sync is refreshed on startup and before calendar read
   assert.match(googleSource,/calendar_integrations\.calendar_id<>excluded\.calendar_id THEN NULL ELSE calendar_integrations\.sync_token/);
   assert.match(workflowSource,/await googleCalendar\.syncIfStale\("CALENDAR_VIEW",30000\)/);
   assert.match(workflowSource,/res\.setHeader\("Cache-Control","no-store"\)/);
+});
+
+
+test('Google sync is hard-locked to the Klavierhaus Work source calendar',()=>{
+  const source=fs.readFileSync(path.join(__dirname,"..","server","google-calendar.js"),"utf8");
+  assert.match(source,/DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail\.com"/);
+  assert.match(source,/GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK/);
+  assert.match(source,/FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail\.com"/);
+  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
+  assert.match(source,/googleRequest\(\`\/calendars\/\$\{encodeURIComponent\(config\.calendarId\)\}\/events\?/);
+  assert.doesNotMatch(source,/calendarList\/list/);
+  assert.doesNotMatch(source,/\/calendars\/primary\/events/);
 });
