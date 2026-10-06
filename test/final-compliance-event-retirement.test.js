@@ -13,6 +13,7 @@ test("ticketed event runtime, public routes and admin surfaces are retired",()=>
   const server=read("server/index.js");
   const business=read("server/business-operations.js");
   const publicServer=read("website/server/index.js");
+  const platform=read("server/website-platform.js");
   const publicContent=read("website/server/site-content.js");
   const admin=read("public/app.js");
   const publicCss=read("website/public/styles.css");
@@ -22,6 +23,8 @@ test("ticketed event runtime, public routes and admin surfaces are retired",()=>
   for(const marker of ["registerEventRoutes","createTicketService","createEventImageUpload"])missing(server,marker);
   for(const marker of ["event_tickets","event_payments","event_attendance","ticketService"])missing(business,marker);
   for(const marker of ["/events","/hu/esemenyek","ticket-terms","event-invitations","repeat-interest"])missing(publicServer,marker);
+  missing(platform,"SAMPLE_EVENTS_HAVE_TRANSACTIONAL_DEPENDENCIES");
+  missing(platform,"Number(dependencies)");
   for(const marker of ["events: Object.freeze({","salon: Object.freeze({"])missing(publicContent,marker);
   for(const marker of ["renderEvents","renderEventWorkspace","renderDigitalAttendance","renderGuestData","event_tickets","event_invitations"])missing(admin,marker);
   for(const marker of [".public-event-card",".event-carousel",".event-order-form",".ticket-quantity",".attendee-names",".dynamic-event-list"])missing(publicCss,marker);
@@ -31,6 +34,8 @@ test("retirement migration destroys legacy event data after creating a safety ba
   const init=read("server/init-db.js");
   present(init,"event-management-retirement-");
   present(init,"Event-management safety backup created");
+  present(init,"deleteRetiredConversationAttachmentFiles");
+  present(init,"customer-conversations");
   for(const legacy of ["event_tickets","event_payments","event_invitations","event_attendance_entries","events","event_categories"])present(init,`\"${legacy}\"`,legacy);
   present(init,"DROP TABLE");
   present(init,"DELETE FROM landing_sections WHERE section_key='salon_events'");
