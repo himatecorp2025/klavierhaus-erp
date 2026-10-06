@@ -42,7 +42,7 @@ function googleSetup() {
     db, rid, stableJobKey: () => `JK-${++seq}`,
     nyLocalDateTime: (date) => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date).replace(" ", "T"),
     findScheduleConflicts, getJob, createNotification: () => {},
-    env: { GOOGLE_CLIENT_ID:"client", GOOGLE_CLIENT_SECRET:"secret", GOOGLE_TOKEN_ENCRYPTION_KEY:"separate-test-encryption-key-at-least-32-chars", APP_BASE_URL:"https://erp.example.com", GOOGLE_CALENDAR_ID:"klavierhauswork@gmail.com", GOOGLE_CALENDAR_CENTRAL_EMAIL:"klavierhauswork@gmail.com" },
+    env: { GOOGLE_CLIENT_ID:"client", GOOGLE_CLIENT_SECRET:"secret", GOOGLE_TOKEN_ENCRYPTION_KEY:"separate-test-encryption-key-at-least-32-chars", APP_BASE_URL:"https://erp.example.com", GOOGLE_CALENDAR_ID:"ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com", GOOGLE_CALENDAR_CENTRAL_EMAIL:"klavierhauswork@gmail.com" },
     fetchImpl: async () => { throw new Error("unexpected network request"); }
   });
   return { db, integration, getJob };
