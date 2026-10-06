@@ -11,7 +11,7 @@ ERP changes are never written back to Google. The existing PWA/Web Push keys are
 1. Sign in to Google with `klavierhauswork@gmail.com`.
 2. Use the account's primary calendar and rename it to **Klavierhaus Work**, or create a separate calendar with this name.
 3. Share the calendar with every employee's Google account and grant permission to add and edit events.
-4. If a separate calendar was created, open **Settings and sharing → Integrate calendar** and copy its Calendar ID. Use that value as `GOOGLE_CALENDAR_ID`. If the primary calendar is used, its ID is `klavierhauswork@gmail.com`.
+4. The ERP is intentionally pinned to the dedicated Klavierhaus Work shared calendar. `GOOGLE_CALENDAR_ID` must remain `ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com`; primary or personal calendars are rejected.
 
 ## 2. Create Google Cloud OAuth credentials
 
@@ -35,7 +35,7 @@ GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_TOKEN_ENCRYPTION_KEY=...
 GOOGLE_CALENDAR_CENTRAL_EMAIL=klavierhauswork@gmail.com
-GOOGLE_CALENDAR_ID=klavierhauswork@gmail.com
+GOOGLE_CALENDAR_ID=ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com
 GOOGLE_CALENDAR_POLL_INTERVAL_MS=120000
 GOOGLE_CALENDAR_INITIAL_LOOKBACK_DAYS=30
 ```

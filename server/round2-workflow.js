@@ -126,7 +126,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       WHERE p.job_id=? ORDER BY p.position,p.id`).all(jobId);
     const costMap=phaseCostsForJob(jobId);
     if(rows.length)return rows.map(row=>{const costs=costMap.get(row.stage_key)||[];return {...row,enabled:Boolean(row.enabled),job_specific:Number(row.definition_active)===0,removable:Boolean(row.definition_removable),costs,internal_cost_total:money(costs.reduce((sum,item)=>sum+Number(item.amount||0),0))};});
-    return stageDefinitions().map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,responsibility_skill_id:null,responsibility_skill_name_en:null,responsibility_skill_name_hu:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable),costs:[],internal_cost_total:0}));
+    return stageDefinitions().filter(row=>ACTIVE_STAGE_KEYS.has(row.key)).map(row=>({job_id:jobId,stage_key:row.key,position:row.position,enabled:true,starts_at:null,due_at:null,customer_price:0,responsible_user_id:null,responsible_name:null,responsibility_skill_id:null,responsibility_skill_name_en:null,responsibility_skill_name_hu:null,blocker_code:null,blocker_note:null,activated_at:null,completed_at:null,label_en:row.label_en,label_hu:row.label_hu,stage_type:row.stage_type,job_specific:false,removable:Boolean(row.removable),costs:[],internal_cost_total:0}));
   }
   function phaseVisualStatus(job,phase,now=Date.now()){
     if(job?.cancelled_at)return "cancelled";
@@ -217,7 +217,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
   }
   function normalizePlan(input,{defaultResponsibleId=null,defaultStartAt=null,extraDefinitions=[]}={}){
     const supplied=Array.isArray(input)?input:null;
-    const definitions=stageDefinitions().map(stage=>({...stage}));
+    const definitions=(supplied?stageDefinitions():stageDefinitions().filter(stage=>ACTIVE_STAGE_KEYS.has(stage.key))).map(stage=>({...stage}));
     const keys=new Set(definitions.map(stage=>stage.key));
     for(const extra of Array.isArray(extraDefinitions)?extraDefinitions:[]){
       const key=String(extra?.key||extra?.stage_key||"");if(!key||keys.has(key))continue;
@@ -226,7 +226,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     definitions.sort((a,b)=>Number(a.position||0)-Number(b.position||0));
     const byKey=new Map((supplied||[]).map(item=>[String(item?.stage_key||item?.key||""),item]));
     const plan=definitions.map(stage=>{
-      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):true);
+      const item=byKey.get(stage.key),mandatory=FIXED_STAGE_KEYS.has(stage.key),enabled=mandatory?true:(supplied?Boolean(item?.enabled):ACTIVE_STAGE_KEYS.has(stage.key));
       const responsibleId=text(item?.responsible_user_id||defaultResponsibleId,160)||null;
       if(responsibleId)responsibleUser(responsibleId,{optional:false});
       const responsibilitySkillId=integerId(item?.responsibility_skill_id)||null;if(responsibilitySkillId)responsibilitySkill(responsibilitySkillId,{optional:false});
@@ -386,9 +386,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(orderedKeys.length!==defs.length||orderedKeys.some(key=>!byKey.has(key)))throw problem("INVALID_WORKFLOW_STAGE_ORDER");
     if(orderedKeys[0]!=="received"||orderedKeys.at(-2)!=="admin_approval"||orderedKeys.at(-1)!=="completed")throw problem("WORKFLOW_FIXED_STAGE_ORDER",409);
     const updateDef=db.prepare("UPDATE workflow_stage_definitions SET position=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND active=1");
-    const updatePhase=db.prepare(`UPDATE job_workflow_phases SET position=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND job_id IN
-      (SELECT id FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed')`);
-    orderedKeys.forEach((key,index)=>{updateDef.run(index+1,userId,key);updatePhase.run(index+1,key);});
+    orderedKeys.forEach((key,index)=>updateDef.run(index+1,userId,key));
   }
   app.get("/api/workflow/settings",auth,staff,(_req,res)=>res.json(workflowSettingsPayload()));
   app.put("/api/workflow/settings",auth,admin,(req,res)=>{
@@ -417,7 +415,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         const order=stageDefinitions().filter(stage=>stage.key!==key).map(stage=>stage.key);
         order.splice(order.indexOf("admin_approval"),0,key);applyStageOrder(order,req.user.id);
         const stage=stageDefinitions().find(row=>row.key===key);
-        if(req.body?.apply_to_existing!==false){
+        if(req.body?.apply_to_existing===true){
           const insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,created_at,updated_at)
             SELECT id,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed'`);
           insert.run(key,stage.position);
@@ -435,8 +433,6 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const before=stageDefinitions();
       db.transaction(()=>{
         db.prepare("UPDATE workflow_stage_definitions SET active=0,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=?").run(req.user.id,key);
-        db.prepare(`UPDATE job_workflow_phases SET enabled=0,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND job_id IN
-          (SELECT id FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed')`).run(key);
         applyStageOrder(stageDefinitions().map(row=>row.key),req.user.id);
       })();
       audit(req,"ARCHIVE","workflow_stage_definitions",key,stage,null);res.json(workflowSettingsPayload());
@@ -505,7 +501,14 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     let visibleStages=bucket==="active"?allStages.filter(stage=>stage.key!=="completed"):allStages.filter(stage=>stage.key==="completed");
     if(bucket==="closed"&&closedType==="cancelled")visibleStages=[{key:"cancelled",position:1,label_en:"Cancelled",label_hu:"Törölt / megszakított",stage_type:"closed",active:true,removable:false}];
     const activeStageCount=allStages.filter(stage=>stage.key!=="completed").length;
+    const workflowRows=bucket==="active"?jobs.map(job=>({
+      job_id:job.id,
+      current_stage:job.stage,
+      phases:(job.workflow_phases||[]).filter(phase=>phase.enabled&&phase.stage_key!=="completed").sort((a,b)=>Number(a.position||0)-Number(b.position||0)),
+      job
+    })):[];
     res.json({bucket,closed_type:bucket==="closed"?closedType:null,stages:allStages,max_stages:MAX_WORKFLOW_STAGES,active_stage_count:activeStageCount,can_add_stage:activeStageCount<MAX_WORKFLOW_STAGES,
+      workflow_rows:workflowRows,
       columns:visibleStages.map(stage=>({...stage,jobs:bucket==="closed"?jobs:jobs.filter(job=>job.stage===stage.key)})),jobs});
   });
   app.get("/api/workshop",auth,staff,(_req,res)=>{

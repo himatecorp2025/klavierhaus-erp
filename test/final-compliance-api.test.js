@@ -696,8 +696,16 @@ test("Dynamic workflow supports seven active reorderable phases plus a separate 
   assert.equal(reordered.status,200,JSON.stringify(reordered.payload));
   assert.deepEqual(reordered.payload.stages.map(stage=>stage.key),["received",...middle,"admin_approval","completed"]);
 
+  const defaultScoped=await request("/api/jobs",{token,method:"POST",body:{
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Default scoped workflow test"
+  }});
+  assert.equal(defaultScoped.status,201,JSON.stringify(defaultScoped.payload));
+  assert.deepEqual(defaultScoped.payload.workflow_phases.map(phase=>phase.stage_key).sort(),["admin_approval","completed","in_progress","qa_review","received"].sort());
+  assert.equal(defaultScoped.payload.workflow_phases.some(phase=>[voicing.key,polish.key,regulation.key].includes(phase.stage_key)),false);
+
   const created=await request("/api/jobs",{token,method:"POST",body:{
-    client_id:shared.client.id,piano_id:shared.piano.id,title:"Flexible dynamic workflow test"
+    client_id:shared.client.id,piano_id:shared.piano.id,title:"Flexible dynamic workflow test",
+    workflow_phases:reordered.payload.stages.map(stage=>({stage_key:stage.key,enabled:true}))
   }});
   assert.equal(created.status,201,JSON.stringify(created.payload));
   assert.equal(created.payload.stage,"planned");

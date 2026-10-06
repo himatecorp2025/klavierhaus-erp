@@ -13,7 +13,7 @@ function setup(){
   db.prepare("INSERT INTO clients(id,name,email,client_type) VALUES(1,'Concert Client','client@example.com','INDIVIDUAL')").run();
   db.prepare("INSERT INTO pianos(id,client_id,brand,model,serial_number) VALUES(1,1,'Steinway','D','555111')").run();
   for(const [key,pos,type] of [['received',1,'start'],['in_progress',2,'intermediate'],['qa_review',3,'intermediate'],['admin_approval',4,'approval'],['completed',5,'completed']])db.prepare("INSERT INTO workflow_stage_definitions(stage_key,position,label_en,label_hu,stage_type,active,removable) VALUES(?,?,?,?,?,1,0)").run(key,pos,key,key,type);
-  let n=0;const integration=createGoogleCalendarIntegration({db,rid:p=>`${p}-${++n}`,createNotification:()=>{},env:{GOOGLE_CLIENT_ID:'id',GOOGLE_CLIENT_SECRET:'secret',GOOGLE_TOKEN_ENCRYPTION_KEY:'01234567890123456789012345678901',APP_BASE_URL:'https://erp.test',GOOGLE_CALENDAR_ID:'klavierhauswork@gmail.com',GOOGLE_CALENDAR_CENTRAL_EMAIL:'klavierhauswork@gmail.com'},fetchImpl:async()=>{throw new Error('network not expected')}});
+  let n=0;const integration=createGoogleCalendarIntegration({db,rid:p=>`${p}-${++n}`,createNotification:()=>{},env:{GOOGLE_CLIENT_ID:'id',GOOGLE_CLIENT_SECRET:'secret',GOOGLE_TOKEN_ENCRYPTION_KEY:'01234567890123456789012345678901',APP_BASE_URL:'https://erp.test',GOOGLE_CALENDAR_ID:'ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com',GOOGLE_CALENDAR_CENTRAL_EMAIL:'klavierhauswork@gmail.com'},fetchImpl:async()=>{throw new Error('network not expected')}});
   return {db,integration};
 }
 function event(id,{summary='Concert Client Steinway D tuning',description='client@example.com · concert preparation',creator='worker.calendar@gmail.com',etag='"v1"'}={}){return {id,etag,status:'confirmed',summary,description,location:'123 Piano Street',creator:{email:creator},organizer:{email:'klavierhauswork@gmail.com'},start:{dateTime:'2032-08-04T14:00:00-04:00'},end:{dateTime:'2032-08-04T16:00:00-04:00'},updated:'2032-08-01T12:00:00Z'};}
@@ -22,6 +22,7 @@ test('Google Calendar event auto-creates a Round 2 calendar job and workflow whe
   const {db,integration}=setup();const result=integration._test.processEvent(event('auto-1'));assert.equal(result.imported,1);
   const job=db.prepare("SELECT * FROM jobs").get();assert.equal(job.client_id,1);assert.equal(job.piano_id,1);assert.equal(job.assigned_technician_id,'W');assert.equal(job.stage,'received');assert.ok(job.scheduled_at.endsWith('Z'));
   assert.equal(db.prepare("SELECT COUNT(*) n FROM job_workflow_phases WHERE job_id=?").get(job.id).n,5);
+  assert.deepEqual(db.prepare("SELECT stage_key FROM job_workflow_phases WHERE job_id=? AND enabled=1 ORDER BY position").all(job.id).map(row=>row.stage_key),["received","admin_approval","completed"]);
   const source=db.prepare("SELECT * FROM external_calendar_events WHERE external_event_id='auto-1'").get();assert.equal(source.review_status,'REVIEWED');assert.equal(source.job_id,job.id);
   integration.stop();db.close();
 });
@@ -51,4 +52,18 @@ test('Google Calendar live sync is refreshed on startup and before calendar read
   assert.match(googleSource,/calendar_integrations\.calendar_id<>excluded\.calendar_id THEN NULL ELSE calendar_integrations\.sync_token/);
   assert.match(workflowSource,/await googleCalendar\.syncIfStale\("CALENDAR_VIEW",30000\)/);
   assert.match(workflowSource,/res\.setHeader\("Cache-Control","no-store"\)/);
+});
+
+
+test('Google sync is hard-locked to the Klavierhaus Work source calendar',()=>{
+  const source=fs.readFileSync(path.join(__dirname,"..","server","google-calendar.js"),"utf8");
+  assert.match(source,/DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail\.com"/);
+  assert.match(source,/KLAVIERHAUS_WORK_CALENDAR_ID = "ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group\.calendar\.google\.com"/);
+  assert.match(source,/GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK/);
+  assert.match(source,/FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail\.com"/);
+  assert.match(source,/normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID/);
+  assert.match(source,/GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED/);
+  assert.match(source,/googleRequest\(\`\/calendars\/\$\{encodeURIComponent\(config\.calendarId\)\}\/events\?/);
+  assert.doesNotMatch(source,/calendarList\/list/);
+  assert.doesNotMatch(source,/\/calendars\/primary\/events/);
 });

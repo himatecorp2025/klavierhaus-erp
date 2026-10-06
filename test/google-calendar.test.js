@@ -44,7 +44,7 @@ function setup(fetchImpl = async () => { throw new Error("unexpected network req
       GOOGLE_CLIENT_SECRET: "secret",
       GOOGLE_TOKEN_ENCRYPTION_KEY: "separate-test-encryption-key-at-least-32-chars",
       APP_BASE_URL: "https://erp.example.com",
-      GOOGLE_CALENDAR_ID: "klavierhauswork@gmail.com",
+      GOOGLE_CALENDAR_ID: "ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com",
       GOOGLE_CALENDAR_CENTRAL_EMAIL: "klavierhauswork@gmail.com"
     },
     fetchImpl

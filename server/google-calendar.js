@@ -3,6 +3,8 @@ const crypto = require("crypto");
 const PROVIDER = "GOOGLE";
 const INTEGRATION_ID = "CAL-GOOGLE-WORK";
 const DEFAULT_CALENDAR_EMAIL = "klavierhauswork@gmail.com";
+const KLAVIERHAUS_WORK_CALENDAR_ID = "ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513@group.calendar.google.com";
+const FORBIDDEN_NON_KLAVIERHAUS_CALENDAR = "himatecorp2025@gmail.com";
 const REVIEW_STATES = new Set(["NEEDS_REVIEW", "REVIEWED", "SOURCE_CHANGED", "SOURCE_CANCELLED", "INVALID", "IGNORED"]);
 
 function createGoogleCalendarIntegration(options) {
@@ -19,7 +21,7 @@ function createGoogleCalendarIntegration(options) {
     clientId: String(env.GOOGLE_CLIENT_ID || "").trim(),
     clientSecret: String(env.GOOGLE_CLIENT_SECRET || "").trim(),
     encryptionSecret: String(env.GOOGLE_TOKEN_ENCRYPTION_KEY || "").trim(),
-    calendarId: String(env.GOOGLE_CALENDAR_ID || DEFAULT_CALENDAR_EMAIL).trim(),
+    calendarId: String(env.GOOGLE_CALENDAR_ID || KLAVIERHAUS_WORK_CALENDAR_ID).trim(),
     centralEmail: String(env.GOOGLE_CALENDAR_CENTRAL_EMAIL || DEFAULT_CALENDAR_EMAIL).trim(),
     appBaseUrl: String(env.APP_BASE_URL || "").trim().replace(/\/$/, ""),
     redirectUri: String(env.GOOGLE_REDIRECT_URI || "").trim(),
@@ -32,6 +34,10 @@ function createGoogleCalendarIntegration(options) {
   };
   if (!config.redirectUri && config.appBaseUrl) config.redirectUri = `${config.appBaseUrl}/api/google-calendar/oauth/callback`;
   if (!config.webhookUrl && config.appBaseUrl) config.webhookUrl = `${config.appBaseUrl}/api/google-calendar/webhook`;
+  const normalizedCentralEmail = config.centralEmail.toLowerCase();
+  const normalizedCalendarId = config.calendarId.toLowerCase();
+  if (normalizedCentralEmail !== DEFAULT_CALENDAR_EMAIL) throw new Error("GOOGLE_CALENDAR_CENTRAL_EMAIL_MUST_BE_KLAVIERHAUS_WORK");
+  if (normalizedCalendarId === FORBIDDEN_NON_KLAVIERHAUS_CALENDAR || normalizedCalendarId === "primary" || normalizedCalendarId !== KLAVIERHAUS_WORK_CALENDAR_ID) throw new Error("GOOGLE_CALENDAR_SOURCE_NOT_ALLOWED");
 
   const configured = Boolean(config.clientId && config.clientSecret && config.encryptionSecret.length >= 32 && config.redirectUri && fetchImpl);
   const encryptionKey = config.encryptionSecret ? crypto.createHash("sha256").update(config.encryptionSecret).digest() : null;
@@ -106,7 +112,9 @@ function createGoogleCalendarIntegration(options) {
       channel_expires_at: row?.channel_expires_at || null,
       redirect_uri: config.redirectUri || null,
       webhook_enabled: Boolean(config.webhookUrl && /^https:\/\//i.test(config.webhookUrl)),
-      direction: "GOOGLE_TO_ERP"
+      direction: "GOOGLE_TO_ERP",
+      source_locked: true,
+      source_account: DEFAULT_CALENDAR_EMAIL
     };
   }
 
@@ -329,8 +337,12 @@ function createGoogleCalendarIntegration(options) {
     const info=db.prepare(`INSERT INTO jobs(client_id,piano_id,title,description,location_type,site_address,scheduled_at,estimated_duration_min,stage,workflow_stage_key,workflow_owner_user_id,assigned_technician_id,internal_notes,created_by_user_id,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?, 'received','received',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(client.id,piano.id,title,cleanText(event.description,10000)||null,location?"on_site":"workshop",location||null,startTime,duration,owner?.id||null,assignee?.id||null,importedInstructions(event),owner?.id||null);
     const id=Number(info.lastInsertRowid),year=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date(startTime));db.prepare("UPDATE jobs SET job_code=? WHERE id=?").run(`KH-${year}-${String(id).padStart(5,"0")}`,id);
+    const baselinePhases=new Set(["received","admin_approval","completed"]);
     const defs=db.prepare("SELECT stage_key,position FROM workflow_stage_definitions WHERE active=1 ORDER BY position,stage_key").all(),insert=db.prepare(`INSERT OR IGNORE INTO job_workflow_phases(job_id,stage_key,position,enabled,starts_at,responsible_user_id,activated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`);
-    for(const def of defs)insert.run(id,def.stage_key,def.position,1,def.stage_key==="received"?startTime:null,assignee?.id||null,def.stage_key==="received"?new Date().toISOString():null);
+    for(const def of defs){
+      const enabled=baselinePhases.has(def.stage_key)?1:0;
+      insert.run(id,def.stage_key,def.position,enabled,enabled&&def.stage_key==="received"?startTime:null,assignee?.id||null,enabled&&def.stage_key==="received"?new Date().toISOString():null);
+    }
     return getJobRow(id);
   }
   function processCancelledEvent(event,existing){ const job=getJobRow(existing?.job_id);upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"SOURCE_CANCELLED",conflictFlag:Boolean(existing?.conflict_flag)});if(job)notifyAdmins("GOOGLE_EVENT_CANCELLED",event,job,"Google event cancelled","Google-esemény törölve",`${job.title} · ERP job kept for review.`,`${job.title} · Az ERP-munka megmaradt ellenőrzésre.`,event.updated);return {flagged:1}; }
@@ -349,6 +361,7 @@ function createGoogleCalendarIntegration(options) {
   async function fetchCalendarMetadata() {
     const encoded = encodeURIComponent(config.calendarId);
     const calendar = await googleRequest(`/calendars/${encoded}`);
+    if (calendar?.id && String(calendar.id).trim().toLowerCase() !== normalizedCalendarId) throw new Error("GOOGLE_CALENDAR_SOURCE_MISMATCH");
     db.prepare("UPDATE calendar_integrations SET calendar_summary=?,updated_at=CURRENT_TIMESTAMP WHERE provider=?")
       .run(calendar.summary || "Klavierhaus Work", PROVIDER);
   }
@@ -396,7 +409,7 @@ function createGoogleCalendarIntegration(options) {
         status='CONNECTED',updated_at=CURRENT_TIMESTAMP WHERE provider=?`).run(nextSyncToken, PROVIDER);
       db.prepare("UPDATE calendar_sync_log SET status='SUCCESS',imported_count=?,updated_count=?,flagged_count=?,completed_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(imported, updated, flagged, logId);
-      return { ok: true, imported, updated, flagged, status: publicStatus() };
+      return { ok: true, imported, updated, flagged, source_calendar_id: config.calendarId, source_account: DEFAULT_CALENDAR_EMAIL, status: publicStatus() };
     } catch (error) {
       db.prepare("UPDATE calendar_integrations SET last_error=?,updated_at=CURRENT_TIMESTAMP WHERE provider=?")
         .run(String(error.message || error).slice(0, 1000), PROVIDER);
