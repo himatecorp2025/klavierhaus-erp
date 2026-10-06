@@ -386,9 +386,7 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
     if(orderedKeys.length!==defs.length||orderedKeys.some(key=>!byKey.has(key)))throw problem("INVALID_WORKFLOW_STAGE_ORDER");
     if(orderedKeys[0]!=="received"||orderedKeys.at(-2)!=="admin_approval"||orderedKeys.at(-1)!=="completed")throw problem("WORKFLOW_FIXED_STAGE_ORDER",409);
     const updateDef=db.prepare("UPDATE workflow_stage_definitions SET position=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND active=1");
-    const updatePhase=db.prepare(`UPDATE job_workflow_phases SET position=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND job_id IN
-      (SELECT id FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed')`);
-    orderedKeys.forEach((key,index)=>{updateDef.run(index+1,userId,key);updatePhase.run(index+1,key);});
+    orderedKeys.forEach((key,index)=>updateDef.run(index+1,userId,key));
   }
   app.get("/api/workflow/settings",auth,staff,(_req,res)=>res.json(workflowSettingsPayload()));
   app.put("/api/workflow/settings",auth,admin,(req,res)=>{
@@ -435,8 +433,6 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
       const before=stageDefinitions();
       db.transaction(()=>{
         db.prepare("UPDATE workflow_stage_definitions SET active=0,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE stage_key=?").run(req.user.id,key);
-        db.prepare(`UPDATE job_workflow_phases SET enabled=0,updated_at=CURRENT_TIMESTAMP WHERE stage_key=? AND job_id IN
-          (SELECT id FROM jobs WHERE cancelled_at IS NULL AND stage<>'completed')`).run(key);
         applyStageOrder(stageDefinitions().map(row=>row.key),req.user.id);
       })();
       audit(req,"ARCHIVE","workflow_stage_definitions",key,stage,null);res.json(workflowSettingsPayload());
