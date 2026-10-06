@@ -41,3 +41,14 @@ test('Google source edits after review do not overwrite finalized ERP job data',
   assert.equal(db.prepare("SELECT title FROM jobs WHERE id=?").get(job.id).title,'ERP finalized title');assert.equal(db.prepare("SELECT review_status FROM external_calendar_events WHERE id=?").get(source.id).review_status,'SOURCE_CHANGED');
   integration.stop();db.close();
 });
+
+
+test('Google Calendar live sync is refreshed on startup and before calendar reads',()=>{
+  const googleSource=fs.readFileSync(path.join(__dirname,"..","server","google-calendar.js"),"utf8");
+  const workflowSource=fs.readFileSync(path.join(__dirname,"..","server","round2-workflow.js"),"utf8");
+  assert.match(googleSource,/syncNow\("STARTUP"\)/);
+  assert.match(googleSource,/function syncIfStale\(/);
+  assert.match(googleSource,/calendar_integrations\.calendar_id<>excluded\.calendar_id THEN NULL ELSE calendar_integrations\.sync_token/);
+  assert.match(workflowSource,/await googleCalendar\.syncIfStale\("CALENDAR_VIEW",30000\)/);
+  assert.match(workflowSource,/res\.setHeader\("Cache-Control","no-store"\)/);
+});

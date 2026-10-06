@@ -73,10 +73,22 @@ function createGoogleCalendarIntegration(options) {
   }
 
   function upsertBaseIntegration(userId = null) {
+    const before = integrationRow();
+    const calendarChanged = Boolean(before?.calendar_id && before.calendar_id !== config.calendarId);
     db.prepare(`INSERT INTO calendar_integrations(id,provider,central_email,calendar_id,status,connected_by_user_id)
       VALUES(?,?,?,?, 'DISCONNECTED', ?)
-      ON CONFLICT(provider) DO UPDATE SET central_email=excluded.central_email,calendar_id=excluded.calendar_id,updated_at=CURRENT_TIMESTAMP`)
+      ON CONFLICT(provider) DO UPDATE SET
+        central_email=excluded.central_email,
+        calendar_id=excluded.calendar_id,
+        calendar_summary=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.calendar_summary END,
+        sync_token=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.sync_token END,
+        channel_id=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.channel_id END,
+        resource_id=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.resource_id END,
+        channel_token=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.channel_token END,
+        channel_expires_at=CASE WHEN calendar_integrations.calendar_id<>excluded.calendar_id THEN NULL ELSE calendar_integrations.channel_expires_at END,
+        updated_at=CURRENT_TIMESTAMP`)
       .run(INTEGRATION_ID, PROVIDER, config.centralEmail, config.calendarId, userId);
+    if (calendarChanged) logger.info?.(`Google Calendar source changed to ${config.calendarId}; incremental sync state reset.`);
     return integrationRow();
   }
 
@@ -401,6 +413,16 @@ function createGoogleCalendarIntegration(options) {
     return syncPromise;
   }
 
+  function syncIfStale(triggerType = "CALENDAR_VIEW", maxAgeMs = 30000) {
+    const status = publicStatus();
+    if (!runtimeEnabled() || !configured || !status.connected) return Promise.resolve({ ok: false, skipped: true, status });
+    const lastSyncMs = Date.parse(status.last_sync_at || "");
+    if (Number.isFinite(lastSyncMs) && Date.now() - lastSyncMs < Math.max(0, Number(maxAgeMs || 0))) {
+      return Promise.resolve({ ok: true, skipped: true, fresh: true, status });
+    }
+    return syncNow(triggerType);
+  }
+
   async function registerWatch() {
     if (!runtimeEnabled()) return null;
     const row = integrationRow();
@@ -508,6 +530,7 @@ function createGoogleCalendarIntegration(options) {
     stopTimers();
     if (!runtimeEnabled()) return;
     if (!configured || !publicStatus().connected) return;
+    setImmediate(() => syncNow("STARTUP").catch((error) => logger.warn("Google startup sync failed:", error.message)));
     pollTimer = setInterval(() => syncNow("POLL").catch((error) => logger.warn("Google polling sync failed:", error.message)), config.pollIntervalMs);
     pollTimer.unref?.();
     if (config.webhookUrl && /^https:\/\//i.test(config.webhookUrl)) {
@@ -518,6 +541,16 @@ function createGoogleCalendarIntegration(options) {
   }
 
   upsertBaseIntegration();
+  const startupStatus=publicStatus();
+  logger.info?.("Google Calendar runtime", {
+    configured: startupStatus.configured,
+    connected: startupStatus.connected,
+    status: startupStatus.status,
+    runtime_enabled: runtimeEnabled(),
+    calendar_id: startupStatus.calendar_id,
+    central_email: startupStatus.central_email,
+    webhook_enabled: startupStatus.webhook_enabled
+  });
   startTimers();
 
   return {
@@ -530,6 +563,7 @@ function createGoogleCalendarIntegration(options) {
     consumeTestAccessToken,
     handleOAuthCallback,
     syncNow,
+    syncIfStale,
     registerWatch,
     handleWebhook,
     disconnect,
