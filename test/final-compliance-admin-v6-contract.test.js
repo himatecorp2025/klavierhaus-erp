@@ -205,7 +205,7 @@ test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   assert.match(workflow,/\/api\/workflow\/stages\/\:key/);
   assert.match(workflow,/closed_type/);
   assert.match(workflow,/\/api\/jobs\/\:id\/history/);
-  assert.match(ui,/workflowAddStageCard/);
+  assert.match(ui,/workflowCarouselAddStage/);
   assert.match(ui,/function r2ActiveDefinitions\(\)/);
   assert.match(ui,/data-job-draggable/);
   assert.match(ui,/workflowEntry=Boolean\(defaults\.workflow\)/);
@@ -213,7 +213,7 @@ test("Dynamic workflow v7 and CMS image preview contracts are present",()=>{
   assert.match(ui,/data-stage-drag/);
   assert.match(ui,/data-closed-type="completed"/);
   assert.match(ui,/data-closed-type="cancelled"/);
-  assert.match(ui,/r2OpenWorkflowHistory/);
+  assert.match(ui,/r2OpenWorkflowHistory/);\n  assert.match(ui,/function r2BindWorkflowCarousel/);\n  assert.match(ui,/data-workflow-carousel-next/);\n  assert.match(ui,/data-workflow-carousel-prev/);
   assert.match(ui,/class="closed-workflow-grid"/);
   assert.match(ui,/class="closed-workflow-card/);
   assert.match(ui,/data-history-card/);
