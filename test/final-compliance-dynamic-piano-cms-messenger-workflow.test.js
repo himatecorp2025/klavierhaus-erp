@@ -169,6 +169,29 @@ test("Planned, calendar and workflow jobs have an inline job-specific add-phase 
   assert.match(css,/\.workflow-add-phase-card/);
 });
 
+test("Active workflow uses a five-card horizontal carousel with compact clickable cards",()=>{
+  const ui=read("public/round2.js"),css=read("public/styles.css");
+  assert.match(ui,/function r2BindWorkflowCarousel/);
+  assert.match(ui,/data-workflow-carousel-prev/);
+  assert.match(ui,/data-workflow-carousel-next/);
+  assert.match(ui,/id="workflowCarouselAddStage"/);
+  assert.doesNotMatch(ui,/id="workflowAddStageCard"/);
+  assert.match(ui,/workflow-card-open-indicator/);
+  assert.match(ui,/r2OpenWorkflowHistory\(Number\(job\.id\),job\)/);
+  assert.match(ui,/state\.r2WorkflowCarouselFocusStage=body\.to_stage\|\|next/);
+  assert.match(ui,/ghost\.style\.minWidth=rect\.width\+"px"/);
+  assert.match(ui,/ghost\.style\.height=rect\.height\+"px"/);
+  const canonical=css.slice(css.lastIndexOf("WORKFLOW FIVE-CARD CAROUSEL + COMPACT CLICKABLE CARDS"));
+  assert.match(canonical,/grid-auto-flow:column!important/);
+  assert.match(canonical,/grid-auto-columns:max\(220px,calc\(\(100% - 48px\)\/5\)\)!important/);
+  assert.match(canonical,/overflow-x:hidden!important/);
+  assert.match(canonical,/\.workflow-carousel-nav:disabled/);
+  assert.match(canonical,/\.workflow-summary-card/);
+  assert.match(canonical,/@keyframes workflow-carousel-reflow/);
+  assert.match(ui,/r2WorkflowCarouselAnimateLayout=true/);
+  assert.doesNotMatch(canonical,/workflow-drag-ghost[^}]*scale\(/);
+});
+
 test("Messenger admin composer ends with an unclipped two-column 2x2 action grid",()=>{
   const ui=read("public/messenger.js"),css=read("public/styles.css");
   assert.match(ui,/class="messenger-action-grid"/);
