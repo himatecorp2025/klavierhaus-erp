@@ -1146,15 +1146,14 @@ async function renderSystemIntegrations(){
     });
   });
 
-  const qs=new URLSearchParams(location.search);
-  if(qs.get("googleCalendar")==="connected"){
-    history.replaceState({},"","#system_integrations");
+  const integrationParams=state.pendingDeepLinkParams?.view==="system_integrations"?state.pendingDeepLinkParams:null;
+  state.pendingDeepLinkParams=null;
+  if(integrationParams?.googleCalendar==="connected"){
     toast(tr("Google Calendar connected. Initial synchronization has started.","Google Naptár csatlakoztatva. A kezdeti szinkronizáció elindult."),"success");
-  }else if(qs.get("googleCalendar")==="error"){
-    const reason=qs.get("reason")||"GOOGLE_CALENDAR_CONNECTION_FAILED";
-    history.replaceState({},"","#system_integrations");toast(humanError(new Error(reason)),"error");
-  }else if(qs.get("googleCalendarTest")==="authorized"){
-    history.replaceState({},"","#system_integrations");
+  }else if(integrationParams?.googleCalendar==="error"){
+    const reason=integrationParams.reason||"GOOGLE_CALENDAR_CONNECTION_FAILED";
+    toast(humanError(new Error(reason)),"error");
+  }else if(integrationParams?.googleCalendarTest==="authorized"){
     try{await api("/api/system-integrations/GOOGLE_CALENDAR/test",{method:"POST",body:"{}"});toast(tr("Google Calendar read/write test succeeded.","A Google Naptár olvasási/írási teszt sikeres."),"success");}
     catch(error){toast(humanError(error),"error");}
   }
