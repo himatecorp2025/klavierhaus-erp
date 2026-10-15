@@ -52,7 +52,12 @@ function normalizedConfig(provider, config = {}, env = process.env) {
   if (provider === "GA4") return { measurement_id: clean(source.measurement_id, 80) };
   if (provider === "CLARITY") return { project_id: clean(source.project_id, 80) };
   if (provider === "SEARCH_CONSOLE") return { property_url: clean(source.property_url, 1000) };
-  if (provider === "RESEND") return { from_email: clean(source.from_email || env.EMAIL_FROM, 500), reply_to: clean(source.reply_to || env.EMAIL_REPLY_TO, 500) };
+  if (provider === "RESEND") {
+    const requestedFrom = clean(source.from_email || env.EMAIL_FROM, 500);
+    const gmailSender = /<[^>]+@(gmail\.com|googlemail\.com)>$/i.test(requestedFrom) || /^[^<>\s]+@(gmail\.com|googlemail\.com)$/i.test(requestedFrom);
+    const fromEmail = gmailSender ? clean(env.EMAIL_FROM || "Klavierhaus Accounts <accounts@klavierhaus.com>", 500) : requestedFrom;
+    return { from_email: fromEmail, reply_to: clean(source.reply_to || env.EMAIL_REPLY_TO, 500) };
+  }
   if (provider === "STRIPE") return { publishable_key: clean(source.publishable_key, 500), mode: "sandbox" };
   return {};
 }
