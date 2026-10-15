@@ -1135,7 +1135,8 @@ async function renderSystemIntegrations(){
     card.querySelector("[data-integration-test]")?.addEventListener("click",async event=>{
       const button=event.currentTarget;button.disabled=true;
       try{
-        await api(`/api/system-integrations/${encodeURIComponent(provider)}/test`,{method:"POST",body:"{}"});
+        const testPayload=provider==="RESEND"?{test_email:"klavierhauswork@gmail.com"}:{};
+        await api(`/api/system-integrations/${encodeURIComponent(provider)}/test`,{method:"POST",body:JSON.stringify(testPayload)});
         toast(tr("Integration test succeeded.","Az integrációs teszt sikeres."),"success");await renderSystemIntegrations();
       }catch(error){
         if(provider==="GOOGLE_CALENDAR"&&String(error?.message||error).includes("GOOGLE_CALENDAR_TEST_WRITE_AUTH_REQUIRED")){
