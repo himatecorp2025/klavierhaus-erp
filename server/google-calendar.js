@@ -291,7 +291,8 @@ function createGoogleCalendarIntegration(options) {
   function eventEmails(event){
     return [...new Set([event.creator?.email,event.organizer?.email,...(Array.isArray(event.attendees)?event.attendees.map(x=>x?.email):[])].map(normalizeEmail).filter(Boolean))];
   }
-  function mappedUser(event) {
+  function mappedUser(event, sourceUserId = null) {
+    if (sourceUserId) { const owner=db.prepare("SELECT id,name,email,calendar_color FROM users WHERE id=? AND status='Active' AND COALESCE(hidden_user,0)=0").get(sourceUserId); if(owner)return owner; }
     for (const email of eventEmails(event)) {
       const row=db.prepare(`SELECT id,name,email,calendar_color FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0
         AND lower(trim(COALESCE(NULLIF(google_calendar_email,''),email)))=? LIMIT 1`).get(email);
@@ -321,11 +322,11 @@ function createGoogleCalendarIntegration(options) {
   function adminUsers() { return db.prepare("SELECT id,name FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0 AND role='ADMIN'").all(); }
   function notifyAdmins(type,event,job,titleEn,titleHu,bodyEn,bodyHu,suffix=""){ for(const admin of adminUsers())createNotification({recipientUserId:admin.id,type,job,titleEn,titleHu,bodyEn,bodyHu,metadata:{google_event_id:event.id,job_id:job?.id||null},eventKey:`${type}:${event.id}:${admin.id}:${suffix||event.etag||event.updated||"v1"}`}); }
   function notifyAssignee(type,event,job,titleEn,titleHu,bodyEn,bodyHu,suffix=""){ const uid=job?.assigned_technician_id;if(!uid)return;createNotification({recipientUserId:uid,type,job,titleEn,titleHu,bodyEn,bodyHu,metadata:{google_event_id:event.id,job_id:job.id},eventKey:`${type}:${event.id}:${uid}:${suffix||event.etag||event.updated||"v1"}`}); }
-  function upsertExternalEvent(event, values) {
-    const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,config.calendarId,event.id),id=existing?.id||rid("GCE"),reviewStatus=REVIEW_STATES.has(values.reviewStatus)?values.reviewStatus:(existing?.review_status||"NEEDS_REVIEW");
+  function upsertExternalEvent(event, values, sourceCalendarId = config.calendarId) {
+    const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,sourceCalendarId,event.id),id=existing?.id||rid("GCE"),reviewStatus=REVIEW_STATES.has(values.reviewStatus)?values.reviewStatus:(existing?.review_status||"NEEDS_REVIEW");
     db.prepare(`INSERT INTO external_calendar_events(id,provider,calendar_id,external_event_id,external_recurring_event_id,external_status,event_etag,creator_email,organizer_email,job_id,review_status,conflict_flag,raw_json,source_updated_at,reviewed_at,reviewed_by_user_id,updated_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(provider,calendar_id,external_event_id) DO UPDATE SET external_recurring_event_id=excluded.external_recurring_event_id,external_status=excluded.external_status,event_etag=excluded.event_etag,creator_email=excluded.creator_email,organizer_email=excluded.organizer_email,job_id=excluded.job_id,review_status=excluded.review_status,conflict_flag=excluded.conflict_flag,raw_json=excluded.raw_json,source_updated_at=excluded.source_updated_at,reviewed_at=COALESCE(excluded.reviewed_at,external_calendar_events.reviewed_at),reviewed_by_user_id=COALESCE(excluded.reviewed_by_user_id,external_calendar_events.reviewed_by_user_id),updated_at=CURRENT_TIMESTAMP`)
-      .run(id,PROVIDER,config.calendarId,event.id,event.recurringEventId||null,event.status||"confirmed",event.etag||null,normalizeEmail(event.creator?.email),normalizeEmail(event.organizer?.email),values.jobId||null,reviewStatus,values.conflictFlag?1:0,values.rawJson===null?null:JSON.stringify(event),event.updated||null,values.reviewedAt||null,values.reviewedByUserId||null);
+      .run(id,PROVIDER,sourceCalendarId,event.id,event.recurringEventId||null,event.status||"confirmed",event.etag||null,normalizeEmail(event.creator?.email),normalizeEmail(event.organizer?.email),values.jobId||null,reviewStatus,values.conflictFlag?1:0,values.rawJson===null?null:JSON.stringify(event),event.updated||null,values.reviewedAt||null,values.reviewedByUserId||null);
     return db.prepare("SELECT * FROM external_calendar_events WHERE id=?").get(id);
   }
   function getJobRow(id){ return id?db.prepare(`SELECT j.*,u.name assigned_technician_name,u.calendar_color assigned_technician_color,c.name client_name,p.brand piano_brand,p.model piano_model,p.serial_number piano_serial_number FROM jobs j LEFT JOIN users u ON u.id=j.assigned_technician_id LEFT JOIN clients c ON c.id=j.client_id LEFT JOIN pianos p ON p.id=j.piano_id WHERE j.id=?`).get(id):null; }
@@ -345,18 +346,88 @@ function createGoogleCalendarIntegration(options) {
     }
     return getJobRow(id);
   }
-  function processCancelledEvent(event,existing){ const job=getJobRow(existing?.job_id);upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"SOURCE_CANCELLED",conflictFlag:Boolean(existing?.conflict_flag)});if(job)notifyAdmins("GOOGLE_EVENT_CANCELLED",event,job,"Google event cancelled","Google-esemény törölve",`${job.title} · ERP job kept for review.`,`${job.title} · Az ERP-munka megmaradt ellenőrzésre.`,event.updated);return {flagged:1}; }
-  function processEvent(event){
-    if(!event?.id)return {};const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,config.calendarId,event.id);if(existing?.review_status==="IGNORED")return {};if(event.status==="cancelled")return processCancelledEvent(event,existing);
-    const startTime=eventDateTime(event.start,false),endTime=eventDateTime(event.end,true);if(!startTime||!endTime||Date.parse(endTime)<=Date.parse(startTime)){upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"INVALID",conflictFlag:false});return {flagged:1};}
+  function processCancelledEvent(event,existing,sourceCalendarId=config.calendarId){ const job=getJobRow(existing?.job_id);upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"SOURCE_CANCELLED",conflictFlag:Boolean(existing?.conflict_flag)},sourceCalendarId);if(job)notifyAdmins("GOOGLE_EVENT_CANCELLED",event,job,"Google event cancelled","Google-esemény törölve",`${job.title} · ERP job kept for review.`,`${job.title} · Az ERP-munka megmaradt ellenőrzésre.`,event.updated);return {flagged:1}; }
+  function processEvent(event, sourceCalendarId=config.calendarId, sourceUserId=null){
+    if(!event?.id)return {};const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,sourceCalendarId,event.id);if(existing?.review_status==="IGNORED")return {};if(event.status==="cancelled")return processCancelledEvent(event,existing,sourceCalendarId);
+    const startTime=eventDateTime(event.start,false),endTime=eventDateTime(event.end,true);if(!startTime||!endTime||Date.parse(endTime)<=Date.parse(startTime)){upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"INVALID",conflictFlag:false},sourceCalendarId);return {flagged:1};}
     const sourceChanged=Boolean(existing?.event_etag&&event.etag&&existing.event_etag!==event.etag),linked=getJobRow(existing?.job_id);
-    if(linked&&["REVIEWED","SOURCE_CHANGED","SOURCE_CANCELLED"].includes(existing.review_status)){upsertExternalEvent(event,{jobId:linked.id,reviewStatus:sourceChanged?"SOURCE_CHANGED":existing.review_status,conflictFlag:Boolean(existing.conflict_flag)});if(sourceChanged)notifyAdmins("GOOGLE_EVENT_SOURCE_CHANGED",event,linked,"Reviewed Google event changed","Ellenőrzött Google-esemény megváltozott",`${linked.title} · ERP data was not overwritten.`,`${linked.title} · Az ERP-adatok nem íródtak felül.`,event.etag);return sourceChanged?{flagged:1}:{};}
-    const assignee=mappedUser(event),client=matchClient(event),piano=matchPiano(event,client);
-    if(!linked&&client&&piano){const conflicts=conflictsFor(assignee?.id,startTime,endTime),job=createRound2Job(event,{client,piano,assignee,startTime,endTime});upsertExternalEvent(event,{jobId:job.id,reviewStatus:"REVIEWED",conflictFlag:conflicts.length>0,reviewedAt:new Date().toISOString()});notifyAdmins("GOOGLE_EVENT_IMPORTED",event,job,"Google Calendar job imported","Google Naptár-munka importálva",`${job.title} · Added to Klavierhaus Calendar.`,`${job.title} · Hozzáadva a Klavierhaus naptárhoz.`,event.etag);notifyAssignee("GOOGLE_EVENT_IMPORTED",event,job,"New Google Calendar job","Új Google Naptár-munka",job.title,job.title,event.etag);return {imported:1,flagged:conflicts.length?1:0};}
-    upsertExternalEvent(event,{jobId:linked?.id||null,reviewStatus:"NEEDS_REVIEW",conflictFlag:false});notifyAdmins("GOOGLE_EVENT_REVIEW_REQUIRED",event,linked,"Google job needs review","Google-munka ellenőrzésre vár",event.summary||event.id,event.summary||event.id,event.etag);return {updated:existing?1:0,imported:existing?0:1,flagged:1};
+    if(linked&&["REVIEWED","SOURCE_CHANGED","SOURCE_CANCELLED"].includes(existing.review_status)){upsertExternalEvent(event,{jobId:linked.id,reviewStatus:sourceChanged?"SOURCE_CHANGED":existing.review_status,conflictFlag:Boolean(existing.conflict_flag)},sourceCalendarId);if(sourceChanged)notifyAdmins("GOOGLE_EVENT_SOURCE_CHANGED",event,linked,"Reviewed Google event changed","Ellenőrzött Google-esemény megváltozott",`${linked.title} · ERP data was not overwritten.`,`${linked.title} · Az ERP-adatok nem íródtak felül.`,event.etag);return sourceChanged?{flagged:1}:{};}
+    const assignee=mappedUser(event,sourceUserId),client=matchClient(event),piano=matchPiano(event,client);
+    if(!linked&&client&&piano){const conflicts=conflictsFor(assignee?.id,startTime,endTime),job=createRound2Job(event,{client,piano,assignee,startTime,endTime});upsertExternalEvent(event,{jobId:job.id,reviewStatus:"REVIEWED",conflictFlag:conflicts.length>0,reviewedAt:new Date().toISOString()},sourceCalendarId);notifyAdmins("GOOGLE_EVENT_IMPORTED",event,job,"Google Calendar job imported","Google Naptár-munka importálva",`${job.title} · Added to Klavierhaus Calendar.`,`${job.title} · Hozzáadva a Klavierhaus naptárhoz.`,event.etag);notifyAssignee("GOOGLE_EVENT_IMPORTED",event,job,"New Google Calendar job","Új Google Naptár-munka",job.title,job.title,event.etag);return {imported:1,flagged:conflicts.length?1:0};}
+    upsertExternalEvent(event,{jobId:linked?.id||null,reviewStatus:"NEEDS_REVIEW",conflictFlag:false},sourceCalendarId);notifyAdmins("GOOGLE_EVENT_REVIEW_REQUIRED",event,linked,"Google job needs review","Google-munka ellenőrzésre vár",event.summary||event.id,event.summary||event.id,event.etag);return {updated:existing?1:0,imported:existing?0:1,flagged:1};
   }
 
   const processEventTransaction = db.transaction(processEvent);
+
+  // Staff calendars use the existing read-only central OAuth account. Google Calendar
+  // ACLs must grant that account access; an entered email is not OAuth consent.
+  db.exec(`CREATE TABLE IF NOT EXISTS staff_calendar_sync (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    calendar_email TEXT NOT NULL,
+    sync_token TEXT,
+    last_sync_at TEXT,
+    last_error TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+  function staffCalendarStatuses() {
+    return db.prepare(`SELECT u.id AS user_id,u.name,u.google_calendar_email AS calendar_email,
+      s.last_sync_at,s.last_error,
+      CASE WHEN lower(u.google_calendar_email)=lower('klavierhauswork@gmail.com') THEN 'CENTRAL'
+           WHEN s.user_id IS NULL THEN 'PENDING' WHEN s.last_error IS NOT NULL THEN 'ERROR'
+           WHEN s.last_sync_at IS NOT NULL THEN 'SYNCED' ELSE 'PENDING' END AS sync_status
+      FROM users u LEFT JOIN staff_calendar_sync s ON s.user_id=u.id
+        AND lower(s.calendar_email)=lower(u.google_calendar_email)
+      WHERE u.status='Active' AND COALESCE(u.hidden_user,0)=0
+        AND length(trim(COALESCE(u.google_calendar_email,'')))>0
+      ORDER BY lower(u.name)`).all();
+  }
+  async function syncStaffCalendars() {
+    const staff=db.prepare(`SELECT id,name,lower(trim(google_calendar_email)) AS calendar_email
+      FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0
+        AND length(trim(COALESCE(google_calendar_email,'')))>0`).all();
+    let imported=0,updated=0,flagged=0;
+    for(const user of staff) {
+      const calendarId=user.calendar_email;
+      // Shared central calendar is already handled by the original sync.
+      if(calendarId===config.centralEmail.toLowerCase() || calendarId===config.calendarId.toLowerCase())continue;
+      db.prepare(`INSERT INTO staff_calendar_sync(user_id,calendar_email,sync_token)
+        VALUES(?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET
+        sync_token=CASE WHEN calendar_email=excluded.calendar_email THEN sync_token ELSE NULL END,
+        last_sync_at=CASE WHEN calendar_email=excluded.calendar_email THEN last_sync_at ELSE NULL END,
+        last_error=CASE WHEN calendar_email=excluded.calendar_email THEN last_error ELSE NULL END,
+        calendar_email=excluded.calendar_email,updated_at=CURRENT_TIMESTAMP`).run(user.id,calendarId);
+      let token=db.prepare("SELECT sync_token FROM staff_calendar_sync WHERE user_id=?").get(user.id)?.sync_token||"";
+      let nextToken=null,page=null,reset=false;
+      try {
+        do {
+          const q=new URLSearchParams({showDeleted:"true",singleEvents:"true",maxResults:"2500"});
+          if(token)q.set("syncToken",token);
+          else q.set("timeMin",new Date(Date.now()-config.lookbackDays*86400000).toISOString());
+          if(page)q.set("pageToken",page);
+          let payload;
+          try { payload=await googleRequest(`/calendars/${encodeURIComponent(calendarId)}/events?${q}`); }
+          catch(error) {
+            if(error.status===410 && token && !reset){reset=true;token="";page=null;db.prepare("UPDATE staff_calendar_sync SET sync_token=NULL WHERE user_id=?").run(user.id);continue;}
+            throw error;
+          }
+          for(const event of payload.items||[]) {
+            const result=processEventTransaction(event,calendarId,user.id);
+            imported+=Number(result.imported||0);updated+=Number(result.updated||0);flagged+=Number(result.flagged||0);
+          }
+          page=payload.nextPageToken||null;
+          nextToken=payload.nextSyncToken||nextToken;
+        }while(page);
+        db.prepare(`UPDATE staff_calendar_sync SET sync_token=COALESCE(?,sync_token),
+          last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).run(nextToken,user.id);
+      }catch(error) {
+        const message=String(error.message||error).slice(0,700);
+        db.prepare("UPDATE staff_calendar_sync SET last_error=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(message,user.id);
+        logger.warn?.("Staff Google Calendar sync failed for "+user.id+": "+message);
+      }
+    }
+    return {imported,updated,flagged,staff:staffCalendarStatuses()};
+  }
+
 
   async function fetchCalendarMetadata() {
     const encoded = encodeURIComponent(config.calendarId);
@@ -405,6 +476,8 @@ function createGoogleCalendarIntegration(options) {
         pageToken = payload.nextPageToken || null;
         nextSyncToken = payload.nextSyncToken || nextSyncToken;
       } while (pageToken);
+      const staffResult=await syncStaffCalendars();
+      imported+=staffResult.imported;updated+=staffResult.updated;flagged+=staffResult.flagged;
       db.prepare(`UPDATE calendar_integrations SET sync_token=COALESCE(?,sync_token),last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,
         status='CONNECTED',updated_at=CURRENT_TIMESTAMP WHERE provider=?`).run(nextSyncToken, PROVIDER);
       db.prepare("UPDATE calendar_sync_log SET status='SUCCESS',imported_count=?,updated_count=?,flagged_count=?,completed_at=CURRENT_TIMESTAMP WHERE id=?")
@@ -569,6 +642,7 @@ function createGoogleCalendarIntegration(options) {
   return {
     config: { centralEmail: config.centralEmail, calendarId: config.calendarId, redirectUri: config.redirectUri },
     status: publicStatus,
+    staffCalendarStatuses,
     createAuthUrl,
     createTestAuthUrl,
     isTestState,

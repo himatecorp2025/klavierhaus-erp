@@ -419,7 +419,7 @@ app.post("/api/users",auth,permit("ADMIN"),async(req,res)=>{
     VALUES(?,?,?,?,?,?,?, 'Active',?,?,0,0,0)`).run(id,name,email,contactEmail,googleCalendarEmail||null,hash,role,String(req.body?.phone||""),String(req.body?.address||""));
   const created=db.prepare("SELECT * FROM users WHERE id=?").get(id);
   const issuance=accountActivation.issue(id),delivery=await accountActivation.deliver(created,issuance,"INITIAL");
-  audit(req,"CREATE","users",id,null,safeUser(created));res.status(201).json({...safeUser(created),activation_status:"PENDING",activation_delivery_status:delivery.status});
+  audit(req,"CREATE","users",id,null,safeUser(created));if(googleCalendar?.status?.().connected)setImmediate(()=>googleCalendar.syncNow("STAFF_PROFILE_CREATED").catch(error=>console.warn("[STAFF-CALENDAR-SYNC]",error.message)));res.status(201).json({...safeUser(created),activation_status:"PENDING",activation_delivery_status:delivery.status});
 });
 app.put("/api/users/:id",auth,async(req,res)=>{
   const before=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);if(!before)return res.status(404).json({error:"USER_NOT_FOUND"});
@@ -439,7 +439,7 @@ app.put("/api/users/:id",auth,async(req,res)=>{
   }
   db.prepare(`UPDATE users SET name=?,email=?,contact_email=?,google_calendar_email=?,phone=?,address=?,role=?,status=?,password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(name,email,contactEmail||null,googleCalendarEmail||null,String(req.body?.phone ?? before.phone ?? ""),String(req.body?.address ?? before.address ?? ""),role,status,passwordHash,before.id);
-  const after=db.prepare("SELECT * FROM users WHERE id=?").get(before.id);audit(req,"UPDATE","users",before.id,safeUser(before),safeUser(after));res.json(safeUser(after));
+  const after=db.prepare("SELECT * FROM users WHERE id=?").get(before.id);audit(req,"UPDATE","users",before.id,safeUser(before),safeUser(after));if(googleCalendar?.status?.().connected&&googleCalendarEmail!==normalizeEmail(before.google_calendar_email))setImmediate(()=>googleCalendar.syncNow("STAFF_PROFILE_UPDATED").catch(error=>console.warn("[STAFF-CALENDAR-SYNC]",error.message)));res.json(safeUser(after));
 });
 app.delete("/api/users/:id",auth,permit("ADMIN"),(req,res)=>{
   const row=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);if(!row)return res.status(404).json({error:"USER_NOT_FOUND"});
@@ -489,6 +489,7 @@ const googleCalendar=createGoogleCalendarIntegration({
 });
 registerSystemIntegrationRoutes({app,db,auth,requireSuperadmin,audit,googleCalendar,services:{transactionalEmail,stripeSandbox},env:process.env});
 app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
+app.get('/api/google-calendar/staff-status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.staffCalendarStatuses()));
 app.get('/api/google-calendar/auth-url',auth,permit('ADMIN'),(req,res)=>{try{res.json({url:googleCalendar.createAuthUrl(req.user.id)});}catch(error){res.status(400).json({error:error.message});}});
 app.get('/api/google-calendar/oauth/callback',async(req,res)=>{try{const state=String(req.query.state||'');if(googleCalendar.isTestState(state)){await googleCalendar.handleTestOAuthCallback(String(req.query.code||''),state);return res.redirect('/?view=system_integrations&googleCalendarTest=authorized');}await googleCalendar.handleOAuthCallback(String(req.query.code||''),state);res.redirect('/?view=system_integrations&googleCalendar=connected');}catch(error){console.warn('[GOOGLE-CALENDAR-OAUTH]',error.message);res.redirect(`/?view=system_integrations&googleCalendar=error&reason=${encodeURIComponent(error.message)}`);}});
 app.post('/api/google-calendar/sync',auth,permit('ADMIN'),async(_req,res)=>{try{res.json(await googleCalendar.syncNow('MANUAL'));}catch(error){res.status(502).json({error:error.message});}});

@@ -689,6 +689,16 @@ CREATE TABLE IF NOT EXISTS calendar_integrations (
   FOREIGN KEY(connected_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Incremental, read-only sync state for staff-owned calendars shared with the central account.
+CREATE TABLE IF NOT EXISTS staff_calendar_sync (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  calendar_email TEXT NOT NULL,
+  sync_token TEXT,
+  last_sync_at TEXT,
+  last_error TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS calendar_oauth_states (
   state TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
