@@ -321,7 +321,7 @@ function v6CmsCardTitle(value,key,index){
 function v6CmsPageElements(){
   const entries=[];
   for(const [key,value] of Object.entries(state.cmsDraft||{})){
-    if(key==="_cms_media"||key==="template")continue;
+    if(key==="_cms_media"||key==="template"||(state.cmsPage==="global"&&key==="nav"))continue;
     if(key==="sections"&&Array.isArray(value)){
       value.forEach((section,index)=>entries.push({key:String(section?.id||section?.type||("section_"+(index+1))),value:section,index,path:["sections",index],group:"SECTION"}));
       continue;
@@ -392,7 +392,10 @@ function v6CmsConnectedGrid(config,rows,orderItems=[]){
     return `<div class="cms-collection-grid cms-page-connected-grid">${filtered.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}${v6CmsAddCollectionCard("piano",tr("Add piano to this brand","Új zongora ehhez a márkához"),config.brand)}</div>`;
   }
   const brands=new Map();
-  for(const row of rows){const brand=String(row.brand||tr("Other","Egyéb")),slug=v6CmsPianoBrandSlug(brand);if(!brands.has(slug))brands.set(slug,{brand,items:[]});brands.get(slug).items.push(row);}
+  for(const item of (Array.isArray(state.cmsBrands)?state.cmsBrands:[]).filter(item=>!item.archived)){
+    brands.set(item.slug,{brand:item.name,items:[]});
+  }
+  for(const row of rows){const brand=String(row.brand||tr("Other","Egyéb")),slug=(state.cmsBrands||[]).find(item=>item.name.toLowerCase()===brand.toLowerCase())?.slug||v6CmsPianoBrandSlug(brand);if(!brands.has(slug))brands.set(slug,{brand,items:[]});brands.get(slug).items.push(row);}
   const orderRanks=new Map(orderItems.map((item,index)=>[item.id,index]));
   return `<div class="cms-piano-brand-groups">${[...brands.entries()].sort((a,b)=>(orderRanks.get(a[0])??Infinity)-(orderRanks.get(b[0])??Infinity)||a[1].brand.localeCompare(b[1].brand)).map(([_slug,{brand,items}])=>`<section class="cms-piano-brand-group"><div class="cms-piano-brand-head"><strong>${esc(brand)}</strong><span class="badge">${items.length}</span></div><div class="cms-collection-grid cms-page-connected-grid">${items.map(row=>`<button class="cms-collection-card" type="button" data-edit-page-collection="piano" data-id="${esc(row.id)}">${v6MediaUrlCard(row.image_url)}<span><strong>${esc(v6CmsConnectedTitle(config,row)||"—")}</strong><small>${esc(row.model||tr("Open editor","Szerkesztés megnyitása"))}</small></span></button>`).join("")}${v6CmsAddCollectionCard("piano",tr("Add piano","Új zongora"),brand)}</div></section>`).join("")||`<div class="empty-state">${tr("No showroom pianos yet.","Még nincs bemutatótermi zongora.")}</div>`}</div>`;
 }
@@ -412,10 +415,12 @@ async function v6LoadCmsConnectedCollection(config){
   host.innerHTML=loading();
   try{
     const orderType=config.type==="service"?"services":config.type==="piano"&&!config.brand?"pianos":null;
-    const [rows,orderData]=await Promise.all([
+    const [rows,orderData,brandData]=await Promise.all([
       api(`/api/${config.route}`),
-      orderType?api(`/api/website-catalog-order/${orderType}`):Promise.resolve(null)
+      orderType?api(`/api/website-catalog-order/${orderType}`):Promise.resolve(null),
+      config.type==="piano"?api("/api/website-piano-brands"):Promise.resolve(null)
     ]);
+    if(brandData)state.cmsBrands=brandData.items||[];
     state.cmsConnectedRows=rows;
     host.innerHTML=`<section class="panel cms-page-connected-panel"><div class="panel-head"><div><span class="eyebrow">${tr("CONNECTED CONTENT","KAPCSOLT TARTALOM")}</span><h3>${esc(config.title)}</h3><p>${esc(config.subtitle)}</p></div><button class="primary-button" id="addCmsConnectedItem" type="button">＋ ${config.brand?tr("Add piano","Új zongora"):tr("Add","Hozzáadás")}</button></div>${orderData?'<div id="cmsPublicOrder"></div>':""}${v6CmsConnectedGrid(config,rows,orderData?.items||[])}</section>`;
     const refreshConnected=async()=>{if(config.type==="piano")await v6RefreshCmsSidebarMeta();await v6LoadCmsConnectedCollection(config);};
@@ -431,11 +436,13 @@ async function v6LoadCmsPage(){
   state.cmsDraft=structuredClone(page.content||{});
   const meta=state.cmsPages.find(item=>item.page_key===state.cmsPage)||{},connected=v6CmsConnectedConfig(state.cmsPage);
   host.innerHTML=`<div class="cms-toolbar"><div><span class="eyebrow">${tr("PAGE BUILDER","OLDALSZERKESZTŐ")}</span><h2>${esc(state.language==="hu"?(meta.title_hu||meta.title_en||state.cmsPage):(meta.title_en||state.cmsPage))}</h2><p>${tr("Each page element is an app card. Open a card to edit it in a focused modal.","Minden oldalelem alkalmazáskártya. A kártyára kattintva külön szerkesztőablak nyílik.")}</p></div><label class="field cms-language-field"><span>${tr("Content language","Tartalom nyelve")}</span><select id="cmsLanguage"><option value="en" ${state.cmsLanguage==="en"?"selected":""}>English</option><option value="hu" ${state.cmsLanguage==="hu"?"selected":""}>Magyar</option></select></label></div>
+  <div id="cmsSiteControls" class="cms-site-controls"></div>
   <div id="cmsVisualFields" class="cms-visual-fields"></div>
   ${connected?`<div id="cmsConnectedCollection" class="cms-connected-collection"></div>`:""}
   <div class="cms-publish-bar"><span>${tr("Publish all current page-card changes.","Az oldal kártyáin végzett összes jelenlegi módosítás publikálása.")}</span><button id="saveCmsBtn" class="primary-button" type="button">${tr("Save & publish page","Oldal mentése és publikálása")}</button></div>`;
   v6RenderCmsFields();
   if(connected)await v6LoadCmsConnectedCollection(connected);
+  if(["global","contact","pianos"].includes(state.cmsPage))await v6CmsMountSiteControls(state.cmsPage);
   $("#cmsLanguage").addEventListener("change",async event=>{state.cmsLanguage=event.target.value;await v6LoadCmsPage();});
   $("#saveCmsBtn").addEventListener("click",()=>v6PublishCmsDraft());
 }

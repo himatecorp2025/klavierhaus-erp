@@ -32,7 +32,7 @@ function savedBrandOrder(db) {
 function brandGroups(rows, preferred = []) {
   const bySlug = new Map();
   for (const [index, row] of rows.entries()) {
-    const slug = pianoBrandSlug(row.brand);
+    const slug = row.brand_slug || pianoBrandSlug(row.brand);
     if (!slug) continue;
     if (!bySlug.has(slug)) bySlug.set(slug, { id: slug, label: brandDisplayLabel(row.brand), count: 0, firstIndex: index });
     bySlug.get(slug).count++;
@@ -49,7 +49,7 @@ function reorderPianoRows(rows, preferred = []) {
   const groups = brandGroups(rows, preferred);
   const ranking = new Map(groups.map((group, index) => [group.id, index]));
   return rows.map((row, index) => ({ row, index }))
-    .sort((a, b) => (ranking.get(pianoBrandSlug(a.row.brand)) ?? Infinity) - (ranking.get(pianoBrandSlug(b.row.brand)) ?? Infinity) || a.index - b.index)
+    .sort((a, b) => (ranking.get(a.row.brand_slug || pianoBrandSlug(a.row.brand)) ?? Infinity) - (ranking.get(b.row.brand_slug || pianoBrandSlug(b.row.brand)) ?? Infinity) || a.index - b.index)
     .map(({ row }) => row);
 }
 

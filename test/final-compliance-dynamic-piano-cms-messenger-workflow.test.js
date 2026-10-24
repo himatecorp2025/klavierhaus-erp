@@ -214,9 +214,9 @@ test("Messenger admin composer ends with an unclipped two-column 2x2 action grid
 
 test("dynamic public piano routes are derived from live showroom brands",()=>{
   const publicServer=read("website/server/index.js");
-  assert.match(publicServer,/function uniquePianoBrands\(items=\[\]\)/);
+  assert.match(publicServer,/function uniquePianoBrands\(items=\[\], configured=\[\]\)/);
   assert.match(publicServer,/pianoBrandContentKey\(brand\)/);
-  assert.match(publicServer,/uniquePianoBrands\(allItems\)\.find/);
+  assert.match(publicServer,/uniquePianoBrands\(allItems,allBrands\)\.find/);
   assert.match(publicServer,/erpClient\.content\(pianoBrandContentKey\(brand\),language\)/);
   assert.match(publicServer,/uniquePianoBrands\(values\[0\]\)\.flatMap/);
 });

@@ -4,6 +4,8 @@ const fs=require("node:fs");
 const path=require("node:path");
 const crypto=require("node:crypto");
 const {installSampleContent,SAMPLE_VERSION_KEY}=require("./sample-content");
+const {seedBrands}=require("./website-brand-registry");
+const {NAV_KEY,CONTACT_KEY}=require("./website-site-presentation");
 const {defaultLandingSections}=require("./round8-domain");
 const { SETTING_KEY: PIANO_BRAND_ORDER_KEY }=require("./website-display-order");
 const {defaultWebsiteDesignSettings,PAGE_ROUTE_SETTINGS_KEY,WEBSITE_DESIGN_SETTINGS_KEY}=require("./website-content");
@@ -11,9 +13,9 @@ const {defaultWebsiteDesignSettings,PAGE_ROUTE_SETTINGS_KEY,WEBSITE_DESIGN_SETTI
 const SNAPSHOT_VERSION=1;
 const TABLE_GROUPS=Object.freeze({
   pages:["website_content_pages","website_content_versions","landing_sections"],
-  collections:["website_artists","website_services","website_showroom_pianos","website_reviews"],
+  collections:["website_artists","website_services","website_showroom_pianos","website_piano_brands","website_reviews"],
 });
-const PAGE_SETTING_KEYS=Object.freeze([PAGE_ROUTE_SETTINGS_KEY,"website_seo_settings"]);
+const PAGE_SETTING_KEYS=Object.freeze([PAGE_ROUTE_SETTINGS_KEY,"website_seo_settings",NAV_KEY,CONTACT_KEY]);
 const COLLECTION_SETTING_KEYS=Object.freeze(["website_sample_content_v1",SAMPLE_VERSION_KEY,PIANO_BRAND_ORDER_KEY]);
 const BRANDING_SETTING_KEYS=Object.freeze([
   "company_name","short_name","logo_url","favicon_url","erp_logo_dark_url","erp_logo_light_url","login_logo_url",
@@ -64,6 +66,7 @@ function buildSnapshot(db,{reason="",scope="all"}={}){
       website_artists:tableRows(db,"website_artists"),
       website_services:tableRows(db,"website_services"),
       website_showroom_pianos:tableRows(db,"website_showroom_pianos"),
+      website_piano_brands:tableRows(db,"website_piano_brands"),
       website_reviews:tableRows(db,"website_reviews")
     },
     settings:snapshotSettings(db),
@@ -135,10 +138,12 @@ function restoreSnapshot(db,snapshot){
     insertRows(db,"website_content_versions",tables.website_content_versions||[]);
     insertRows(db,"landing_sections",tables.landing_sections||[]);
 
-    for(const table of ["website_reviews","website_showroom_pianos","website_services","website_artists"])if(tableExists(db,table))db.prepare(`DELETE FROM "${table}"`).run();
+    for(const table of ["website_reviews","website_showroom_pianos","website_piano_brands","website_services","website_artists"])if(tableExists(db,table))db.prepare(`DELETE FROM "${table}"`).run();
     insertRows(db,"website_artists",tables.website_artists||[]);
     insertRows(db,"website_services",tables.website_services||[]);
     insertRows(db,"website_showroom_pianos",tables.website_showroom_pianos||[]);
+    insertRows(db,"website_piano_brands",tables.website_piano_brands||[]);
+    seedBrands(db);
     insertRows(db,"website_reviews",tables.website_reviews||[]);
 
     replaceSettings(db,ALL_SETTING_KEYS,settings);
@@ -160,9 +165,11 @@ function resetPages(db){
   for(const key of PAGE_SETTING_KEYS)db.prepare("DELETE FROM app_settings WHERE setting_key=?").run(key);
 }
 function resetCollections(db,{userId=null,websiteBaseUrl=""}={}){
-  for(const table of ["website_reviews","website_showroom_pianos","website_services","website_artists"])if(tableExists(db,table))db.prepare(`DELETE FROM "${table}"`).run();
+  for(const table of ["website_reviews","website_showroom_pianos","website_piano_brands","website_services","website_artists"])if(tableExists(db,table))db.prepare(`DELETE FROM "${table}"`).run();
   for(const key of COLLECTION_SETTING_KEYS)db.prepare("DELETE FROM app_settings WHERE setting_key=?").run(key);
-  return installSampleContent({db,userId,updatedBy:"FACTORY_RESET",publicWebsiteUrl:websiteBaseUrl});
+  const result=installSampleContent({db,userId,updatedBy:"FACTORY_RESET",publicWebsiteUrl:websiteBaseUrl});
+  seedBrands(db);
+  return result;
 }
 function resetBranding(db){
   const defaults=defaultWebsiteDesignSettings();

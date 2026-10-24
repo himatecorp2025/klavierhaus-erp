@@ -4998,3 +4998,33 @@ input,textarea,select,
   .cms-public-order-footer{align-items:stretch;flex-direction:column}
   .cms-public-order-footer .primary-button{width:100%;min-height:42px}
 }
+
+
+/* CMS independent brand registry, bilingual navigation and public showroom contact */
+.cms-site-controls{display:grid;gap:15px}
+.cms-site-panel{padding:16px;display:grid;gap:15px}
+.cms-site-section-title h3{margin:0 0 5px;font-size:18px}
+.cms-site-section-title p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.cms-site-toolbar{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.cms-brand-editor-list,.cms-site-nav-list{display:grid;gap:9px}
+.cms-brand-editor-row,.cms-site-nav-row{display:flex;align-items:center;gap:13px;border:1px solid var(--line);border-radius:12px;padding:11px 14px;background:var(--surface-2);min-width:0}
+.cms-brand-editor-row.is-archived{opacity:.75}
+.cms-brand-editor-title{flex:1;min-width:0;display:grid;gap:4px}
+.cms-brand-editor-title strong{font-size:13px;overflow-wrap:anywhere}
+.cms-brand-editor-title small{font-size:11px;color:var(--muted)}
+.cms-brand-editor-buttons{display:flex;gap:8px;flex-wrap:wrap}
+.cms-site-nav-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;flex:1;min-width:0}
+.cms-site-field{display:grid;gap:6px;min-width:0}
+.cms-site-field span{font-size:11px;color:var(--muted);font-weight:600}
+.cms-site-field input{min-width:0;width:100%;min-height:40px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font-size:13px}
+.cms-site-field input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cms-site-contact-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.cms-site-social-title{margin:4px 0 -5px;font-size:13px}
+.cms-gallery-grid img{object-fit:contain;background:var(--surface-3)}
+@media(max-width:780px){
+.cms-site-nav-fields,.cms-site-contact-grid{grid-template-columns:1fr}
+.cms-site-nav-row,.cms-brand-editor-row{flex-wrap:wrap}
+.cms-site-nav-row .cms-site-nav-fields{flex-basis:calc(100% - 60px)}
+.cms-brand-editor-buttons{width:100%;justify-content:flex-start}
+.cms-site-toolbar>.primary-button{width:100%}
+}
