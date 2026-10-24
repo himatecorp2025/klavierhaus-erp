@@ -100,3 +100,10 @@ The **Website CMS → Piano Page** includes **Manage Piano Brands**. An administ
 Public individual piano pages provide a gallery lightbox with keyboard navigation, previous/next, 1–5× zoom, wheel zoom and touch pinch/pan. Images of all orientations are shown uncropped using `object-fit:contain`. The standalone ERP customer-owned piano registry and appointment booking logic are untouched.
 
 Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.
+
+
+### Fullscreen piano gallery: fit, pan and original resolution
+
+On each piano detail page, hovering over the main photo or a gallery thumbnail enlarges the preview around the mouse position. Clicking opens a modal that fits the **entire** original photo to the current screen (portrait or landscape) without cropping or auto-zoom. The modal provides original-photo previews along the bottom, previous/next buttons and keyboard arrows. Explicit zoom is available with +/− controls, the mouse wheel, double-click or touch pinch. Once zoomed, the image follows the mouse and can also be dragged; the available panning range is computed from the fitted *image dimensions*, so it works on any aspect ratio. The reset control returns to the full photo, and opening another photo always begins fitted.
+
+The original uploaded file URL is used for zoom, never a low-resolution thumbnail. The viewer avoids upscaling at its default fit level and reports native image dimensions and resolution limits. Existing low-resolution uploads cannot produce additional detail through software: CMS editors now recommend original photos of at least **2,000 pixels on the longest side**. The browser-based smoke regression under \`website/test/gallery-fit-pan.test.js\` exercises fitted display, cursor follow, dragging, swipe, pinch, wheel, keyboard and reopening on desktop and narrow viewports.

@@ -215,7 +215,7 @@ test("piano detail images open interactive full-screen viewer and accept portrai
     assert.match(stylesheet,/\.detail-gallery \.gallery-thumb-trigger img\{[^}]*object-fit:contain/);
     assert.match(stylesheet,/\.piano-lightbox__image\{[^}]*object-fit:contain/);
     const client=read("website/public/gallery-zoom.js");
-    for(const token of ["showModal","pointerdown","pointermove","wheel","ArrowLeft","ArrowRight","changeZoom","touch-action"]) {
+    for(const token of ["showModal","pointerdown","pointermove","wheel","ArrowLeft","ArrowRight","zoomTo","touch-action"]) {
       assert.ok(client.includes(token)||stylesheet.includes(token),"Missing gallery ability: "+token);
     }
   });
@@ -256,4 +256,29 @@ test("public brand endpoint preserves previously displayed piano order when no C
       assert.deepEqual(positions.slice().sort((a,b)=>a-b),positions);
     }
   });
+});
+
+
+test("fullscreen gallery loads original photos, fits the entire viewport and calculates drag bounds from actual image geometry", () => {
+  const client=read("website/public/gallery-zoom.js");
+  const css=read("website/public/styles.css");
+  const server=read("website/server/index.js");
+  const cms=read("public/v6.js");
+  assert.match(server,/data-gallery-full/);
+  assert.match(server,/gallery-zoom\.js\?v=\$\{VERSION\}-fitpan-v3/);
+  assert.match(client,/element\.dataset\.galleryFull/);
+  assert.match(client,/image\.src = photos\[current\]\.url/);
+  assert.match(client,/Math\.min\(width \/ image\.naturalWidth, height \/ image\.naturalHeight, 1\)/);
+  assert.match(client,/fittedWidth \* scale - stage\.clientWidth/);
+  assert.match(client,/fittedHeight \* scale - stage\.clientHeight/);
+  assert.match(client,/source\.textContent = image\.naturalWidth/);
+  assert.match(client,/followMouse\(event\)/);
+  assert.match(client,/function zoomTo\(next, point = null\)/);
+  assert.match(client,/function pointerFinished/);
+  assert.match(client,/new Set\(\[\(current \+ 1\)/);
+  assert.match(css, /\.piano-lightbox__image\{[^}]*object-fit:contain/);
+  assert.match(css, /\.piano-lightbox__stage\{[^}]*touch-action:none/);
+  assert.match(css, /\.gallery-main-trigger:hover>img/);
+  assert.match(css, /\.piano-lightbox__strip\{/);
+  assert.match(cms,/2000 pixeles/);
 });

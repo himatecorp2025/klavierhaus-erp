@@ -5028,3 +5028,5 @@ input,textarea,select,
 .cms-brand-editor-buttons{width:100%;justify-content:flex-start}
 .cms-site-toolbar>.primary-button{width:100%}
 }
+
+.cms-gallery-resolution-guidance{margin:0 0 12px;font-size:12px;line-height:1.6;color:var(--muted)}
