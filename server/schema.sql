@@ -360,6 +360,16 @@ CREATE TABLE IF NOT EXISTS website_reviews (
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- CMS-managed piano brands survive independently of showroom inventory.
+CREATE TABLE IF NOT EXISTS website_piano_brands (
+  slug TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  cover_url TEXT NOT NULL DEFAULT '',
+  archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS website_showroom_pianos (
   id TEXT PRIMARY KEY,
   slug_en TEXT NOT NULL UNIQUE,

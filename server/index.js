@@ -16,6 +16,8 @@ const { createTransactionalEmail } = require("./transactional-email");
 const { createAccountActivationService } = require("./account-activation");
 const { registerWebsiteContentRoutes } = require("./website-content");
 const { registerWebsiteCatalogRoutes } = require("./website-catalog");
+const { registerPianoBrandRoutes } = require("./website-brand-registry");
+const { registerWebsitePresentationRoutes } = require("./website-site-presentation");
 const { registerWebsitePlatformRoutes } = require("./website-platform");
 const { createStripeSandbox } = require("./stripe-sandbox");
 const {
@@ -561,6 +563,8 @@ registerWebsiteContentRoutes({
   websiteBaseUrl:process.env.WEBSITE_BASE_URL||"https://klavierhaus-home.onrender.com",
   erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"
 });
+registerWebsitePresentationRoutes({app,db,auth,permit,audit});
+registerPianoBrandRoutes({app,db,auth,permit,audit,erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
 registerWebsiteCatalogRoutes({app,db,auth,permit,audit,erpBaseUrl:process.env.APP_BASE_URL||"https://klavierhaus-erp.onrender.com"});
 registerWebsitePlatformRoutes({
   app,db,auth,permit,requireSuperadmin,audit,websiteImageUpload,websiteImageDir:WEBSITE_IMAGE_DIR,

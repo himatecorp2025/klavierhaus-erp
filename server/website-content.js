@@ -7,6 +7,8 @@ const { inspectImageFile } = require("./upload-middleware");
 const { pages, routeDefinitions, globalCopy } = require("../website/server/site-content");
 const { defaultLandingSections, normalizeLandingSections } = require("./round8-domain");
 const { savedBrandOrder } = require("./website-display-order");
+const { brandRows,seedBrands } = require("./website-brand-registry");
+const { applySitePresentation } = require("./website-site-presentation");
 
 const LANGUAGES = new Set(["en", "hu"]);
 const PAGE_KEYS = new Set(["global", ...Object.keys(routeDefinitions)]);
@@ -145,10 +147,9 @@ function canonicalizeGlobalContent(content, language) {
   const source = normalizeLegacyPageLinks(content && typeof content === "object" ? content : {});
   const storedNav = Array.isArray(source.nav) ? source.nav : [];
   const byKey = new Map(storedNav.map((item) => [String(item?.key || ""), item]));
-  const nav = (fallback.nav || []).map((item) => {
-    const stored = byKey.get(item.key);
-    return stored && typeof stored === "object" ? { ...stored, ...item, key:item.key } : item;
-  });
+  const keys=new Set((fallback.nav||[]).map(item=>item.key));
+  const nav=[...storedNav.filter(item=>item&&keys.has(item.key)),...(fallback.nav||[]).filter(item=>!byKey.has(item.key))]
+    .map(item=>({key:item.key,label:String(item.label||fallback.nav.find(defaultItem=>defaultItem.key===item.key)?.label||item.key)}));
   const next={ ...source, nav, footerOur:source.footerOur||source.footerStory||fallback.footerOur };
   delete next.footerStory;
   delete next.footerTerms;
@@ -204,10 +205,11 @@ function registerWebsiteContentRoutes(options) {
   }
   function pianoBrands(){
     if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='website_showroom_pianos'").get())return [];
-    const rows=db.prepare("SELECT DISTINCT brand FROM website_showroom_pianos WHERE trim(COALESCE(brand,''))<>'' ORDER BY lower(brand)").all();
+    seedBrands(db);
+    const rows=brandRows(db).filter(row=>!row.archived).map(row=>({brand:row.name,slug:row.slug}));
     const bySlug=new Map();
     for(const row of rows){
-      const label=String(row.brand||"").trim(),slug=pianoBrandSlug(label);if(!slug)continue;
+      const label=String(row.brand||"").trim(),slug=row.slug||pianoBrandSlug(label);if(!slug)continue;
       if(!bySlug.has(slug))bySlug.set(slug,{slug,label,page_key:pianoBrandPageKey(slug),routes:{en:`/pianos/${slug}`,hu:`/hu/zongorak/${slug}`}});
     }
     const ranks=new Map(savedBrandOrder(db).map((slug,index)=>[slug,index]));
@@ -250,7 +252,7 @@ function registerWebsiteContentRoutes(options) {
 
   function pageResponse(pageKey, language) {
     const row = pageRow(pageKey, language);
-    let content = canonicalizePageContent(pageKey, language, parsePage(row, pageKey, language));
+    let content = applySitePresentation(db,pageKey,language,canonicalizePageContent(pageKey, language, parsePage(row, pageKey, language)));
     if (pageKey === "global") {
       const active = new Set(landingSections().filter((item) => Number(item.is_active) === 1).map((item) => item.section_key));
       const sectionForNav = { pianos:"featured_pianos", services:"craftsmanship" };

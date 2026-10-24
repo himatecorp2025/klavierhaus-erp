@@ -89,3 +89,14 @@ In **Website CMS → Piano Page**, use **Public display order** to arrange the c
 In **Website CMS → Service Page**, arrange the visible *service* cards the same way. Save display order using its dedicated button; you do not need to publish other CMS page content for a card-order change. New services append to the end; the `featured` flag cannot override the explicit card order. The ordering endpoints require ERP admin authentication.
 
 Public piano category preferences are stored in `app_settings.website_piano_brand_display_order`. Service positions are stored in `website_services.sort_order`. These changes are included in website collection backups and the existing collection factory-reset lifecycle. They do not change the customer piano registry.
+
+
+## CMS brand registry and site presentation
+
+The **Website CMS → Piano Page** includes **Manage Piano Brands**. An administrator can create brands independently from inventory (including an optional cover image), rename brands while preserving their permanent page slug, or archive and later restore a brand. Archiving hides that brand and its showroom pianos publicly **without deleting any showroom instruments or customer ERP piano records**. The new `website_piano_brands` table is included in the website backup/restore lifecycle. Brand positions remain managed by the separate **Public display order** panel and also support empty brands.
+
+**Website CMS → Global Navigation & Footer** now provides dedicated editors for both the header menu's shared ordering and bilingual labels, and public showroom/footer contact details. The **Contact Page** also exposes the public contact editor. These are stored separately under `website_navigation_presentation_v1` and `website_public_contact_v1`; **never** update the invoicing issuer settings `finance_company_*` as a side effect. Social links support HTTPS Instagram, Facebook, YouTube, LinkedIn and TikTok URLs.
+
+Public individual piano pages provide a gallery lightbox with keyboard navigation, previous/next, 1–5× zoom, wheel zoom and touch pinch/pan. Images of all orientations are shown uncropped using `object-fit:contain`. The standalone ERP customer-owned piano registry and appointment booking logic are untouched.
+
+Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.

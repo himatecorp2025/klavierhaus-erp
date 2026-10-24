@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
 const { SETTING_KEY, brandGroups, savedBrandOrder, reorderPianoRows, validateOrder } = require("./website-display-order");
+const { brandFor,activePianoRows,seedBrands } = require("./website-brand-registry");
 
 function cleanText(value, max = 20000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -92,10 +93,20 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
 
   // Only published, non-hidden piano brands receive customer-facing positions.
   function publicPianoRows() {
-    return db.prepare("SELECT * FROM website_showroom_pianos WHERE published=1 AND availability_status<>'HIDDEN' ORDER BY featured DESC,sort_order,created_at,id").all();
+    return activePianoRows(db);
   }
   function displayedPianoGroups() {
-    return brandGroups(publicPianoRows(), savedBrandOrder(db));
+    const fromPianos=brandGroups(publicPianoRows(),savedBrandOrder(db));
+    const bySlug=new Map(fromPianos.map(row=>[row.id,row]));
+    const all=db.prepare("SELECT slug,name,archived FROM website_piano_brands WHERE archived=0 ORDER BY created_at,slug").all();
+    for(const row of all) {
+      const current=bySlug.get(row.slug);
+      bySlug.set(row.slug,{id:row.slug,label:row.name,count:current?.count||0});
+    }
+    const preference=new Map(savedBrandOrder(db).map((id,index)=>[id,index]));
+    return [...bySlug.values()].sort((a,b)=>(preference.get(a.id)??Infinity)-(preference.get(b.id)??Infinity)
+      ||(fromPianos.findIndex(row=>row.id===a.id)+1||9999)-(fromPianos.findIndex(row=>row.id===b.id)+1||9999)
+      ||a.label.localeCompare(b.label)).map((row,index)=>({...row,position:index+1}));
   }
   function visibleServices() {
     return db.prepare("SELECT id,title_en,title_hu,sort_order FROM website_services WHERE visible=1 ORDER BY sort_order,created_at,id").all();
@@ -165,15 +176,16 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
     const language = req.query.lang === "hu" ? "hu" : "en";
     const rows = reorderPianoRows(publicPianoRows(), savedBrandOrder(db));
     res.setHeader("Cache-Control", "no-store");
-    res.json(rows.map((row) => localized(row, language, baseUrl)));
+    res.json(rows.map((row) => ({ ...localized(row, language, baseUrl), brand_slug: row.brand_slug, brand_label: row.brand_label })));
   });
 
   app.get("/api/public/showroom-pianos/:slug", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
     const column = language === "hu" ? "slug_hu" : "slug_en";
     const row = db.prepare(`SELECT * FROM website_showroom_pianos WHERE ${column}=? AND published=1 AND availability_status<>'HIDDEN'`).get(req.params.slug);
-    if (!row) return res.status(404).json({ error: "SHOWROOM_PIANO_NOT_FOUND" });
-    res.json(localized(row, language, baseUrl));
+    if (!row || brandFor(db,row.brand)?.archived) return res.status(404).json({ error: "SHOWROOM_PIANO_NOT_FOUND" });
+    const brand=brandFor(db,row.brand);
+    res.json({ ...localized(row,language,baseUrl),brand_slug:brand?.slug||null,brand_label:brand?.name||row.brand });
   });
 
   app.get("/api/public/website-services", (req, res) => {
@@ -269,6 +281,7 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
             .run({ ...common, visible: bool(body.visible, true) });
         }
         const row = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id);
+        if(table==="website_showroom_pianos")seedBrands(db);
         audit(req, "CREATE", route, id, null, row, 1, `${route} record created`);
         res.status(201).json(row);
       } catch (error) { sendError(res, error, `${prefix}_CREATE_FAILED`); }
@@ -297,6 +310,7 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
           .run(slugEn, slugHu, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), bool(body.visible, true), bool(body.featured), Number(body.sort_order || 0), req.user.id, before.id);
       }
       const after = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(before.id);
+      if(table==="website_showroom_pianos")seedBrands(db);
       audit(req, "UPDATE", route, before.id, before, after, 1, `${route} record updated`);
       res.json(after);
     });

@@ -98,6 +98,9 @@ function createErpClient(options = {}) {
     showroomPianos(language) {
       return request(`/api/public/showroom-pianos?lang=${language === "hu" ? "hu" : "en"}`);
     },
+    pianoBrands() {
+      return request("/api/public/piano-brands");
+    },
     showroomPiano(slug, language) {
       return request(`/api/public/showroom-pianos/${encodeURIComponent(slug)}?lang=${language === "hu" ? "hu" : "en"}`);
     },

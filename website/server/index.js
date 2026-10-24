@@ -386,7 +386,7 @@ function renderCards(section, language) {
 
 function renderGallery(items, label) {
   if (!Array.isArray(items) || !items.length) return "";
-  return `<section class="detail-gallery" aria-label="${escapeHtml(label)}">${items.map((item) => `<figure><img data-gallery-image src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || label)}" loading="lazy" decoding="async"></figure>`).join("")}</section>`;
+  return `<section class="detail-gallery" aria-label="${escapeHtml(label)}" data-zoom-gallery>${items.map((item) => `<figure><button class="gallery-thumb-trigger" type="button" data-gallery-open aria-label="${escapeHtml(item.alt || label)} · ${escapeHtml(label)}"><img data-gallery-image src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || label)}" loading="lazy" decoding="async"></button></figure>`).join("")}</section>`;
 }
 
 function renderCta(section, language) {
@@ -474,6 +474,24 @@ function renderSection(section, language) {
   }
 }
 
+function renderSocialLinks(links) {
+  if(!Array.isArray(links))return "";
+  // Only approved platform identifiers can select an icon. URLs are validated on the ERP.
+  const icons={
+    instagram:'<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.4" cy="6.8" r="1" fill="currentColor" stroke="none"/>',
+    facebook:'<path d="M14 21v-8h3l.6-4H14V7c0-1.2.4-2 2-2h2V2h-3c-3.6 0-5 1.8-5 5v2H7v4h3v8"/>',
+    youtube:'<rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 6 3-6 3z"/>',
+    linkedin:'<rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 10v8M7 7v.2M11 18v-8M11 13c0-4 6-4 6 0v5"/>',
+    tiktok:'<path d="M13 3v12a5 5 0 1 1-5-5M13 3c1 4 3 5 7 5"/>'
+  };
+  const values=links.filter(row=>row&&Object.prototype.hasOwnProperty.call(icons,row.platform)&&/^https:\/\//i.test(String(row.url||"")));
+  if(!values.length)return "";
+  return '<div class="footer-social-links" aria-label="Social media">'+values.map(row=>
+    '<a href="'+escapeHtml(row.url)+'" target="_blank" rel="noopener noreferrer" aria-label="'+escapeHtml(row.platform)+'" title="'+escapeHtml(row.platform)+'">'+
+    '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icons[row.platform]+'</svg></a>'
+  ).join("")+'</div>';
+}
+
 function renderFooter(copy, language, activeLandingKeys = null) {
   const brand = resolveBrand(copy);
   const enabled = (key) => { if (activeLandingKeys) return activeLandingKeys.has(key); const navKey={featured_pianos:"pianos",craftsmanship:"services",contact_cta:"contact"}[key]; return !navKey || copy.nav.some((item)=>item.key===navKey); };
@@ -494,6 +512,7 @@ function renderFooter(copy, language, activeLandingKeys = null) {
         <address>${escapeHtml(brand.addressLine1)}<br>${escapeHtml(brand.addressLine2)}</address>
         <a href="${escapeHtml(brand.phoneHref)}">${escapeHtml(brand.phoneDisplay)}</a>
         <a href="${escapeHtml(brand.emailHref)}">${escapeHtml(brand.emailDisplay)}</a>
+        ${renderSocialLinks(copy.social_links)}
         ${enabled("contact_cta") ? `<a href="${escapeHtml(getRoute("contact", language))}">${escapeHtml(copy.footerContact)}</a>` : ""}
       </div>
       <div class="footer-column">
@@ -571,9 +590,28 @@ function resolvePianoBrand(value) {
   const known=pianoBrands.find((brand)=>brand.matches(source));if(known)return known;
   const slug=pianoBrandSlug(source);return slug?{slug,label:source,matches:(candidate)=>pianoBrandSlug(candidate)===slug}:null;
 }
-function uniquePianoBrands(items=[]) {
+function uniquePianoBrands(items=[], configured=[]) {
   const map=new Map();
-  for(const item of items){const brand=resolvePianoBrand(item?.brand);if(brand&&!map.has(brand.slug))map.set(brand.slug,brand);}
+  for(const meta of configured){
+    const slug=String(meta?.slug||"").trim().toLowerCase();
+    if(!slug||map.has(slug))continue;
+    const label=meta.name||meta.label||slug;
+    map.set(slug,{slug,label,cover_url:meta.cover_url||"",
+      matches:(candidate)=>{
+        if(candidate&&typeof candidate==="object")return candidate.brand_slug===slug||resolvePianoBrand(candidate.brand)?.slug===slug;
+        return resolvePianoBrand(candidate)?.slug===slug;
+      }});
+  }
+  for(const item of items) {
+    const slug=item?.brand_slug||resolvePianoBrand(item?.brand)?.slug;
+    if(!slug||map.has(slug))continue;
+    const label=item?.brand_label||resolvePianoBrand(item?.brand)?.label||item.brand;
+    map.set(slug,{slug,label,cover_url:"",
+      matches:(candidate)=>{
+        if(candidate&&typeof candidate==="object")return candidate.brand_slug===slug||resolvePianoBrand(candidate.brand)?.slug===slug;
+        return resolvePianoBrand(candidate)?.slug===slug;
+      }});
+  }
   return [...map.values()];
 }
 
@@ -605,12 +643,12 @@ function publicPianoReferenceText(item, language, { includeSerial = false } = {}
 }
 
 function renderShowroomCollection(items, language, options = {}) {
-  if (!items.length) return "";
+  if (!items.length && !options.brands?.length) return "";
   const compact = Boolean(options.compact);
   const labels = (options.copy || getGlobal(language)).collectionLabels || {};
-  const grouped = uniquePianoBrands(items).map((brand) => ({ brand, items: items.filter((item) => brand.matches(item.brand)) })).filter((entry) => entry.items.length);
+  const grouped = uniquePianoBrands(items, options.brands||[]).map((brand) => ({ brand, items: items.filter((item) => brand.matches(item)) }));
   const cards = grouped.map(({ brand, items: brandItems }) => {
-    const item = brandItems[0];
+    const item = brandItems[0] || {image_url:brand.cover_url||shared.heroImage,image_alt:brand.label,title:brand.label};
     const path = pianoBrandPath(brand, language);
     return `<article class="catalog-card piano-brand-card" data-reveal>
       <a class="catalog-card__image" href="${escapeHtml(path)}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" loading="lazy" decoding="async"></a>
@@ -664,7 +702,7 @@ function renderPrivateViewingDialog(language) {
   return `<dialog class="service-dialog private-appointment-dialog" data-private-viewing-dialog aria-labelledby="private-viewing-title"><form method="dialog" data-private-viewing-form><button type="button" class="dialog-close" value="cancel" aria-label="${hu ? "Bezárás" : "Close"}">×</button><p class="eyebrow">Klavierhaus</p><h2 id="private-viewing-title">${hu ? "Privát megtekintés egyeztetése" : "Arrange a private viewing"}</h2><p data-private-viewing-context></p><input type="hidden" name="piano_id"><input type="hidden" name="service_id"><div class="service-form-grid private-appointment-grid"><label>${hu ? "Név" : "Name"}<input name="name" maxlength="200" autocomplete="name" required></label><label>${hu ? "E-mail" : "Email"}<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>${hu ? "Telefonszám" : "Phone"}<input name="phone" maxlength="80" autocomplete="tel" required></label><label>${hu ? "Privát időpont oka" : "Appointment purpose"}<select name="appointment_reason" required><option value="PIANO_VIEWING">${hu ? "Zongora megtekintés" : "Piano viewing"}</option><option value="SERVICE_REQUEST">${hu ? "Szolgáltatás igénybevétele" : "Service request"}</option><option value="OTHER">${hu ? "Egyéb ügy" : "Other"}</option></select></label>${renderPrivateAppointmentPicker(language)}<label class="service-field-wide">${hu ? "Rövid megjegyzés" : "Short note"}<textarea name="note" maxlength="1000" rows="3" placeholder="${hu ? "Röviden, mit szeretne megnézni vagy megbeszélni?" : "Briefly, what would you like to view or discuss?"}"></textarea></label></div><button class="button button--primary" type="submit">${hu ? "Időpontot kérek" : "Request appointment"}</button><p class="form-result" data-private-viewing-result aria-live="polite"></p></form></dialog>`;
 }
 
-function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], showroomPianos = [], websiteServices = [], artists = [], landingSections = null, pageOverride = null, globalOverride = null, seoConfig = null }) {
+function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], showroomPianos = [], showroomBrands = [], websiteServices = [], artists = [], landingSections = null, pageOverride = null, globalOverride = null, seoConfig = null }) {
   const { key, language } = route;
   const copy = globalOverride || getGlobal(language);
   const page = pageOverride || getPage(key, language);
@@ -688,7 +726,7 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], sh
     const byId = Object.fromEntries(page.sections.map((section) => [section.id, section]));
     const homeBlocks = {
       hero: () => renderHero(page, language, copy),
-      featured_pianos: () => showroomPianos.length ? renderShowroomCollection(showroomPianos, language, { compact: true, copy }) : renderSection(byId.pianos, language),
+      featured_pianos: () => (showroomPianos.length || showroomBrands.length) ? renderShowroomCollection(showroomPianos, language, { compact: true, copy, brands: showroomBrands }) : renderSection(byId.pianos, language),
       craftsmanship: () => websiteServices.length ? renderServiceCollection(websiteServices, language, { compact: true, copy }) : renderSection(byId.craft, language),
       testimonials: () => renderReviewShowcase(reviews, language, testimonial, copy),
       contact_cta: () => renderSection(byId.consultation, language)
@@ -697,11 +735,11 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], sh
   } else {
     const contactMap = key === "contact" ? renderContactMap(copy, language) : "";
     sections = page.sections.filter((section) => {
-      if (key === "pianos" && showroomPianos.length && ["selection", "inventory"].includes(section.id)) return false;
+      if (key === "pianos" && (showroomPianos.length || showroomBrands.length) && ["selection", "inventory"].includes(section.id)) return false;
       if (key === "services" && websiteServices.length && section.id === "services") return false;
       if (key === "artists" && artists.length && section.id === "artist-directory") return false;
       return true;
-    }).map((section) => key==="contact"&&section.type==="contact" ? renderContact(section,contactMap) : renderSection(section, language)).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
+    }).map((section) => key==="contact"&&section.type==="contact" ? renderContact(section,contactMap) : renderSection(section, language)).join("") + (key === "pianos" ? renderShowroomCollection(showroomPianos, language, { copy, brands: showroomBrands }) : "") + (key === "services" ? renderServiceCollection(websiteServices, language, { copy }) : "") + (key === "artists" ? renderArtistCollection(artists, language, { copy }) : "");
   }
 
   return `<!doctype html>
@@ -733,6 +771,7 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], sh
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(webPageStructuredData({ title: pageTitle, description: pageDescription, canonicalUrl, keywords }))}</script>
   <title>${escapeHtml(pageTitle)}</title>
@@ -798,6 +837,7 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
   ${[...structuredData, ...(keywords.length ? [webPageStructuredData({ title, description, canonicalUrl, keywords })] : [])].map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
   <title>${escapeHtml(title)}</title>
   <!-- ${escapeHtml(copy.languageName)} -->`;
@@ -836,7 +876,7 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
           ? "concert"
           : "services";
   const keywords = seoKeywords({ seoConfig, key: seoKey, language, title, description });
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-id="${escapeHtml(isPiano ? item.id : "")}" data-service-id="${escapeHtml(!isPiano ? item.id : "")}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail">${isPiano?`<button class="gallery-main-trigger" type="button" data-gallery-open aria-label="${escapeHtml(language==="hu"?"Zongorakép megnyitása és nagyítása":"Open and zoom piano photo")}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><span class="gallery-open-hint" aria-hidden="true">⊕ ${escapeHtml(language==="hu"?"Nagyítás":"Zoom")}</span></button>`:`<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async">`}<div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-id="${escapeHtml(isPiano ? item.id : "")}" data-service-id="${escapeHtml(!isPiano ? item.id : "")}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
 function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, pageOverride = null, globalOverride = null, seoConfig = null }) {
@@ -911,6 +951,7 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   <meta name="robots" content="${robots}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
   <title>${escapeHtml(copy.notFoundTitle)} | Klavierhaus</title>
 </head>
 <body class="template-not-found" data-language="${escapeHtml(language)}">
@@ -1166,14 +1207,15 @@ function createApp(options = {}) {
     const language = req.path.startsWith("/hu/") ? "hu" : "en";
     try {
       const allItems=await erpClient.showroomPianos(language);
-      const brand=uniquePianoBrands(allItems).find((item)=>item.slug===String(req.params.slug||"").toLowerCase());
+      const allBrands=await erpClient.pianoBrands().catch(()=>[]);
+      const brand=uniquePianoBrands(allItems,allBrands).find((item)=>item.slug===String(req.params.slug||"").toLowerCase());
       if(brand){
         const [pageContent,globalContent,seoConfig]=await Promise.all([
           erpClient.content(pianoBrandContentKey(brand),language).catch(()=>null),
           erpClient.content("global",language).catch(()=>null),
           loadSeoConfig()
         ]);
-        const items=allItems.filter((item)=>brand.matches(item.brand));if(!items.length)return next();
+        const items=allItems.filter((item)=>brand.matches(item));
         res.setHeader("Cache-Control","public, max-age=30, stale-while-revalidate=120");
         return res.type("html").send(renderPianoBrandPage({brand,items,language,baseUrl,allowIndexing,nonce:res.locals.cspNonce,pageOverride:pageContent?.content||null,globalOverride:globalContent?.content||null,seoConfig}));
       }
@@ -1231,6 +1273,7 @@ function createApp(options = {}) {
 
     let reviews = [];
     let showroomPianos = [];
+    let showroomBrands = [];
     let websiteServices = [];
     let artists = [];
     let landingSections = null;
@@ -1246,15 +1289,17 @@ function createApp(options = {}) {
         ["home","pianos"].includes(route.key) ? erpClient.showroomPianos(route.language) : Promise.resolve([]),
         ["home","services"].includes(route.key) ? erpClient.services(route.language) : Promise.resolve([]),
         ["home","artists"].includes(route.key) ? erpClient.artists(route.language) : Promise.resolve([]),
-        erpClient.landingSections()
+        erpClient.landingSections(),
+        ["home","pianos"].includes(route.key)?erpClient.pianoBrands().catch(()=>[]):Promise.resolve([])
       ];
-      const [contentResult,globalResult,seoResult,reviewResult,pianoResult,serviceResult,artistResult,landingResult] = await Promise.allSettled(requests);
+      const [contentResult,globalResult,seoResult,reviewResult,pianoResult,serviceResult,artistResult,landingResult,brandResult] = await Promise.allSettled(requests);
       if (contentResult.status === "fulfilled") pageOverride = contentResult.value?.content || null;
       else console.warn(`[website] Page content fallback: ${contentResult.reason?.code || contentResult.reason?.message}`);
       if (globalResult.status === "fulfilled") globalOverride = globalResult.value?.content || null;
       if (seoResult.status === "fulfilled") seoConfig = seoResult.value || null;
       if (reviewResult.status === "fulfilled") reviews = reviewResult.value;
       if (pianoResult.status === "fulfilled") showroomPianos = pianoResult.value;
+      if (brandResult.status === "fulfilled") showroomBrands = brandResult.value;
       if (serviceResult.status === "fulfilled") websiteServices = serviceResult.value;
       if (artistResult.status === "fulfilled") artists = artistResult.value;
       if (landingResult.status === "fulfilled") landingSections = landingResult.value;
@@ -1267,6 +1312,7 @@ function createApp(options = {}) {
       nonce: res.locals.cspNonce,
       reviews,
       showroomPianos,
+      showroomBrands,
       websiteServices,
       artists,
       landingSections,

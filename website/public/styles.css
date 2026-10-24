@@ -2500,3 +2500,39 @@ html.customer-chat-open,html.customer-chat-open body{height:100%;overflow:hidden
 .customer-chat__recording-info{min-width:0;max-width:100%;flex-wrap:wrap}
 .customer-chat__recording-info>*{min-width:0;max-width:100%}
 .customer-chat__recording-stop{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
+
+/* Interactive piano gallery and full-resolution lightbox */
+.gallery-main-trigger{position:relative;display:block;width:100%;min-width:0;padding:0;background:#100f0d;border:0;border-radius:15px;overflow:hidden;cursor:zoom-in;line-height:0}
+.gallery-main-trigger>img{display:block;width:100%;max-height:75vh;object-fit:contain}
+.gallery-open-hint{position:absolute;right:1rem;bottom:1rem;padding:.65rem .9rem;border-radius:999px;color:#f1eadc;background:rgba(6,6,6,.82);border:1px solid rgba(238,212,168,.35);font:600 .83rem/1.2 Arial,sans-serif;line-height:1}
+.gallery-main-trigger:focus-visible,.gallery-thumb-trigger:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.detail-gallery{align-items:start}
+.detail-gallery figure{min-width:0;background:#171511}
+.detail-gallery .gallery-thumb-trigger{width:100%;display:block;cursor:zoom-in;border:1px solid rgba(183,154,96,.18);padding:0;background:#171511;border-radius:15px;overflow:hidden}
+.detail-gallery .gallery-thumb-trigger img{display:block;width:100%;height:auto;max-height:520px;aspect-ratio:auto;object-fit:contain;border-radius:0}
+.detail-gallery .gallery-thumb-trigger:hover{border-color:var(--gold)}
+.piano-lightbox{position:fixed;inset:0;margin:0;padding:0;border:none;width:100vw;max-width:none;height:100dvh;max-height:none;color:#f3eee4;background:rgba(4,4,4,.97);z-index:99999}
+.piano-lightbox::backdrop{background:rgba(0,0,0,.97)}
+.piano-lightbox__frame{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;padding:clamp(8px,2vw,24px)}
+.piano-lightbox__bar{display:flex;align-items:center;justify-content:space-between;gap:14px;font:500 .85rem/1.4 Arial,sans-serif}
+.piano-lightbox__actions{display:flex;gap:8px;align-items:center}
+.piano-lightbox__actions button,.piano-lightbox__nav{border:1px solid rgba(244,235,211,.36);background:#1e1d1b;color:#fff;border-radius:9px;min-height:43px;min-width:43px;padding:7px 12px;cursor:pointer;font:600 1.1rem Arial,sans-serif}
+.piano-lightbox__actions button:hover,.piano-lightbox__nav:hover{background:#373027;border-color:#cba86a}
+.piano-lightbox__actions button:disabled,.piano-lightbox__nav:disabled{opacity:.35;cursor:default}
+.piano-lightbox__stage{position:relative;min-height:0;overflow:hidden;display:grid;place-items:center;touch-action:none;user-select:none;cursor:grab}
+.piano-lightbox__stage.is-panning{cursor:grabbing}
+.piano-lightbox__image{display:block;max-height:100%;max-width:100%;width:auto;height:auto;object-fit:contain;transform-origin:center center;will-change:transform;pointer-events:none;user-select:none}
+.piano-lightbox__stage .piano-lightbox__nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2}
+.piano-lightbox__nav--prev{left:5px}
+.piano-lightbox__nav--next{right:5px}
+.piano-lightbox__caption{margin:0;text-align:center;color:#d6cfbd;font:400 .87rem/1.5 Arial,sans-serif}
+.piano-lightbox button:focus-visible{outline:3px solid #d4b47a;outline-offset:3px}
+@media(max-width:700px){.piano-lightbox__frame{padding:8px}.piano-lightbox__actions{gap:4px}.piano-lightbox__actions button,.piano-lightbox__nav{min-width:40px;min-height:40px;padding:6px}.piano-lightbox__bar{flex-wrap:wrap}.piano-lightbox__stage .piano-lightbox__nav{top:auto;bottom:6px;transform:none}}
+
+
+/* Footer links stay separate from billing company details */
+.footer-social-links{display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;margin:.9rem 0}
+.footer-social-links a{display:grid;place-items:center;width:42px;height:42px;border:1px solid rgba(235,211,171,.25);border-radius:11px;color:var(--ivory,#f1eadc);background:rgba(255,255,255,.025);transition:border-color .2s,background .2s}
+.footer-social-links a:hover,.footer-social-links a:focus-visible{border-color:var(--gold,#b79a60);background:rgba(183,154,96,.12)}
+.footer-social-links a:focus-visible{outline:2px solid var(--gold,#b79a60);outline-offset:2px}
