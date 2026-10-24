@@ -231,3 +231,29 @@ test("CMS editors expose brand, navigation and footer controls; booking logic is
   assert.match(index,/cms-site-settings\.js/);
   assert.doesNotMatch(ui,/private-appointments|slotAvailability/);
 });
+
+
+test("public brand endpoint preserves previously displayed piano order when no CMS preference exists",async()=>{
+  await withApps(async({request,page})=>{
+    // Insert the records in the reverse order from their actual published ranking.
+    for(const [brand,title,order,featured] of [
+      ["Art Case","Art Case Gold",3,false],
+      ["Steinway & Sons","Steinway B",2,false],
+      ["Bösendorfer","Bösendorfer 214",1,true]
+    ]){
+      const created=await request("/api/showroom-pianos",{method:"POST",body:{...piano(brand,title),sort_order:order,featured}});
+      assert.equal(created.status,201);
+    }
+    const pianos=await request("/api/public/showroom-pianos?lang=en");
+    const expected=[...new Set(pianos.body.map(row=>row.brand_slug))];
+    assert.deepEqual(expected,["bosendorfer","steinway","art-case"]);
+    const brands=await request("/api/public/piano-brands");
+    assert.deepEqual(brands.body.map(row=>row.slug),expected,"Public brand listing must inherit the previous showroom order");
+    for(const route of ["/","/pianos"]){
+      const html=(await page(route)).html;
+      const positions=expected.map(slug=>html.indexOf('href="/pianos/'+slug+'"'));
+      assert.ok(positions.every(x=>x>=0),JSON.stringify(positions));
+      assert.deepEqual(positions.slice().sort((a,b)=>a-b),positions);
+    }
+  });
+});

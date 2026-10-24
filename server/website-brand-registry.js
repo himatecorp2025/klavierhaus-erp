@@ -1,6 +1,6 @@
 "use strict";
 
-const { pianoBrandSlug } = require("./website-display-order");
+const { pianoBrandSlug, brandGroups, savedBrandOrder } = require("./website-display-order");
 
 function trim(value, max = 180) { return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max); }
 function brandRows(db) { return db.prepare("SELECT * FROM website_piano_brands ORDER BY created_at,slug").all(); }
@@ -48,8 +48,13 @@ function registerPianoBrandRoutes({ app, db, auth, permit, audit, erpBaseUrl="" 
   app.get("/api/public/piano-brands",(_req,res)=>{
     const active=visibleBrandRows(db);
     res.setHeader("Cache-Control","no-store");
-    const preference=new Map(require("./website-display-order").savedBrandOrder(db).map((slug,index)=>[slug,index]));
+    const preference=new Map(savedBrandOrder(db).map((slug,index)=>[slug,index]));
+    // Preserve the previous customer-facing order when no explicit CMS sort was saved.
+    // Registry insertion order can differ (e.g. pre-existing brands are seeded alphabetically).
+    const visibleGroups=brandGroups(activePianoRows(db),savedBrandOrder(db));
+    const firstOccurrence=new Map(visibleGroups.map((row,index)=>[row.id,index]));
     active.sort((a,b)=>(preference.get(a.slug)??Infinity)-(preference.get(b.slug)??Infinity)
+      ||(firstOccurrence.get(a.slug)??Infinity)-(firstOccurrence.get(b.slug)??Infinity)
       ||a.created_at.localeCompare(b.created_at)||a.slug.localeCompare(b.slug));
     res.json(active.map(row=>({slug:row.slug,name:row.name,
       cover_url:row.cover_url.startsWith("/uploads/")&&erpBaseUrl?(erpBaseUrl.endsWith("/")?erpBaseUrl.slice(0,-1):erpBaseUrl)+row.cover_url:row.cover_url,count:row.count})));
