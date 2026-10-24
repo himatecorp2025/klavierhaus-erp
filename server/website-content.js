@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const { inspectImageFile } = require("./upload-middleware");
 const { pages, routeDefinitions, globalCopy } = require("../website/server/site-content");
 const { defaultLandingSections, normalizeLandingSections } = require("./round8-domain");
+const { savedBrandOrder } = require("./website-display-order");
 
 const LANGUAGES = new Set(["en", "hu"]);
 const PAGE_KEYS = new Set(["global", ...Object.keys(routeDefinitions)]);
@@ -209,7 +210,8 @@ function registerWebsiteContentRoutes(options) {
       const label=String(row.brand||"").trim(),slug=pianoBrandSlug(label);if(!slug)continue;
       if(!bySlug.has(slug))bySlug.set(slug,{slug,label,page_key:pianoBrandPageKey(slug),routes:{en:`/pianos/${slug}`,hu:`/hu/zongorak/${slug}`}});
     }
-    return [...bySlug.values()];
+    const ranks=new Map(savedBrandOrder(db).map((slug,index)=>[slug,index]));
+    return [...bySlug.values()].sort((a,b)=>(ranks.get(a.slug)??Infinity)-(ranks.get(b.slug)??Infinity)||a.label.localeCompare(b.label));
   }
   function dynamicBrandPage(pageKey){const slug=pianoBrandSlugFromPageKey(pageKey);return slug?pianoBrands().find(row=>row.slug===slug)||null:null;}
   function pageFallback(pageKey,language){
@@ -316,6 +318,7 @@ function registerWebsiteContentRoutes(options) {
   });
 
   app.get("/api/website-content/pages", auth, admin, (_req, res) => {
+    const brandPages=pianoBrands();
     res.json({
       website_base_url: websiteBaseUrl,
       pages: [
@@ -327,15 +330,15 @@ function registerWebsiteContentRoutes(options) {
             routes:brand?.routes||pageRoutes()[pageKey]||routeDefinitions[pageKey]||{en:"/",hu:"/hu/"},
             title_en:brand?`Piano · ${brand.label}`:adminMeta.label_en,
             title_hu:brand?`Piano · ${brand.label}`:adminMeta.label_hu,
-            admin_group:adminMeta.group,admin_group_order:adminMeta.group_order,admin_page_order:adminMeta.page_order,
+            admin_group:adminMeta.group,admin_group_order:adminMeta.group_order,admin_page_order:brand?1+brandPages.findIndex(row=>row.slug===brand.slug):adminMeta.page_order,
             admin_group_label_en:CMS_GROUP_LABELS[adminMeta.group]?.en||adminMeta.group,
             admin_group_label_hu:CMS_GROUP_LABELS[adminMeta.group]?.hu||adminMeta.group,
             piano_brand:brand?.label||null,piano_brand_slug:brand?.slug||null
           };
         }),
-        ...pianoBrands().filter(brand=>!PAGE_KEYS.has(brand.page_key)).map((brand,index)=>({
+        ...brandPages.filter(brand=>!PAGE_KEYS.has(brand.page_key)).map((brand)=>({
           page_key:brand.page_key,routes:brand.routes,title_en:`Piano · ${brand.label}`,title_hu:`Piano · ${brand.label}`,
-          admin_group:"pianos",admin_group_order:4,admin_page_order:2+index,
+          admin_group:"pianos",admin_group_order:4,admin_page_order:1+brandPages.findIndex(row=>row.slug===brand.slug),
           admin_group_label_en:CMS_GROUP_LABELS.pianos.en,admin_group_label_hu:CMS_GROUP_LABELS.pianos.hu,
           piano_brand:brand.label,piano_brand_slug:brand.slug
         }))

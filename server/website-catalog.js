@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const { lookupSteinwayReference, isSteinwayBrand } = require("./steinway-reference");
+const { SETTING_KEY, brandGroups, savedBrandOrder, reorderPianoRows, validateOrder } = require("./website-display-order");
 
 function cleanText(value, max = 20000) {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
@@ -89,6 +90,68 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
     res.status(String(error?.message || "").includes("UNIQUE") ? 409 : 400).json({ error: code });
   }
 
+  // Only published, non-hidden piano brands receive customer-facing positions.
+  function publicPianoRows() {
+    return db.prepare("SELECT * FROM website_showroom_pianos WHERE published=1 AND availability_status<>'HIDDEN' ORDER BY featured DESC,sort_order,created_at,id").all();
+  }
+  function displayedPianoGroups() {
+    return brandGroups(publicPianoRows(), savedBrandOrder(db));
+  }
+  function visibleServices() {
+    return db.prepare("SELECT id,title_en,title_hu,sort_order FROM website_services WHERE visible=1 ORDER BY sort_order,created_at,id").all();
+  }
+  function orderItems(rows, label) {
+    return rows.map((row, index) => ({ id: row.id, label: row[label] || row.title_en || row.id, position: index + 1 }));
+  }
+
+  app.get("/api/website-catalog-order/pianos", auth, admin, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items: displayedPianoGroups() });
+  });
+
+  app.put("/api/website-catalog-order/pianos", auth, admin, (req, res) => {
+    try {
+      const change = db.transaction(() => {
+        const before = displayedPianoGroups();
+        const ids = validateOrder(req.body?.ids, before.map((row) => row.id));
+        db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) "+
+          "VALUES(?,?,?,CURRENT_TIMESTAMP) "+
+          "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP")
+          .run(SETTING_KEY, JSON.stringify(ids), req.user.name || req.user.id);
+        return { before, after: displayedPianoGroups() };
+      })();
+      audit(req, "REORDER", "website_piano_brands", SETTING_KEY,
+        { ids: change.before.map((row) => row.id) }, { ids: change.after.map((row) => row.id) }, 1, "Public piano brand order updated");
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ items: change.after });
+    } catch (error) {
+      res.status(400).json({ error: error.message === "INVALID_DISPLAY_ORDER" ? "INVALID_DISPLAY_ORDER" : "PIANO_BRAND_ORDER_FAILED" });
+    }
+  });
+
+  app.get("/api/website-catalog-order/services", auth, admin, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items: orderItems(visibleServices(), "title_en") });
+  });
+
+  app.put("/api/website-catalog-order/services", auth, admin, (req, res) => {
+    try {
+      const change = db.transaction(() => {
+        const before = visibleServices();
+        const ids = validateOrder(req.body?.ids, before.map((row) => row.id));
+        const update = db.prepare("UPDATE website_services SET sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND visible=1");
+        ids.forEach((id, index) => update.run(index + 1, req.user.id, id));
+        return { before: before.map((row) => row.id), after: orderItems(visibleServices(), "title_en") };
+      })();
+      audit(req, "REORDER", "website_services", "public_display_order",
+        { ids: change.before }, { ids: change.after.map((row) => row.id) }, 1, "Public service display order updated");
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ items: change.after });
+    } catch (error) {
+      res.status(400).json({ error: error.message === "INVALID_DISPLAY_ORDER" ? "INVALID_DISPLAY_ORDER" : "SERVICE_ORDER_FAILED" });
+    }
+  });
+
   app.get("/api/public/website-reviews", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
     const rows = db.prepare(`SELECT r.*,e.slug_en AS event_slug_en,e.slug_hu AS event_slug_hu
@@ -100,8 +163,8 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
 
   app.get("/api/public/showroom-pianos", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
-    const rows = db.prepare("SELECT * FROM website_showroom_pianos WHERE published=1 AND availability_status<>'HIDDEN' ORDER BY featured DESC,sort_order,created_at").all();
-    res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+    const rows = reorderPianoRows(publicPianoRows(), savedBrandOrder(db));
+    res.setHeader("Cache-Control", "no-store");
     res.json(rows.map((row) => localized(row, language, baseUrl)));
   });
 
@@ -115,8 +178,8 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
 
   app.get("/api/public/website-services", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
-    const rows = db.prepare("SELECT * FROM website_services WHERE visible=1 ORDER BY featured DESC,sort_order,created_at").all();
-    res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
+    const rows = db.prepare("SELECT * FROM website_services WHERE visible=1 ORDER BY sort_order,created_at,id").all();
+    res.setHeader("Cache-Control", "no-store");
     res.json(rows.map((row) => localized(row, language, baseUrl)));
   });
 
@@ -183,7 +246,10 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         summary_en: cleanText(body.summary_en, 2000), summary_hu: cleanText(body.summary_hu, 2000), description_en: cleanText(body.description_en), description_hu: cleanText(body.description_hu),
         image_url: cleanText(body.image_url, 1000), image_alt_en: cleanText(body.image_alt_en, 500), image_alt_hu: cleanText(body.image_alt_hu, 500),
         gallery_json: JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)),
-        featured: bool(body.featured), sort_order: Number(body.sort_order || 0), user_id: req.user.id
+        featured: bool(body.featured),
+        sort_order: Number(body.sort_order ?? (table === "website_services"
+          ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_services").get().position : 0)),
+        user_id: req.user.id
       };
       try {
         if (table === "website_showroom_pianos") {

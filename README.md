@@ -80,3 +80,12 @@ Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic Gi
 For browser-facing ERP API calls, `CORS_ALLOWED_ORIGINS` optionally adds a comma-separated list of trusted HTTPS origins. Official Klavierhaus website and admin origins are allowed by default.
 
 Never commit Google Calendar private feed URLs; if one was published, remove it, regenerate the secret calendar URL in Google Calendar settings, and update any subscriptions that depended on it. Deleting the URL from the current files does not erase Git history.
+
+
+## Customer-facing CMS catalogue order
+
+In **Website CMS → Piano Page**, use **Public display order** to arrange the currently published piano *brand* cards. Position 1 appears on the left, followed by 2, 3 and so on, consistently on the public homepage and Piano page in both languages. Future brands are automatically included after the configured brands until an administrator reorders them.
+
+In **Website CMS → Service Page**, arrange the visible *service* cards the same way. Save display order using its dedicated button; you do not need to publish other CMS page content for a card-order change. New services append to the end; the `featured` flag cannot override the explicit card order. The ordering endpoints require ERP admin authentication.
+
+Public piano category preferences are stored in `app_settings.website_piano_brand_display_order`. Service positions are stored in `website_services.sort_order`. These changes are included in website collection backups and the existing collection factory-reset lifecycle. They do not change the customer piano registry.
