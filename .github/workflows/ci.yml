@@ -1,8 +1,8 @@
 name: Klavierhaus ERP Final Compliance CI
 
+# On-demand fallback only; primary CI is executed on the Mac.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -70,10 +70,8 @@ jobs:
         run: npm ci
       - name: Check website JavaScript syntax
         run: npm run check
-      - name: Run public event-retirement contract
-        run: node --test --test-name-pattern="retired event and ticket URLs" test/website-foundation.test.js
-      - name: Run private appointment website contract
-        run: node --test --test-name-pattern="private appointment forms" test/website-foundation.test.js
+      - name: Run complete public website suite
+        run: npm test
       - name: Report website dependency baseline
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high

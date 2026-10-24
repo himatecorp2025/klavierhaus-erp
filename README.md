@@ -1,4 +1,4 @@
-# Klavierhaus ERP v6.5.0
+# Klavierhaus ERP v6.7.0
 
 Internal, bilingual (American English and Hungarian) work-management system for Klavierhaus.
 
@@ -72,4 +72,11 @@ npm run dev       # development server (migration must already be applied)
 ```
 
 
-https://calendar.google.com/calendar/ical/ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513%40group.calendar.google.com/private-052f19a7e56f9910c4becf2c9d8a79c4/basic.ics
+
+## Local Mac CI and release procedure
+
+Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 20.18.0/npm 10, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
+
+For browser-facing ERP API calls, `CORS_ALLOWED_ORIGINS` optionally adds a comma-separated list of trusted HTTPS origins. Official Klavierhaus website and admin origins are allowed by default.
+
+Never commit Google Calendar private feed URLs; if one was published, remove it, regenerate the secret calendar URL in Google Calendar settings, and update any subscriptions that depended on it. Deleting the URL from the current files does not erase Git history.

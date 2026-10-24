@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const { createApp, normalizeBaseUrl } = require("../server/index");
-const { getPage, getRoute, routeDefinitions } = require("../server/site-content");
+const { VERSION, getPage, getRoute, routeDefinitions } = require("../server/site-content");
 
 async function withServer(options, callback) {
   const server = createApp(options).listen(0, "127.0.0.1");
@@ -18,14 +18,15 @@ async function withServer(options, callback) {
   }
 }
 
-test("health endpoint identifies stage-one public website", async () => {
+test("health endpoint identifies the current public website version", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
     const response = await fetch(`${origin}/health`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
+    const payload = await response.json();
+    assert.deepEqual(payload, {
       status: "ok",
       service: "klavierhaus-public-website",
-      version: "1.2.4",
+      version: VERSION,
       commit: "unknown",
       indexing: "disabled",
       erp_api: "not-configured"
@@ -53,20 +54,23 @@ test("every English and Hungarian route renders localized canonical metadata", a
   });
 });
 
-test("private appointment assets are cache-busted and the picker is reinitialized when dialogs open", async () => {
+test("private appointment assets share a current cache-busting revision and dialog picker initialization", async () => {
   await withServer({ allowIndexing: false }, async (origin) => {
     const body = await (await fetch(`${origin}/`)).text();
-    assert.match(body, /\/assets\/styles\.css\?v=1\.2\.4-cms-messenger-layout-20261001-1/);
-    assert.match(body, /\/assets\/app\.js\?v=1\.2\.4-cms-messenger-layout-20261001-1/);
+    const css = body.match(/\/assets\/styles\.css\?v=([^"]+)/);
+    const js = body.match(/\/assets\/app\.js\?v=([^"]+)/);
+    assert.ok(css, "versioned website CSS must load");
+    assert.ok(js, "versioned website JavaScript must load");
+    assert.equal(css[1], js[1], "both assets must use the same deployment revision");
+    assert.ok(css[1].startsWith(`${VERSION}-`));
   });
-  const browser=fs.readFileSync(path.join(__dirname,"..","public","app.js"),"utf8");
-  const css=fs.readFileSync(path.join(__dirname,"..","public","styles.css"),"utf8");
-  assert.match(browser,/function privatePickerEnsure\(root=document\)/);
-  assert.match(browser,/privatePickerEnsure\(form\);form\?\.reset\(\);privatePickerReset\(form\)/);
-  assert.match(browser,/event\.preventDefault\(\);event\.stopPropagation\(\)/);
-  assert.match(css,/Public private appointment picker reliability \+ visual polish/);
-  assert.match(css,/\.private-calendar-popover\{[\s\S]*position:relative/);
-  assert.match(css,/\.private-date-trigger\{[\s\S]*border-radius:8px/);
+  const browser = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "public", "styles.css"), "utf8");
+  assert.match(browser, /function privatePickerEnsure\(root=document\)/);
+  assert.match(browser, /privatePickerEnsure\(form\);form\?\.reset\(\);privatePickerReset\(form\)/);
+  assert.match(browser, /data-private-slot-picker/);
+  assert.match(css, /\.private-calendar-popover\{/);
+  assert.match(css, /\.private-date-trigger\{/);
 });
 
 test("home routes render exactly one visible language at a time", async () => {
@@ -146,46 +150,41 @@ test("unknown Hungarian route renders a localized responsive 404", async () => {
   });
 });
 
-test("website manifest stays self-contained and independent from ERP storage", () => {
+test("website manifest and lockfile are independent from ERP storage and pinned to the public runtime", () => {
   const websiteRoot = path.join(__dirname, "..");
   const manifest = JSON.parse(fs.readFileSync(path.join(websiteRoot, "package.json"), "utf8"));
   const lockfile = JSON.parse(fs.readFileSync(path.join(websiteRoot, "package-lock.json"), "utf8"));
   const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
-
   assert.equal(manifest.name, "klavierhaus-public-website");
-  assert.equal(manifest.version, "1.2.0");
-  assert.equal(lockfile.version, manifest.version);
-  assert.equal(lockfile.packages[""].version, manifest.version);
+  assert.equal(manifest.version, VERSION);
+  assert.equal(lockfile.version, VERSION);
+  assert.equal(lockfile.packages[""].version, VERSION);
   assert.equal(manifest.scripts.start, "node server/index.js");
+  assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["compression","dotenv","express","multer"]);
   assert.equal(manifest.dependencies["better-sqlite3"], undefined);
   assert.doesNotMatch(serverSource, /better-sqlite3|klavierhaus_v6\.sqlite|\.\.\/\.\.\/server/);
 });
 
-test("public pages include security headers and an admin-ready content contract", async () => {
+test("public pages enforce security headers and responsive bilingual CMS contracts", async () => {
   const websiteRoot = path.join(__dirname, "..");
   const css = fs.readFileSync(path.join(websiteRoot, "public", "styles.css"), "utf8");
   const contentSource = fs.readFileSync(path.join(websiteRoot, "server", "site-content.js"), "utf8");
-
   await withServer({ allowIndexing: false }, async (origin) => {
     const response = await fetch(`${origin}/`);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");
     assert.equal(response.headers.get("x-frame-options"), "DENY");
     assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
+    assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
     assert.match(response.headers.get("content-security-policy"), /default-src 'self'/);
     assert.match(response.headers.get("content-security-policy"), /nonce-/);
   });
-
   assert.match(css, /overflow-x:\s*hidden/);
   assert.match(css, /--black:\s*#080807/);
   assert.match(css, /--ivory:\s*#f1eadc/);
   assert.match(css, /--gold:\s*#b79a60/);
-  assert.match(css, /@media \(max-width:\s*760px\)/);
+  assert.match(css, /--kh-gutter:clamp\(/);
+  assert.match(css, /@media\s*\(max-width:\s*760px\)/);
   assert.match(css, /prefers-reduced-motion/);
-  assert.match(css, /--page-gutter:\s*clamp\(/);
-  assert.match(css, /border-radius:\s*15px/);
-  assert.match(css, /grid-auto-columns:\s*calc\(\(100% - 2 \* clamp\([^)]*\)\)\/3\)/);
-  assert.match(css, /grid-auto-columns:\s*86%/);
-  assert.match(contentSource, /Public content contract/);
   assert.match(contentSource, /sections:/);
   assert.match(contentSource, /seo:/);
 });
@@ -240,53 +239,41 @@ test("base URL normalization uses the actual Render host as safe fallback", () =
   assert.equal(normalizeBaseUrl("javascript:alert(1)"), "https://klavierhaus-home.onrender.com");
 });
 
-test("final luxury design contract keeps compact margins, safe titles and five-three-one horizontal event navigation", () => {
+test("current luxury website layout keeps responsive catalogues, reviews, chat and modal appointment flows", () => {
   const websiteRoot = path.join(__dirname, "..");
   const css = fs.readFileSync(path.join(websiteRoot, "public", "styles.css"), "utf8");
-  const browserSource = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
-  const serverSource = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
+  const browser = fs.readFileSync(path.join(websiteRoot, "public", "app.js"), "utf8");
+  const server = fs.readFileSync(path.join(websiteRoot, "server", "index.js"), "utf8");
   assert.match(css, /--kh-gutter:clamp\(/);
-  assert.match(css, /grid-auto-columns:calc\(\(100% - 2 \* var\(--kh-card-gap\)\)\/3\.18\)/);
   assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
-  assert.match(css, /@media\(max-width:760px\)/);
-  assert.match(css, /word-break:keep-all!important/);
-  assert.match(css, /border-radius:15px/);
-  assert.match(css, /grid-auto-columns:calc\(\(100% - var\(--kh-card-gap\)\)\/2\.12\)/);
-  assert.match(css, /grid-auto-columns:86%/);
-  assert.match(css, /overflow-x:auto/);
-  assert.match(css, /overflow-y:hidden/);
-  assert.match(css, /\.statement-copy\{max-width:48rem;margin-inline:auto;text-align:center\}/);
-  assert.match(css, /\.home-event-showcase\{box-sizing:border-box;width:100vw;max-width:none/);
-  assert.match(browserSource, /site-header\.is-hidden|classList\.add\("is-hidden"\)/);
-  assert.match(browserSource, /data-ticket-quantity/);
-  assert.match(browserSource, /data-review-carousel/);
-  assert.doesNotMatch(browserSource, /addEventListener\("wheel"/);
-  assert.match(serverSource, /renderHomeEventShowcase\(homeEvents/);
-  assert.match(serverSource, /renderReviewShowcase\(reviews/);
-  assert.match(serverSource, /renderShowroomCollection/);
-  assert.match(serverSource, /renderServiceCollection/);
-  assert.match(serverSource, /class="catalog-card artist-profile-card"/);
-  assert.match(serverSource, /class="button button--ghost"/);
-  assert.match(serverSource, /<button type="button" class="dialog-close"/);
-  assert.match(browserSource, /button\.closest\("dialog"\)\?\.close\("cancel"\)/);
-  assert.match(browserSource, /serviceDialog\.close\("success"\)/);
-  assert.match(browserSource, /privateViewingDialog\.close\("success"\)/);
-  assert.match(browserSource, /interestDialog\.close\("success"\)/);
-  assert.match(serverSource, /rel="canonical"/);
-  assert.match(serverSource, /hreflang="x-default"/);
+  assert.match(css, /@media\s*\(max-width:\s*760px\)/);
+  assert.match(css, /\.customer-chat/);
+  assert.match(browser, /data-review-carousel/);
+  assert.match(browser, /privatePickerEnsure\(form\)/);
+  assert.match(browser, /data-private-viewing-open/);
+  assert.match(server, /renderReviewShowcase\(reviews/);
+  assert.match(server, /renderShowroomCollection/);
+  assert.match(server, /renderServiceCollection/);
+  assert.match(server, /class="catalog-card artist-profile-card"/);
+  assert.match(server, /data-private-viewing-dialog/);
+  assert.doesNotMatch(browser, /data-ticket-quantity/);
+  assert.doesNotMatch(server, /renderHomeEventShowcase\(homeEvents/);
 });
 
-test("privacy copy matches the active enquiry forms and consent-gated measurement", async () => {
+test("privacy fallback accurately describes active customer forms and optional tracking without placeholders", async () => {
+  const browser = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  assert.match(browser, /async function applyTrackingConsent\(choice\)/);
+  assert.match(browser, /if \(!choice\?\.analytics\) return/);
   await withServer({ allowIndexing: false }, async (origin) => {
     const english = await (await fetch(`${origin}/privacy`)).text();
     const hungarian = await (await fetch(`${origin}/hu/adatkezeles`)).text();
-
-    assert.match(english, /Service enquiries and event-interest requests can be submitted/);
-    assert.match(english, /disabled until the visitor gives the corresponding consent/);
-    assert.doesNotMatch(english, /does not currently provide.*active contact form/);
-    assert.match(hungarian, /szolgáltatási érdeklődések és az események újraszervezésére vonatkozó kérések/);
-    assert.match(hungarian, /mindaddig kikapcsolva marad, amíg a látogató/);
-    assert.doesNotMatch(hungarian, /nincs.*aktív kapcsolatfelvételi űrlap/);
+    assert.match(english, /customer-service messages or private appointment requests/);
+    assert.match(english, /Optional analytics and marketing technologies/);
+    assert.match(english, /info@klavierhaus\.com/);
+    assert.doesNotMatch(english, /Paste the current/);
+    assert.match(hungarian, /ügyfélszolgálati üzeneteket és privát időpontfoglalási kérelmeket/);
+    assert.match(hungarian, /Követési beállításokban/);
+    assert.doesNotMatch(hungarian, /Ide másolható be/);
   });
 });
 

@@ -1,32 +1,27 @@
 {
-  "name": "klavierhaus-calendar-finance-system",
-  "version": "6.7.0",
-  "description": "Klavierhaus calendar-first work management with finance and income statement",
+  "name": "klavierhaus-public-website",
+  "version": "1.2.5",
+  "description": "Klavierhaus public website and secure ERP public API gateway",
   "main": "server/index.js",
   "engines": {
-    "node": ">=20.18.0 <21.0.0",
+    "node": "20.18.0",
     "npm": ">=10.0.0 <11.0.0"
   },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/erp-client.js && node --check public/app.js"
+    "check": "node --check server/index.js && node --check server/erp-client.js && node --check server/site-content.js && node --check public/app.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "adm-zip": "0.6.0",
-    "bcryptjs": "2.4.3",
-    "better-sqlite3": "11.10.0",
-    "compression": "1.8.1",
-    "cors": "2.8.5",
+    "compression": "1.8.2",
     "dotenv": "16.4.7",
-    "express": "4.22.2",
-    "jsonwebtoken": "9.0.2",
-    "multer": "2.2.0",
-    "resend": "6.19.0",
-    "stripe": "22.5.0",
-    "web-push": "3.6.7"
+    "express": "4.22.3",
+    "multer": "2.5.0"
   },
   "overrides": {
-    "path-to-regexp": "0.1.13"
+    "path-to-regexp": "0.1.13",
+    "proxy-addr": "2.0.8",
+    "body-parser": "1.20.9"
   }
 }

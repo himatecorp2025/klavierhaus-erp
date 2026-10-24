@@ -524,8 +524,8 @@ const pages = Object.freeze({
       seo: { title: "Privacy & Terms | Klavierhaus", description: "Klavierhaus privacy information, data-processing notice, and general terms and conditions." },
       hero: { eyebrow: "Legal", title: "Privacy & Terms", lead: "Official privacy, data-processing and contractual information published by Klavierhaus." },
       sections: [
-        { id: "privacy-policy", type: "legal", title: "Privacy & data-processing notice", content: "Paste the current Klavierhaus Privacy Policy and data-processing notice here." },
-        { id: "terms-and-conditions", type: "legal", title: "Terms & Conditions", content: "Paste the current Klavierhaus Terms & Conditions here." }
+        { id: "privacy-policy", type: "legal", title: "Privacy & data-processing notice", content: "Visitors who submit customer-service messages or private appointment requests may provide their name, contact details and information about the requested service. These details are handled to respond and arrange the requested service. Optional analytics and marketing technologies are controlled through Tracking settings, and non-essential tracking may be declined. For the current complete privacy policy, retention details and personal-data requests, please contact info@klavierhaus.com." },
+        { id: "terms-and-conditions", type: "legal", title: "Terms & Conditions", content: "The conditions applicable to a specific service, quotation or booking are provided directly by Klavierhaus as part of the relevant arrangement. Please request the current full Terms & Conditions, including payment and cancellation information, via info@klavierhaus.com before entering an agreement." }
       ]
     }
   }),
@@ -691,8 +691,8 @@ const pages = Object.freeze({
       seo: { title: "Adatkezelés és ÁSZF | Klavierhaus", description: "A Klavierhaus adatkezelési tájékoztatója, adatvédelmi információi és általános szerződési feltételei." },
       hero: { eyebrow: "Jogi információk", title: "Adatkezelés és ÁSZF", lead: "A Klavierhaus által közzétett hivatalos adatvédelmi, adatkezelési és szerződéses információk." },
       sections: [
-        { id: "adatkezeles", type: "legal", title: "Adatkezelési és adatvédelmi nyilatkozat", content: "Ide másolható be a Klavierhaus aktuális adatkezelési és adatvédelmi nyilatkozata." },
-        { id: "altalanos-szerzodesi-feltetelek", type: "legal", title: "Általános szerződési feltételek", content: "Ide másolható be a Klavierhaus aktuális általános szerződési feltételeinek teljes szövege." }
+        { id: "adatkezeles", type: "legal", title: "Adatkezelési és adatvédelmi nyilatkozat", content: "Az ügyfélszolgálati üzeneteket és privát időpontfoglalási kérelmeket beküldő látogatók megadhatják nevüket, elérhetőségeiket és a kért szolgáltatás adatait. Ezeket az adatokat a megkeresés megválaszolása és a kért szolgáltatás egyeztetése céljából kezeljük. Az opcionális analitikai és marketingkövetés a Követési beállításokban szabályozható; a nem szükséges követés elutasítható. A teljes aktuális adatkezelési tájékoztató, a megőrzési idők és az érintetti kérelmek ügyében kérjük, írjon az info@klavierhaus.com címre." },
+        { id: "altalanos-szerzodesi-feltetelek", type: "legal", title: "Általános szerződési feltételek", content: "Az egyes szolgáltatások, ajánlatok és foglalások feltételeit a Klavierhaus az adott ügylet keretében közli. A teljes aktuális Általános Szerződési Feltételeket, a fizetési és lemondási szabályokat szerződéskötés előtt kérje az info@klavierhaus.com címen." }
       ]
     }
   })
