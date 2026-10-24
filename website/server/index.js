@@ -6,7 +6,7 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const { createErpClient } = require("./erp-client");
-const PRIVATE_PICKER_ASSET_REV = "calendar-contact-header-20261005-2";
+const PRIVATE_PICKER_ASSET_REV = "calendar-contact-header-20261005-2-gallery-fitpan-v3";
 const {
   VERSION,
   findRoute,
@@ -386,7 +386,7 @@ function renderCards(section, language) {
 
 function renderGallery(items, label) {
   if (!Array.isArray(items) || !items.length) return "";
-  return `<section class="detail-gallery" aria-label="${escapeHtml(label)}" data-zoom-gallery>${items.map((item) => `<figure><button class="gallery-thumb-trigger" type="button" data-gallery-open aria-label="${escapeHtml(item.alt || label)} · ${escapeHtml(label)}"><img data-gallery-image src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || label)}" loading="lazy" decoding="async"></button></figure>`).join("")}</section>`;
+  return `<section class="detail-gallery" aria-label="${escapeHtml(label)}" data-zoom-gallery>${items.map((item) => `<figure><button class="gallery-thumb-trigger" type="button" data-gallery-open data-gallery-full="${escapeHtml(item.url)}" aria-label="${escapeHtml(item.alt || label)} · ${escapeHtml(label)}"><img data-gallery-image src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || label)}" loading="lazy" decoding="async"></button></figure>`).join("")}</section>`;
 }
 
 function renderCta(section, language) {
@@ -771,7 +771,7 @@ function renderDocument({ route, baseUrl, allowIndexing, nonce, reviews = [], sh
   <link rel="preload" as="image" href="${escapeHtml(page.hero.image || shared.heroImage)}" fetchpriority="high">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
-  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-fitpan-v3" defer></script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(organizationStructuredData(baseUrl, copy))}</script>
   <script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(webPageStructuredData({ title: pageTitle, description: pageDescription, canonicalUrl, keywords }))}</script>
   <title>${escapeHtml(pageTitle)}</title>
@@ -837,7 +837,7 @@ function renderDynamicHead({ language, title, description, canonicalUrl, alterna
   <link rel="icon" type="image/png" href="${escapeHtml(brand.logoImage)}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
-  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-fitpan-v3" defer></script>
   ${[...structuredData, ...(keywords.length ? [webPageStructuredData({ title, description, canonicalUrl, keywords })] : [])].map((item) => `<script type="application/ld+json" nonce="${escapeHtml(nonce)}">${escapeJson(item)}</script>`).join("\n  ")}
   <title>${escapeHtml(title)}</title>
   <!-- ${escapeHtml(copy.languageName)} -->`;
@@ -876,7 +876,7 @@ function renderCatalogDetail({ item, kind, language, baseUrl, allowIndexing, non
           ? "concert"
           : "services";
   const keywords = seoKeywords({ seoConfig, key: seoKey, language, title, description });
-  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail">${isPiano?`<button class="gallery-main-trigger" type="button" data-gallery-open aria-label="${escapeHtml(language==="hu"?"Zongorakép megnyitása és nagyítása":"Open and zoom piano photo")}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><span class="gallery-open-hint" aria-hidden="true">⊕ ${escapeHtml(language==="hu"?"Nagyítás":"Zoom")}</span></button>`:`<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async">`}<div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-id="${escapeHtml(isPiano ? item.id : "")}" data-service-id="${escapeHtml(!isPiano ? item.id : "")}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(copy.locale)}" class="no-js" data-theme="dark"><head>${renderDynamicHead({ language, title, description, canonicalUrl, alternateUrl: pageUrl(baseUrl, alternatePath), imageUrl: item.image_url, robots: allowIndexing ? "index, follow" : "noindex, nofollow, noarchive", nonce, structuredData: [organizationStructuredData(baseUrl, copy), catalogStructuredData(item, kind, canonicalUrl)], globalCopyOverride: copy, keywords })}</head><body class="template-catalog-detail" data-language="${escapeHtml(language)}" data-page="${isPiano ? "pianos" : "services"}">${renderHeader({ copy, language, currentKey: isPiano ? "pianos" : "services", alternateRouteOverride: alternatePath })}<main id="main-content"><article id="instrument-details" class="catalog-detail">${isPiano?`<button class="gallery-main-trigger" type="button" data-gallery-open data-gallery-full="${escapeHtml(item.image_url)}" aria-label="${escapeHtml(language==="hu"?"Zongorakép megnyitása és nagyítása":"Open and zoom piano photo")}"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async"><span class="gallery-open-hint" aria-hidden="true">⊕ ${escapeHtml(language==="hu"?"Nagyítás":"Zoom")}</span></button>`:`<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.image_alt || item.title)}" fetchpriority="high" decoding="async">`}<div class="catalog-detail__copy" data-reveal><p class="eyebrow">${escapeHtml(isPiano ? [item.brand, item.model].filter(Boolean).join(" · ") : "Klavierhaus atelier")}</p><h1 class="word-safe-title${titleLengthClass(item.title)}">${escapeHtml(item.title)}</h1>${isPiano && publicPianoReferenceText(item,language,{includeSerial:true}) ? `<p class="piano-age">${escapeHtml(publicPianoReferenceText(item,language,{includeSerial:true}))}</p>` : ""}${item.summary ? `<p class="catalog-detail__lead">${escapeHtml(item.summary)}</p>` : ""}${item.description ? renderParagraphs(String(item.description).split(/\n+/).filter(Boolean)) : ""}<div class="catalog-detail__actions">${isPiano ? `<a class="button button--ghost" href="#instrument-details"><span>${escapeHtml(language === "hu" ? "A hangszer részletei" : "Explore the instrument")}</span><span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></a>` : ""}<button class="button button--primary" type="button" data-private-viewing-open data-piano-id="${escapeHtml(isPiano ? item.id : "")}" data-service-id="${escapeHtml(!isPiano ? item.id : "")}" data-context-title="${escapeHtml(item.title || "")}" data-piano-brand="${escapeHtml(item.brand || "")}" data-piano-model="${escapeHtml(item.model || item.title || "")}">${escapeHtml(ctaLabel)} <span class="button-arrow" aria-hidden="true">${renderPublicArrow("external")}</span></button></div></div></article>${renderGallery(item.gallery, galleryLabel)}</main>${renderFooter(copy, language)}${renderPrivateViewingDialog(language)}</body></html>`;
 }
 
 function renderPianoBrandPage({ brand, items, language, baseUrl, allowIndexing, nonce, pageOverride = null, globalOverride = null, seoConfig = null }) {
@@ -951,7 +951,7 @@ function renderNotFound({ language, baseUrl, allowIndexing, nonce }) {
   <meta name="robots" content="${robots}">
   <link rel="stylesheet" href="/assets/styles.css?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}">
   <script src="/assets/app.js?v=${VERSION}-${PRIVATE_PICKER_ASSET_REV}" defer></script>
-  <script src="/assets/gallery-zoom.js?v=${VERSION}-gallery2" defer></script>
+  <script src="/assets/gallery-zoom.js?v=${VERSION}-fitpan-v3" defer></script>
   <title>${escapeHtml(copy.notFoundTitle)} | Klavierhaus</title>
 </head>
 <body class="template-not-found" data-language="${escapeHtml(language)}">

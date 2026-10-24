@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Klavierhaus gallery interactive browser verification</title>
+  <link rel="stylesheet" href="../public/styles.css">
+  <script src="../public/gallery-zoom.js" defer></script>
+</head>
+<body>
+  <button type="button" data-gallery-open>
+    <img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%222400%22%20height%3D%221600%22%3E%3Crect%20width%3D%222400%22%20height%3D%221600%22%20fill%3D%22%23987%22%2F%3E%3C%2Fsvg%3E" alt="Landscape piano">
+  </button>
+  <button type="button" data-gallery-open>
+    <img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22900%22%20height%3D%221400%22%3E%3Crect%20width%3D%22900%22%20height%3D%221400%22%20fill%3D%22%23987%22%2F%3E%3C%2Fsvg%3E" alt="Portrait piano">
+  </button>
+  <pre id="gallery-browser-result">PENDING</pre>
+  <script>
+    window.addEventListener("load", async () => {
+      const result = document.querySelector("#gallery-browser-result");
+      const pause = () => new Promise((resolve) => setTimeout(resolve, 120));
+      const assert = (ok, message) => { if (!ok) throw Error(message); };
+      const pointer = (target, type, x, y, id = 1, pointerType = "mouse") => {
+        target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y,
+          pointerId: id, pointerType, isPrimary: id === 1, button: 0, buttons: type === "pointerup" ? 0 : 1
+        }));
+      };
+      const ratio = (image) => {
+        const match = image.style.transform.match(/scale\(([\d.]+)\)/);
+        return match ? Number(match[1]) : 0;
+      };
+      const offset = (image) => {
+        const match = image.style.transform.match(/translate3d\(\s*([-\d.]+)px,\s*([-\d.]+)px,\s*0(?:px)?\)/);
+        return match ? { x: Number(match[1]), y: Number(match[2]) } : { x: NaN, y: NaN };
+      };
+      try {
+        await pause();
+        const buttons = [...document.querySelectorAll("[data-gallery-open]")];
+        assert(buttons.length === 2, "two photo triggers");
+        pointer(buttons[0], "pointermove", 100, 100);
+        assert(buttons[0].style.getPropertyValue("--gallery-hover-x") !== "", "preview magnifier tracks cursor");
+        buttons[0].click();
+        await pause();
+        const dialog = document.querySelector(".piano-lightbox");
+        assert(dialog?.open, "fullscreen dialog opens");
+        const stage = dialog.querySelector("[data-zoom-stage]");
+        const image = dialog.querySelector("[data-zoom-image]");
+        stage.setPointerCapture = () => {}; // synthetic pointer input has no physical pointer stream
+        const fit = () => {
+          assert(Math.abs(ratio(image) - 1) < .01, "original is opened in fit mode");
+          assert(image.width > 0 && image.height > 0 && stage.clientHeight > 0, "photo and stage have dimensions");
+          assert(image.getBoundingClientRect().width <= stage.clientWidth + 1.5, "fitted photo is not horizontally cropped");
+          assert(image.getBoundingClientRect().height <= stage.clientHeight + 1.5, "fitted photo is not vertically cropped");
+        };
+        fit();
+        assert(image.naturalWidth === 2400 && image.naturalHeight === 1600, "full source resolution is loaded");
+        assert(dialog.querySelector("[data-zoom-source]").textContent.includes("2400 × 1600"), "native resolution is displayed");
+        const fullPhotoRect = stage.getBoundingClientRect();
+        const centerX = fullPhotoRect.left + fullPhotoRect.width / 2;
+        const centerY = fullPhotoRect.top + fullPhotoRect.height / 2;
+        dialog.querySelector("[data-zoom-in]").click();
+        assert(ratio(image) > 1, "zoom-in button actually enlarges photo");
+        dialog.querySelector("[data-zoom-in]").click(); // Large desktop view may need 2× to expose horizontal overflow.
+        pointer(stage, "pointermove", fullPhotoRect.left + fullPhotoRect.width * .12, centerY);
+        const left = offset(image).x;
+        pointer(stage, "pointermove", fullPhotoRect.left + fullPhotoRect.width * .88, centerY);
+        const right = offset(image).x;
+        assert(left > 5 && right < -5, "mouse follows enlarged content in both directions: " + left + " " + right);
+        pointer(stage, "pointermove", centerX, centerY);
+        pointer(stage, "pointerdown", centerX, centerY);
+        pointer(stage, "pointermove", centerX + 38, centerY + 33);
+        const dragged = offset(image);
+        assert(dragged.x > 15, "dragging enlarged photo moves it: " + JSON.stringify(dragged));
+        pointer(stage, "pointerup", centerX + 38, centerY + 33);
+        dialog.querySelector("[data-zoom-reset]").click();
+        fit();
+
+        pointer(stage, "pointerdown", centerX + 100, centerY, 8, "touch");
+        pointer(stage, "pointermove", centerX - 100, centerY, 8, "touch");
+        pointer(stage, "pointerup", centerX - 100, centerY, 8, "touch");
+        await pause();
+        assert(dialog.querySelector("[data-zoom-counter]").textContent.startsWith("2 / 2"), "swipe advances the photo");
+        fit();
+        assert(image.naturalWidth === 900 && image.naturalHeight === 1400, "portrait source is original");
+        pointer(stage, "pointerdown", centerX - 65, centerY, 10, "touch");
+        pointer(stage, "pointerdown", centerX + 65, centerY, 11, "touch");
+        pointer(stage, "pointermove", centerX + 165, centerY, 11, "touch");
+        assert(ratio(image) > 1.2, "two-finger pinch changes zoom");
+        pointer(stage, "pointerup", centerX + 165, centerY, 11, "touch");
+        pointer(stage, "pointerup", centerX - 65, centerY, 10, "touch");
+        dialog.querySelector("[data-zoom-reset]").click();
+        dialog.querySelector("[data-zoom-in]").click();
+        dialog.querySelector("[data-zoom-in]").click();
+        const portraitRect = stage.getBoundingClientRect();
+        pointer(stage, "pointermove", centerX, portraitRect.top + portraitRect.height * .12);
+        const portraitTop = offset(image).y;
+        pointer(stage, "pointermove", centerX, portraitRect.top + portraitRect.height * .88);
+        const portraitBottom = offset(image).y;
+        assert(portraitTop > 10 && portraitBottom < -10, "portrait vertical panning follows cursor to both edges");
+        pointer(stage, "pointermove", centerX, centerY);
+        pointer(stage, "pointerdown", centerX, centerY);
+        pointer(stage, "pointermove", centerX, centerY + 48);
+        assert(offset(image).y > 20, "portrait photo can be dragged vertically");
+        pointer(stage, "pointerup", centerX, centerY + 48);
+        dialog.querySelector("[data-zoom-reset]").click();
+        fit();
+
+        stage.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: centerX, clientY: centerY, deltaY: -130 }));
+        assert(ratio(image) > 1, "wheel performs deliberate cursor-anchored zoom");
+        dialog.querySelector("[data-zoom-reset]").click();
+        dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+        await pause();
+        assert(dialog.querySelector("[data-zoom-counter]").textContent.startsWith("1 / 2"), "keyboard arrows navigate the gallery");
+        dialog.querySelector("[data-zoom-close]").click();
+        assert(!dialog.open, "closing works");
+        buttons[1].click();
+        await pause();
+        assert(ratio(image) === 1, "reopening a new photo always starts in fit mode");
+        fit();
+        assert(dialog.querySelectorAll(".piano-lightbox__thumb").length === 2, "gallery filmstrip is present");
+        result.textContent = "KH_GALLERY_PASS " + JSON.stringify({ viewport:[window.innerWidth,window.innerHeight], fit:[image.width,image.height], source:[image.naturalWidth,image.naturalHeight], hover:true, mouseFollow:true, drag:true, swipe:true, pinch:true, wheel:true, keyboard:true });
+        dialog.close();
+      } catch (error) {
+        result.textContent = "KH_GALLERY_FAIL " + error.message;
+      }
+    });
+  </script>
+</body>
+</html>
