@@ -1,58 +1,17 @@
-# Klavierhaus ERP v6.5.0
+# Klavierhaus public website v1.2.5
 
-Internal, bilingual (American English and Hungarian) work-management system for Klavierhaus.
+Separate Express web service under `website/`, backed by the Klavierhaus ERP **public HTTP API** (not by direct access to the ERP SQLite database).
 
-Belső, kétnyelvű (amerikai angol és magyar) Klavierhaus munkakezelő rendszer.
+## Runtime
+- Node.js 20.18.0 and npm 10.x.
+- Independent dependencies: Express, compression, Multer and dotenv.
+- `ERP_PUBLIC_API_URL`: public ERP base URL for catalogue, CMS, contact, conversation and booking data.
+- This service has its own Render deploy root: `website`; the ERP service deploy root is the repository root.
 
-## Main modules / Fő modulok
+## Local verification
+Run the repository's `bash scripts/run-local-ci.sh` from a Mac with Node 20.18.0. It checks the website and ERP together, including both lockfiles and all website tests.
 
-- weekly and daily scheduler with employee-specific colors / heti és napi naptár munkavállalói színekkel;
-- planned jobs and multi-step part-work workflows / tervezett munkák és többlépcsős részmunkafolyamatok;
-- clients and piano registry / ügyfél- és zongoranyilvántartás;
-- inventory / leltár;
-- invoices and internal finance register / számlák és belső pénzügyi nyilvántartás;
-- knowledge base, notifications, audit log and backups / tudásbázis, értesítések, módosítási napló és biztonsági mentések;
-- responsive desktop, mobile and installed PWA interface / reszponzív asztali, mobil- és telepített PWA-felület.
+## Security
+Never commit live tokens, API keys, customer data or private Google Calendar ICS URLs. A previously exposed private ICS address must be rotated at the provider: deletion from the repository tip cannot revoke older Git history.
 
-Roles / Szerepkörök: `ADMIN`, `MANAGER`, `WORKER`. The hidden superadmin is an existing protected account and is never created by the installer. / A rejtett szuperadmin meglévő, védett fiók; a telepítő nem hozza létre.
-
-## Installation and update / Telepítés és frissítés
-
-```bash
-npm ci
-cp .env.example .env
-npm start
-```
-
-`npm start` automatically runs the idempotent database migration before starting the server. Existing users, clients, pianos, jobs and inventory records are counted before and after migration, and SQLite integrity is checked. When a structural migration is needed, a pre-migration database backup is created first.
-
-Az `npm start` a szerver indítása előtt automatikusan lefuttatja az ismételhető adatbázis-migrációt. A migráció előtt és után ellenőrzi a felhasználók, ügyfelek, zongorák, munkák és leltártételek darabszámát, valamint az SQLite integritását. Szerkezeti migráció előtt automatikus adatbázis-mentés készül.
-
-Default local URL / Alapértelmezett helyi cím: `http://localhost:3030`
-
-No demo user is created. Existing production users and the hidden superadmin remain unchanged. / Demo felhasználó nem jön létre. A meglévő éles felhasználók és a rejtett szuperadmin változatlanok maradnak.
-
-## Deployment notes / Telepítési megjegyzések
-
-- Keep `DB_PATH`, `BACKUP_DIR` and `UPLOAD_DIR` on persistent storage. / A három útvonal tartós tárhelyre mutasson.
-- Preserve the currently working VAPID keys when updating. Changing them invalidates existing push subscriptions. / Frissítéskor a jelenleg működő VAPID-kulcsokat meg kell őrizni; cseréjük érvényteleníti a meglévő push-feliratkozásokat.
-- Use HTTPS outside local development. / Helyi fejlesztésen kívül HTTPS szükséges.
-- Run `npm test` and `npm run check` before deployment. / Telepítés előtt futtasd az `npm test` és `npm run check` parancsokat.
-
-## Finance scope / A pénzügyi modul hatóköre
-
-The finance module is a simple internal income, expense and management register. It does not implement guaranteed double-entry bookkeeping and does not replace an official accounting system or accountant.
-
-A pénzügyi modul egyszerű belső bevételi, kiadási és vezetői nyilvántartás. Nem garantált kettős könyvviteli rendszer, és nem helyettesít hivatalos könyvelőprogramot vagy könyvelőt.
-
-## Useful commands / Hasznos parancsok
-
-```bash
-npm run init-db   # manual idempotent migration / kézi, ismételhető migráció
-npm run check     # JavaScript syntax checks / JavaScript szintaktikai ellenőrzések
-npm test          # automated tests / automatikus tesztek
-npm run dev       # development server (migration must already be applied)
-```
-
-
-https://calendar.google.com/calendar/ical/ac31bd0e9409cafb409e38e035bdaa59f913ea932fa5a94a488d218d97ed3513%40group.calendar.google.com/private-052f19a7e56f9910c4becf2c9d8a79c4/basic.ics
+The bundled privacy/terms fallback is an interim information page. The company must publish reviewed, jurisdiction-appropriate legal policies in the CMS.

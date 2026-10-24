@@ -6,6 +6,7 @@ const path = require("node:path");
 const express = require("express");
 const compression = require("compression");
 const cors = require("cors");
+const { createCorsOptions } = require("./cors-policy");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Database = require("better-sqlite3");
@@ -240,7 +241,14 @@ function renderAdminIndex(){
   return html;
 }
 
-app.use(cors());
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+app.use(cors(createCorsOptions(process.env)));
 app.use(compression({threshold:1024}));
 
 app.post("/api/webhooks/stripe",express.raw({type:"application/json",limit:"1mb"}),(req,res)=>stripeSandbox.handleWebhook(req,res));
