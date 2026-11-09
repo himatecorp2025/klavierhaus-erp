@@ -328,5 +328,6 @@ test("showroom price styles are actually served by the active consolidated Websi
   assert.match(css,/\.piano-public-price__original/);
   assert.match(css,/\.piano-public-price__current/);
   assert.match(html,/\/assets\/styles\.css/);
+  assert.match(html,/showroom-pricing-v1/);
   assert.doesNotMatch(obsolete,/\.piano-public-price/);
 });
