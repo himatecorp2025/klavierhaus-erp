@@ -425,6 +425,11 @@ async function v6LoadCmsConnectedCollection(config){
     host.innerHTML=`<section class="panel cms-page-connected-panel"><div class="panel-head"><div><span class="eyebrow">${tr("CONNECTED CONTENT","KAPCSOLT TARTALOM")}</span><h3>${esc(config.title)}</h3><p>${esc(config.subtitle)}</p></div><button class="primary-button" id="addCmsConnectedItem" type="button">＋ ${config.brand?tr("Add piano","Új zongora"):tr("Add","Hozzáadás")}</button></div>${orderData?'<div id="cmsPublicOrder"></div>':""}${v6CmsConnectedGrid(config,rows,orderData?.items||[])}</section>`;
     const refreshConnected=async()=>{if(config.type==="piano")await v6RefreshCmsSidebarMeta();await v6LoadCmsConnectedCollection(config);};
     if(orderData)v6CmsOrderMount(host,config,orderData,refreshConnected);
+    if(config.type==="piano"&&!config.brand){
+      const instrumentData=await api("/api/website-catalog-order/instruments");
+      const slot=document.createElement("div");slot.id="cmsPublicInstrumentOrder";host.querySelector(".cms-page-connected-panel").appendChild(slot);
+      v6CmsInstrumentOrderMount(slot,instrumentData,refreshConnected);
+    }
     $("#addCmsConnectedItem")?.addEventListener("click",()=>v6OpenCollectionEditor(config.type,null,refreshConnected,config.brand?{brand:config.brand}:{}));
     $$("[data-add-page-collection]",host).forEach(button=>button.addEventListener("click",()=>v6OpenCollectionEditor(button.dataset.addPageCollection,null,refreshConnected,button.dataset.addPianoBrand?{brand:button.dataset.addPianoBrand}:{})));
     $$("[data-edit-page-collection]",host).forEach(button=>button.addEventListener("click",()=>{const row=rows.find(item=>String(item.id)===String(button.dataset.id));if(row)v6OpenCollectionEditor(config.type,row,refreshConnected);}));
@@ -467,11 +472,21 @@ async function v6OpenCollectionEditor(type,row=null,refresh,seed={}){
     <div class="cms-collection-media full" id="collectionMainImage">${v6MediaUrlCard(image)}<label class="file-picker"><input id="collectionImageFile" type="file" accept="image/*"><span>↑ ${tr(image?"Replace main image":"Upload main image",image?"Főkép cseréje":"Főkép feltöltése")}${type==="piano"||type==="service"?" *":""}</span></label></div>`;
   let fields="";
   if(type==="piano")fields=`<label class="field"><span>${tr("Brand","Márka")} *</span><input name="brand" value="${esc(row?.brand||seed?.brand||"")}" required></label><label class="field"><span>${tr("Model","Modell")}</span><input name="model" value="${esc(row?.model||"")}"></label>`;
+  if(type==="piano")fields+=`<section class="full cms-price-editor"><h3>${tr("Sales price & discount (USD)","Eladási ár és kedvezmény (USD)")}</h3><p>${tr("Leave the price blank to keep it hidden from the website.","Ha üresen hagyod az árat, nem jelenik meg a weboldalon.")}</p><div class="form-grid"><label class="field"><span>${tr("Original price","Eredeti ár")} ($)</span><input name="piano_price_usd" type="number" min="0" step="0.01" value="${row?.price_cents == null ? "" : (row.price_cents/100).toFixed(2)}"></label><label class="field"><span>${tr("Discount","Kedvezmény")} (%)</span><input name="piano_discount_pct" type="number" min="0" max="100" step="0.01" placeholder="0"></label><label class="field"><span>${tr("Sale price","Kedvezményes ár")} ($)</span><input name="piano_sale_usd" type="number" min="0" step="0.01" value="${row?.sale_price_cents == null ? "" : (row.sale_price_cents/100).toFixed(2)}"></label></div></section>`;
   if(type==="artist")fields=`<label class="field full"><span>${tr("Artist name","Művész neve")} *</span><input name="name" value="${esc(row?.name||"")}" required></label><label class="field"><span>Role EN</span><input name="role_en" value="${esc(row?.role_en||"")}"></label><label class="field"><span>Szerep HU</span><input name="role_hu" value="${esc(row?.role_hu||"")}"></label><label class="field full"><span>Biography EN</span><textarea name="biography_en">${esc(row?.biography_en||"")}</textarea></label><label class="field full"><span>Bemutatkozás HU</span><textarea name="biography_hu">${esc(row?.biography_hu||"")}</textarea></label>`;
   else if(type==="review")fields=`<label class="field full"><span>${tr("Person name","Személy neve")} *</span><input name="person_name" value="${esc(row?.person_name||"")}" required></label><label class="field"><span>Role EN</span><input name="role_en" value="${esc(row?.role_en||"")}"></label><label class="field"><span>Szerep HU</span><input name="role_hu" value="${esc(row?.role_hu||"")}"></label><label class="field full"><span>Quote EN *</span><textarea name="quote_en" required>${esc(row?.quote_en||"")}</textarea></label><label class="field full"><span>Idézet HU *</span><textarea name="quote_hu" required>${esc(row?.quote_hu||"")}</textarea></label>`;
   else fields+=`<label class="field full"><span>Title EN *</span><input name="title_en" value="${esc(row?.title_en||"")}" required></label><label class="field full"><span>Cím HU *</span><input name="title_hu" value="${esc(row?.title_hu||"")}" required></label><label class="field full"><span>Summary EN</span><textarea name="summary_en">${esc(row?.summary_en||"")}</textarea></label><label class="field full"><span>Összefoglaló HU</span><textarea name="summary_hu">${esc(row?.summary_hu||"")}</textarea></label><label class="field full"><span>Description EN</span><textarea name="description_en">${esc(row?.description_en||"")}</textarea></label><label class="field full"><span>Leírás HU</span><textarea name="description_hu">${esc(row?.description_hu||"")}</textarea></label>`;
   const alt=`<label class="field"><span>Image alt EN</span><input name="${type==="artist"||type==="review"?"portrait_alt_en":"image_alt_en"}" value="${esc(row?.[type==="artist"||type==="review"?"portrait_alt_en":"image_alt_en"]||"")}"></label><label class="field"><span>Kép alt HU</span><input name="${type==="artist"||type==="review"?"portrait_alt_hu":"image_alt_hu"}" value="${esc(row?.[type==="artist"||type==="review"?"portrait_alt_hu":"image_alt_hu"]||"")}"></label>`;
   openDialog({title:def.title,eyebrow:tr("PUBLIC WEBSITE","PUBLIKUS WEBOLDAL"),body:`<form id="collectionEditor" class="form-grid">${common}${fields}${alt}${def.gallery?`<section class="full cms-gallery-editor"><div class="panel-head inline-panel-head"><h3>${tr("Gallery","Galéria")}</h3></div><p class="cms-gallery-resolution-guidance">${tr("For sharp fullscreen zoom, upload the original photo, preferably at least 2000 pixels on its longest side. Existing lower-resolution images remain usable, but zoom cannot create missing detail.","Éles teljes képernyős nagyításhoz az eredeti fotót töltsd fel, lehetőleg legalább 2000 pixeles hosszabb oldallal. A kisebb képek is használhatók, de a nagyítás nem tud új részleteket előállítani.")}</p><div id="collectionGallery">${v6GalleryMarkup(gallery)}</div></section>`:""}<div class="form-actions full">${row?`<button type="button" class="danger-button cms-collection-delete" id="deleteCollectionItem">🗑 ${tr("Delete","Törlés")}</button>`:""}<button type="button" class="secondary-button" data-close-dialog>${tr("Cancel","Mégse")}</button><button class="primary-button" type="submit">${tr("Save","Mentés")}</button></div></form>`});
+  if(type==="piano"){
+    const form=$("#collectionEditor"),price=form.elements.namedItem("piano_price_usd"),percent=form.elements.namedItem("piano_discount_pct"),sale=form.elements.namedItem("piano_sale_usd");
+    const updatePercent=()=>{if(price.value!==""&&sale.value!==""&&Number(price.value)>0)percent.value=(((Number(price.value)-Number(sale.value))/Number(price.value))*100).toFixed(2);else percent.value="";};
+    const updateSale=()=>{if(price.value!==""&&percent.value!=="")sale.value=(Math.round(Number(price.value)*(1-Number(percent.value)/100)*100)/100).toFixed(2);else if(percent.value==="")sale.value="";};
+    updatePercent();
+    price.addEventListener("input",()=>{if(percent.value!=="")updateSale();});
+    percent.addEventListener("input",updateSale);
+    sale.addEventListener("input",updatePercent);
+  }
   $("#collectionImageFile").addEventListener("change",event=>v6CollectionImageUpload(event.currentTarget,url=>{image=url;$("#collectionMainImage").querySelector(".collection-image-preview").outerHTML=v6MediaUrlCard(image);}));
   function bindGallery(){
     if(!def.gallery)return;
@@ -488,7 +503,16 @@ async function v6OpenCollectionEditor(type,row=null,refresh,seed={}){
     }
     const body=Object.fromEntries(new FormData(event.currentTarget));body[def.image]=image;
     if(def.gallery){$$("[data-gallery-alt-en]").forEach(input=>gallery[Number(input.dataset.galleryAltEn)].alt_en=input.value);$$("[data-gallery-alt-hu]").forEach(input=>gallery[Number(input.dataset.galleryAltHu)].alt_hu=input.value);body.gallery=gallery;}
-    if(type==="piano"){body.published=row?.published??true;body.availability_status=row?.availability_status||"AVAILABLE";}
+    if(type==="piano"){
+      body.published=row?.published??true;body.availability_status=row?.availability_status||"AVAILABLE";
+      const original=body.piano_price_usd,final=body.piano_sale_usd;
+      const toCents=(value)=>value===""?null:Math.round(Number(value)*100);
+      body.price_cents=toCents(original);body.sale_price_cents=toCents(final);
+      if((original!==""&&(!Number.isFinite(Number(original))||Number(original)<0))||(final!==""&&(!Number.isFinite(Number(final))||Number(final)<0))||(body.sale_price_cents!==null&&(body.price_cents===null||body.sale_price_cents>=body.price_cents))){
+        toast(tr("Enter a valid sale price below the original price.","Adj meg érvényes, az eredeti árnál alacsonyabb kedvezményes árat."),"error");return;
+      }
+      delete body.piano_price_usd;delete body.piano_discount_pct;delete body.piano_sale_usd;
+    }
     if(type==="service")body.visible=row?.visible??true;
     if(type==="artist")body.published=row?.published??true;
     if(type==="review")body.visible=row?.visible??true;
