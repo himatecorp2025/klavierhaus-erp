@@ -66,7 +66,17 @@ function localized(row, language, erpBaseUrl) {
   if (row.build_year !== undefined) { value.build_year = row.build_year ? Number(row.build_year) : null; value.age = value.build_year ? Math.max(0, new Date().getFullYear() - value.build_year) : null; }
   if (row.availability_status !== undefined) value.availability_status = row.availability_status;
   if (row.featured !== undefined) value.featured = Number(row.featured) === 1;
+  if (row.price_cents !== undefined) value.price_cents = row.price_cents;
+  if (row.sale_price_cents !== undefined) value.sale_price_cents = row.sale_price_cents;
   return value;
+}
+
+function pianoPricing(body) {
+  const price = body.price_cents === "" || body.price_cents == null ? null : Number(body.price_cents);
+  const sale = body.sale_price_cents === "" || body.sale_price_cents == null ? null : Number(body.sale_price_cents);
+  const valid = n => n === null || (Number.isSafeInteger(n) && n >= 0 && n <= 999999999999);
+  if (!valid(price) || !valid(sale) || (sale !== null && (price === null || sale >= price))) throw new Error("INVALID_PIANO_PRICE");
+  return { price_cents: price, sale_price_cents: sale };
 }
 
 function slugify(value){return cleanText(value,300).normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"item";}
@@ -138,6 +148,27 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
     } catch (error) {
       res.status(400).json({ error: error.message === "INVALID_DISPLAY_ORDER" ? "INVALID_DISPLAY_ORDER" : "PIANO_BRAND_ORDER_FAILED" });
     }
+  });
+
+  app.get("/api/website-catalog-order/instruments", auth, admin, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const rows=db.prepare("SELECT id,brand,model,title_en,sort_order FROM website_showroom_pianos ORDER BY sort_order,created_at,id").all();
+    res.json({ items: rows.map((row,index)=>({...row,label: [row.brand,row.model||row.title_en].filter(Boolean).join(" · "),position:index+1})) });
+  });
+  app.put("/api/website-catalog-order/instruments", auth, admin, (req, res) => {
+    try {
+      const change=db.transaction(()=>{
+        const before=db.prepare("SELECT id FROM website_showroom_pianos ORDER BY sort_order,created_at,id").all().map(row=>row.id);
+        const ids=validateOrder(req.body?.ids,before);
+        const update=db.prepare("UPDATE website_showroom_pianos SET sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
+        ids.forEach((id,index)=>update.run(index+1,req.user.id,id));
+        db.prepare("INSERT INTO app_settings(setting_key,setting_value,updated_by,updated_at) VALUES('website_piano_instrument_order_enabled','1',?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value='1',updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP").run(req.user.name||req.user.id);
+        return {before,after:ids};
+      })();
+      audit(req,"REORDER","website_showroom_pianos","all",{ids:change.before},{ids:change.after},1,"Individual public piano order updated");
+      res.setHeader("Cache-Control","no-store");
+      res.json({items:change.after.map((id,index)=>({id,position:index+1}))});
+    }catch(error){res.status(400).json({error:error.message==="INVALID_DISPLAY_ORDER"?"INVALID_DISPLAY_ORDER":"PIANO_ORDER_FAILED"});}
   });
 
   app.get("/api/website-catalog-order/services", auth, admin, (_req, res) => {
@@ -272,9 +303,10 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
           const sizeCm=cleanText(body.size_cm,60)||steinway.size_cm||null;
           const sizeIn=cleanText(body.size_in,60)||steinway.size_in||null;
           const sizeDisplay=cleanText(body.size_display,120)||((sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null)||steinway.size_display||null;
-          db.prepare(`INSERT INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,serial_no,build_year,size_cm,size_in,size_display,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,gallery_json,availability_status,featured,published,sort_order,created_by_user_id,updated_by_user_id)
-            VALUES(@id,@slug_en,@slug_hu,@brand,@model,@serial_no,@build_year,@size_cm,@size_in,@size_display,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@gallery_json,@availability_status,@featured,@published,@sort_order,@user_id,@user_id)`)
-            .run({ ...common, brand, model, serial_no:serialNo||null, build_year: Number(body.build_year) || steinway.build_year || null, size_cm:sizeCm, size_in:sizeIn, size_display:sizeDisplay, availability_status: status, published: bool(body.published, true) });
+          const pricing=pianoPricing(body);
+          db.prepare(`INSERT INTO website_showroom_pianos(id,slug_en,slug_hu,brand,model,serial_no,build_year,size_cm,size_in,size_display,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,gallery_json,availability_status,featured,published,sort_order,price_cents,sale_price_cents,created_by_user_id,updated_by_user_id)
+            VALUES(@id,@slug_en,@slug_hu,@brand,@model,@serial_no,@build_year,@size_cm,@size_in,@size_display,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@gallery_json,@availability_status,@featured,@published,@sort_order,@price_cents,@sale_price_cents,@user_id,@user_id)`)
+            .run({ ...common, ...pricing, brand, model, serial_no:serialNo||null, build_year: Number(body.build_year) || steinway.build_year || null, size_cm:sizeCm, size_in:sizeIn, size_display:sizeDisplay, availability_status: status, published: bool(body.published, true) });
         } else {
           db.prepare(`INSERT INTO website_services(id,slug_en,slug_hu,title_en,title_hu,summary_en,summary_hu,description_en,description_hu,image_url,image_alt_en,image_alt_hu,visible,featured,sort_order,created_by_user_id,updated_by_user_id)
             VALUES(@id,@slug_en,@slug_hu,@title_en,@title_hu,@summary_en,@summary_hu,@description_en,@description_hu,@image_url,@image_alt_en,@image_alt_hu,@visible,@featured,@sort_order,@user_id,@user_id)`)
@@ -303,8 +335,9 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         const sizeWasEdited=req.body && (Object.prototype.hasOwnProperty.call(req.body,"size_cm")||Object.prototype.hasOwnProperty.call(req.body,"size_in"));
         const derivedSizeDisplay=(sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null;
         const sizeDisplay=cleanText(body.size_display,120)||(sizeWasEdited?derivedSizeDisplay:null)||before.size_display||derivedSizeDisplay||steinway.size_display||null;
-        db.prepare(`UPDATE website_showroom_pianos SET slug_en=?,slug_hu=?,brand=?,model=?,serial_no=?,build_year=?,size_cm=?,size_in=?,size_display=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,gallery_json=?,availability_status=?,featured=?,published=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(slugEn, slugHu, brand, model, serialNo||null, Number(body.build_year) || before.build_year || steinway.build_year || null, sizeCm, sizeIn, sizeDisplay, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), status, bool(body.featured), bool(body.published, true), Number(body.sort_order || 0), req.user.id, before.id);
+        const pricing=pianoPricing(body);
+        db.prepare(`UPDATE website_showroom_pianos SET slug_en=?,slug_hu=?,brand=?,model=?,serial_no=?,build_year=?,size_cm=?,size_in=?,size_display=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,gallery_json=?,availability_status=?,featured=?,published=?,sort_order=?,price_cents=?,sale_price_cents=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(slugEn, slugHu, brand, model, serialNo||null, Number(body.build_year) || before.build_year || steinway.build_year || null, sizeCm, sizeIn, sizeDisplay, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), status, bool(body.featured), bool(body.published, true), Number(body.sort_order || 0), pricing.price_cents, pricing.sale_price_cents, req.user.id, before.id);
       } else {
         db.prepare(`UPDATE website_services SET slug_en=?,slug_hu=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,visible=?,featured=?,sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(slugEn, slugHu, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), bool(body.visible, true), bool(body.featured), Number(body.sort_order || 0), req.user.id, before.id);
