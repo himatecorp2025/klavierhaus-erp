@@ -2562,3 +2562,9 @@ html.customer-chat-open,html.customer-chat-open body{height:100%;overflow:hidden
 .footer-social-links a{display:grid;place-items:center;width:42px;height:42px;border:1px solid rgba(235,211,171,.25);border-radius:11px;color:var(--ivory,#f1eadc);background:rgba(255,255,255,.025);transition:border-color .2s,background .2s}
 .footer-social-links a:hover,.footer-social-links a:focus-visible{border-color:var(--gold,#b79a60);background:rgba(183,154,96,.12)}
 .footer-social-links a:focus-visible{outline:2px solid var(--gold,#b79a60);outline-offset:2px}
+
+/* Showroom asking prices follow the established editorial brand treatment. */
+.piano-public-price{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem 1rem;margin:1.1rem 0;letter-spacing:.025em}
+.piano-public-price__original{font-size:clamp(.88rem,1vw,1.05rem);opacity:.6;text-decoration-thickness:1px}
+.piano-public-price__current{font-weight:500;font-size:clamp(1.2rem,2vw,1.8rem);font-variant-numeric:lining-nums tabular-nums}
+@media(max-width:600px){.piano-public-price{gap:.2rem .7rem}}

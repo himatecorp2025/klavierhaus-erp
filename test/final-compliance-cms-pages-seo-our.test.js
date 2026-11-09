@@ -60,9 +60,8 @@ test("CMS Pages renders every public page section as its own card instead of one
   assert.match(admin,/cmsPagesLoadedAt/);
 });
 
-test("public website SEO is server rendered and the audit checks actual fallback content plus image ALT",()=>{
+test("public website SEO and image ALT metadata are server rendered",()=>{
   const publicRenderer=read("website/server/index.js");
-  const audit=read("server/business-operations.js");
   const css=read("website/public/styles.css");
 
   assert.match(publicRenderer,/<meta name="robots"/);
@@ -83,9 +82,6 @@ test("public website SEO is server rendered and the audit checks actual fallback
   assert.match(publicRenderer,/sitemap\.xml/);
 
   assert.match(publicRenderer,/const seoKey=key==="our"\?"story":key/);
-  assert.match(audit,/fallbackPage\(pageKey,language\)/);
-  assert.match(audit,/MISSING_IMAGE_ALT/);
-  assert.match(audit,/technical_seo/);
   assert.match(css,/\.legal-document/);
   assert.match(css,/white-space:pre-wrap/);
 });

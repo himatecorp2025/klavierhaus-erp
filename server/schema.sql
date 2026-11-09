@@ -395,6 +395,8 @@ CREATE TABLE IF NOT EXISTS website_showroom_pianos (
   featured INTEGER NOT NULL DEFAULT 0 CHECK(featured IN (0,1)),
   published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
+  price_cents INTEGER CHECK(price_cents IS NULL OR price_cents >= 0),
+  sale_price_cents INTEGER CHECK(sale_price_cents IS NULL OR sale_price_cents >= 0),
   is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1)),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,

@@ -18,7 +18,8 @@ function brandFor(db, label) {
     || db.prepare("SELECT * FROM website_piano_brands WHERE slug=?").get(pianoBrandSlug(clean)) || null;
 }
 function activePianoRows(db) {
-  const rows = db.prepare("SELECT * FROM website_showroom_pianos WHERE published=1 AND availability_status<>'HIDDEN' ORDER BY featured DESC,sort_order,created_at,id").all();
+  const manual=db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_piano_instrument_order_enabled'").get()?.setting_value==='1';
+  const rows = db.prepare("SELECT * FROM website_showroom_pianos WHERE published=1 AND availability_status<>'HIDDEN' ORDER BY "+(manual?"sort_order,created_at,id":"featured DESC,sort_order,created_at,id")).all();
   return rows.filter((row) => !brandFor(db, row.brand)?.archived).map((row) => {
     const brand = brandFor(db, row.brand);
     return { ...row, brand_slug: brand?.slug || pianoBrandSlug(row.brand), brand_label: brand?.name || row.brand };

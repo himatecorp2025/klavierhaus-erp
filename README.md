@@ -39,23 +39,6 @@ No demo user is created. Existing production users and the hidden superadmin rem
 - Use HTTPS outside local development. / Helyi fejlesztésen kívül HTTPS szükséges.
 - Run `npm test` and `npm run check` before deployment. / Telepítés előtt futtasd az `npm test` és `npm run check` parancsokat.
 
-## HIMATE START-22 connector / HIMATE START-22 adatkapcsolat
-
-The ERP includes a one-way, privacy-safe Klavierhaus -> HIMATE export adapter. It does **not** give HIMATE direct SQLite access and it does not replicate raw ERP tables. The adapter has an explicit 38-module registry and exports only approved aggregate/business-metadata fields. Passwords, sessions, API/OAuth secrets, invitation/preview tokens, payment credentials and raw customer-message bodies are outside the export contract.
-
-Az ERP egy egyirányú, adatminimalizált Klavierhaus -> HIMATE export adaptert tartalmaz. A HIMATE **nem** kap közvetlen SQLite-hozzáférést, és a rendszer nem másolja át nyersen az ERP tábláit. Az adapter pontosan 38 modul géppel olvasható szerződését használja, és csak jóváhagyott aggregált vagy üzleti metaadatokat továbbít.
-
-Runtime configuration / Futásidejű konfiguráció:
-
-- `HIMATE_CONNECTOR_ENABLED=true` enables scheduled export only after the remaining settings are valid.
-- `HIMATE_CONNECTOR_URL` is the HTTPS HIMATE Gateway origin, without a `/connector/v1` suffix.
-- `HIMATE_CONNECTOR_TOKEN` is the one-time raw partner+environment credential issued by HIMATE. Treat it as a production secret; never store a real value in Git, SQLite, logs or frontend code.
-- `HIMATE_CONNECTOR_TIMEOUT_MS` controls outbound request timeout and defaults to 10000 ms.
-
-The adapter sends a heartbeat and system telemetry every five minutes, operational datasets hourly, and a complete 38-module batch plus reconciliation daily. Batch/reconciliation requests use SHA-512 integrity checks, HMAC-SHA-512 signatures, timestamps and one-time nonces. Manual status/sync endpoints are Superadmin-only: `GET /api/system/himate-connector/status` and `POST /api/system/himate-connector/sync`.
-
-A Connector Protocol v1 implementation-language independent. A future Go-based Klavierhaus backend can implement the same contract without changing HIMATE.
-
 ## Finance scope / A pénzügyi modul hatóköre
 
 The finance module is a simple internal income, expense and management register. It does not implement guaranteed double-entry bookkeeping and does not replace an official accounting system or accountant.
@@ -73,9 +56,13 @@ npm run dev       # development server (migration must already be applied)
 
 
 
-## Local Mac CI and release procedure
+## Local CI and release procedure
 
-Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 20.18.0/npm 10, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
+Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 24 LTS/npm 10 or 11, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
+
+On Windows, use PowerShell 7: `pwsh -File scripts/run-local-ci.ps1`. This runs the same complete gate, including five ERP acceptance runs, both dependency audits and the full Website suite. Local Chrome is mandatory; the gallery tests support Windows Chrome locations and a `CHROME_PATH` override. Start from a clean, committed checkout. The runner saves step logs and a commit-specific `result.json` with log hashes in a new temporary directory and fails if the checkout changes during testing. Use the default five runs for release verification.
+
+The protected branch retains its historical status context `mac-ci/local`; this is the local verification gate's identifier, not an assertion of the machine's operating system. After all release checks pass, the maintainer can publish the local result for the exact tested PR head, explicitly naming the real platform in the status description and linking the checked-in procedure. Never reuse evidence for a different commit, publish success for skipped/failed checks, weaken branch protection, or claim Windows execution was a Mac run. This script does not publish statuses or deploy automatically.
 
 For browser-facing ERP API calls, `CORS_ALLOWED_ORIGINS` optionally adds a comma-separated list of trusted HTTPS origins. Official Klavierhaus website and admin origins are allowed by default.
 
@@ -99,7 +86,7 @@ The **Website CMS → Piano Page** includes **Manage Piano Brands**. An administ
 
 Public individual piano pages provide a gallery lightbox with keyboard navigation, previous/next, 1–5× zoom, wheel zoom and touch pinch/pan. Images of all orientations are shown uncropped using `object-fit:contain`. The standalone ERP customer-owned piano registry and appointment booking logic are untouched.
 
-Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.
+Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac or `pwsh -File scripts/run-local-ci.ps1` on Windows. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.
 
 
 ### Fullscreen piano gallery: fit, pan and original resolution

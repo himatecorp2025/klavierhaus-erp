@@ -8,10 +8,18 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
-const chrome = process.platform === "darwin"
-  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : "/usr/bin/google-chrome";
-const browserAvailable = fs.existsSync(chrome);
+const chromeCandidates = [
+  process.env.CHROME_PATH,
+  ...(process.platform === "win32" ? [
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe")
+  ] : process.platform === "darwin" ? [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  ] : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"])
+].filter(Boolean);
+const chrome = chromeCandidates.find((candidate) => fs.existsSync(candidate));
+const browserAvailable = Boolean(chrome);
 const fixture = path.join(__dirname, "gallery-fit-pan-browser.html");
 
 for (const viewport of ["1440,900", "400,820"]) {

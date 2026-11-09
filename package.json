@@ -4,8 +4,8 @@
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
   "engines": {
-    "node": "20.18.0",
-    "npm": ">=10.0.0 <11.0.0"
+    "node": ">=24.0.0 <25.0.0",
+    "npm": ">=10.0.0 <12.0.0"
   },
   "scripts": {
     "prestart": "node server/init-db.js",
@@ -24,7 +24,7 @@
   "dependencies": {
     "adm-zip": "0.6.1",
     "bcryptjs": "2.4.3",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.10.0",
     "compression": "1.8.2",
     "cors": "2.8.5",
     "dotenv": "16.4.7",
@@ -34,6 +34,9 @@
     "resend": "6.19.0",
     "stripe": "22.5.0",
     "web-push": "3.6.7"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true
   },
   "overrides": {
     "path-to-regexp": "0.1.13",
