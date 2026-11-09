@@ -705,11 +705,54 @@ CREATE TABLE IF NOT EXISTS calendar_integrations (
 CREATE TABLE IF NOT EXISTS staff_calendar_sync (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   calendar_email TEXT NOT NULL,
+  calendar_id TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  write_enabled INTEGER NOT NULL DEFAULT 0 CHECK(write_enabled IN (0,1)),
   sync_token TEXT,
   last_sync_at TEXT,
+  last_checked_at TEXT,
+  last_verified_at TEXT,
   last_error TEXT,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Separate opt-in write connection. Existing Google -> ERP read-only OAuth is preserved.
+CREATE TABLE IF NOT EXISTS google_calendar_write_connections (
+  id TEXT PRIMARY KEY,
+  central_email TEXT NOT NULL,
+  calendar_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED',
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+  access_token_encrypted TEXT,
+  refresh_token_encrypted TEXT,
+  token_expiry TEXT,
+  sync_token TEXT,
+  last_sync_at TEXT,
+  last_success_at TEXT,
+  last_error TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS google_calendar_write_oauth_states (
+  state TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS calendar_outbound_links (
+  source_type TEXT NOT NULL CHECK(source_type IN ('JOB','PRIVATE_APPOINTMENT','PRIVATE_REQUEST','WEBSITE_LEAD')),
+  source_id TEXT NOT NULL,
+  calendar_id TEXT NOT NULL,
+  google_event_id TEXT,
+  google_etag TEXT,
+  fingerprint TEXT,
+  state TEXT NOT NULL DEFAULT 'PENDING',
+  last_error TEXT,
+  last_success_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_type,source_id,calendar_id)
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_outbound_event ON calendar_outbound_links(calendar_id,google_event_id);
 
 CREATE TABLE IF NOT EXISTS calendar_oauth_states (
   state TEXT PRIMARY KEY,

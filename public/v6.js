@@ -1193,6 +1193,8 @@ async function renderSystemIntegrations(){
 
   const integrationParams=state.pendingDeepLinkParams?.view==="system_integrations"?state.pendingDeepLinkParams:null;
   state.pendingDeepLinkParams=null;
+  await renderStaffCalendarAdminPanel();
+  await renderGoogleCalendarWritePanel();
   if(integrationParams?.googleCalendar==="connected"){
     toast(tr("Google Calendar connected. Initial synchronization has started.","Google Naptár csatlakoztatva. A kezdeti szinkronizáció elindult."),"success");
   }else if(integrationParams?.googleCalendar==="error"){

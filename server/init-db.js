@@ -603,6 +603,12 @@ prepareClientSegmentationCompatibility();
 prepareMasterDataCompatibility();
 prepareMilestoneRoadmapCompatibility();
 db.exec(canonicalSchemaSql);
+// Non-destructive extension for per-employee Google Calendar onboarding.
+ensureColumn("staff_calendar_sync","calendar_id","TEXT");
+ensureColumn("staff_calendar_sync","enabled","INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))");
+ensureColumn("staff_calendar_sync","write_enabled","INTEGER NOT NULL DEFAULT 0 CHECK(write_enabled IN (0,1))");
+ensureColumn("staff_calendar_sync","last_checked_at","TEXT");
+ensureColumn("staff_calendar_sync","last_verified_at","TEXT");
 finishEventManagementRetirement();
 if(tableExists("_workflow_capacity_legacy_workflow_stage_definitions")){
   db.pragma("foreign_keys = OFF");

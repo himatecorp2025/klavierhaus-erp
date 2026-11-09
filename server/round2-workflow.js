@@ -1,4 +1,5 @@
 "use strict";
+const {calendarLeadRows}=require("./calendar-leads");
 
 const PIPELINE_STAGE="planned";
 const WORKFLOW_STAGES=Object.freeze([
@@ -554,7 +555,8 @@ function registerRound2WorkflowRoutes({app,db,auth,permit,audit,customerAutomati
         .map(row=>decorateJob({...row,scheduled_end:endAt(row.scheduled_at,row.estimated_duration_min)}));
       const googleRows=googleCalendar?.calendarEntries?.({from,to,technicianId})||[];
       res.setHeader("Cache-Control","no-store");
-      res.json({from,to,timezone:"America/New_York",google_sync:googleSync,jobs:[...rows,...googleRows]});
+      const leads=calendarLeadRows(db,{from,to,technicianId});
+      res.json({from,to,timezone:"America/New_York",google_sync:googleSync,jobs:[...rows,...googleRows],lead_events:leads.scheduled,lead_inbox:leads.inbox});
     }catch(error){respondError(res,error);}
   });
 

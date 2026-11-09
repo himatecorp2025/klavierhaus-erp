@@ -25,7 +25,7 @@ function overlapsWithBuffer(aStart,aEnd,bStart,bEnd,bufferMin=BUFFER_MIN){
   return aStart.getTime()<bEnd.getTime()+buffer&&aEnd.getTime()+buffer>bStart.getTime();
 }
 function expireHolds(db){
-  try{db.prepare("UPDATE customer_appointment_proposals SET status='CANCELLED',updated_at=CURRENT_TIMESTAMP WHERE status='PROPOSED' AND private_appointment_id IS NULL AND expires_at IS NOT NULL AND expires_at<=CURRENT_TIMESTAMP").run();}
+  try{db.prepare("UPDATE customer_appointment_proposals SET status='CANCELLED',updated_at=CURRENT_TIMESTAMP WHERE status='PROPOSED' AND private_appointment_id IS NULL AND expires_at IS NOT NULL AND julianday(expires_at)<=julianday('now')").run();}
   catch(_error){}
 }
 function availability(db,{startsAt,endsAt,duration,excludeAppointmentId=null,excludeProposalId=null,excludeRequestId=null}={}){
@@ -50,7 +50,7 @@ function availability(db,{startsAt,endsAt,duration,excludeAppointmentId=null,exc
   }catch(_error){}
   const holds=db.prepare(`SELECT id,starts_at,ends_at FROM customer_appointment_proposals
     WHERE private_appointment_id IS NULL AND status IN ('PROPOSED','ACCEPTED')
-      AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP)`).all();
+      AND (expires_at IS NULL OR julianday(expires_at)>julianday('now'))`).all();
   for(const row of holds){
     if(excludeProposalId&&String(row.id)===String(excludeProposalId))continue;
     const otherStart=toDate(row.starts_at),otherEnd=toDate(row.ends_at);if(!otherStart||!otherEnd)continue;
