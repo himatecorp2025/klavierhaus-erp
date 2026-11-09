@@ -75,7 +75,7 @@ npm run dev       # development server (migration must already be applied)
 
 ## Local Mac CI and release procedure
 
-Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 20.18.0/npm 10, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
+Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 24 LTS/npm 10 or 11, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
 
 For browser-facing ERP API calls, `CORS_ALLOWED_ORIGINS` optionally adds a comma-separated list of trusted HTTPS origins. Official Klavierhaus website and admin origins are allowed by default.
 
