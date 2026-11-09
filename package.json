@@ -4,8 +4,8 @@
   "description": "Klavierhaus calendar-first work management with finance and income statement",
   "main": "server/index.js",
   "engines": {
-    "node": "20.18.0",
-    "npm": ">=10.0.0 <11.0.0"
+    "node": ">=24.0.0 <25.0.0",
+    "npm": ">=10.0.0 <12.0.0"
   },
   "scripts": {
     "prestart": "node server/init-db.js",
