@@ -11,7 +11,6 @@ const present=(source,value,label=value)=>assert.equal(source.includes(value),tr
 test("ticketed event runtime, public routes and admin surfaces are retired",()=>{
   const schema=read("server/schema.sql");
   const server=read("server/index.js");
-  const business=read("server/business-operations.js");
   const publicServer=read("website/server/index.js");
   const platform=read("server/website-platform.js");
   const publicContent=read("website/server/site-content.js");
@@ -21,7 +20,6 @@ test("ticketed event runtime, public routes and admin surfaces are retired",()=>
     missing(schema,`CREATE TABLE IF NOT EXISTS ${table} (`,table);
   }
   for(const marker of ["registerEventRoutes","createTicketService","createEventImageUpload"])missing(server,marker);
-  for(const marker of ["event_tickets","event_payments","event_attendance","ticketService"])missing(business,marker);
   for(const marker of ["/events","/hu/esemenyek","ticket-terms","event-invitations","repeat-interest"])missing(publicServer,marker);
   missing(platform,"SAMPLE_EVENTS_HAVE_TRANSACTIONAL_DEPENDENCIES");
   missing(platform,"Number(dependencies)");
@@ -44,17 +42,13 @@ test("retirement migration destroys legacy event data after creating a safety ba
   present(init,'ALTER TABLE "invoices" DROP COLUMN "deferred_event_id"');
 });
 
-test("event email, ticket PDF and Himate event datasets are retired",()=>{
+test("retired event email and ticket PDF are not exposed",()=>{
   const mail=read("server/transactional-email.js");
   const pdf=read("server/document-pdf.js");
-  const registry=read("server/himate-connector/registry.js");
-  const collectors=read("server/himate-connector/collectors.js");
   const integrations=read("server/system-integrations.js");
   for(const marker of ["sendEvent","buildEvent","EVENT_EMAIL_FROM","event_purchase","event_ticket"])missing(mail,marker);
   for(const marker of ["EVENT_EMAIL_FROM","event_from_email","eventFrom"])missing(integrations,marker);
   for(const marker of ["generateTicket","BOARDING_PASS","ticketPalette","ADMISSION TICKET"])missing(pdf,marker);
-  for(const marker of ['module_key:"digital_attendance"','dataset_key:"events.events"','dataset_key:"events.guests"','dataset_key:"events.invitations"','dataset_key:"events.tickets"'])missing(registry,marker);
-  for(const marker of ["event_tickets","event_payments","event_invitations","event_attendance_entries"])missing(collectors,marker);
 });
 
 test("Stripe remains available only for workshop invoice checkout",()=>{

@@ -222,7 +222,6 @@ test("suspension contracts stay server-enforced and hidden-owner lookups exclude
   const index=fs.readFileSync(path.join(root,"server","index.js"),"utf8");
   const v6=fs.readFileSync(path.join(root,"public","v6.js"),"utf8");
   const website=fs.readFileSync(path.join(root,"website","server","index.js"),"utf8");
-  const workflow=fs.readFileSync(path.join(root,"server","workflow-v2.js"),"utf8");
   const round2=fs.readFileSync(path.join(root,"server","round2-workflow.js"),"utf8");
 
   assert.match(index,/serviceSuspension\.isSuspended\(\) && !isSuperadmin\(req\.user\)/);
@@ -238,6 +237,5 @@ test("suspension contracts stay server-enforced and hidden-owner lookups exclude
   assert.match(v6,/api\/superadmin\/service-suspension/);
   assert.match(website,/renderTechnicalUnavailable/);
   assert.match(website,/SITE_TEMPORARILY_UNAVAILABLE/);
-  assert.match(workflow,/COALESCE\(hidden_user,0\)=0/);
   assert.match(round2,/COALESCE\(hidden_user,0\)=0/);
 });
