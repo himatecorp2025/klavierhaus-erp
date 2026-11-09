@@ -260,3 +260,63 @@ test("website collection backups restore the piano-brand order, and collection r
       "Collection factory reset must also reset ordering preferences");
   });
 });
+
+
+test("showroom prices and discounted prices save, validate and render in both languages", async () => {
+  await withCatalog(async ({request,publicPage,db,audits}) => {
+    const created=await request("/api/showroom-pianos", json({...brandInput("Fazioli","Fazioli F212",1),price_cents:3800000,sale_price_cents:3420000}));
+    assert.equal(created.status,201,JSON.stringify(created.body));
+    assert.equal(created.body.price_cents,3800000);
+    assert.equal(created.body.sale_price_cents,3420000);
+    const en=await request("/api/public/showroom-pianos?lang=en");
+    assert.equal(en.body[0].price_cents,3800000);
+    assert.equal(en.body[0].sale_price_cents,3420000);
+    const brandPage=await publicPage("/pianos/fazioli");
+    assert.match(brandPage,/piano-public-price__original/);
+    assert.match(brandPage,/piano-public-price__current/);
+    assert.match(brandPage,/\$38,000/);
+    assert.match(brandPage,/\$34,200/);
+    const huPage=await publicPage("/hu/zongorak/fazioli");
+    assert.match(huPage,/piano-public-price__original/);
+    assert.match(huPage,/piano-public-price__current/);
+    const invalid=await request("/api/showroom-pianos/"+created.body.id,put({price_cents:3800000,sale_price_cents:3900000}));
+    assert.equal(invalid.status,400);
+    assert.equal(invalid.body.error,"INVALID_PIANO_PRICE");
+    assert.equal(db.prepare("SELECT sale_price_cents FROM website_showroom_pianos WHERE id=?").get(created.body.id).sale_price_cents,3420000);
+    const changed=await request("/api/showroom-pianos/"+created.body.id,put({price_cents:3400000,sale_price_cents:null}));
+    assert.equal(changed.status,200,JSON.stringify(changed.body));
+    assert.equal(changed.body.sale_price_cents,null);
+    const detail=await publicPage("/pianos/fazioli-f212");
+    assert.match(detail,/piano-public-price__current/);
+    assert.doesNotMatch(detail,/piano-public-price__original/);
+    assert.ok(audits.some(entry=>entry[1]==="UPDATE"&&entry[2]==="showroom-pianos"));
+  });
+});
+
+test("manual piano order respects brand positions, individual positions and newly appended instruments",async()=>{
+  await withCatalog(async ({request,db,audits})=>{
+    const created=[];
+    for(const [brand,title,featured] of [
+      ["Steinway & Sons","Steinway D",true],
+      ["Fazioli","Fazioli F212",false],
+      ["Steinway & Sons","Steinway B",false],
+      ["Fazioli","Fazioli F278",false]
+    ]){
+      const row=await request("/api/showroom-pianos",json(brandInput(brand,title,0,featured)));
+      assert.equal(row.status,201,JSON.stringify(row.body));created.push(row.body);
+    }
+    const brands=await request("/api/website-catalog-order/pianos",put({ids:["fazioli","steinway"]}));
+    assert.equal(brands.status,200,JSON.stringify(brands.body));
+    const order=[created[3].id,created[2].id,created[1].id,created[0].id];
+    assert.equal((await request("/api/website-catalog-order/instruments",put({ids:order}))).status,200);
+    const publicRows=await request("/api/public/showroom-pianos?lang=en");
+    assert.deepEqual(publicRows.body.map(row=>row.id),[created[3].id,created[1].id,created[2].id,created[0].id]);
+    assert.equal(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_piano_instrument_order_enabled'").get().setting_value,"1");
+    const additional=await request("/api/showroom-pianos",json(brandInput("Fazioli","Fazioli F183",0,true)));
+    assert.equal(additional.status,201);
+    const after=await request("/api/public/showroom-pianos?lang=en");
+    assert.deepEqual(after.body.map(row=>row.id),[created[3].id,created[1].id,additional.body.id,created[2].id,created[0].id]);
+    assert.equal((await request("/api/website-catalog-order/instruments",{headers:{"x-test-role":"worker"}})).status,403);
+    assert.ok(audits.some(entry=>entry[1]==="REORDER"&&entry[2]==="website_showroom_pianos"));
+  });
+});
