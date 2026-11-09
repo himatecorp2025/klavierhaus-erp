@@ -56,9 +56,13 @@ npm run dev       # development server (migration must already be applied)
 
 
 
-## Local Mac CI and release procedure
+## Local CI and release procedure
 
 Run `bash scripts/run-local-ci.sh` on the Mac before a PR or merge. Automatic GitHub Actions are disabled; the workflow is available for manual troubleshooting only. The local gate checks Node 24 LTS/npm 10 or 11, locked dependencies, database migration, JavaScript, ERP acceptance tests, website tests, and production dependency advisories.
+
+On Windows, use PowerShell 7: `pwsh -File scripts/run-local-ci.ps1`. This runs the same complete gate, including five ERP acceptance runs, both dependency audits and the full Website suite. Local Chrome is mandatory; the gallery tests support Windows Chrome locations and a `CHROME_PATH` override. Start from a clean, committed checkout. The runner saves step logs and a commit-specific `result.json` with log hashes in a new temporary directory and fails if the checkout changes during testing. Use the default five runs for release verification.
+
+The protected branch retains its historical status context `mac-ci/local`; this is the local verification gate's identifier, not an assertion of the machine's operating system. After all release checks pass, the maintainer can publish the local result for the exact tested PR head, explicitly naming the real platform in the status description and linking the checked-in procedure. Never reuse evidence for a different commit, publish success for skipped/failed checks, weaken branch protection, or claim Windows execution was a Mac run. This script does not publish statuses or deploy automatically.
 
 For browser-facing ERP API calls, `CORS_ALLOWED_ORIGINS` optionally adds a comma-separated list of trusted HTTPS origins. Official Klavierhaus website and admin origins are allowed by default.
 
@@ -82,7 +86,7 @@ The **Website CMS → Piano Page** includes **Manage Piano Brands**. An administ
 
 Public individual piano pages provide a gallery lightbox with keyboard navigation, previous/next, 1–5× zoom, wheel zoom and touch pinch/pan. Images of all orientations are shown uncropped using `object-fit:contain`. The standalone ERP customer-owned piano registry and appointment booking logic are untouched.
 
-Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.
+Before deploying, run `CI_RUNS=5 bash scripts/run-local-ci.sh` on the Mac or `pwsh -File scripts/run-local-ci.ps1` on Windows. The full suite includes service/website routes, bilingual navigation, independent billing details, image-gallery markup, brand create/rename/archive/restore and backup regressions.
 
 
 ### Fullscreen piano gallery: fit, pan and original resolution
