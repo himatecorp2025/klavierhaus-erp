@@ -320,3 +320,13 @@ test("manual piano order respects brand positions, individual positions and newl
     assert.ok(audits.some(entry=>entry[1]==="REORDER"&&entry[2]==="website_showroom_pianos"));
   });
 });
+
+test("showroom price styles are actually served by the active consolidated Website stylesheet",()=>{
+  const css=read("website/public/styles.css");
+  const obsolete=read("website/public/design-v3.css");
+  const html=read("website/server/index.js");
+  assert.match(css,/\.piano-public-price__original/);
+  assert.match(css,/\.piano-public-price__current/);
+  assert.match(html,/\/assets\/styles\.css/);
+  assert.doesNotMatch(obsolete,/\.piano-public-price/);
+});
