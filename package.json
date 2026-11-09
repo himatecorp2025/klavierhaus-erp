@@ -35,6 +35,9 @@
     "stripe": "22.5.0",
     "web-push": "3.6.7"
   },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true
+  },
   "overrides": {
     "path-to-regexp": "0.1.13",
     "proxy-addr": "2.0.8",
