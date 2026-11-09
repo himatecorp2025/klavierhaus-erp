@@ -846,6 +846,8 @@ if(tableExists("handoff_presets")&&Number(db.prepare("SELECT COUNT(*) count FROM
 }
 
 ensureColumn("website_services","gallery_json","TEXT NOT NULL DEFAULT '[]'");
+ensureColumn("website_showroom_pianos","price_cents","INTEGER CHECK(price_cents IS NULL OR price_cents >= 0)");
+ensureColumn("website_showroom_pianos","sale_price_cents","INTEGER CHECK(sale_price_cents IS NULL OR sale_price_cents >= 0)");
 ensureColumn("invoices","deleted_at","TEXT");
 ensureColumn("invoices","deleted_by_user_id","TEXT");
 ensureColumn("invoices","service_date","TEXT");
