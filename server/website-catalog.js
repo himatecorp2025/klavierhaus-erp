@@ -294,8 +294,10 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         image_url: cleanText(body.image_url, 1000), image_alt_en: cleanText(body.image_alt_en, 500), image_alt_hu: cleanText(body.image_alt_hu, 500),
         gallery_json: JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)),
         featured: bool(body.featured),
-        sort_order: Number(body.sort_order ?? (table === "website_services"
-          ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_services").get().position : db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_showroom_pianos").get().position)),
+        sort_order: table==="website_showroom_pianos" && db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_piano_instrument_order_enabled'").get()?.setting_value==="1"
+          ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_showroom_pianos").get().position
+          : Number(body.sort_order ?? (table === "website_services"
+            ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_services").get().position : db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_showroom_pianos").get().position)),
         user_id: req.user.id
       };
       try {
@@ -339,7 +341,8 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         const sizeWasEdited=req.body && (Object.prototype.hasOwnProperty.call(req.body,"size_cm")||Object.prototype.hasOwnProperty.call(req.body,"size_in"));
         const derivedSizeDisplay=(sizeCm||sizeIn)?[sizeCm?`${sizeCm} cm`:"",sizeIn?`(${sizeIn})`:""].filter(Boolean).join(" "):null;
         const sizeDisplay=cleanText(body.size_display,120)||(sizeWasEdited?derivedSizeDisplay:null)||before.size_display||derivedSizeDisplay||steinway.size_display||null;
-        const pricing=pianoPricing(body);
+        let pricing;
+        try{pricing=pianoPricing(body);}catch(_error){return res.status(400).json({error:"INVALID_PIANO_PRICE"});}
         db.prepare(`UPDATE website_showroom_pianos SET slug_en=?,slug_hu=?,brand=?,model=?,serial_no=?,build_year=?,size_cm=?,size_in=?,size_display=?,title_en=?,title_hu=?,summary_en=?,summary_hu=?,description_en=?,description_hu=?,image_url=?,image_alt_en=?,image_alt_hu=?,gallery_json=?,availability_status=?,featured=?,published=?,sort_order=?,price_cents=?,sale_price_cents=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(slugEn, slugHu, brand, model, serialNo||null, Number(body.build_year) || before.build_year || steinway.build_year || null, sizeCm, sizeIn, sizeDisplay, cleanText(body.title_en, 300), cleanText(body.title_hu, 300), cleanText(body.summary_en, 2000), cleanText(body.summary_hu, 2000), cleanText(body.description_en), cleanText(body.description_hu), cleanText(body.image_url, 1000), cleanText(body.image_alt_en, 500), cleanText(body.image_alt_hu, 500), JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)), status, bool(body.featured), bool(body.published, true), Number(body.sort_order || 0), pricing.price_cents, pricing.sale_price_cents, req.user.id, before.id);
       } else {
