@@ -1,7 +1,1 @@
 /* UI34: design-v3.css has been consolidated into styles.css. Intentionally empty. */
-
-/* Showroom asking prices follow the established editorial brand treatment. */
-.piano-public-price{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem 1rem;margin:1.1rem 0;letter-spacing:.025em}
-.piano-public-price__original{font-size:clamp(.88rem,1vw,1.05rem);opacity:.6;text-decoration-thickness:1px}
-.piano-public-price__current{font-weight:500;font-size:clamp(1.2rem,2vw,1.8rem);font-variant-numeric:lining-nums tabular-nums}
-@media(max-width:600px){.piano-public-price{gap:.2rem .7rem}}
