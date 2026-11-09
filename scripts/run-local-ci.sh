@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Klavierhaus authoritative local CI gate: Mac, Node 20.18.0/npm 10.
+# Klavierhaus authoritative local CI gate: Mac, Node 24 LTS/npm 10 or 11.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,12 +7,12 @@ cd "$repo_root"
 if [[ -x "$HOME/.klavierhaus-runtime/node_modules/node/bin/node" ]]; then
   export PATH="$HOME/.klavierhaus-runtime/node_modules/node/bin:$HOME/.klavierhaus-runtime/node_modules/.bin:$PATH"
 fi
-if [[ "$(node --version)" != "v20.18.0" ]]; then
-  echo "ERROR: Klavierhaus requires Node.js 20.18.0 (found $(node --version))." >&2
+if [[ "$(node --version)" != v24.* ]]; then
+  echo "ERROR: Klavierhaus requires Node.js 24 LTS (found $(node --version))." >&2
   exit 1
 fi
-if [[ "$(npm --version)" != 10.* ]]; then
-  echo "ERROR: Klavierhaus requires npm 10.x (found $(npm --version))." >&2
+if [[ "$(npm --version)" != 10.* && "$(npm --version)" != 11.* ]]; then
+  echo "ERROR: Klavierhaus requires npm 10.x or 11.x (found $(npm --version))." >&2
   exit 1
 fi
 echo "[LOCAL-CI] Runtime: $(node --version), npm $(npm --version)"
