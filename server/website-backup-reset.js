@@ -16,7 +16,7 @@ const TABLE_GROUPS=Object.freeze({
   collections:["website_artists","website_services","website_showroom_pianos","website_piano_brands","website_reviews"],
 });
 const PAGE_SETTING_KEYS=Object.freeze([PAGE_ROUTE_SETTINGS_KEY,"website_seo_settings",NAV_KEY,CONTACT_KEY]);
-const COLLECTION_SETTING_KEYS=Object.freeze(["website_sample_content_v1",SAMPLE_VERSION_KEY,PIANO_BRAND_ORDER_KEY]);
+const COLLECTION_SETTING_KEYS=Object.freeze(["website_sample_content_v1",SAMPLE_VERSION_KEY,PIANO_BRAND_ORDER_KEY,"website_piano_instrument_order_enabled"]);
 const BRANDING_SETTING_KEYS=Object.freeze([
   "company_name","short_name","logo_url","favicon_url","erp_logo_dark_url","erp_logo_light_url","login_logo_url",
   "app_icon_url","login_background_url","branding_version",WEBSITE_DESIGN_SETTINGS_KEY
