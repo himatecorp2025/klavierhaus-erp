@@ -1,0 +1,75 @@
+name: Klavierhaus Required PR Verification
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: required-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verification:
+    name: mac-ci/local
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the proposed changes
+        uses: actions/checkout@v4
+
+      - name: Use supported Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            website/package-lock.json
+
+      - name: Install locked ERP dependencies
+        run: npm ci
+
+      - name: Validate synchronized manifests
+        run: npm run check:manifests
+
+      - name: Validate ERP schema and JavaScript
+        run: npm run check
+
+      - name: Validate database migrations
+        run: npm run check:migration
+
+      - name: Validate public ERP assets
+        run: npm run check:assets
+
+      - name: Run ERP acceptance tests
+        run: npm test
+
+      - name: Install locked Website dependencies
+        run: npm --prefix website ci
+
+      - name: Validate Website syntax
+        run: npm --prefix website run check
+
+      - name: Run Website acceptance tests
+        run: npm --prefix website test
+
+      - name: Publish verified required commit status
+        if: success() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPOSITORY}/statuses/${PR_HEAD_SHA}" \
+            -d '{"state":"success","context":"mac-ci/local","description":"ERP + Website verified on Node.js 24 LTS"}'
