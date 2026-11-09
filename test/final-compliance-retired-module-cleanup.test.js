@@ -39,7 +39,7 @@ test("showroom price migration makes a verified persistent backup before schema 
   const order = migration.indexOf("showroomPricingPreMigrationBackup();");
   const schema = migration.indexOf("db.exec(canonicalSchemaSql);");
   assert.ok(order >= 0 && schema > order, "Backup must precede schema application");
-  assert.match(migration, /wal_checkpoint\("TRUNCATE"\)/);
+  assert.match(migration, /db\.pragma\("wal_checkpoint\(TRUNCATE\)"\)/);
   assert.match(migration, /showroom-pricing-pre-migration-/);
   assert.match(migration, /integrity_check/);
   assert.match(migration, /COPYFILE_EXCL/);
