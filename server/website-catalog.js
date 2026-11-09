@@ -150,15 +150,19 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
     }
   });
 
+  function instrumentOrder() {
+    const manual=db.prepare("SELECT setting_value FROM app_settings WHERE setting_key='website_piano_instrument_order_enabled'").get()?.setting_value==='1';
+    return db.prepare("SELECT id,brand,model,title_en,sort_order FROM website_showroom_pianos ORDER BY "+(manual?"sort_order,created_at,id":"featured DESC,sort_order,created_at,id")).all();
+  }
   app.get("/api/website-catalog-order/instruments", auth, admin, (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    const rows=db.prepare("SELECT id,brand,model,title_en,sort_order FROM website_showroom_pianos ORDER BY sort_order,created_at,id").all();
+    const rows=instrumentOrder();
     res.json({ items: rows.map((row,index)=>({...row,label: [row.brand,row.model||row.title_en].filter(Boolean).join(" · "),position:index+1})) });
   });
   app.put("/api/website-catalog-order/instruments", auth, admin, (req, res) => {
     try {
       const change=db.transaction(()=>{
-        const before=db.prepare("SELECT id FROM website_showroom_pianos ORDER BY sort_order,created_at,id").all().map(row=>row.id);
+        const before=instrumentOrder().map(row=>row.id);
         const ids=validateOrder(req.body?.ids,before);
         const update=db.prepare("UPDATE website_showroom_pianos SET sort_order=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?");
         ids.forEach((id,index)=>update.run(index+1,req.user.id,id));
@@ -291,7 +295,7 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
         gallery_json: JSON.stringify(normalizeGallery(body.gallery ?? body.gallery_json)),
         featured: bool(body.featured),
         sort_order: Number(body.sort_order ?? (table === "website_services"
-          ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_services").get().position : 0)),
+          ? db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_services").get().position : db.prepare("SELECT COALESCE(MAX(sort_order),0)+1 AS position FROM website_showroom_pianos").get().position)),
         user_id: req.user.id
       };
       try {
