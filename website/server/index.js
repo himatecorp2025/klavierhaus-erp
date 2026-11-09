@@ -6,7 +6,7 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const { createErpClient } = require("./erp-client");
-const PRIVATE_PICKER_ASSET_REV = "calendar-contact-header-20261005-2-gallery-fitpan-v3";
+const PRIVATE_PICKER_ASSET_REV = "calendar-contact-header-20261005-2-gallery-fitpan-v3-showroom-pricing-v1";
 const {
   VERSION,
   findRoute,
