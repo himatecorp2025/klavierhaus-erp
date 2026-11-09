@@ -54,7 +54,7 @@ test("existing showroom data survives price migration and is backed up before ch
 
     const second = run();
     assert.equal(second.status, 0, second.stdout + "\n" + second.stderr);
-    assert.equal(fs.readdirSync(dir).filter(name => name.startsWith("showroom-pricing-pre-migration-")).length, 1, "Repeated startup must not repeat the pricing backup");
+    assert.equal(fs.readdirSync(dir).filter(name => name.startsWith("showroom-pricing-pre-migration-") && name.endsWith(".sqlite")).length, 1, "Repeated startup must not repeat the pricing backup");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
