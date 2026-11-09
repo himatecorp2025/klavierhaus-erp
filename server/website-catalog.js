@@ -200,11 +200,11 @@ function registerWebsiteCatalogRoutes({ app, db, auth, permit, audit, erpBaseUrl
 
   app.get("/api/public/website-reviews", (req, res) => {
     const language = req.query.lang === "hu" ? "hu" : "en";
-    const rows = db.prepare(`SELECT r.*,e.slug_en AS event_slug_en,e.slug_hu AS event_slug_hu
+    const rows = db.prepare(`SELECT r.*
       FROM website_reviews r
       WHERE r.visible=1 ORDER BY r.sort_order,r.created_at`).all();
     res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    res.json(rows.map((row) => ({ ...localized({ ...row, image_url: row.portrait_url }, language, baseUrl), event_slug: row[`event_slug_${language}`] || null })));
+    res.json(rows.map((row) => ({ ...localized({ ...row, image_url: row.portrait_url }, language, baseUrl), event_slug: null })));
   });
 
   app.get("/api/public/showroom-pianos", (req, res) => {

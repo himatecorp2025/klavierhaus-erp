@@ -262,6 +262,34 @@ test("website collection backups restore the piano-brand order, and collection r
 });
 
 
+test("public reviews remain localized, ordered and visible after event retirement", async () => {
+  await withCatalog(async ({ request, publicPage, db }) => {
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='events'").get(), undefined);
+    const ids = [];
+    for (const [person, position, visible] of [["Second", 2, true], ["First", 1, true], ["Hidden", 0, false]]) {
+      const created = await request("/api/website-reviews", json({
+        person_name: person, role_en: "Pianist", role_hu: "Zongorista",
+        quote_en: "English review " + person, quote_hu: "Magyar vélemény " + person,
+        portrait_url: "/uploads/website/review.jpg", sort_order: position, visible
+      }));
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      ids.push(created.body.id);
+    }
+    for (const language of ["en", "hu"]) {
+      const response = await request("/api/public/website-reviews?lang=" + language);
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      assert.deepEqual(response.body.map(row => row.id), [ids[1], ids[0]]);
+      assert.equal(response.body[0].quote, language === "hu" ? "Magyar vélemény First" : "English review First");
+      assert.equal(response.body[0].role, language === "hu" ? "Zongorista" : "Pianist");
+      assert.equal(response.body[0].event_slug, null);
+      assert.equal(response.body[0].image_url, "https://erp.klavierhaus.test/uploads/website/review.jpg");
+      const page = await publicPage(language === "hu" ? "/hu/" : "/");
+      assert.ok(page.includes(response.body[0].quote), "CMS reviews must appear on the public home page");
+      assert.ok(!page.includes("English review Hidden") && !page.includes("Magyar vélemény Hidden"));
+    }
+  });
+});
+
 test("showroom prices and discounted prices save, validate and render in both languages", async () => {
   await withCatalog(async ({request,publicPage,db,audits}) => {
     const created=await request("/api/showroom-pianos", json({...brandInput("Fazioli","Fazioli F212",1),price_cents:3800000,sale_price_cents:3420000}));
