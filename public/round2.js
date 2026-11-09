@@ -889,6 +889,15 @@ function r2EventSegment(job,date){
 }
 function r2CalendarEvent(job,date){
   const segment=r2EventSegment(job,date);if(!segment)return "";
+  if(job.website_lead||job.private_request){
+    const isLead=Boolean(job.website_lead),attribute=isLead?"data-calendar-lead":"data-calendar-request";
+    const itemId=isLead?job.lead_id:job.private_request_id;
+    const label=isLead?tr("Web request · awaiting confirmation","Webes igény · egyeztetésre vár"):
+      tr("Private request · call the customer","Privát időpontigény · ügyfélhívás szükséges");
+    return `<button type="button" class="calendar-event-block private-appointment-event calendar-provisional-event" ${attribute}="${esc(itemId)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:#c99a45">
+      <strong>${esc(job.title)}</strong><span>${esc(job.client_name||"")}</span><small>${esc(label)}</small>
+    </button>`;
+  }
   if(job.google_calendar_pending){
     return `<button type="button" class="calendar-event-block google-pending-event ${segment.isStart?"segment-start":""} ${segment.isEnd?"segment-end":""}" data-google-event="${esc(job.google_external_id)}" data-calendar-date="${date}" style="--event-top:${segment.top}px;--event-height:${segment.height}px;--tech-color:${esc(job.assigned_technician_color||"#c99a45")}">
       <strong>${segment.isStart?esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at))):"↳"} · G · ${esc(job.title)}</strong>
@@ -939,7 +948,7 @@ function r2RenderMonthGrid(range,jobs){
   const weekdays=Array.from({length:7},(_,i)=>r2DateAdd(r2WeekStart("2026-09-28"),i));
   return `<div class="month-calendar"><div class="month-weekdays">${weekdays.map(date=>`<div>${esc(r2FormatDate(date,{weekday:"short"}))}</div>`).join("")}</div><div class="month-calendar-grid">${range.days.map(date=>{
     const rows=jobs.filter(job=>r2JobTouchesDate(job,date));
-    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>job.google_calendar_pending?`<button type="button" class="month-event-pill google-pending-event" data-google-event="${esc(job.google_external_id)}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#c99a45")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> G · ${esc(job.title)}</button>`:job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
+    return `<section class="month-day-cell ${date.slice(0,7)===currentMonth?"":"outside-month"} ${date===r2Today()?"today":""}" data-calendar-date="${date}"><header><button type="button" data-new-calendar-job="${date}">${Number(date.slice(-2))}</button></header><div class="month-events">${rows.slice(0,5).map(job=>(job.website_lead||job.private_request)?`<button type="button" class="month-event-pill private-appointment-event" ${job.website_lead?"data-calendar-lead":"data-calendar-request"}="${esc(job.website_lead?job.lead_id:job.private_request_id)}" data-calendar-date="${date}"><strong>${esc(job.title)}</strong> · ${esc(job.client_name||"")}</button>`:job.google_calendar_pending?`<button type="button" class="month-event-pill google-pending-event" data-google-event="${esc(job.google_external_id)}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#c99a45")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> G · ${esc(job.title)}</button>`:job.private_appointment?`<button type="button" class="month-event-pill private-appointment-event ${job.status==="CANCELLED"?"is-cancelled":job.status==="COMPLETED"?"is-private-completed":""}" data-private-appointment="${esc(job.private_id)}" data-calendar-date="${date}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ◈ ${esc(job.title)}</button>`:`<button type="button" class="month-event-pill status-${esc(job.workflow_status||"scheduled")} ${job.stage==="completed"?"is-completed":""}" data-calendar-job="${job.id}" data-calendar-date="${date}" style="--tech-color:${esc(job.assigned_technician_color||"#8d6a2c")}"><strong>${esc(new Intl.DateTimeFormat(state.language==="hu"?"hu-HU":"en-US",{timeZone:R2_TZ,hour:"2-digit",minute:"2-digit"}).format(new Date(job.scheduled_at)))}</strong> ${esc(job.title)}</button>`).join("")}${rows.length>5?`<small>+${rows.length-5} ${tr("more","további")}</small>`:""}</div></section>`;
   }).join("")}</div></div>`;
 }
 function r2RefreshCalendarStatuses(host,jobs){
@@ -1057,6 +1066,7 @@ function r2BindCalendarCreate(host){
   $$("[data-calendar-date]",host).forEach(column=>column.addEventListener("click",event=>{
     if(event.target.closest("[data-google-event]"))return;
     if(event.target.closest("[data-calendar-job],[data-private-appointment],[data-new-calendar-job],.calendar-now-line"))return;
+    if(event.target.closest("[data-calendar-lead],[data-calendar-request]"))return;
     const date=column.dataset.calendarDate;if(!date)return;
     if(state.r2CalendarMode==="month"){r2OpenCreateJob(renderWorkshop,{date});return;}
     const rect=column.getBoundingClientRect();
@@ -1072,11 +1082,20 @@ async function r2RenderCalendar(){
   if(!["day","week","month"].includes(state.r2CalendarMode))state.r2CalendarMode=window.matchMedia?.("(max-width:700px)")?.matches?"day":"week";
   state.r2CalendarDate=state.r2CalendarDate||r2Today();
   const range=r2Range(state.r2CalendarDate,state.r2CalendarMode),tech=state.r2CalendarTech||"";
-  const [data,privateAppointments]=await Promise.all([
+  const [data,privateAppointments,privateRequests]=await Promise.all([
     api(`/api/calendar?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${tech?`&technician_id=${encodeURIComponent(tech)}`:""}`),
-    api(`/api/private-appointments?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)
+    api(`/api/private-appointments?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`),
+    api("/api/private-appointment-requests?status=REQUESTED,PROPOSED")
   ]);
-  const privateRows=(privateAppointments||[]).map(r2PrivateCalendarRow),jobRows=data.jobs||[],calendarRows=state.r2CalendarPrivateOnly?privateRows:[...jobRows,...privateRows];
+  const privateRows=(privateAppointments||[]).filter(row=>!tech||String(row.assigned_user_id||"")===String(tech)).map(r2PrivateCalendarRow);
+  const pendingRows=(privateRequests||[]).filter(row=>(!tech||String(row.assigned_user_id||"")===String(tech))&&row.requested_at).map(row=>({
+    ...row, id:"request:"+row.id, private_request:true,private_request_id:row.id,
+    title:row.appointment_type||"Private request",client_name:row.name,
+    scheduled_at:row.requested_at,scheduled_end:new Date(Date.parse(row.requested_at)+Number(row.requested_duration_min||60)*60000).toISOString(),
+    estimated_duration_min:Number(row.requested_duration_min||60),status:"PENDING_CONFIRMATION",location_type:"private"
+  }));
+  const leadRows=data.lead_events||[],leadInbox=data.lead_inbox||[],jobRows=data.jobs||[];
+  const calendarRows=state.r2CalendarPrivateOnly?[...privateRows,...pendingRows]:[...jobRows,...privateRows,...pendingRows,...leadRows];
   host.innerHTML=`<section class="panel calendar-panel"><div class="calendar-toolbar"><div class="calendar-nav"><button id="calendarPrev" class="secondary-button" type="button" aria-label="${tr("Previous","Előző")}">←</button><button id="calendarToday" class="secondary-button" type="button">${tr("Today","Ma")}</button><button id="calendarNext" class="secondary-button" type="button" aria-label="${tr("Next","Következő")}">→</button></div>
     <strong class="calendar-range-title">${esc(r2CalendarTitle(range,state.r2CalendarMode))}</strong>
     <div class="calendar-toolbar-right"><button id="calendarPrivateFilter" class="secondary-button private-filter-button ${state.r2CalendarPrivateOnly?"active":""}" type="button">◈ ${tr("Private","Privát")}</button><div class="segmented-control compact"><button type="button" data-calendar-mode="day" class="${state.r2CalendarMode==="day"?"active":""}">${tr("Day","Nap")}</button><button type="button" data-calendar-mode="week" class="${state.r2CalendarMode==="week"?"active":""}">${tr("Week","Hét")}</button><button type="button" data-calendar-mode="month" class="${state.r2CalendarMode==="month"?"active":""}">${tr("Month","Hónap")}</button></div><select id="calendarTechFilter"><option value="">${tr("All technicians","Minden technikus")}</option>${r2TechnicianOptions(tech)}</select></div></div>
@@ -1086,6 +1105,32 @@ async function r2RenderCalendar(){
   const move=delta=>{state.r2CalendarDate=state.r2CalendarMode==="month"?r2MonthAdd(state.r2CalendarDate,delta):r2DateAdd(range.startDate,state.r2CalendarMode==="day"?delta:delta*7);void r2RenderCalendar();};
   $("#calendarPrev").addEventListener("click",()=>move(-1));$("#calendarToday").addEventListener("click",()=>{state.r2CalendarDate=r2Today();void r2RenderCalendar();});$("#calendarNext").addEventListener("click",()=>move(1));
   $$("[data-calendar-mode]",host).forEach(button=>button.addEventListener("click",()=>{state.r2CalendarMode=button.dataset.calendarMode;localStorage.setItem("kh_calendar_mode",state.r2CalendarMode);void r2RenderCalendar();}));
+  const openCalendarRequest=(item,isPrivate=false)=>{
+    if(!item)return;
+    const title=isPrivate?tr("Private appointment · awaiting staff confirmation","Privát időpont · munkatársi megerősítésre vár"):
+      tr("Website request · follow-up required","Weboldali igény · kapcsolatfelvétel szükséges");
+    const rows=[
+      [tr("Customer","Ügyfél"),item.name],[tr("E-mail","E-mail"),item.email],
+      [tr("Phone","Telefon"),item.phone],[tr("Preferred time","Kért időpont"),item.requested_at||item.agreed_appointment_at||item.preferred_time],
+      [tr("Purpose","Cél"),item.appointment_reason||item.lead_type],
+      [tr("Status","Állapot"),item.status],[tr("Message","Üzenet"),item.note||item.message]
+    ];
+    const body=rows.filter(row=>row[1]).map(row=>"<p><strong>"+esc(row[0])+":</strong> "+esc(String(row[1]))+"</p>").join("");
+    openDialog({title,eyebrow:tr("NOT CONFIRMED","MÉG NEM VÉGLEGES"),body:body+"<p class='muted'>"+tr("The company must contact the customer before confirming or moving this appointment.","Az időpont véglegesítéséhez vagy áthelyezéséhez a munkatársnak egyeztetnie kell az ügyféllel.")+"</p>"});
+  };
+  if(leadInbox.length&&!state.r2CalendarPrivateOnly){
+    const details=document.createElement("details");details.className="panel";details.style.marginTop="12px";
+    const summary=document.createElement("summary");summary.textContent=tr("Website enquiries without a calendar time","Időpont nélküli weboldali megkeresések")+" ("+leadInbox.length+")";
+    details.appendChild(summary);
+    for(const item of leadInbox){
+      const button=document.createElement("button");button.type="button";button.className="secondary-button";
+      button.style.margin="6px";button.textContent=item.name+" · "+(item.lead_type||"Lead")+" · "+(item.preferred_time||tr("Time to be agreed","Időpont egyeztetendő"));
+      button.addEventListener("click",()=>openCalendarRequest(item));details.appendChild(button);
+    }
+    host.querySelector(".calendar-panel")?.appendChild(details);
+  }
+  $$("[data-calendar-lead]",host).forEach(node=>node.addEventListener("click",()=>openCalendarRequest(leadRows.find(x=>String(x.lead_id)===String(node.dataset.calendarLead)))));
+  $$("[data-calendar-request]",host).forEach(node=>node.addEventListener("click",()=>openCalendarRequest((privateRequests||[]).find(x=>String(x.id)===String(node.dataset.calendarRequest)),true)));
   $("#calendarTechFilter").addEventListener("change",event=>{state.r2CalendarTech=event.target.value;void r2RenderCalendar();});
   $("#calendarPrivateFilter").addEventListener("click",()=>{state.r2CalendarPrivateOnly=!state.r2CalendarPrivateOnly;void r2RenderCalendar();});
   $$("[data-new-calendar-job]",host).forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();r2OpenCreateJob(renderWorkshop,{date:button.dataset.newCalendarJob});}));

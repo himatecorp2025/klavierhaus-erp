@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const {createGoogleCalendarBridge}=require("./google-calendar-bridge");
 
 const PROVIDER = "GOOGLE";
 const INTEGRATION_ID = "CAL-GOOGLE-WORK";
@@ -348,7 +349,9 @@ function createGoogleCalendarIntegration(options) {
   }
   function processCancelledEvent(event,existing,sourceCalendarId=config.calendarId){ const job=getJobRow(existing?.job_id);upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"SOURCE_CANCELLED",conflictFlag:Boolean(existing?.conflict_flag)},sourceCalendarId);if(job)notifyAdmins("GOOGLE_EVENT_CANCELLED",event,job,"Google event cancelled","Google-esemény törölve",`${job.title} · ERP job kept for review.`,`${job.title} · Az ERP-munka megmaradt ellenőrzésre.`,event.updated);return {flagged:1}; }
   function processEvent(event, sourceCalendarId=config.calendarId, sourceUserId=null){
-    if(!event?.id)return {};const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,sourceCalendarId,event.id);if(existing?.review_status==="IGNORED")return {};if(event.status==="cancelled")return processCancelledEvent(event,existing,sourceCalendarId);
+    if(!event?.id)return {};
+    if(calendarBridge.applyIncoming(event,sourceCalendarId))return {};
+    const existing=db.prepare("SELECT * FROM external_calendar_events WHERE provider=? AND calendar_id=? AND external_event_id=?").get(PROVIDER,sourceCalendarId,event.id);if(existing?.review_status==="IGNORED")return {};if(event.status==="cancelled")return processCancelledEvent(event,existing,sourceCalendarId);
     const startTime=eventDateTime(event.start,false),endTime=eventDateTime(event.end,true);if(!startTime||!endTime||Date.parse(endTime)<=Date.parse(startTime)){upsertExternalEvent(event,{jobId:existing?.job_id||null,reviewStatus:"INVALID",conflictFlag:false},sourceCalendarId);return {flagged:1};}
     const sourceChanged=Boolean(existing?.event_etag&&event.etag&&existing.event_etag!==event.etag),linked=getJobRow(existing?.job_id);
     if(linked&&["REVIEWED","SOURCE_CHANGED","SOURCE_CANCELLED"].includes(existing.review_status)){upsertExternalEvent(event,{jobId:linked.id,reviewStatus:sourceChanged?"SOURCE_CHANGED":existing.review_status,conflictFlag:Boolean(existing.conflict_flag)},sourceCalendarId);if(sourceChanged)notifyAdmins("GOOGLE_EVENT_SOURCE_CHANGED",event,linked,"Reviewed Google event changed","Ellenőrzött Google-esemény megváltozott",`${linked.title} · ERP data was not overwritten.`,`${linked.title} · Az ERP-adatok nem íródtak felül.`,event.etag);return sourceChanged?{flagged:1}:{};}
@@ -357,72 +360,110 @@ function createGoogleCalendarIntegration(options) {
     upsertExternalEvent(event,{jobId:linked?.id||null,reviewStatus:"NEEDS_REVIEW",conflictFlag:false},sourceCalendarId);notifyAdmins("GOOGLE_EVENT_REVIEW_REQUIRED",event,linked,"Google job needs review","Google-munka ellenőrzésre vár",event.summary||event.id,event.summary||event.id,event.etag);return {updated:existing?1:0,imported:existing?0:1,flagged:1};
   }
 
+  const calendarBridge=createGoogleCalendarBridge({db,env,config,fetchImpl,encrypt,decrypt,exchangeToken,logger});
   const processEventTransaction = db.transaction(processEvent);
 
-  // Staff calendars use the existing read-only central OAuth account. Google Calendar
-  // ACLs must grant that account access; an entered email is not OAuth consent.
-  db.exec(`CREATE TABLE IF NOT EXISTS staff_calendar_sync (
-    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    calendar_email TEXT NOT NULL,
-    sync_token TEXT,
-    last_sync_at TEXT,
-    last_error TEXT,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`);
+  // Staff calendar email is a candidate, not Google authorization. The central
+  // account needs an explicit calendar share before its read-only token can access it.
+  function refreshStaffCalendarRegistry() {
+    const users=db.prepare("SELECT id,email,google_calendar_email FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0").all();
+    const insert=db.prepare(`INSERT INTO staff_calendar_sync(user_id,calendar_email,calendar_id,enabled)
+      VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
+      calendar_id=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email OR staff_calendar_sync.calendar_id IS NULL OR trim(staff_calendar_sync.calendar_id)='' THEN excluded.calendar_id ELSE staff_calendar_sync.calendar_id END,
+      sync_token=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email THEN NULL ELSE staff_calendar_sync.sync_token END,
+      last_sync_at=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email THEN NULL ELSE staff_calendar_sync.last_sync_at END,
+      last_verified_at=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email THEN NULL ELSE staff_calendar_sync.last_verified_at END,
+      last_error=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email THEN NULL ELSE staff_calendar_sync.last_error END,
+      write_enabled=CASE WHEN staff_calendar_sync.calendar_email<>excluded.calendar_email THEN 0 ELSE staff_calendar_sync.write_enabled END,
+      calendar_email=excluded.calendar_email,updated_at=CURRENT_TIMESTAMP`);
+    for(const user of users) {
+      const calendar=normalizeEmail(user.google_calendar_email||user.email);
+      if(calendar)insert.run(user.id,calendar,calendar,user.google_calendar_email?1:0);
+    }
+  }
   function staffCalendarStatuses() {
-    return db.prepare(`SELECT u.id AS user_id,u.name,u.google_calendar_email AS calendar_email,
-      s.last_sync_at,s.last_error,
-      CASE WHEN lower(u.google_calendar_email)=lower('klavierhauswork@gmail.com') THEN 'CENTRAL'
-           WHEN s.user_id IS NULL THEN 'PENDING' WHEN s.last_error IS NOT NULL THEN 'ERROR'
-           WHEN s.last_sync_at IS NOT NULL THEN 'SYNCED' ELSE 'PENDING' END AS sync_status
-      FROM users u LEFT JOIN staff_calendar_sync s ON s.user_id=u.id
-        AND lower(s.calendar_email)=lower(u.google_calendar_email)
+    refreshStaffCalendarRegistry();
+    return db.prepare(`SELECT u.id AS user_id,u.name,u.email AS user_email,
+      s.calendar_email,s.calendar_id,s.enabled,s.write_enabled,s.last_sync_at,s.last_checked_at,s.last_verified_at,s.last_error,
+      CASE WHEN lower(s.calendar_id)=lower(?) THEN 'CENTRAL'
+        WHEN s.enabled=0 THEN 'DISABLED'
+        WHEN s.last_error IS NOT NULL THEN 'ERROR'
+        WHEN s.last_sync_at IS NOT NULL THEN 'SYNCED'
+        WHEN s.last_verified_at IS NOT NULL THEN 'VERIFIED'
+        ELSE 'PENDING' END AS sync_status
+      FROM users u JOIN staff_calendar_sync s ON s.user_id=u.id
       WHERE u.status='Active' AND COALESCE(u.hidden_user,0)=0
-        AND length(trim(COALESCE(u.google_calendar_email,'')))>0
-      ORDER BY lower(u.name)`).all();
+      ORDER BY lower(u.name)`).all(config.calendarId);
+  }
+  function configureStaffCalendar(userId, payload={}) {
+    refreshStaffCalendarRegistry();
+    const before=db.prepare("SELECT * FROM staff_calendar_sync WHERE user_id=?").get(userId);
+    if(!before)throw Object.assign(new Error("STAFF_CALENDAR_USER_NOT_FOUND"),{status:404});
+    const calendar=String(payload.calendar_id||before.calendar_id||before.calendar_email).trim();
+    if(calendar.length>320||calendar.length<3||!calendar.includes("@")||calendar==="primary"||normalizeEmail(calendar)===FORBIDDEN_NON_KLAVIERHAUS_CALENDAR)
+      throw Object.assign(new Error("INVALID_STAFF_CALENDAR_ID"),{status:400});
+    const enabled=payload.enabled===true||payload.enabled===1;
+    const writeEnabled=enabled&&(payload.write_enabled===true||payload.write_enabled===1);
+    db.prepare(`UPDATE staff_calendar_sync SET calendar_id=?,enabled=?,write_enabled=?,
+      sync_token=CASE WHEN calendar_id<>? THEN NULL ELSE sync_token END,
+      last_sync_at=CASE WHEN calendar_id<>? THEN NULL ELSE last_sync_at END,
+      last_verified_at=CASE WHEN calendar_id<>? THEN NULL ELSE last_verified_at END,
+      last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`)
+      .run(calendar,enabled?1:0,writeEnabled?1:0,calendar,calendar,calendar,userId);
+    return staffCalendarStatuses().find(item=>item.user_id===userId);
+  }
+  async function verifyStaffCalendar(userId) {
+    const row=staffCalendarStatuses().find(item=>item.user_id===userId);
+    if(!row)throw Object.assign(new Error("STAFF_CALENDAR_USER_NOT_FOUND"),{status:404});
+    if(!row.enabled)throw Object.assign(new Error("STAFF_CALENDAR_DISABLED"),{status:409});
+    if(!publicStatus().connected)throw Object.assign(new Error("GOOGLE_CALENDAR_NOT_CONNECTED"),{status:409});
+    try{
+      const metadata=await googleRequest("/calendars/"+encodeURIComponent(row.calendar_id));
+      db.prepare("UPDATE staff_calendar_sync SET last_checked_at=CURRENT_TIMESTAMP,last_verified_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(userId);
+      return {...staffCalendarStatuses().find(item=>item.user_id===userId),calendar_summary:metadata.summary||row.calendar_id};
+    }catch(error){
+      const message=error.status===404?"CALENDAR_NOT_SHARED_OR_UNKNOWN":
+        error.status===403?"CALENDAR_PERMISSION_DENIED":String(error.message||error).slice(0,160);
+      db.prepare("UPDATE staff_calendar_sync SET last_checked_at=CURRENT_TIMESTAMP,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(message,userId);
+      return {...staffCalendarStatuses().find(item=>item.user_id===userId),error:message};
+    }
   }
   async function syncStaffCalendars() {
-    const staff=db.prepare(`SELECT id,name,lower(trim(google_calendar_email)) AS calendar_email
-      FROM users WHERE status='Active' AND COALESCE(hidden_user,0)=0
-        AND length(trim(COALESCE(google_calendar_email,'')))>0`).all();
+    refreshStaffCalendarRegistry();
+    const staff=db.prepare(`SELECT u.id,s.calendar_id FROM staff_calendar_sync s
+      JOIN users u ON u.id=s.user_id WHERE u.status='Active'
+      AND COALESCE(u.hidden_user,0)=0 AND s.enabled=1 AND length(trim(s.calendar_id))>0`).all();
     let imported=0,updated=0,flagged=0;
     for(const user of staff) {
-      const calendarId=user.calendar_email;
-      // Shared central calendar is already handled by the original sync.
-      if(calendarId===config.centralEmail.toLowerCase() || calendarId===config.calendarId.toLowerCase())continue;
-      db.prepare(`INSERT INTO staff_calendar_sync(user_id,calendar_email,sync_token)
-        VALUES(?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET
-        sync_token=CASE WHEN calendar_email=excluded.calendar_email THEN sync_token ELSE NULL END,
-        last_sync_at=CASE WHEN calendar_email=excluded.calendar_email THEN last_sync_at ELSE NULL END,
-        last_error=CASE WHEN calendar_email=excluded.calendar_email THEN last_error ELSE NULL END,
-        calendar_email=excluded.calendar_email,updated_at=CURRENT_TIMESTAMP`).run(user.id,calendarId);
+      const calendarId=user.calendar_id;
+      if(normalizeEmail(calendarId)===normalizeEmail(config.calendarId))continue;
       let token=db.prepare("SELECT sync_token FROM staff_calendar_sync WHERE user_id=?").get(user.id)?.sync_token||"";
       let nextToken=null,page=null,reset=false;
-      try {
-        do {
+      try{
+        do{
           const q=new URLSearchParams({showDeleted:"true",singleEvents:"true",maxResults:"2500"});
           if(token)q.set("syncToken",token);
           else q.set("timeMin",new Date(Date.now()-config.lookbackDays*86400000).toISOString());
           if(page)q.set("pageToken",page);
           let payload;
-          try { payload=await googleRequest(`/calendars/${encodeURIComponent(calendarId)}/events?${q}`); }
-          catch(error) {
-            if(error.status===410 && token && !reset){reset=true;token="";page=null;db.prepare("UPDATE staff_calendar_sync SET sync_token=NULL WHERE user_id=?").run(user.id);continue;}
+          try{payload=await googleRequest("/calendars/"+encodeURIComponent(calendarId)+"/events?"+q);}
+          catch(error){
+            if(error.status===410&&token&&!reset){reset=true;token="";page=null;db.prepare("UPDATE staff_calendar_sync SET sync_token=NULL WHERE user_id=?").run(user.id);continue;}
             throw error;
           }
-          for(const event of payload.items||[]) {
+          for(const event of payload.items||[]){
             const result=processEventTransaction(event,calendarId,user.id);
             imported+=Number(result.imported||0);updated+=Number(result.updated||0);flagged+=Number(result.flagged||0);
           }
-          page=payload.nextPageToken||null;
-          nextToken=payload.nextSyncToken||nextToken;
+          page=payload.nextPageToken||null;nextToken=payload.nextSyncToken||nextToken;
         }while(page);
-        db.prepare(`UPDATE staff_calendar_sync SET sync_token=COALESCE(?,sync_token),
-          last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).run(nextToken,user.id);
-      }catch(error) {
-        const message=String(error.message||error).slice(0,700);
-        db.prepare("UPDATE staff_calendar_sync SET last_error=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(message,user.id);
-        logger.warn?.("Staff Google Calendar sync failed for "+user.id+": "+message);
+        db.prepare("UPDATE staff_calendar_sync SET sync_token=COALESCE(?,sync_token),last_sync_at=CURRENT_TIMESTAMP,last_checked_at=CURRENT_TIMESTAMP,last_verified_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(nextToken,user.id);
+      }catch(error){
+        const message=error.status===404?"CALENDAR_NOT_SHARED_OR_UNKNOWN":
+          error.status===403?"CALENDAR_PERMISSION_DENIED":String(error.message||error).slice(0,160);
+        const previous=db.prepare("SELECT last_error FROM staff_calendar_sync WHERE user_id=?").get(user.id)?.last_error;
+        db.prepare("UPDATE staff_calendar_sync SET last_error=?,last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").run(message,user.id);
+        if(previous!==message)logger.warn?.("Staff Google Calendar sync failed for "+user.id+": "+message);
       }
     }
     return {imported,updated,flagged,staff:staffCalendarStatuses()};
@@ -437,6 +478,19 @@ function createGoogleCalendarIntegration(options) {
       .run(calendar.summary || "Klavierhaus Work", PROVIDER);
   }
 
+  async function syncBothDirections(options) {
+    refreshStaffCalendarRegistry();
+    const incoming=await calendarBridge.pullIncoming();
+    let inbound_imported=0,inbound_updated=0,inbound_flagged=0;
+    for(const event of incoming.events||[]){
+      const result=processEventTransaction(event,incoming.calendar_id,null);
+      inbound_imported+=Number(result.imported||0);
+      inbound_updated+=Number(result.updated||0);
+      inbound_flagged+=Number(result.flagged||0);
+    }
+    const outgoing=await calendarBridge.reconcile(options);
+    return {...outgoing,inbound_imported,inbound_updated,inbound_flagged,inbound_error:incoming.error||null};
+  }
   async function performSync(triggerType) {
     if (!configured) throw new Error("GOOGLE_CALENDAR_NOT_CONFIGURED");
     const row = integrationRow();
@@ -478,6 +532,11 @@ function createGoogleCalendarIntegration(options) {
       } while (pageToken);
       const staffResult=await syncStaffCalendars();
       imported+=staffResult.imported;updated+=staffResult.updated;flagged+=staffResult.flagged;
+      const outbound=await syncBothDirections();
+      imported+=outbound.inbound_imported||0;
+      updated+=outbound.inbound_updated||0;
+      flagged+=outbound.inbound_flagged||0;
+      if(outbound.failed)logger.warn?.("Google Calendar ERP-to-Google sync had "+outbound.failed+" queued error(s).");
       db.prepare(`UPDATE calendar_integrations SET sync_token=COALESCE(?,sync_token),last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,
         status='CONNECTED',updated_at=CURRENT_TIMESTAMP WHERE provider=?`).run(nextSyncToken, PROVIDER);
       db.prepare("UPDATE calendar_sync_log SET status='SUCCESS',imported_count=?,updated_count=?,flagged_count=?,completed_at=CURRENT_TIMESTAMP WHERE id=?")
@@ -643,6 +702,17 @@ function createGoogleCalendarIntegration(options) {
     config: { centralEmail: config.centralEmail, calendarId: config.calendarId, redirectUri: config.redirectUri },
     status: publicStatus,
     staffCalendarStatuses,
+    writeStatus:calendarBridge.status,
+    configureWrite:calendarBridge.configure,
+    createWriteAuthUrl:calendarBridge.createAuthUrl,
+    isWriteState:calendarBridge.isState,
+    handleWriteOAuthCallback:calendarBridge.handleCallback,
+    verifyWriteTarget:calendarBridge.verifyTarget,
+    outboundErrors:calendarBridge.outboundErrors,
+    resolveConflict:calendarBridge.resolveConflict,
+    syncOutbound:syncBothDirections,
+    configureStaffCalendar,
+    verifyStaffCalendar,
     createAuthUrl,
     createTestAuthUrl,
     isTestState,

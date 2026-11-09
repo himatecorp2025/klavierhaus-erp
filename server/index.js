@@ -500,9 +500,57 @@ const googleCalendar=createGoogleCalendarIntegration({
 registerSystemIntegrationRoutes({app,db,auth,requireSuperadmin,audit,googleCalendar,services:{transactionalEmail,stripeSandbox},env:process.env});
 app.get('/api/google-calendar/status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.status()));
 app.get('/api/google-calendar/staff-status',auth,permit('ADMIN'),(_req,res)=>res.json(googleCalendar.staffCalendarStatuses()));
+app.put('/api/google-calendar/staff/:id',auth,permit('ADMIN'),(req,res)=>{
+  try{
+    const before=googleCalendar.staffCalendarStatuses().find(row=>String(row.user_id)===req.params.id)||null;
+    const after=googleCalendar.configureStaffCalendar(req.params.id,req.body||{});
+    audit(req,'UPDATE','staff_calendar_sync',req.params.id,before,after);
+    res.json(after);
+  }catch(error){res.status(error.status||400).json({error:error.message});}
+});
+app.post('/api/google-calendar/staff/:id/verify',auth,permit('ADMIN'),async(req,res)=>{
+  try{res.json(await googleCalendar.verifyStaffCalendar(req.params.id));}
+  catch(error){res.status(error.status||400).json({error:error.message});}
+});
 app.get('/api/google-calendar/auth-url',auth,permit('ADMIN'),(req,res)=>{try{res.json({url:googleCalendar.createAuthUrl(req.user.id)});}catch(error){res.status(400).json({error:error.message});}});
-app.get('/api/google-calendar/oauth/callback',async(req,res)=>{try{const state=String(req.query.state||'');if(googleCalendar.isTestState(state)){await googleCalendar.handleTestOAuthCallback(String(req.query.code||''),state);return res.redirect('/?view=system_integrations&googleCalendarTest=authorized');}await googleCalendar.handleOAuthCallback(String(req.query.code||''),state);res.redirect('/?view=system_integrations&googleCalendar=connected');}catch(error){console.warn('[GOOGLE-CALENDAR-OAUTH]',error.message);res.redirect(`/?view=system_integrations&googleCalendar=error&reason=${encodeURIComponent(error.message)}`);}});
+app.get('/api/google-calendar/oauth/callback',async(req,res)=>{try{const state=String(req.query.state||'');if(googleCalendar.isTestState(state)){await googleCalendar.handleTestOAuthCallback(String(req.query.code||''),state);return res.redirect('/?view=system_integrations&googleCalendarTest=authorized');}if(googleCalendar.isWriteState(state)){await googleCalendar.handleWriteOAuthCallback(String(req.query.code||''),state);return res.redirect('/?view=system_integrations&googleCalendarWrite=authorized');}await googleCalendar.handleOAuthCallback(String(req.query.code||''),state);res.redirect('/?view=system_integrations&googleCalendar=connected');}catch(error){console.warn('[GOOGLE-CALENDAR-OAUTH]',error.message);res.redirect(`/?view=system_integrations&googleCalendar=error&reason=${encodeURIComponent(error.message)}`);}});
 app.post('/api/google-calendar/sync',auth,permit('ADMIN'),async(_req,res)=>{try{res.json(await googleCalendar.syncNow('MANUAL'));}catch(error){res.status(502).json({error:error.message});}});
+app.get('/api/google-calendar/write-status',auth,permit('ADMIN'),(_req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json({...googleCalendar.writeStatus(),outbound_errors:googleCalendar.outboundErrors()});
+});
+app.put('/api/google-calendar/write-config',auth,permit('ADMIN'),(req,res)=>{
+  try{
+    const before=googleCalendar.writeStatus();
+    const after=googleCalendar.configureWrite(req.body||{});
+    audit(req,'UPDATE','google_calendar_write_connections','master',before,after);
+    res.json(after);
+  }catch(error){res.status(error.status||400).json({error:error.message});}
+});
+app.get('/api/google-calendar/write-auth-url',auth,permit('ADMIN'),(req,res)=>{
+  try{res.json({url:googleCalendar.createWriteAuthUrl(req.user.id)});}
+  catch(error){res.status(error.status||400).json({error:error.message});}
+});
+app.post('/api/google-calendar/write-verify',auth,permit('ADMIN'),async(req,res)=>{
+  try{res.json(await googleCalendar.verifyWriteTarget(req.body?.calendar_id));}
+  catch(error){res.status(error.status||400).json({error:error.message});}
+});
+app.post('/api/google-calendar/write-sync',auth,permit('ADMIN'),async(_req,res)=>{
+  try{res.json(await googleCalendar.syncOutbound());}
+  catch(error){res.status(error.status||400).json({error:error.message});}
+});
+app.post('/api/google-calendar/write-conflict/resolve',auth,permit('ADMIN'),async(req,res)=>{
+  try{
+    const before=googleCalendar.outboundErrors(100).find(row=>
+      row.source_type===req.body?.source_type&&
+      String(row.source_id)===String(req.body?.source_id||'')&&
+      row.calendar_id===req.body?.calendar_id)||null;
+    const outcome=await googleCalendar.resolveConflict(req.body||{});
+    audit(req,'RESOLVE','calendar_outbound_links',
+      [req.body?.source_type,req.body?.source_id,req.body?.calendar_id].join('/'),before,outcome);
+    res.json(outcome);
+  }catch(error){res.status(error.status||409).json({error:error.message});}
+});
 app.delete('/api/google-calendar/disconnect',auth,permit('ADMIN'),async(_req,res)=>{try{res.json(await googleCalendar.disconnect());}catch(error){res.status(400).json({error:error.message});}});
 app.post('/api/google-calendar/webhook',(req,res)=>{if(!googleCalendar.handleWebhook(req.headers))return res.status(403).json({error:'INVALID_GOOGLE_CHANNEL'});res.status(204).end();});
 app.post('/api/google-calendar/events/:id/review',auth,permit('ADMIN'),(req,res)=>{try{res.json(googleCalendar.reviewEvent(req.params.id,req.body||{},req.user.id));}catch(error){res.status(error.status||400).json({error:error.message});}});
