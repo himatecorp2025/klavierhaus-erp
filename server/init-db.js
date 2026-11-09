@@ -253,6 +253,27 @@ function adminUxV6Backup() {
   console.log(`[ADMIN-V6] Safety backup created: ${target}`);
   return target;
 }
+function showroomPricingPreMigrationBackup() {
+  if (!tableExists("website_showroom_pianos")) return null;
+  const existing = columns("website_showroom_pianos");
+  if (existing.has("price_cents") && existing.has("sale_price_cents")) return null;
+  // Keep the pre-migration snapshot on the same persistent volume as the database.
+  // Abort the migration if this snapshot cannot be produced and verified.
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(path.dirname(dbPath), `showroom-pricing-pre-migration-${stamp}.sqlite`);
+  fs.copyFileSync(dbPath, target, fs.constants.COPYFILE_EXCL);
+  const backup = new Database(target, { readonly: true, fileMustExist: true });
+  try {
+    const check = backup.pragma("integrity_check", { simple: true });
+    if (check !== "ok") throw new Error("SHOWROOM_PRICING_BACKUP_INTEGRITY_FAILED");
+  } finally {
+    backup.close();
+  }
+  console.log(`[SHOWROOM-PRICING] Verified pre-migration backup created: ${target}`);
+  return target;
+}
+
 function messengerV12NeedsCompatibilityMigration() {
   return (tableExists("private_appointments") &&
       (!columns("private_appointments").has("scheduled_end_at") || !columns("private_appointments").has("conversation_id"))) ||
@@ -571,6 +592,8 @@ for(const table of ["intake_assessment_email_log","workshop_invoice_checkouts"])
   legacyDocumentFkTables.push({table,legacy,legacyTarget});
   console.log(`[DOCUMENTS] Legacy FK ${table} -> ${legacyTarget} isolated for canonical archive repair`);
 }
+// Ensure existing showroom data is recoverable before the new price columns are introduced.
+showroomPricingPreMigrationBackup();
 // Retire the former public event/ticket system before canonical schema creation.
 prepareEventManagementRetirement();
 // Existing production databases already have private_appointments/intake_leads/clients.
