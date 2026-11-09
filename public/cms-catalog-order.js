@@ -153,3 +153,45 @@ function v6CmsOrderMount(host, config, data, reload) {
   });
   render();
 }
+
+
+function v6CmsInstrumentOrderMount(target,data,reload){
+  const items=Array.isArray(data?.items)?data.items:[],names=new Map(items.map(row=>[row.id,row.label]));
+  let ids=items.map(row=>row.id),saved=ids.slice(),saving=false;
+  const section=document.createElement("section");section.className="cms-public-order-panel";
+  section.innerHTML=`<div class="cms-public-order-head"><div class="cms-public-order-intro"><span class="eyebrow">${tr("INDIVIDUAL PIANO ORDER","EGYEDI ZONGORASORREND")}</span><h3>${tr("Arrange all showroom instruments","Összes bemutatótermi zongora rendezése")}</h3><p>${tr("Set positions for every piano. Brand positions are controlled above; each brand keeps this instrument order.","Állítsd be minden zongora sorrendjét. A márkák sorrendje fent állítható; a márkákon belül ez a sorrend érvényes.")}</p></div></div><ol class="cms-public-order-list"></ol><div class="cms-public-order-footer"><p class="cms-public-order-feedback" role="status"></p><button type="button" class="primary-button">${tr("Save piano order","Zongorasorrend mentése")}</button></div>`;
+  target.appendChild(section);
+  const list=section.querySelector("ol"),message=section.querySelector(".cms-public-order-feedback"),button=section.querySelector("button.primary-button");
+  const change=(from,to)=>{
+    if(saving||to<0||to>=ids.length||from===to)return;
+    ids.splice(to,0,ids.splice(from,1)[0]);render();
+  };
+  function render(){
+    list.replaceChildren();
+    ids.forEach((id,index)=>{
+      const li=document.createElement("li");li.className="cms-public-order-item";
+      const position=document.createElement("span");position.className="cms-public-order-position";position.textContent=String(index+1);
+      const title=document.createElement("span");title.className="cms-public-order-name";title.textContent=names.get(id)||id;
+      const actions=document.createElement("span");actions.className="cms-public-order-actions";
+      for(const [symbol,delta,description] of [["↑",-1,"Move up"],["↓",1,"Move down"]]){
+        const move=document.createElement("button");move.type="button";move.className="secondary-button";move.textContent=symbol;move.setAttribute("aria-label",description);move.disabled=saving||index+delta<0||index+delta>=ids.length;move.addEventListener("click",()=>change(index,index+delta));actions.appendChild(move);
+      }
+      const select=document.createElement("select");select.setAttribute("aria-label",tr("Position","Pozíció"));
+      ids.forEach((_,i)=>{const option=document.createElement("option");option.value=String(i);option.textContent=String(i+1);option.selected=i===index;select.appendChild(option);});
+      select.disabled=saving;select.addEventListener("change",()=>change(index,Number(select.value)));actions.appendChild(select);
+      li.append(position,title,actions);list.appendChild(li);
+    });
+    button.disabled=saving||ids.every((id,i)=>saved[i]===id);
+    message.textContent=button.disabled&&!saving?"":tr("Unsaved piano order","Nem mentett zongorasorrend");
+  }
+  button.addEventListener("click",async()=>{
+    if(saving)return;saving=true;render();
+    try{
+      const response=await api("/api/website-catalog-order/instruments",{method:"PUT",body:JSON.stringify({ids})});
+      if(response?.items?.length!==ids.length)throw Error("PIANO_ORDER_SAVE_INCOMPLETE");
+      saved=ids.slice();toast(tr("Piano order saved.","Zongorasorrend mentve."),"success");await reload();
+    }catch(error){message.textContent=humanError(error);toast(humanError(error),"error");}
+    finally{saving=false;if(target.isConnected)render();}
+  });
+  render();
+}
